@@ -3479,3 +3479,100 @@ def test_model_pricing_table_matches_model_registry():
         f"model_pricing.py has entries for models model_registry.py no longer offers: "
         f"{stale}. Remove them from _RATES."
     )
+
+
+def test_project_switch_actually_cancels_inflight_agent_turn():
+    """Bug history: switching projects while the AI was actively streaming/
+    running tools on the OLD project didn't cancel that turn -- it kept
+    running in the background against the old project_root, and its late
+    tool results / streamed tokens still delivered to the SAME shared chat
+    panel widget, now showing the NEW project. User-visible symptom: switch
+    to project 2 shows an empty chat (correct), but once you start chatting
+    there, project 1's earlier conversation appears mixed in.
+
+    Root cause: the guard in _on_project_opened checked a bridge attribute
+    that never existed on CortexAgentBridge ('_is_generating') and called a
+    method that never existed either ('.cancel()'). getattr()'s False
+    default made the guard permanently inert -- it silently did nothing,
+    every single project switch, regardless of whether a turn was active.
+
+    Fix: check the REAL flag ('_agentic_turn_active', set True/False across
+    every turn -- see agent_bridge.py) and call the REAL method ('.stop()',
+    which calls stop_generation() and cancels the asyncio task via
+    task.cancel(), propagating CancelledError through the whole call
+    chain)."""
+    mw = (SRC / "main_window.py").read_text(encoding="utf-8", errors="ignore")
+    guard_block = mw.split("def _on_project_opened(", 1)[1].split("\n    def _do_project_switch(", 1)[0]
+    assert "_agentic_turn_active" in guard_block, \
+        "project-switch guard must check the real turn-active flag, not a nonexistent one"
+    assert "getattr(getattr(self, '_ai_agent', None), '_is_generating'" not in guard_block, \
+        "the dead getattr(..., '_is_generating', False) check must not come back"
+    assert "self._ai_agent.stop()" in guard_block, \
+        "project-switch guard must call the real .stop() (stop_generation()), not '.cancel()'"
+    assert "self._ai_agent.cancel()" not in guard_block, \
+        "the nonexistent '.cancel()' call must not come back"
+
+    bridge = AGENT_BRIDGE_SRC
+    assert "self._agentic_turn_active: bool = False" in bridge
+    assert "self._agentic_turn_active = True" in bridge
+    assert "self._agentic_turn_active = False" in bridge
+    assert "def stop(self):" in bridge and "self.stop_generation()" in bridge
+
+
+def test_clear_messages_hides_widgets_before_deferred_delete():
+    """Bug: switching projects showed garbled/overlapping chat text -- old
+    project's message widgets superimposed on the new project's. Two
+    contributing bugs, this test covers the second:
+
+    clear_messages()'s cleanup loop did `item = col.takeAt(0); w.deleteLater()`.
+    takeAt() only removes a widget from the LAYOUT's bookkeeping -- it does
+    NOT hide it. deleteLater() only frees it on the NEXT event-loop tick.
+    Between those two moments the widget is still a visible child sitting at
+    its last painted position, no longer layout-managed. If anything adds
+    new widgets to the same column in that window (e.g. a stray signal from
+    a turn that should have been cancelled on project switch), the old
+    orphaned widget renders behind/through the new ones.
+
+    Fix: hide() each widget immediately, before deleteLater(), closing that
+    visible window to zero regardless of when the deferred delete runs."""
+    panel = (SRC / "ui" / "chat_panel.py").read_text(encoding="utf-8", errors="ignore")
+    clear_body = panel.split("def clear_messages(self):", 1)[1].split("\n    def ", 1)[0]
+    assert "w.hide()" in clear_body, \
+        "clear_messages() must hide() each removed widget immediately, not rely on deleteLater() timing"
+    # hide() must come BEFORE deleteLater() for the fix to close the window
+    hide_idx = clear_body.index("w.hide()")
+    delete_idx = clear_body.index("w.deleteLater()")
+    assert hide_idx < delete_idx, "w.hide() must run before w.deleteLater(), not after"
+
+
+def test_login_retry_does_not_exchange_empty_auth_code():
+    """Bug history: clicking Sign In a second time (common when the browser
+    is slow to open) left the FIRST attempt's _wait_for_callback thread
+    alive for up to 5 minutes, waiting on the same module-global event as
+    the new attempt's thread. When the browser finally redirected, BOTH
+    threads woke: the stale one consumed _auth_code_result["code"] and
+    nulled it, so the current one exchanged None -> the server's 400
+    {"error": "missing_code"} -> "[AuthManager] Failed to exchange auth
+    code" even though the user completed login in the browser. A stale
+    thread's trailing sleep(60) + _stop_callback_server() could also kill
+    the newer attempt's callback server mid-login.
+
+    Fix, all three parts must stay wired in auth_manager.py:
+    1. start_login() bumps _login_generation and pins the waiter to it.
+    2. The waiter exits untouched when its generation is superseded, and
+       only stops the callback server if it still owns the current flow.
+    3. An empty/None code is never sent to the server."""
+    am = (SRC / "core" / "auth_manager.py").read_text(encoding="utf-8", errors="ignore")
+    assert "self._login_generation += 1" in am, \
+        "start_login() must bump the login generation"
+    assert "args=(self._login_generation,)" in am, \
+        "the waiter thread must be pinned to its own login generation"
+
+    waiter = am.split("def _wait_for_callback(", 1)[1].split("\n# ──", 1)[0]
+    assert "generation != self._login_generation" in waiter, \
+        "a superseded waiter must exit without touching shared login state"
+    assert "if not code:" in waiter, \
+        "an empty auth code must never be exchanged (server 400 missing_code)"
+    # The trailing shutdown must be ownership-guarded
+    assert "if generation == self._login_generation:" in waiter, \
+        "a stale waiter must not shut down a newer attempt's callback server"

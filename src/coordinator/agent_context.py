@@ -5,7 +5,7 @@ Provides utilities to build worker tool context and agent configuration
 for AutoGen/OpenHands integration in Cortex IDE.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Any
 
 
 # Default tools available to all workers
@@ -27,7 +27,7 @@ INTERNAL_COORDINATOR_TOOLS = {
 
 
 def get_worker_tool_context(
-    mcp_servers: Optional[List[Dict[str, str]]] = None,
+    mcp_servers: List[Dict[str, str]] = None,
     simple_mode: bool = False
 ) -> Dict[str, str]:
     """
@@ -66,9 +66,9 @@ def get_worker_tool_context(
 
 def format_worker_prompt(
     task_description: str,
-    purpose: Optional[str] = None,
-    file_paths: Optional[List[str]] = None,
-    expected_output: Optional[str] = None
+    purpose: str = None,
+    file_paths: List[str] = None,
+    expected_output: str = None
 ) -> str:
     """
     Format a well-structured worker prompt following best practices.
@@ -107,7 +107,7 @@ def format_worker_prompt(
 
 def create_research_prompt(
     topic: str,
-    scope: Optional[str] = None,
+    scope: str = None,
     deliverable: str = "Report findings — do not modify files"
 ) -> str:
     """
@@ -160,8 +160,8 @@ def create_implementation_prompt(
 
 def create_verification_prompt(
     change_description: str,
-    test_focus: Optional[str] = None,
-    edge_cases: Optional[List[str]] = None
+    test_focus: str = None,
+    edge_cases: List[str] = None
 ) -> str:
     """
     Create a verification-focused worker prompt.

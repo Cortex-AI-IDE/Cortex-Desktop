@@ -1,41 +1,39 @@
 """
-Safe Delete — sends files to Windows Recycle Bin instead of permanent deletion.
-Used by fsOperations.py so the AI agent never permanently deletes files.
-
-Primary: send2trash library
-Fallback: Windows SHFileOperationW API with FOF_ALLOWUNDO
-Last resort: error (NEVER falls back to permanent delete)
+Safe Delete — moves files/folders to Windows Recycle Bin instead of permanent delete.
+Uses send2trash for cross-platform recycle bin support.
+Falls back to Windows SHFileOperation API if send2trash is unavailable.
 """
 
 import os
-import logging
-from typing import Dict, Any
+import sys
+import ctypes
+from pathlib import Path
+from typing import Optional
 
-log = logging.getLogger("cortex.safe_delete")
+from src.utils.logger import get_logger
 
-# Lazy-import send2trash to avoid import errors if not installed
-_send2trash = None
-
-
-def _get_send2trash():
-    global _send2trash
-    if _send2trash is None:
-        try:
-            from send2trash import send2trash as _s2t
-            _send2trash = _s2t
-        except ImportError:
-            _send2trash = False
-            log.warning("send2trash not installed — falling back to Windows API")
-    return _send2trash if _send2trash is not False else None
+log = get_logger("safe_delete")
 
 
-def _windows_recycle_bin(filepath: str) -> Dict[str, Any]:
-    """Fallback: Use Windows SHFileOperationW with FOF_ALLOWUNDO flag."""
+def _send2trash(filepath: str) -> bool:
+    """Try using send2trash library."""
     try:
-        import ctypes
-        from ctypes import wintypes
+        from send2trash import send2trash as _s2t
+        _s2t(filepath)
+        return True
+    except ImportError:
+        return False
+    except Exception as e:
+        log.warning(f"send2trash failed: {e}")
+        return False
 
-        shell32 = ctypes.windll.shell32
+
+def _windows_recycle_bin(filepath: str) -> bool:
+    """Move to Windows Recycle Bin using SHFileOperationW API."""
+    if sys.platform != "win32":
+        return False
+    try:
+        from ctypes import wintypes
 
         class SHFILEOPSTRUCTW(ctypes.Structure):
             _fields_ = [
@@ -50,58 +48,64 @@ def _windows_recycle_bin(filepath: str) -> Dict[str, Any]:
             ]
 
         FO_DELETE = 0x0003
-        FOF_ALLOWUNDO = 0x0040
+        FOF_ALLOWUNDO = 0x0040   # Move to Recycle Bin (not permanent delete)
         FOF_NOCONFIRMATION = 0x0010
         FOF_SILENT = 0x0004
+        FOF_NOERRORUI = 0x0400
 
-        path_buf = filepath + "\0"
-        fileop = SHFILEOPSTRUCTW()
-        fileop.hwnd = 0
-        fileop.wFunc = FO_DELETE
-        fileop.pFrom = path_buf
-        fileop.pTo = None
-        fileop.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+        # pFrom must be double null-terminated
+        from_path = filepath + "\0\0"
 
-        result = shell32.SHFileOperationW(ctypes.byref(fileop))
+        op = SHFILEOPSTRUCTW()
+        op.hwnd = 0
+        op.wFunc = FO_DELETE
+        op.pFrom = from_path
+        op.pTo = None
+        op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+
+        shell32 = ctypes.windll.shell32
+        result = shell32.SHFileOperationW(ctypes.byref(op))
+
         if result == 0:
-            return {"success": True, "method": "windows_recycle_bin"}
+            return True
         else:
-            return {"success": False, "error": f"SHFileOperationW returned {result}"}
+            log.warning(f"SHFileOperation returned {result} for {filepath}")
+            return False
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        log.warning(f"Windows Recycle Bin API failed: {e}")
+        return False
 
 
-def safe_delete(filepath: str) -> Dict[str, Any]:
+def safe_delete(filepath: str) -> dict:
     """
-    Safely delete a file by sending it to the Recycle Bin.
+    Move a file or directory to the Recycle Bin (NOT permanent delete).
     
-    Args:
-        filepath: Absolute path to file or directory to delete
-        
     Returns:
-        dict with 'success' (bool), 'method' (str), and optional 'error' (str)
+        dict with keys:
+            success: bool
+            method: str — which method was used
+            message: str — description
     """
-    if not os.path.exists(filepath):
-        return {"success": False, "error": "File not found", "method": "none"}
+    p = Path(filepath)
+    
+    if not p.exists():
+        return {"success": False, "method": "none", "message": f"Path does not exist: {filepath}"}
 
-    # Method 1: send2trash (cross-platform, most reliable)
-    s2t = _get_send2trash()
-    if s2t:
-        try:
-            s2t(filepath)
-            log.info(f"[SAFE DELETE] Sent to Recycle Bin via send2trash: {filepath}")
-            return {"success": True, "method": "send2trash"}
-        except Exception as e:
-            log.warning(f"[SAFE DELETE] send2trash failed for {filepath}: {e}")
+    # Try send2trash first (most reliable cross-platform)
+    if _send2trash(filepath):
+        log.info(f"Moved to Recycle Bin (send2trash): {filepath}")
+        return {"success": True, "method": "send2trash", "message": "Moved to Recycle Bin"}
 
-    # Method 2: Windows SHFileOperationW API
-    if os.name == "nt":
-        result = _windows_recycle_bin(filepath)
-        if result["success"]:
-            log.info(f"[SAFE DELETE] Sent to Recycle Bin via Windows API: {filepath}")
-            return result
-        log.warning(f"[SAFE DELETE] Windows API failed for {filepath}: {result.get('error')}")
+    # Fallback: Windows SHFileOperation API
+    if _windows_recycle_bin(filepath):
+        log.info(f"Moved to Recycle Bin (SHFileOperation): {filepath}")
+        return {"success": True, "method": "SHFileOperation", "message": "Moved to Recycle Bin"}
 
-    # NEVER fall back to permanent delete (os.remove / shutil.rmtree)
-    log.error(f"[SAFE DELETE] ALL methods failed for {filepath} — file NOT deleted")
-    return {"success": False, "error": "All Recycle Bin methods failed — file preserved", "method": "none"}
+    # Last resort: DO NOT permanently delete — return error
+    log.error(f"Cannot move to Recycle Bin (no method available): {filepath}")
+    return {
+        "success": False,
+        "method": "none",
+        "message": "Cannot move to Recycle Bin — send2trash library not installed. "
+                   "Install with: pip install send2trash",
+    }

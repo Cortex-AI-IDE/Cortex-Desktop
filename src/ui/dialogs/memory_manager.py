@@ -281,10 +281,10 @@ class MemoryManagerBridge(QObject):
             from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app:
-                return app.applicationVersion() or "2.8.0"
+                return app.applicationVersion() or "2.8.1"
         except Exception:
             pass
-        return "2.8.0"
+        return "2.8.1"
 
     @pyqtSlot(result=str)
     def refresh(self):

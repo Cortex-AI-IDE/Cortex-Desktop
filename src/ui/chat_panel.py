@@ -8747,6 +8747,18 @@ class ChatPanel(QWidget):
             item = self.col.takeAt(0)
             w = item.widget() if item else None
             if w:
+                # takeAt() only removes the widget from the LAYOUT's bookkeeping —
+                # it does NOT hide it. deleteLater() only frees it on the next
+                # event-loop tick. Between those two moments the widget is still
+                # a visible child sitting at its last painted position, no longer
+                # layout-managed. If anything (e.g. a stray signal from a turn
+                # that should have been cancelled — see project-switch fix in
+                # main_window.py) adds new widgets to this same column in that
+                # window, the old orphaned widget renders BEHIND/THROUGH the new
+                # ones — the overlapping/superimposed text seen when switching
+                # projects. hide() closes that visible window to zero regardless
+                # of when deleteLater() actually runs.
+                w.hide()
                 w.deleteLater()
         self._cur_msg = None
         self._open_kind = None

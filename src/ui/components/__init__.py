@@ -1,1 +1,1 @@
-"""Package."""
+"""src.ui.components module."""

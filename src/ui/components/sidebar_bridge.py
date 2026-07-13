@@ -369,7 +369,11 @@ class SidebarBridge(QObject):
         try:
             for entry in os.scandir(path):
                 if entry.is_dir() and not entry.name.startswith('.') and entry.name not in {
-                    'node_modules', '__pycache__', 'venv', '.venv', '.git', '.cortex'
+                    'node_modules', '__pycache__', 'venv', '.venv', '.git', '.cortex',
+                    # PyInstaller output dirs — locked/access-denied during and
+                    # after a compile, spamming "FindNextChangeNotification
+                    # failed ... (Access is denied.)" on every launch.
+                    'build', 'dist',
                 }:
                     self._file_watcher.addPath(entry.path)
         except Exception:
