@@ -1,0 +1,60 @@
+{% extends "adminpanel/base_admin.html" %}
+{% block title %}Dashboard — Cortex Admin{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="subtitle">Overview of users, subscriptions, and revenue.</p>
+
+<div class="stats">
+    <div class="stat-card"><div class="value">{{ total_users }}</div><div class="label">Total Users</div></div>
+    <div class="stat-card"><div class="value">{{ total_subscriptions }}</div><div class="label">Total Subscriptions</div></div>
+    <div class="stat-card"><div class="value">{{ active_subscriptions }}</div><div class="label">Active Subscriptions</div></div>
+    <div class="stat-card"><div class="value">${{ revenue_usd|floatformat:0 }}</div><div class="label">Revenue (USD)</div></div>
+    <div class="stat-card"><div class="value">{{ total_payments }}</div><div class="label">Completed Payments</div></div>
+    <div class="stat-card"><div class="value">{{ users_this_month }}</div><div class="label">New Users (This Month)</div></div>
+    <div class="stat-card"><div class="value">{{ total_downloads }}</div><div class="label">Installer Downloads</div></div>
+    <div class="stat-card"><div class="value">{{ downloads_this_month }}</div><div class="label">Downloads (This Month)</div></div>
+</div>
+
+{% if version_dist %}
+<h2 style="margin-bottom:12px;color:#e6edf3;">App Versions in Use</h2>
+<table style="margin-bottom:24px;max-width:420px;">
+    <thead><tr><th>Version</th><th>Users</th></tr></thead>
+    <tbody>
+    {% for row in version_dist %}
+    <tr>
+        <td><span class="badge badge-pro">v{{ row.last_seen_version }}</span></td>
+        <td>{{ row.count }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if latest_release %}
+<div style="margin-bottom:24px;padding:12px 16px;background:#161b22;border:1px solid #21262d;border-radius:8px;">
+    <span style="color:#6b7280;">Latest Release:</span>
+    <strong style="color:#e6edf3;">v{{ latest_release.version }}</strong>
+    {% if latest_release.force_update %}
+    <span class="badge badge-force">Force Update</span>
+    {% endif %}
+    <span style="color:#6b7280;margin-left:12px;">{{ latest_release.downloads_count }} downloads</span>
+</div>
+{% endif %}
+
+<h2 style="margin-bottom:12px;color:#e6edf3;">Recent Subscriptions</h2>
+<table>
+    <thead><tr><th>Email</th><th>Plan</th><th>Status</th><th>Created</th></tr></thead>
+    <tbody>
+    {% for sub in recent_subscriptions %}
+    <tr>
+        <td><a href="{% url 'adminpanel:subscription-detail' sub.id %}" style="color:#58a6ff;text-decoration:none;">{{ sub.email }}</a></td>
+        <td><span class="badge badge-pro">{{ sub.get_plan_display }}</span></td>
+        <td><span class="badge badge-{{ sub.status }}">{{ sub.get_status_display }}</span></td>
+        <td>{{ sub.created_at|date:"M d, Y" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4" class="empty-state">No subscriptions yet</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

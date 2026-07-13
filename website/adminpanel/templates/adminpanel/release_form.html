@@ -1,0 +1,132 @@
+{% extends "adminpanel/base_admin.html" %}
+{% block title %}New Release — Cortex Admin{% endblock %}
+{% block content %}
+<style>
+    /* Override main layout for full-screen centered form */
+    html, body { height: 100%; }
+    body { display: flex; }
+    .sidebar { flex-shrink: 0; }
+    .main { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 32px; }
+    .main h1 { display: none; }
+    .main .subtitle { display: none; }
+    .release-hero { background: linear-gradient(135deg, rgba(35,134,54,0.08), rgba(88,166,255,0.06)); border: 1px solid #21262d; border-radius: 10px; padding: 28px; margin-bottom: 24px; }
+    .release-hero .icon { width: 48px; height: 48px; background: rgba(35,134,54,0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 16px; }
+    .release-hero h2 { color: #e6edf3; font-size: 20px; margin-bottom: 6px; }
+    .release-hero p { color: #6b7280; font-size: 13px; margin: 0; }
+    .form-card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 32px; max-width: 640px; width: 100%; }
+    .form-row { margin-bottom: 18px; }
+    .form-row label { display: block; font-size: 13px; font-weight: 600; color: #e6edf3; margin-bottom: 6px; }
+    .form-row label small { font-weight: 400; color: #6b7280; }
+    .form-row input[type=text], .form-row textarea { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; color: #c9d1d9; font-size: 14px; font-family: inherit; resize: vertical; }
+    .form-row input[type=text]:focus, .form-row textarea:focus { border-color: #58a6ff; outline: none; box-shadow: 0 0 0 3px rgba(88,166,255,0.1); }
+    .form-row input[type=text]::placeholder, .form-row textarea::placeholder { color: #484f58; }
+    .file-drop { border: 2px dashed #30363d; border-radius: 10px; padding: 32px 24px; text-align: center; cursor: pointer; transition: all .2s; position: relative; }
+    .file-drop:hover, .file-drop.drag { border-color: #58a6ff; background: rgba(88,166,255,0.03); }
+    .file-drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .file-drop .icon { font-size: 32px; margin-bottom: 8px; display: block; }
+    .file-drop .text { color: #c9d1d9; font-size: 14px; font-weight: 500; }
+    .file-drop .hint { color: #6b7280; font-size: 12px; margin-top: 4px; }
+    .file-drop .selected { color: #3fb950; font-size: 13px; margin-top: 6px; display: none; }
+    .toggle-row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: rgba(248,81,73,0.04); border: 1px solid rgba(248,81,73,0.12); border-radius: 8px; }
+    .toggle-row .info { flex: 1; }
+    .toggle-row .info strong { color: #e6edf3; font-size: 13px; }
+    .toggle-row .info span { color: #6b7280; font-size: 12px; display: block; margin-top: 2px; }
+    /* Toggle switch */
+    .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; background: #30363d; border-radius: 24px; cursor: pointer; transition: .25s; }
+    .slider:before { content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #c9d1d9; border-radius: 50%; transition: .25s; }
+    .switch input:checked + .slider { background: #da3633; }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    .btn-lg { padding: 12px 28px; font-size: 14px; }
+    .info-box { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; background: rgba(88,166,255,0.06); border: 1px solid rgba(88,166,255,0.12); border-radius: 8px; margin-top: 20px; font-size: 12px; color: #8b949e; line-height: 1.5; }
+    .info-box .icon { flex-shrink: 0; font-size: 16px; }
+</style>
+
+<a href="{% url 'adminpanel:releases' %}" style="color:#58a6ff;text-decoration:none;font-size:13px;margin-bottom:16px;display:inline-block;">← Back to Releases</a>
+
+<div class="form-card">
+    <div style="text-align:center;margin-bottom:24px;">
+        <div style="font-size:32px;margin-bottom:8px;">📦</div>
+        <h2 style="color:#e6edf3;font-size:20px;margin:0 0 4px;">Publish New Release</h2>
+        <p style="color:#6b7280;font-size:13px;margin:0;">Upload a compiled installer. Desktop users will receive update notifications.</p>
+    </div>
+    <form method="post" enctype="multipart/form-data" id="releaseForm">
+        {% csrf_token %}
+
+        <div class="form-row">
+            <label>Version <small>— semantic, e.g. 2.8.0</small></label>
+            <input type="text" name="version" placeholder="2.8.0" required autofocus>
+        </div>
+
+        <div class="form-row">
+            <label>Release Notes <small>— markdown supported</small></label>
+            <textarea name="release_notes" rows="5" placeholder="### What's New&#10;&#10;- Fixed critical crash when opening large projects&#10;- Added NeuralSpinner for semantic search&#10;- Improved subscription handling"></textarea>
+        </div>
+
+        <div class="form-row">
+            <label>Installer .exe</label>
+            <div class="file-drop" id="fileDrop">
+                <input type="file" name="file" accept=".exe" id="fileInput">
+                <span class="icon">⬆</span>
+                <span class="text">Click to browse or drag &amp; drop</span>
+                <span class="hint">.exe files &middot; up to 350MB</span>
+                <span class="selected" id="fileSelected"></span>
+            </div>
+        </div>
+
+        <div class="toggle-row">
+            <div class="info">
+                <strong>Force Update</strong>
+                <span>Blocks the IDE until user installs this version. Use for critical security fixes.</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="force_update" id="force">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="info-box">
+            <span class="icon">💡</span>
+            <span>After publishing, restart your Django server if the .exe download link returns 404. The file is stored in <code style="background:#0d1117;padding:1px 6px;border-radius:3px;color:#e6edf3;">media/releases/</code>.</span>
+        </div>
+
+        <div class="actions">
+            <button type="submit" class="btn btn-primary btn-lg">🚀 Publish Release</button>
+            <a href="{% url 'adminpanel:releases' %}" class="btn btn-ghost btn-lg">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+// File drop zone handler
+var drop = document.getElementById('fileDrop');
+var input = document.getElementById('fileInput');
+var selected = document.getElementById('fileSelected');
+
+['dragenter','dragover','dragleave','drop'].forEach(function(evt) {
+    drop.addEventListener(evt, function(e) { e.preventDefault(); e.stopPropagation(); });
+});
+['dragenter','dragover'].forEach(function(evt) {
+    drop.addEventListener(evt, function() { drop.classList.add('drag'); });
+});
+['dragleave','drop'].forEach(function(evt) {
+    drop.addEventListener(evt, function() { drop.classList.remove('drag'); });
+});
+drop.addEventListener('drop', function(e) {
+    input.files = e.dataTransfer.files;
+    showSelected();
+});
+
+input.addEventListener('change', showSelected);
+
+function showSelected() {
+    if (input.files && input.files[0]) {
+        var mb = (input.files[0].size / (1024 * 1024)).toFixed(1);
+        selected.textContent = '✓ ' + input.files[0].name + ' (' + mb + ' MB)';
+        selected.style.display = 'block';
+    }
+}
+</script>
+{% endblock %}

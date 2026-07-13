@@ -1,0 +1,72 @@
+{% extends "adminpanel/base_admin.html" %}
+{% block title %}Users — Cortex Admin{% endblock %}
+{% block content %}
+<h1>Users</h1>
+<p class="subtitle">{{ page_obj.paginator.count }} user{{ page_obj.paginator.count|pluralize }}</p>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:12px;align-items:center;">
+        <input type="text" name="search" placeholder="Search username or email..." value="{{ search }}" style="max-width:280px;">
+        <button type="submit" class="btn btn-primary">Search</button>
+        <a href="{% url 'adminpanel:users' %}" class="btn btn-ghost">Clear</a>
+    </form>
+</div>
+
+<table>
+    <thead><tr><th>Username</th><th>Email</th><th>Subscription</th><th>IDE Version</th><th>Date Joined</th><th>Last Login</th></tr></thead>
+    <tbody>
+    {% for u in page_obj %}
+    <tr>
+        <td>{{ u.username }}</td>
+        <td>{{ u.email|default:"—" }}</td>
+        <td>
+            {% if u.has_sub %}
+                <span class="badge badge-active">Active</span>
+            {% else %}
+                <span class="badge badge-free">None</span>
+            {% endif %}
+        </td>
+        <td>
+            {% if u.last_seen_version %}
+                <span class="badge badge-pro">v{{ u.last_seen_version }}</span>
+                <span style="color:#6b7280;font-size:11px;">{{ u.last_seen_at|date:"M d" }}</span>
+            {% else %}
+                <span style="color:#6b7280;">—</span>
+            {% endif %}
+        </td>
+        <td>{{ u.date_joined|date:"M d, Y" }}</td>
+        <td>{{ u.last_login|date:"M d, Y"|default:"Never" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6" class="empty-state">No users found</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="pagination">
+    {% if page_obj.has_previous %}
+        <a class="pg-btn" href="?page=1{% if search %}&search={{ search }}{% endif %}">« First</a>
+        <a class="pg-btn" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}">‹ Prev</a>
+    {% else %}
+        <span class="pg-btn disabled">« First</span>
+        <span class="pg-btn disabled">‹ Prev</span>
+    {% endif %}
+    {% for num in page_range %}
+        {% if num == page_obj.number %}
+            <span class="pg-btn active">{{ num }}</span>
+        {% else %}
+            <a class="pg-btn" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+        {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+        <a class="pg-btn" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}">Next ›</a>
+        <a class="pg-btn" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}">Last »</a>
+    {% else %}
+        <span class="pg-btn disabled">Next ›</span>
+        <span class="pg-btn disabled">Last »</span>
+    {% endif %}
+    <span class="pg-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+</div>
+{% endif %}
+{% endblock %}

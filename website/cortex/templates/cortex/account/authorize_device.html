@@ -1,0 +1,334 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authorize Device — Cortex</title>
+    <meta name="description" content="Authorize Cortex Desktop to access your account.">
+    <meta name="theme-color" content="#060607">
+
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23e8c547'/><text x='50%25' y='56%25' dominant-baseline='middle' text-anchor='middle' fill='%231a1400' font-size='19' font-weight='bold' font-family='Inter'>C</text></svg>">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg: #0a0a0b;
+            --card: #111113;
+            --border: #1e1e22;
+            --text: #e4e4e7;
+            --muted: #71717a;
+            --gold: #e8c547;
+            --gold-dim: rgba(232, 197, 71, 0.15);
+            --green: #22c55e;
+            --green-dim: rgba(34, 197, 94, 0.15);
+            --red: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 32px;
+        }
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--gold);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 800;
+            color: #1a1400;
+        }
+        .logo-text {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .device-icon {
+            width: 64px;
+            height: 64px;
+            background: var(--gold-dim);
+            border: 2px solid rgba(232, 197, 71, 0.3);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 28px;
+            line-height: 1.5;
+        }
+
+        .device-info {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .device-info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+        }
+        .device-info-row + .device-info-row {
+            border-top: 1px solid var(--border);
+            margin-top: 6px;
+            padding-top: 12px;
+        }
+        .device-label {
+            font-size: 12px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .device-value {
+            font-size: 14px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .user-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 24px;
+        }
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--gold), #f0d060);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1400;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .user-email {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+            text-decoration: none;
+        }
+
+        .btn-authorize {
+            background: var(--gold);
+            color: #1a1400;
+            box-shadow: 0 2px 12px rgba(232, 197, 71, 0.25);
+        }
+        .btn-authorize:hover {
+            background: #f0d060;
+            box-shadow: 0 4px 20px rgba(232, 197, 71, 0.35);
+            transform: translateY(-1px);
+        }
+        .btn-authorize:active {
+            transform: translateY(0);
+        }
+
+        .btn-cancel {
+            background: transparent;
+            color: var(--muted);
+            margin-top: 10px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .btn-cancel:hover {
+            color: var(--text);
+        }
+
+        .permissions {
+            margin-bottom: 24px;
+        }
+        .permissions-title {
+            font-size: 12px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .permission-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            color: var(--text);
+        }
+        .permission-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--green-dim);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .permission-icon svg {
+            width: 12px;
+            height: 12px;
+        }
+
+        .footer {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 11px;
+            color: #3f3f46;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <div class="logo">
+            <div class="logo-icon">C</div>
+            <span class="logo-text">Cortex</span>
+        </div>
+
+        <div class="device-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#e8c547" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+        </div>
+
+        <h1>Authorize Device</h1>
+        <p class="subtitle">
+            <strong>Cortex Desktop</strong> wants to access your account.
+            <br>Review the permissions below.
+        </p>
+
+        <!-- Logged-in user -->
+        <div class="user-card">
+            <div class="user-avatar">{{ user_initials }}</div>
+            <div>
+                <div class="user-name">{{ user.get_full_name|default:user.email }}</div>
+                <div class="user-email">{{ user.email }}</div>
+            </div>
+        </div>
+
+        <!-- Device info -->
+        <div class="device-info">
+            <div class="device-info-row">
+                <span class="device-label">Application</span>
+                <span class="device-value">Cortex Desktop</span>
+            </div>
+            <div class="device-info-row">
+                <span class="device-label">Device</span>
+                <span class="device-value">{{ device_os|default:"Desktop" }}</span>
+            </div>
+            <div class="device-info-row">
+                <span class="device-label">Version</span>
+                <span class="device-value">{{ ide_version|default:"0.0.1" }}</span>
+            </div>
+        </div>
+
+        <!-- Permissions -->
+        <div class="permissions">
+            <div class="permissions-title">This will allow Cortex Desktop to</div>
+            <div class="permission-item">
+                <div class="permission-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <span>Read your profile and subscription info</span>
+            </div>
+            <div class="permission-item">
+                <div class="permission-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <span>Use your subscription credits for AI models</span>
+            </div>
+            <div class="permission-item">
+                <div class="permission-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <span>Sync usage and billing data</span>
+            </div>
+        </div>
+
+        <!-- Authorize form -->
+        <form method="post" action="{% url 'api:auth-authorize' %}">
+            {% csrf_token %}
+            <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+            <input type="hidden" name="state" value="{{ state }}">
+            <button type="submit" class="btn btn-authorize">Authorize Cortex Desktop</button>
+        </form>
+
+        <a href="{% url 'cortex:index' %}" class="btn btn-cancel">Cancel</a>
+
+        <div class="footer">
+            You can revoke access at any time from your account settings.
+        </div>
+    </div>
+</body>
+
+</html>

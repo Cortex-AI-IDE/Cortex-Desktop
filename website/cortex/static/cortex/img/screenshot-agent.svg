@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0c0d0f"/>
+      <stop offset="100%" stop-color="#060607"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1200" fill="url(#bg)"/>
+  <!-- Chat messages -->
+  <rect x="460" y="200" width="1000" height="50" rx="16" fill="#e8c547" opacity="0.12" stroke="#e8c547" stroke-width="1" stroke-opacity="0.2"/>
+  <text x="960" y="232" text-anchor="middle" fill="#fff" font-family="Inter,sans-serif" font-size="16">Add a Stripe checkout endpoint and wire it to the Checkout button</text>
+  <!-- Agent response -->
+  <rect x="460" y="280" width="1000" height="60" rx="12" fill="#141416"/>
+  <text x="490" y="305" fill="#28c840" font-family="Inter,sans-serif" font-size="13">Planned changes across 2 files</text>
+  <text x="490" y="325" fill="#e8c547" font-family="Inter,sans-serif" font-size="13">Creating src/app/api/checkout.ts</text>
+  <rect x="460" y="360" width="1000" height="40" rx="12" fill="#141416"/>
+  <text x="490" y="386" fill="#28c840" font-family="Inter,sans-serif" font-size="13">Ran npm test</text>
+  <rect x="460" y="420" width="1000" height="40" rx="12" fill="#141416"/>
+  <text x="490" y="446" fill="#28c840" font-family="Inter,sans-serif" font-size="13">Done — checkout flow ready</text>
+  <!-- Center label -->
+  <text x="960" y="600" text-anchor="middle" fill="#e8c547" font-family="Inter,sans-serif" font-size="36" font-weight="800">AI Agent</text>
+  <text x="960" y="650" text-anchor="middle" fill="#71717a" font-family="Inter,sans-serif" font-size="16">Replace with actual screenshot</text>
+</svg>

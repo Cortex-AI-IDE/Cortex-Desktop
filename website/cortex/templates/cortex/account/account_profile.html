@@ -1,0 +1,315 @@
+{% extends 'cortex/account/account_base.html' %}
+{% load static %}
+
+{% block account_content %}
+<div class="account-page">
+    <h1 class="account-page-title">Profile</h1>
+
+    <!-- Avatar Section -->
+    <div class="account-card">
+        <div class="account-card-header">
+            <h2 class="account-card-title">Avatar</h2>
+        </div>
+        <div class="account-profile-avatar-row">
+            <div class="account-avatar-lg">{{ user.initials }}</div>
+            <div class="account-avatar-actions">
+                <button class="btn-ghost-sm">Upload New</button>
+                <button class="btn-ghost-sm btn-danger">Remove</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Form -->
+    <div class="account-card">
+        <form method="post" action="{% url 'account:profile' %}">
+            {% csrf_token %}
+
+            <div class="account-field-row">
+                <div class="account-field">
+                    <label class="account-label">First Name</label>
+                    {{ form.first_name }}
+                </div>
+                <div class="account-field">
+                    <label class="account-label">Last Name</label>
+                    {{ form.last_name }}
+                </div>
+            </div>
+
+            <div class="account-field-row">
+                <div class="account-field">
+                    <label class="account-label">Display Name</label>
+                    {{ form.display_name }}
+                </div>
+                <div class="account-field">
+                    <label class="account-label">Email
+                        {% if user.email_verified %}
+                        <span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);">✓ Verified</span>
+                        {% else %}
+                        <span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);" title="Email verification will be available soon.">⚠ Not verified</span>
+                        {% endif %}
+                    </label>
+                    <div class="account-input-row">
+                        <input type="email" class="account-input" value="{{ user.email }}" readonly>
+                        <button type="button" class="btn-ghost-sm" onclick="navigator.clipboard.writeText('{{ user.email }}')">📋</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="account-field" style="max-width: 400px;">
+                <label class="account-label">Timezone</label>
+                <!-- Hidden select for form submission -->
+                {{ form.timezone }}
+                <!-- Custom dropdown UI -->
+                <div class="ctz-dropdown" id="ctzDropdown">
+                    <button type="button" class="ctz-trigger" id="ctzTrigger">
+                        <span class="ctz-value" id="ctzValue">
+                            <span class="ctz-placeholder">Select timezone...</span>
+                        </span>
+                        <span class="ctz-chevron">&#9662;</span>
+                    </button>
+                    <div class="ctz-panel" id="ctzPanel">
+                        <input type="text" class="ctz-search" id="ctzSearch" placeholder="Search timezones..." autocomplete="off">
+                        <div class="ctz-list" id="ctzList"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="account-actions">
+                <button type="submit" class="btn-gold">Save Changes</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Active Sessions -->
+    <div class="account-card">
+        <div class="account-card-header">
+            <h2 class="account-card-title">Active Sessions</h2>
+        </div>
+
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Client</th>
+                    <th>Location</th>
+                    <th>IP</th>
+                    <th>Last Active</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in sessions %}
+                <tr>
+                    <td>{{ s.client_type }}</td>
+                    <td>—</td>
+                    <td><code class="account-code">{{ s.ip_address }}</code></td>
+                    <td>{{ s.latest_active|date:"M d, Y g:i A" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" class="account-empty">No active sessions</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if sessions|length > 1 %}
+        <div class="account-actions-right">
+            <button class="btn-danger-outline">Revoke Others</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Advanced Settings -->
+    <div class="account-card">
+        <div class="account-card-header">
+            <h2 class="account-card-title">Advanced Account Settings</h2>
+        </div>
+        <div class="account-link-list">
+            <a href="{% url 'account:security' %}" class="account-link-item">
+                <span>Change Password</span>
+                <span class="account-link-arrow">→</span>
+            </a>
+            <a href="{% url 'account:security' %}" class="account-link-item">
+                <span>Two-Factor Authentication</span>
+                <span class="account-link-arrow">→</span>
+            </a>
+            <a href="{% url 'account:security' %}" class="account-link-item account-link-danger">
+                <span>Delete Account</span>
+                <span class="account-link-arrow">→</span>
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    /* ---- Timezone Custom Dropdown ---- */
+    const select = document.querySelector('select[name="timezone"]');
+    if (!select) return;
+
+    // Hide native select
+    select.style.display = 'none';
+
+    const trigger  = document.getElementById('ctzTrigger');
+    const panel    = document.getElementById('ctzPanel');
+    const list     = document.getElementById('ctzList');
+    const search   = document.getElementById('ctzSearch');
+    const valueEl  = document.getElementById('ctzValue');
+
+    // Move panel to <body> so it escapes ALL parent stacking contexts
+    // This prevents any card or section from clipping/overriding the dropdown
+    document.body.appendChild(panel);
+
+    // Build options from native <select> optgroups
+    const groups = [];
+    let currentGroup = null;
+    Array.from(select.options).forEach(opt => {
+        if (opt.disabled && opt.classList.contains('placeholder')) return;
+        if (opt.parentElement.tagName === 'OPTGROUP') {
+            const region = opt.parentElement.label;
+            if (!currentGroup || currentGroup.region !== region) {
+                currentGroup = { region, items: [] };
+                groups.push(currentGroup);
+            }
+            currentGroup.items.push({ value: opt.value, label: opt.text });
+        } else {
+            if (opt.value === '') return; // skip empty placeholder
+            // UTC / Etc entries — put in "Other" group
+            if (!currentGroup || currentGroup.region !== 'Other') {
+                currentGroup = { region: 'Other', items: [] };
+                groups.push(currentGroup);
+            }
+            currentGroup.items.push({ value: opt.value, label: opt.text });
+        }
+    });
+
+    function renderList(filter) {
+        list.innerHTML = '';
+        const q = (filter || '').toLowerCase();
+        let anyShown = false;
+        groups.forEach(g => {
+            const matched = g.items.filter(i => i.label.toLowerCase().includes(q) || i.value.toLowerCase().includes(q));
+            if (matched.length === 0) return;
+            anyShown = true;
+
+            const regionEl = document.createElement('div');
+            regionEl.className = 'ctz-region';
+            regionEl.textContent = g.region;
+            list.appendChild(regionEl);
+
+            matched.forEach(item => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'ctz-option' + (select.value === item.value ? ' selected' : '');
+                btn.textContent = item.label;
+                btn.dataset.value = item.value;
+                btn.addEventListener('click', () => selectTimezone(item.value, item.label));
+                list.appendChild(btn);
+            });
+        });
+        if (!anyShown) {
+            const empty = document.createElement('div');
+            empty.className = 'ctz-empty';
+            empty.textContent = 'No timezones found';
+            list.appendChild(empty);
+        }
+    }
+
+    function selectTimezone(value, label) {
+        select.value = value;
+        valueEl.innerHTML = label;
+        close();
+    }
+
+    function positionPanel() {
+        const rect = trigger.getBoundingClientRect();
+        panel.style.position = 'fixed';
+        panel.style.top = (rect.bottom + 6) + 'px';
+        panel.style.left = rect.left + 'px';
+        panel.style.width = rect.width + 'px';
+        panel.style.zIndex = '99999';
+    }
+
+    function open() {
+        renderList('');
+        search.value = '';
+        positionPanel();
+        panel.classList.add('open');
+        trigger.classList.add('active');
+        setTimeout(() => search.focus(), 50);
+    }
+
+    // Reposition on scroll/resize while open
+    window.addEventListener('scroll', () => { if (panel.classList.contains('open')) positionPanel(); }, true);
+    window.addEventListener('resize', () => { if (panel.classList.contains('open')) positionPanel(); });
+
+    function close() {
+        panel.classList.remove('open');
+        trigger.classList.remove('active');
+    }
+
+    // Toggle on trigger click
+    trigger.addEventListener('click', e => {
+        e.stopPropagation();
+        panel.classList.contains('open') ? close() : open();
+    });
+
+    // Close on outside click
+    document.addEventListener('click', e => {
+        if (!panel.contains(e.target) && e.target !== trigger) close();
+    });
+
+    // Search filter
+    search.addEventListener('input', () => renderList(search.value));
+
+    // Keyboard: Escape closes, Arrow keys navigate
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && panel.classList.contains('open')) close();
+    });
+
+    // Set initial value from select
+    if (select.value) {
+        const selectedOpt = select.options[select.selectedIndex];
+        valueEl.innerHTML = selectedOpt ? selectedOpt.text : '<span class="ctz-placeholder">Select timezone...</span>';
+    }
+
+    /* ---- Auto-fill Display Name from First + Last Name ---- */
+    const firstNameInput = document.querySelector('input[name="first_name"]');
+    const lastNameInput  = document.querySelector('input[name="last_name"]');
+    const displayNameInput = document.querySelector('input[name="display_name"]');
+
+    if (firstNameInput && lastNameInput && displayNameInput) {
+        // Track if user manually edited display_name
+        let userEdited = displayNameInput.value.trim().length > 0;
+        let lastAutoValue = displayNameInput.value.trim();
+
+        displayNameInput.addEventListener('input', () => {
+            const val = displayNameInput.value.trim();
+            // If user cleared it or typed something different from auto, track it
+            if (val !== lastAutoValue) {
+                userEdited = true;
+            }
+            // If they cleared it entirely, allow auto-fill again
+            if (val.length === 0) {
+                userEdited = false;
+                lastAutoValue = '';
+            }
+        });
+
+        function autoFillDisplayName() {
+            if (userEdited) return;
+            const first = firstNameInput.value.trim();
+            const last = lastNameInput.value.trim();
+            const fullName = [first, last].filter(Boolean).join(' ');
+            displayNameInput.value = fullName;
+            lastAutoValue = fullName;
+        }
+
+        firstNameInput.addEventListener('input', autoFillDisplayName);
+        lastNameInput.addEventListener('input', autoFillDisplayName);
+
+        // Run once on load to set initial value from DB
+        autoFillDisplayName();
+    }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Email — Cortex</title>
+    <link rel="stylesheet" href="{% static 'cortex/css/account.css' %}?v=2026-07-11">
+</head>
+<body class="auth-body">
+<div class="auth-page">
+    <div class="auth-card">
+        <a href="{% url 'cortex:index' %}" class="auth-logo">
+            <img class="brand-logo" src="{% static 'cortex/img/logo.png' %}?v=2026-07-11" alt="Cortex" width="32" height="32">
+            <span>Cortex</span>
+        </a>
+
+        {% if error %}
+        <h1 class="auth-title">Verification failed</h1>
+        <div class="auth-error">{{ error }}</div>
+        <p class="auth-links"><a href="{% url 'account:signup' %}">Sign up again</a></p>
+        {% else %}
+        <h1 class="auth-title">Check your email</h1>
+        <p class="auth-subtitle">We sent a verification link to <strong>{{ email }}</strong>. Click the link in the email to activate your account.</p>
+        <p class="auth-links">Didn't receive it? Check spam or <a href="{% url 'account:signup' %}">try again</a>.</p>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,105 @@
+{% extends "adminpanel/base_admin.html" %}
+{% block title %}Downloads — Cortex Admin{% endblock %}
+{% block content %}
+<h1>Downloads</h1>
+<p class="subtitle">Installer download tracking — who downloaded which version.</p>
+
+<div class="stats">
+    <div class="stat-card"><div class="value">{{ unique_downloads }}</div><div class="label">Unique Downloads (IP × version)</div></div>
+    <div class="stat-card"><div class="value">{{ total_events }}</div><div class="label">Raw Events (incl. retries)</div></div>
+    <div class="stat-card"><div class="value">{{ signed_in_events }}</div><div class="label">By Signed-in Users</div></div>
+    <div class="stat-card"><div class="value">{{ unique_users }}</div><div class="label">Unique Users</div></div>
+</div>
+
+{% if per_version %}
+<h2 style="margin-bottom:12px;color:#e6edf3;">Downloads by Version</h2>
+<table style="margin-bottom:24px;max-width:520px;">
+    <thead><tr><th>Version</th><th>Unique (by IP)</th><th>Raw events</th></tr></thead>
+    <tbody>
+    {% for row in per_version %}
+    <tr>
+        <td><span class="badge badge-pro">v{{ row.version }}</span></td>
+        <td><strong>{{ row.unique }}</strong></td>
+        <td style="color:#6b7280;">{{ row.count }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:12px;align-items:center;">
+        <select name="version" onchange="this.form.submit()">
+            <option value="">All versions</option>
+            {% for v in versions %}
+            <option value="{{ v }}" {% if v == version_filter %}selected{% endif %}>v{{ v }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="search" placeholder="Search email, username or IP..." value="{{ search }}" style="max-width:280px;">
+        <button type="submit" class="btn btn-primary">Search</button>
+        <a href="{% url 'adminpanel:downloads' %}" class="btn btn-ghost">Clear</a>
+    </form>
+</div>
+
+<table>
+    <thead><tr><th>When</th><th>User</th><th>Version</th><th>IP</th><th>User Agent</th></tr></thead>
+    <tbody>
+    {% for e in page_obj %}
+    <tr>
+        <td><span class="js-localtime" data-utc="{{ e.created_at|date:'c' }}">{{ e.created_at|date:"M d, Y H:i" }} UTC</span></td>
+        <td>
+            {% if e.user %}{{ e.user.email|default:e.user.username }}
+            {% else %}<span style="color:#6b7280;">anonymous</span>{% endif %}
+        </td>
+        <td><span class="badge badge-pro">v{{ e.version }}</span></td>
+        <td>{{ e.ip_address|default:"—" }}</td>
+        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;">{{ e.user_agent|truncatechars:70 }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5" class="empty-state">No downloads recorded yet</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="pagination">
+    {% if page_obj.has_previous %}
+        <a class="pg-btn" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if version_filter %}&version={{ version_filter }}{% endif %}">« First</a>
+        <a class="pg-btn" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if version_filter %}&version={{ version_filter }}{% endif %}">‹ Prev</a>
+    {% else %}
+        <span class="pg-btn disabled">« First</span>
+        <span class="pg-btn disabled">‹ Prev</span>
+    {% endif %}
+    {% for num in page_range %}
+        {% if num == page_obj.number %}
+            <span class="pg-btn active">{{ num }}</span>
+        {% else %}
+            <a class="pg-btn" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if version_filter %}&version={{ version_filter }}{% endif %}">{{ num }}</a>
+        {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+        <a class="pg-btn" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if version_filter %}&version={{ version_filter }}{% endif %}">Next ›</a>
+        <a class="pg-btn" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if version_filter %}&version={{ version_filter }}{% endif %}">Last »</a>
+    {% else %}
+        <span class="pg-btn disabled">Next ›</span>
+        <span class="pg-btn disabled">Last »</span>
+    {% endif %}
+    <span class="pg-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+</div>
+{% endif %}
+
+<script>
+/* Times are stored/rendered in UTC on the server; convert to the VIEWER's
+   local timezone in the browser — India sees IST, UAE sees GST, automatically. */
+document.querySelectorAll('.js-localtime').forEach(function (el) {
+    var d = new Date(el.dataset.utc);
+    if (!isNaN(d)) {
+        el.textContent = d.toLocaleString(undefined, {
+            month: 'short', day: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        el.title = 'UTC: ' + el.dataset.utc;
+    }
+});
+</script>
+{% endblock %}

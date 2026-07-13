@@ -1,0 +1,12 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <!-- Override Django admin favicon with Cortex logo -->
+    <link rel="icon" type="image/png" href="{% static 'cortex/img/logo.png' %}?v=2026-07-11">
+    <link rel="shortcut icon" href="{% static 'cortex/img/logo.png' %}?v=2026-07-11">
+    <link rel="stylesheet" href="{% static 'cortex/css/admin_custom.css' %}?v=2026-07-11">
+{% endblock %}
+
+{% block title %}Cortex Admin | {{ title }}{% endblock %}

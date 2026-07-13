@@ -1,0 +1,303 @@
+{% extends 'cortex/base.html' %}
+{% load static %}
+
+{% block title %}Terms of Service — Cortex{% endblock %}
+{% block description %}Read the Terms of Service governing your use of Cortex, the agentic AI code editor for Windows.{% endblock %}
+
+{% block content %}
+    <!-- LEGAL HERO -->
+    <section class="legal-hero">
+        <div class="legal-hero-inner">
+            <span class="legal-pill">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                Legal
+            </span>
+            <h1>Terms of Service</h1>
+            <p class="legal-hero-sub">Please read these terms carefully before using Cortex. By using our software, you agree to be bound by these terms.</p>
+            <div class="legal-meta">
+                <span class="legal-meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    Last updated: June 14, 2026
+                </span>
+                <span class="legal-meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    Effective: June 14, 2026
+                </span>
+            </div>
+        </div>
+    </section>
+
+    <!-- LEGAL BODY: TOC + CONTENT -->
+    <section class="legal-body">
+        <div class="legal-layout">
+
+            <!-- STICKY SIDEBAR — TABLE OF CONTENTS -->
+            <aside class="legal-toc" id="legalToc">
+                <div class="legal-toc-sticky">
+                    <h3 class="legal-toc-title">On this page</h3>
+                    <nav class="legal-toc-nav">
+                        <a href="#acceptance" class="legal-toc-link">1. Acceptance of Terms</a>
+                        <a href="#byok" class="legal-toc-link">2. Bring Your Own Key</a>
+                        <a href="#subscriptions" class="legal-toc-link">3. Subscriptions &amp; Credits</a>
+                        <a href="#premium-features" class="legal-toc-link">4. Premium Features &amp; Access</a>
+                        <a href="#acceptable-use" class="legal-toc-link">5. Acceptable Use</a>
+                        <a href="#ai-output" class="legal-toc-link">6. AI-Generated Output</a>
+                        <a href="#intellectual-property" class="legal-toc-link">7. Intellectual Property</a>
+                        <a href="#privacy" class="legal-toc-link">8. Privacy &amp; Data</a>
+                        <a href="#warranties" class="legal-toc-link">9. Disclaimer of Warranties</a>
+                        <a href="#liability" class="legal-toc-link">10. Limitation of Liability</a>
+                        <a href="#indemnification" class="legal-toc-link">11. Indemnification</a>
+                        <a href="#termination" class="legal-toc-link">12. Termination</a>
+                        <a href="#changes" class="legal-toc-link">13. Changes to Terms</a>
+                        <a href="#governing-law" class="legal-toc-link">14. Governing Law</a>
+                        <a href="#contact" class="legal-toc-link">15. Contact Us</a>
+                    </nav>
+                </div>
+            </aside>
+
+            <!-- MAIN CONTENT -->
+            <article class="legal-content">
+
+                <!-- Section 1 -->
+                <section class="legal-section" id="acceptance">
+                    <h2><span class="legal-num">1</span> Acceptance of Terms</h2>
+                    <p>By downloading, installing, accessing, or using Cortex (the <strong>"Software"</strong>), you acknowledge that you have read, understood, and agree to be bound by these Terms of Service (<strong>"Terms"</strong>). If you are using the Software on behalf of an organization, you represent that you have authority to bind that organization to these Terms.</p>
+                    <p>If you do not agree to these Terms, do not use the Software. Your continued use of the Software constitutes ongoing acceptance of these Terms.</p>
+                </section>
+
+                <!-- Section 2 -->
+                <section class="legal-section" id="byok">
+                    <h2><span class="legal-num">2</span> Bring Your Own Key</h2>
+                    <p>Cortex supports a "Bring Your Own Key" (BYOK) model for certain AI providers. When using BYOK mode:</p>
+                    <ul>
+                        <li>You supply your own API key from a third-party AI provider (e.g., OpenAI, Qwen, OpenRouter).</li>
+                        <li><strong>You are solely responsible</strong> for all usage, fees, and charges billed by that provider.</li>
+                        <li>Cortex does not resell AI usage through BYOK providers and adds no markup to BYOK requests.</li>
+                        <li>Your relationship with each AI provider is governed by that provider's own terms of service.</li>
+                        <li>API keys are stored locally on your device and are never transmitted to Cortex servers.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 3 -->
+                <section class="legal-section" id="subscriptions">
+                    <h2><span class="legal-num">3</span> Subscriptions &amp; Credits</h2>
+                    <div class="legal-callout">
+                        <div class="legal-callout-icon">⚠️</div>
+                        <div class="legal-callout-body">
+                            <strong>No auto-renewal.</strong> All Cortex subscriptions are 30-day plans that expire automatically. You must manually renew to continue using the service.
+                        </div>
+                    </div>
+                    <p>Cortex offers subscription plans that include credits for use with included AI models (e.g., DeepSeek, MiMo). The following terms apply:</p>
+                    <h3>3.1 Billing Cycle</h3>
+                    <ul>
+                        <li><strong>30-day subscription period.</strong> All paid plans (Pro) are billed as a single 30-day cycle starting from the date of purchase.</li>
+                        <li><strong>Automatic expiration.</strong> Your subscription expires at the end of day 30 — there are no recurring charges. On day 31, your access to included AI models and premium features is revoked.</li>
+                        <li><strong>Manual renewal required.</strong> To continue using the service after expiration, you must manually purchase a new subscription through the Cortex dashboard or website.</li>
+                    </ul>
+                    <h3>3.2 Credits</h3>
+                    <ul>
+                        <li><strong>Credit allocation</strong> is determined by your subscription tier as described on the <a href="{% url 'cortex:pricing' %}">Pricing page</a>.</li>
+                        <li><strong>Credits expire with your subscription</strong> and do not roll over. See §3.1 for billing cycle details.</li>
+                        <li><strong>Credit exhaustion.</strong> If you consume all credits before day 30, your access to included models is paused until you renew (<a href="#byok">BYOK models</a> remain unaffected).</li>
+                        <li><strong>Fair usage limits</strong> apply. Excessive usage that degrades service for other users may result in throttling or suspension.</li>
+                    </ul>
+                    <h3>3.3 Refunds &amp; Changes</h3>
+                    <ul>
+                        <li><strong>Refunds</strong> are handled on a case-by-case basis. Contact us within 14 days of purchase if you believe a charge was made in error.</li>
+                        <li><strong>No mid-cycle upgrades.</strong> If you wish to switch plans, you may purchase a new plan at any time. Your current plan continues until it expires.</li>
+                        <li>Cortex reserves the right to modify credit allocations with 30 days' notice to active subscribers.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 4 -->
+                <section class="legal-section" id="premium-features">
+                    <h2><span class="legal-num">4</span> Premium Features &amp; Access</h2>
+                    <p>Cortex provides certain advanced features that are available exclusively through an active subscription. These features enhance the AI-assisted development experience beyond standard code generation and editing.</p>
+
+                    <h3>4.1 Subscription-Only Features</h3>
+                    <div class="legal-callout">
+                        <div class="legal-callout-icon">🔒</div>
+                        <div class="legal-callout-body">
+                            <strong>Web Search and OCR / Image Recognition are subscription-only features.</strong> These capabilities require an active Pro subscription to function. They are not available on the Free plan or to BYOK-only users.
+                        </div>
+                    </div>
+                    <ul>
+                        <li><strong>Web Search</strong> — enables the AI to search the internet in real-time for up-to-date documentation, library versions, API references, and solutions to recent technical issues.</li>
+                        <li><strong>OCR / Image Recognition</strong> — enables the AI to process, analyze, and extract text from images, screenshots, diagrams, and PDF documents submitted by the user.</li>
+                    </ul>
+
+                    <h3>4.2 BYOK Provider Support</h3>
+                    <p>When using a BYOK (Bring Your Own Key) configuration with an active subscription:</p>
+                    <ul>
+                        <li>If your chosen BYOK provider <strong>natively supports</strong> web search or OCR capabilities (e.g., certain OpenAI or Qwen models with vision/search APIs), those features will function through your own API key.</li>
+                        <li>If your chosen BYOK provider <strong>does not natively support</strong> web search or OCR (e.g., DeepSeek), Cortex will route these specific requests through its own provider infrastructure as a fallback, consuming your subscription credits.</li>
+                        <li>This fallback mechanism ensures that premium features work seamlessly regardless of which model you have selected, provided you have an active subscription with available credits.</li>
+                    </ul>
+
+                    <h3>4.3 Without a Subscription</h3>
+                    <p>Without an active subscription, <a href="#byok">BYOK users</a> retain access to their chosen AI provider for standard coding tasks at no cost from Cortex. However, web search and OCR features are <a href="#premium-features">subscription-only</a> and will not function — even if the BYOK model theoretically supports those capabilities.</p>
+                </section>
+
+                <!-- Section 5 -->
+                <section class="legal-section" id="acceptable-use">
+                    <h2><span class="legal-num">5</span> Acceptable Use</h2>
+                    <p>You agree to use the Software in compliance with all applicable laws and regulations. You must not:</p>
+                    <ul>
+                        <li>Use the Software to generate content that is unlawful, harmful, threatening, abusive, harassing, defamatory, or otherwise objectionable.</li>
+                        <li>Use the Software to build or distribute malware, exploits, or tools designed to compromise system security.</li>
+                        <li>Attempt to reverse-engineer, decompile, or disassemble the Software, except as permitted by applicable law.</li>
+                        <li>Circumvent usage limits, rate limits, or access controls implemented by the Software or connected AI providers.</li>
+                        <li>Use the Software in any manner that violates the terms of service of connected AI providers.</li>
+                        <li>Redistribute, sell, lease, or sublicense the Software without prior written consent from Cortex.</li>
+                    </ul>
+                    <p>You are responsible for reviewing and testing any code generated by AI agents before relying on it in production environments.</p>
+                </section>
+
+                <!-- Section 6 -->
+                <section class="legal-section" id="ai-output">
+                    <h2><span class="legal-num">6</span> AI-Generated Output</h2>
+                    <div class="legal-callout">
+                        <div class="legal-callout-icon">⚠️</div>
+                        <div class="legal-callout-body">
+                            <strong>Important:</strong> AI agents can make mistakes. Output may be inaccurate, insecure, incomplete, or biased. Always review generated code before use.
+                        </div>
+                    </div>
+                    <ul>
+                        <li><strong>No warranty on AI output.</strong> Cortex does not guarantee the accuracy, completeness, or fitness for any particular purpose of AI-generated content.</li>
+                        <li><strong>User responsibility.</strong> You are solely responsible for reviewing, testing, and deciding whether to use any generated code, commands, or suggestions.</li>
+                        <li><strong>No professional advice.</strong> AI-generated output does not constitute legal, financial, medical, or professional advice.</li>
+                        <li><strong>Third-party models.</strong> AI output is generated by third-party models. Cortex does not control the training data, behavior, or policies of these models.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 7 -->
+                <section class="legal-section" id="intellectual-property">
+                    <h2><span class="legal-num">7</span> Intellectual Property</h2>
+                    <p>The Software, including all code, design, graphics, documentation, and other content, is the intellectual property of Cortex and is protected by copyright, trademark, and other intellectual property laws.</p>
+                    <ul>
+                        <li><strong>License grant.</strong> Cortex grants you a limited, non-exclusive, non-transferable, revocable license to use the Software for personal or internal business purposes in accordance with these Terms.</li>
+                        <li><strong>Your content.</strong> You retain all rights to code and content you create using the Software. Cortex does not claim ownership of your work.</li>
+                        <li><strong>AI-generated content.</strong> Ownership of AI-generated output is subject to the terms of the applicable AI provider. You are responsible for understanding these terms.</li>
+                        <li><strong>Feedback.</strong> If you provide suggestions or feedback about the Software, you grant Cortex a perpetual, royalty-free license to use such feedback for any purpose.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 8 -->
+                <section class="legal-section" id="privacy">
+                    <h2><span class="legal-num">8</span> Privacy &amp; Data</h2>
+                    <p>Your privacy is important to us. Key points:</p>
+                    <ul>
+                        <li><strong>Local-first architecture.</strong> As described in §2, code context and API keys are stored locally on your device and are never transmitted to Cortex servers.</li>
+                        <li><strong>Telemetry.</strong> The Software may collect anonymous usage telemetry and crash reports. You can opt out at any time in Settings.</li>
+                        <li><strong>AI provider data.</strong> When you use AI features, your prompts are sent to the configured AI provider. Review that provider's privacy policy.</li>
+                        <li><strong>Subscription data.</strong> If you subscribe to a paid plan, we collect billing information necessary to process your subscription. Payment processing is handled by our third-party payment processor.</li>
+                    </ul>
+                    <p>For full details, see our <a href="{% url 'cortex:privacy' %}">Privacy Policy</a>.</p>
+                </section>
+
+                <!-- Section 9 -->
+                <section class="legal-section" id="warranties">
+                    <h2><span class="legal-num">9</span> Disclaimer of Warranties</h2>
+                    <div class="legal-callout legal-callout-warning">
+                        <div class="legal-callout-icon">📋</div>
+                        <div class="legal-callout-body">
+                            <strong>THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE"</strong> WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
+                        </div>
+                    </div>
+                    <p>Cortex specifically disclaims all warranties, including but not limited to:</p>
+                    <ul>
+                        <li>Implied warranties of merchantability, fitness for a particular purpose, and non-infringement.</li>
+                        <li>Warranties that the Software will be uninterrupted, error-free, secure, or free of viruses or other harmful components.</li>
+                        <li>Warranties regarding the accuracy, reliability, or completeness of any AI-generated content.</li>
+                    </ul>
+                    <p>Some jurisdictions do not allow the exclusion of implied warranties. In such cases, the above exclusions may not apply to you.</p>
+                </section>
+
+                <!-- Section 10 -->
+                <section class="legal-section" id="liability">
+                    <h2><span class="legal-num">10</span> Limitation of Liability</h2>
+                    <p>To the maximum extent permitted by applicable law:</p>
+                    <ul>
+                        <li><strong>No indirect damages.</strong> Cortex shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including but not limited to loss of profits, data, business opportunities, or goodwill.</li>
+                        <li><strong>Cap on liability.</strong> Cortex's total aggregate liability under these Terms shall not exceed the greater of (a) the amount you paid for the Software in the 12 months preceding the claim, or (b) $100 USD.</li>
+                        <li><strong>Third-party charges.</strong> Cortex is not liable for charges incurred from third-party AI providers, including unexpected API usage or billing errors.</li>
+                    </ul>
+                    <p>Some jurisdictions do not allow limitation of liability for certain damages. In such cases, liability is limited to the fullest extent permitted by law.</p>
+                </section>
+
+                <!-- Section 11 -->
+                <section class="legal-section" id="indemnification">
+                    <h2><span class="legal-num">11</span> Indemnification</h2>
+                    <p>You agree to indemnify, defend, and hold harmless Cortex, its officers, directors, employees, and agents from and against any claims, liabilities, damages, losses, and expenses (including reasonable legal fees) arising from or related to:</p>
+                    <ul>
+                        <li>Your use of the Software or AI-generated content.</li>
+                        <li>Your violation of these Terms or any applicable law.</li>
+                        <li>Your violation of any third-party rights, including intellectual property rights.</li>
+                        <li>Any content you submit or generate through the Software.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 12 -->
+                <section class="legal-section" id="termination">
+                    <h2><span class="legal-num">12</span> Termination</h2>
+                    <ul>
+                        <li><strong>By you.</strong> You may stop using the Software at any time. Uninstalling the Software terminates your license under these Terms.</li>
+                        <li><strong>By Cortex.</strong> We may suspend or terminate your access to the Software at any time, with or without cause, with or without notice.</li>
+                        <li><strong>Effect of termination.</strong> Upon termination, your right to use the Software ceases immediately. Sections 5, 6, 8, 9, 10, and 13 survive termination.</li>
+                        <li><strong>Subscriptions.</strong> Since subscriptions do not auto-renew (see §3.1), no cancellation action is needed. Your access continues until the current 30-day period expires.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 13 -->
+                <section class="legal-section" id="changes">
+                    <h2><span class="legal-num">13</span> Changes to Terms</h2>
+                    <p>Cortex reserves the right to modify these Terms at any time. We will notify you of material changes by:</p>
+                    <ul>
+                        <li>Posting the updated Terms on this page with a new "Last updated" date.</li>
+                        <li>Displaying an in-app notification for significant changes.</li>
+                        <li>Sending an email to registered subscribers for material changes affecting billing or data practices.</li>
+                    </ul>
+                    <p>Your continued use of the Software after changes take effect constitutes acceptance of the updated Terms. If you disagree with any changes, you must stop using the Software.</p>
+                </section>
+
+                <!-- Section 14 -->
+                <section class="legal-section" id="governing-law">
+                    <h2><span class="legal-num">14</span> Governing Law</h2>
+                    <p>These Terms are governed by and construed in accordance with the laws of the jurisdiction in which Cortex operates, without regard to its conflict-of-law principles.</p>
+                    <p>Any disputes arising under or in connection with these Terms shall be resolved through binding arbitration or in the courts of competent jurisdiction in that location, except where prohibited by applicable law.</p>
+                </section>
+
+                <!-- Section 15 -->
+                <section class="legal-section" id="contact">
+                    <h2><span class="legal-num">15</span> Contact Us</h2>
+                    <p>If you have questions about these Terms, please contact us:</p>
+                    <div class="legal-contact-card">
+                        <div class="legal-contact-method">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                            <span><a href="mailto:notification@cortex-ide.app" style="color:var(--yellow);text-decoration:none;">notification@cortex-ide.app</a></span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- DISCLAIMER -->
+                <div class="legal-disclaimer">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <p>This document constitutes the official Terms of Service for Cortex AI IDE. If you have questions about any provision herein, contact us at <strong>notification@cortex-ide.app</strong>.</p>
+                </div>
+
+                <!-- BACK LINK -->
+                <div class="legal-back-wrap">
+                    <a class="legal-back" href="{% url 'cortex:index' %}">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        Back to home
+                    </a>
+                    <button class="legal-print-btn" onclick="window.print()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                        Print this page
+                    </button>
+                </div>
+
+            </article>
+        </div>
+    </section>
+{% endblock %}

@@ -1,0 +1,247 @@
+﻿{% extends 'cortex/base.html' %}
+
+{% block title %}Download Cortex for Windows{% endblock %}
+{% block description %}Download Cortex — the agentic AI code editor for Windows 10 and 11. Bring your own model; your keys stay on your machine.{% endblock %}
+
+{% block content %}
+    <!-- ===== HERO ===== -->
+    <section class="dl-hero">
+        <div class="dl-hero-glow"></div>
+        <div class="pill seq" style="animation-delay:.1s">
+            <span class="dot"></span>
+            Stable Release
+            <span class="tag">v2.8.0</span>
+        </div>
+        <h1 class="seq" style="animation-delay:.2s">Download <span class="grad">Cortex</span></h1>
+        <p class="dl-sub seq" style="animation-delay:.32s">
+            The agentic AI code editor for Windows. Bring your own model — your keys never leave your PC.
+        </p>
+
+        <!-- ===== DOWNLOAD CARD ===== -->
+        <div class="dl-card reveal">
+            <div class="dl-card-glow"></div>
+            <div class="dl-os">
+                <div class="dl-os-icon">
+                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
+                        <rect x="1" y="1" width="10" height="10" rx="1.5" fill="#e8c547"/>
+                        <rect x="13" y="1" width="10" height="10" rx="1.5" fill="#e8c547" opacity=".7"/>
+                        <rect x="1" y="13" width="10" height="10" rx="1.5" fill="#e8c547" opacity=".5"/>
+                        <rect x="13" y="13" width="10" height="10" rx="1.5" fill="#e8c547" opacity=".35"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="dl-os-name">Windows 10 &amp; 11 (64-bit x64)</div>
+                    <div class="dl-os-meta">64-bit · version 1809 or later · ~293 MB</div>
+                </div>
+            </div>
+            <a class="btn-lg primary magnetic dl-btn" href="/api/v1/download/latest/" id="downloadBtn">
+                <span>⬇</span> Download for Windows
+            </a>
+            <div class="dl-meta-row" id="dlMeta">
+                <span class="dl-meta-chip">v2.8.0</span>
+                <span class="dl-meta-chip" id="dlSize">~293 MB</span>
+                <span class="dl-meta-chip" id="dlHash">SHA-256</span>
+            </div>
+            <div class="dl-hint">Free to download · $10/mo subscription · Bring your own AI provider key</div>
+            <div class="dl-alt">
+                Prefer the Microsoft Store? <a href="#">Get it on the Store →</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== STEPS ===== -->
+    <section class="dl-section">
+        <div class="section-head reveal">
+            <span class="eyebrow">Get started in 3 steps</span>
+            <h2>Up and running in under a minute</h2>
+        </div>
+        <div class="dl-steps">
+            <div class="dl-step reveal" style="--i:0">
+                <div class="dl-step-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                </div>
+                <div class="dl-step-num">01</div>
+                <h3>Install</h3>
+                <p>Run the installer. Clean install, clean uninstall — no registry mess, no background services.</p>
+            </div>
+            <div class="dl-step-connector reveal"></div>
+            <div class="dl-step reveal" style="--i:1">
+                <div class="dl-step-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                </div>
+                <div class="dl-step-num">02</div>
+                <h3>Add your key</h3>
+                <p>The first-run wizard validates your provider key and stores it in Windows Credential Manager.</p>
+            </div>
+            <div class="dl-step-connector reveal"></div>
+            <div class="dl-step reveal" style="--i:2">
+                <div class="dl-step-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                </div>
+                <div class="dl-step-num">03</div>
+                <h3>Build</h3>
+                <p>Hand off your first task and watch the agent plan, edit, run, and verify — autonomously.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== WHAT YOU GET ===== -->
+    <section class="dl-section">
+        <div class="section-head reveal">
+            <span class="eyebrow">What you get</span>
+            <h2>Everything you need, nothing you don't</h2>
+        </div>
+        <div class="dl-features">
+            <div class="dl-feature reveal">
+                <div class="dl-feature-icon">🤖</div>
+                <h4>Multi-Agent Sessions</h4>
+                <p>Run parallel AI agents on different tasks simultaneously. Each agent plans, codes, and iterates independently.</p>
+            </div>
+            <div class="dl-feature reveal">
+                <div class="dl-feature-icon">🔄</div>
+                <h4>Provider Failover</h4>
+                <p>Set up automatic failover chains across OpenAI, DeepSeek, MiMo, OpenRouter, and Qwen. If one provider is down, the next takes over.</p>
+            </div>
+            <div class="dl-feature reveal">
+                <div class="dl-feature-icon">🧩</div>
+                <h4>MCP Tool Support</h4>
+                <p>Connect to databases, APIs, and external tools via the Model Context Protocol. Extend your agent's capabilities.</p>
+            </div>
+            <div class="dl-feature reveal">
+                <div class="dl-feature-icon">🔑</div>
+                <h4>Credential Manager</h4>
+                <p>Your API keys are stored in Windows Credential Manager. Never in plaintext, never on our servers — BYOK architecture.</p>
+            </div>
+            <div class="dl-feature reveal">
+                <div class="dl-feature-icon">📋</div>
+                <h4>Session Fork &amp; Review</h4>
+                <p>Fork any agent session to explore alternate approaches. Review the full plan before code is written.</p>
+            </div>
+            <div class="dl-feature reveal">
+                <div class="dl-feature-icon">⚡</div>
+                <h4>Native Windows</h4>
+                <p>Built for Windows. Feels like a native app — not an Electron wrapper. Fast startup, low memory footprint.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== SYSTEM REQUIREMENTS ===== -->
+    <section class="dl-section">
+        <div class="section-head reveal">
+            <span class="eyebrow">System requirements</span>
+            <h2>Before you install</h2>
+        </div>
+        <div class="dl-req-card reveal">
+            <div class="dl-req-row">
+                <div class="dl-req-label">Operating System</div>
+                <div class="dl-req-value">Windows 10 (1809+) or Windows 11</div>
+            </div>
+            <div class="dl-req-row">
+                <div class="dl-req-label">Architecture</div>
+                <div class="dl-req-value">64-bit (x64)</div>
+            </div>
+            <div class="dl-req-row">
+                <div class="dl-req-label">RAM</div>
+                <div class="dl-req-value">4 GB minimum, 8 GB recommended</div>
+            </div>
+            <div class="dl-req-row">
+                <div class="dl-req-label">Disk Space</div>
+                <div class="dl-req-value">200 MB free for installation</div>
+            </div>
+            <div class="dl-req-row">
+                <div class="dl-req-label">Internet</div>
+                <div class="dl-req-value">Required for AI provider calls (your keys, your traffic)</div>
+            </div>
+            <div class="dl-req-row">
+                <div class="dl-req-label">Provider Account</div>
+                <div class="dl-req-value">At least one API key from OpenAI, DeepSeek, MiMo, OpenRouter, or Qwen</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== FAQ ===== -->
+    <section class="dl-section">
+        <div class="section-head reveal">
+            <span class="eyebrow">Common questions</span>
+            <h2>Download FAQ</h2>
+        </div>
+        <div class="dl-faq reveal">
+            <details class="dl-faq-item">
+                <summary>Is Cortex free?</summary>
+                <div class="dl-faq-body">
+                    <p>The IDE is free to download. To use AI features, you need a subscription ($10/mo) which includes platform services (OCR, embeddings, web search). You also bring your own API keys for LLM providers — you pay them directly.</p>
+                </div>
+            </details>
+            <details class="dl-faq-item">
+                <summary>What about my API keys?</summary>
+                <div class="dl-faq-body">
+                    <p>Your keys are stored locally in Windows Credential Manager. They never leave your machine and are never sent to any Cortex server. You pay the LLM providers directly — Cortex doesn't mark up or resell tokens.</p>
+                </div>
+            </details>
+            <details class="dl-faq-item">
+                <summary>Can I use it offline?</summary>
+                <div class="dl-faq-body">
+                    <p>The IDE itself works offline for code editing. AI agent features require an internet connection to reach your chosen provider's API. The $10/mo subscription covers platform services (OCR, embeddings, web search) which also require internet.</p>
+                </div>
+            </details>
+            <details class="dl-faq-item">
+                <summary>Does it work on Mac or Linux?</summary>
+                <div class="dl-faq-body">
+                    <p>Currently Cortex is Windows-only. Mac and Linux support is on the roadmap.</p>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <!-- ===== PRIVACY NOTE ===== -->
+    <section class="dl-section">
+        <div class="dl-privacy-card reveal">
+            <div class="dl-privacy-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+            </div>
+            <div class="dl-privacy-text">
+                <h3>Your keys stay local</h3>
+                <p>Cortex is bring-your-own-key — your LLM requests go directly from your machine to the provider over TLS. Your prompts, code, and credentials never touch our infrastructure. The $10/mo subscription covers platform services (OCR, embeddings, web search) which are proxied through Cortex servers.</p>
+            </div>
+            <a class="btn-ghost dl-privacy-link" href="{% url 'cortex:privacy' %}">Read our privacy policy →</a>
+        </div>
+    </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Fetch real version info from API and update download button
+fetch('/api/v1/download/version/')
+  .then(r => r.json())
+  .then(data => {
+    if (data.version && data.version !== '0.0.0') {
+      // Update version chip
+      var chips = document.querySelectorAll('.dl-meta-chip');
+      if (chips[0]) chips[0].textContent = 'v' + data.version;
+      // Update size
+      if (data.size) {
+        var mb = (data.size / (1024 * 1024)).toFixed(1);
+        var el = document.getElementById('dlSize');
+        if (el) el.textContent = '~' + mb + ' MB';
+      }
+      // Update SHA
+      if (data.sha256) {
+        var hashEl = document.getElementById('dlHash');
+        if (hashEl) hashEl.textContent = data.sha256.slice(0, 12) + '...';
+      }
+    }
+  })
+  .catch(function() { /* offline — use defaults */ });
+</script>
+{% endblock %}

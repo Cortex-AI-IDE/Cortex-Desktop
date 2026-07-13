@@ -1,0 +1,30 @@
+{% extends 'cortex/account/account_base.html' %}
+{% load static %}
+
+{% block account_content %}
+<div class="account-page">
+    <h1 class="account-page-title">Integrations</h1>
+
+    <!-- MCP Server — Live Feature -->
+    <div class="integration-card integration-card-live">
+        <div class="integration-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="4" y="8" width="40" height="32" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                <circle cx="16" cy="24" r="4" stroke="currentColor" stroke-width="2" fill="none"/>
+                <circle cx="32" cy="24" r="4" stroke="currentColor" stroke-width="2" fill="none"/>
+                <line x1="20" y1="24" x2="28" y2="24" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"/>
+                <line x1="12" y1="16" x2="12" y2="32" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2" opacity="0.4"/>
+                <line x1="36" y1="16" x2="36" y2="32" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2" opacity="0.4"/>
+            </svg>
+        </div>
+        <h2 class="integration-title">MCP Server</h2>
+        <p class="integration-subtitle">Model Context Protocol</p>
+        <p class="integration-desc">Connect external tools, databases, and services through the Model Context Protocol. Integrate your IDE with any MCP-compatible server for extended capabilities.</p>
+        <div class="integration-status">
+            <span class="integration-status-dot integration-status-dot-live"></span>
+            Live
+        </div>
+        <p class="integration-hint">Included with your Pro subscription ($10/month or $80/year). Subscribe, sign in, then add your servers in Cortex Desktop → Settings → MCP Servers — paste any standard mcpServers JSON config and the tools appear in the agent automatically.</p>
+    </div>
+</div>
+{% endblock %}

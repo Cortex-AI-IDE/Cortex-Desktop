@@ -1,0 +1,115 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Account{% endblock %} — Cortex</title>
+    <meta name="description" content="Manage your Cortex account — profile, usage, plan, and security.">
+    <meta name="theme-color" content="#060607">
+
+    <!-- Favicon: Cortex logo -->
+    <link rel="icon" type="image/png" href="{% static 'cortex/img/logo.png' %}?v=2026-07-11">
+    <link rel="shortcut icon" href="{% static 'cortex/img/logo.png' %}?v=2026-07-11">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{% static 'cortex/css/account.css' %}?v=2026-07-11">
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body class="account-body">
+
+    <!-- ===== TOPBAR ===== -->
+    <header class="account-topbar">
+        <div class="account-topbar-left">
+            <a href="{% url 'cortex:index' %}" class="account-topbar-brand" title="Back to Cortex Home">
+                <img class="account-topbar-logo" src="{% static 'cortex/img/logo.png' %}?v=2026-07-11" alt="Cortex" width="28" height="28">
+                <span class="account-topbar-name">Cortex</span>
+            </a>
+        </div>
+
+        <div class="account-topbar-right">
+            <a href="{% url 'cortex:index' %}" class="account-topbar-link">
+                <span class="account-topbar-link-icon">&larr;</span>
+                <span>Back to Home</span>
+            </a>
+            <div class="account-topbar-divider"></div>
+            <div class="account-topbar-user" id="topbarUserMenu">
+                <div class="account-topbar-avatar">{{ user.initials }}</div>
+                <span class="account-topbar-username">{{ user.get_display_name_or_email }}</span>
+                <span class="account-topbar-chevron">&#9662;</span>
+            </div>
+            <div class="account-topbar-dropdown" id="topbarDropdown">
+                <a href="{% url 'account:profile' %}" class="account-topbar-dropdown-item">
+                    <span class="account-topbar-dropdown-icon">&#128100;</span>
+                    <span>Profile</span>
+                </a>
+                <a href="{% url 'account:security' %}" class="account-topbar-dropdown-item">
+                    <span class="account-topbar-dropdown-icon">&#128274;</span>
+                    <span>Security</span>
+                </a>
+                <div class="account-topbar-dropdown-divider"></div>
+                <form method="post" action="{% url 'account:logout' %}">
+                    {% csrf_token %}
+                    <button type="submit" class="account-topbar-dropdown-item account-topbar-dropdown-danger">
+                        <span class="account-topbar-dropdown-icon">&#10140;</span>
+                        <span>Sign Out</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </header>
+
+    <!-- ===== SIDEBAR + MAIN ===== -->
+    <div class="account-shell">
+        <button class="account-sidebar-toggle" id="sidebarToggle" aria-label="Toggle navigation">
+            <span class="sidebar-toggle-icon">&#9776;</span>
+        </button>
+
+        <div class="account-sidebar-overlay" id="sidebarOverlay"></div>
+
+        <aside class="account-sidebar" id="accountSidebar">
+            <div class="account-user">
+                <div class="account-avatar">{{ user.initials }}</div>
+                <div class="account-name">{{ user.get_display_name_or_email }}</div>
+                <div class="account-email">{{ user.email }}</div>
+            </div>
+
+            <nav class="account-nav">
+                <a href="{% url 'account:profile' %}" class="account-nav-item {% if active_tab == 'profile' %}active{% endif %}">
+                    <span class="account-nav-icon">&#128100;</span>
+                    <span class="account-nav-label">Profile</span>
+                </a>
+                <a href="{% url 'account:usage' %}" class="account-nav-item {% if active_tab == 'usage' %}active{% endif %}">
+                    <span class="account-nav-icon">&#128200;</span>
+                    <span class="account-nav-label">Usage</span>
+                </a>
+                <a href="{% url 'account:plan' %}" class="account-nav-item {% if active_tab == 'plan' %}active{% endif %}">
+                    <span class="account-nav-icon">&#127873;</span>
+                    <span class="account-nav-label">Plan & Billing</span>
+                </a>
+                <a href="{% url 'account:integrations' %}" class="account-nav-item {% if active_tab == 'integrations' %}active{% endif %}">
+                    <span class="account-nav-icon">&#128279;</span>
+                    <span class="account-nav-label">Integrations</span>
+                </a>
+                <a href="{% url 'account:security' %}" class="account-nav-item {% if active_tab == 'security' %}active{% endif %}">
+                    <span class="account-nav-icon">&#128274;</span>
+                    <span class="account-nav-label">Security</span>
+                </a>
+            </nav>
+        </aside>
+
+        <main class="account-main">
+            {% block account_content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="{% static 'cortex/js/account.js' %}?v=2026-06-18b"></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+
+</html>

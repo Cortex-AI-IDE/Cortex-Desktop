@@ -1,0 +1,89 @@
+{% extends 'cortex/base.html' %}
+{% load static %}
+{% url 'cortex:download' as download_url %}
+
+{% block title %}Pricing — Cortex AI IDE{% endblock %}
+{% block description %}Choose the Cortex plan that fits your workflow. Simple pricing with no hidden fees.{% endblock %}
+
+{% block content %}
+    <!-- HERO -->
+    <section class="hero" id="pricing-hero">
+        <div class="pill seq" style="animation-delay:.15s">
+            <span class="dot"></span>
+            Simple pricing
+            <span class="tag">No hidden fees</span>
+        </div>
+        <h1>
+            <span class="seq" style="animation-delay:.28s;display:block">Simple plans, real value</span>
+        </h1>
+        <p class="sub seq" style="animation-delay:.56s">
+            Get OCR, embeddings, web search, and MCP server connections. Use any AI model with your own API keys — no lock-in.
+        </p>
+    </section>
+
+    <!-- PRICING -->
+    <section class="section pricing" id="pricing">
+        <div class="pricing-grid">
+            <!-- PRO MONTHLY -->
+            <div class="pricing-card featured">
+                <div class="pricing-featured-badge">Popular</div>
+                <div class="pricing-header">
+                    <h3>Pro Monthly</h3>
+                    <div class="pricing-price">
+                        <span class="amount">$10</span>
+                        <span class="period">/month</span>
+                    </div>
+                    <p class="pricing-desc">Perfect for getting started</p>
+                </div>
+                <ul class="pricing-features">
+                    <li><span class="check">✓</span> Mistral OCR (image text extraction)</li>
+                    <li><span class="check">✓</span> SiliconFlow embeddings (semantic search)</li>
+                    <li><span class="check">✓</span> Web search included</li>
+                    <li><span class="check">✓</span> All LLM models via BYOK</li>
+                    <li><span class="check">✓</span> Full IDE features</li>
+                    <li><span class="check">✓</span> Community support</li>
+                    <li><span class="check">✓</span> MCP Servers — connect databases, GitHub, search &amp; hundreds of external tools</li>
+                </ul>
+                <div style="margin-top:auto;">
+                    {% if user.is_authenticated %}
+                    <a href="/account/pricing/" class="pricing-cta primary" style="display:block;text-align:center;">Get Started</a>
+                    {% else %}
+                    <a href="{% url 'account:login' %}" class="pricing-cta primary" style="display:block;text-align:center;">Get Started</a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- PRO YEARLY -->
+            <div class="pricing-card">
+                <div class="pricing-featured-badge">Save 33%</div>
+                <div class="pricing-header">
+                    <h3>Pro Yearly</h3>
+                    <div class="pricing-price">
+                        <span class="amount">$80</span>
+                        <span class="period">/year</span>
+                    </div>
+                    <p class="pricing-desc">Best value — $6.67/month</p>
+                </div>
+                <ul class="pricing-features">
+                    <li><span class="check">✓</span> Everything in Pro Monthly</li>
+                    <li><span class="check">✓</span> Save $40/year</li>
+                    <li><span class="check">✓</span> Priority support</li>
+                    <li><span class="check">✓</span> Early access features</li>
+                    <li><span class="check">✓</span> MCP Servers — connect databases, GitHub, search &amp; hundreds of external tools</li>
+                </ul>
+                <div style="margin-top:auto;">
+                    {% if user.is_authenticated %}
+                    <a href="/account/pricing/" class="pricing-cta primary" style="display:block;text-align:center;">Get Started</a>
+                    {% else %}
+                    <a href="{% url 'account:login' %}" class="pricing-cta primary" style="display:block;text-align:center;">Get Started</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <p class="pricing-note reveal">
+            🔑 <strong>All AI models (MiMo, DeepSeek, OpenAI, Qwen, OpenRouter)</strong> use your own API keys.
+            You pay those providers directly. Our subscription covers OCR (Mistral), embeddings (SiliconFlow), web search, and MCP server connections.
+        </p>
+    </section>
+{% endblock %}

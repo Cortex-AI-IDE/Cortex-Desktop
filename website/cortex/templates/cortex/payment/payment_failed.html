@@ -1,0 +1,33 @@
+{% extends 'cortex/base.html' %}
+{% load static %}
+
+{% block title %}Payment Failed — Cortex AI IDE{% endblock %}
+
+{% block content %}
+<section class="hero" style="min-height: 60vh; display: flex; align-items: center; justify-content: center;">
+    <div style="text-align: center; max-width: 520px;">
+        <div style="font-size: 64px; margin-bottom: 24px; animation: pulse 2s ease infinite;">&#x26A0;&#xFE0F;</div>
+        <h1 style="font-size: 2rem; margin-bottom: 12px;">Payment Failed</h1>
+        <p class="sub" style="margin-bottom: 32px;">
+            Something went wrong processing your payment. You haven't been charged.
+            Please try again or contact support if this keeps happening.
+        </p>
+
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            {% if user.is_authenticated %}
+            <a href="/account/pricing/" class="pricing-cta primary">Try Again</a>
+            {% else %}
+            <a href="{% url 'account:login' %}" class="pricing-cta primary">Sign In to Retry</a>
+            {% endif %}
+            <a href="/account/profile/" class="pricing-cta">Go Home</a>
+        </div>
+    </div>
+</section>
+
+<style>
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+    }
+</style>
+{% endblock %}

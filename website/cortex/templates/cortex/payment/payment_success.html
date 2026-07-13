@@ -1,0 +1,38 @@
+{% extends 'cortex/base.html' %}
+{% load static %}
+
+{% block title %}Payment Successful — Cortex AI IDE{% endblock %}
+
+{% block content %}
+<section class="hero" style="min-height: 60vh; display: flex; align-items: center; justify-content: center;">
+    <div style="text-align: center; max-width: 520px;">
+        <div style="font-size: 64px; margin-bottom: 24px; animation: popIn 0.5s ease;">&#x2705;</div>
+        <h1 style="font-size: 2rem; margin-bottom: 12px;">Payment Successful!</h1>
+        <p class="sub" style="margin-bottom: 8px;">
+            {% if payment %}
+                Thank you for subscribing to <strong>{{ payment.get_plan_display }}</strong>.
+            {% else %}
+                Your payment has been processed successfully.
+            {% endif %}
+        </p>
+        {% if payment %}
+        <p class="sub" style="margin-bottom: 32px; opacity: 0.6; font-size: 0.9rem;">
+            {{ payment.amount }} {{ payment.currency }} — {{ payment.get_gateway_display }}
+        </p>
+        {% endif %}
+
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <a href="{% url 'account:profile' %}" class="pricing-cta primary">Go to Account</a>
+            <a href="/account/profile/" class="pricing-cta">Go Home</a>
+        </div>
+    </div>
+</section>
+
+<style>
+    @keyframes popIn {
+        0% { transform: scale(0); opacity: 0; }
+        70% { transform: scale(1.15); }
+        100% { transform: scale(1); opacity: 1; }
+    }
+</style>
+{% endblock %}

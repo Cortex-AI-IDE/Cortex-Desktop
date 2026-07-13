@@ -1,0 +1,21 @@
+{% extends 'cortex/base.html' %}
+{% load static %}
+
+{% block title %}Payment Cancelled — Cortex AI IDE{% endblock %}
+
+{% block content %}
+<section class="hero" style="min-height: 60vh; display: flex; align-items: center; justify-content: center;">
+    <div style="text-align: center; max-width: 520px;">
+        <div style="font-size: 64px; margin-bottom: 24px; opacity: 0.5;">&#x274C;</div>
+        <h1 style="font-size: 2rem; margin-bottom: 12px;">Payment Cancelled</h1>
+        <p class="sub" style="margin-bottom: 32px;">
+            No worries — you haven't been charged. You can try again whenever you're ready.
+        </p>
+
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <a href="/account/pricing/" class="pricing-cta primary">View Plans</a>
+            <a href="/account/profile/" class="pricing-cta">Go Home</a>
+        </div>
+    </div>
+</section>
+{% endblock %}

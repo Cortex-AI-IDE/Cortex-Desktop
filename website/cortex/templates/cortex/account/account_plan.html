@@ -1,0 +1,127 @@
+{% extends 'cortex/account/account_base.html' %}
+{% load static %}
+
+{% block account_content %}
+<div class="account-page">
+    <h1 class="account-page-title">Plan & Billing</h1>
+
+    <!-- Current Plan Card -->
+    <div class="account-card">
+        <div class="account-card-header">
+            <h2 class="account-card-title">Current Plan</h2>
+        </div>
+
+        {% if subscription %}
+        <div class="plan-current">
+            <div class="plan-badge">
+                {% if subscription.plan == 'pro_yearly' %}
+                <span class="badge badge-plan">Pro</span>
+                {% elif subscription.plan == 'pro' or subscription.plan == 'starter' %}
+                <span class="badge badge-plan">Pro</span>
+                {% endif %}
+            </div>
+            <div class="plan-price">
+                {% if subscription.plan == 'pro_yearly' %}$80.00{% elif subscription.plan == 'pro' or subscription.plan == 'starter' %}$10.00{% endif %}
+                <span class="plan-period">{% if subscription.plan == 'pro_yearly' %}per year{% else %}per month{% endif %}</span>
+            </div>
+            <div class="plan-details">
+                <div class="plan-detail">
+                    <span class="plan-detail-label">Status:</span>
+                    <span class="badge {% if subscription.status == 'active' %}badge-active{% else %}badge-cancelled{% endif %}">
+                        {{ subscription.get_status_display }}
+                    </span>
+                </div>
+                <div class="plan-detail">
+                    <span class="plan-detail-label">Renews:</span>
+                    <span>{{ subscription.current_period_end|date:"M d, Y" }}</span>
+                </div>
+                <div class="plan-detail">
+                    <span class="plan-detail-label">Credits:</span>
+                    <span>{{ subscription.monthly_credits|floatformat:0 }} / month</span>
+                </div>
+            </div>
+            <div class="plan-actions">
+                <a href="{% url 'account:pricing' %}" class="btn-gold">Upgrade</a>
+            </div>
+            <div class="plan-detail" style="margin-top:12px;">
+                <span class="plan-detail-label">Auto-renew:</span>
+                <span style="color:#8b949e;">Unavailable — subscriptions are manual only. To renew, purchase again from the <a href="{% url 'account:pricing' %}" style="color:#58a6ff;">pricing page</a> before expiry.</span>
+            </div>
+            <div class="plan-detail">
+                <span style="color:#6b7280; font-size:12px;">⚠ If you were charged unexpectedly, contact <a href="mailto:notification@cortex-ide.app" style="color:#58a6ff;">notification@cortex-ide.app</a></span>
+            </div>
+        </div>
+                {% else %}
+        <div class="plan-current">
+            <div class="plan-badge">
+                <span class="badge badge-inactive">No Plan</span>
+            </div>
+            <div class="plan-price">
+                <span class="plan-period">No active subscription</span>
+            </div>
+            <div class="plan-details">
+                <p class="plan-detail-text">Choose a plan to get monthly AI credits and unlock included models.</p>
+            </div>
+            <div class="plan-actions">
+                <a href="{% url 'account:pricing' %}" class="btn-gold">Choose a Plan</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Order History -->
+    <div class="account-card">
+        <div class="account-card-header">
+            <h2 class="account-card-title">Orders</h2>
+        </div>
+
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Item</th>
+                    <th>Type</th>
+                    <th>Invoice</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                <tr>
+                    <td>{{ order.created_at|date:"Y-m-d" }}</td>
+                    <td>${{ order.amount_usd }} {{ order.currency }}</td>
+                    <td>
+                        <span class="badge {% if order.status == 'paid' %}badge-active{% elif order.status == 'cancelled' %}badge-cancelled{% else %}badge-pending{% endif %}">
+                            {{ order.get_status_display }}
+                        </span>
+                    </td>
+                    <td>{{ order.item }}</td>
+                    <td>{{ order.get_order_type_display }}</td>
+                    <td>
+                        {% if order.status == 'paid' %}
+                        <a href="{% url 'account:invoice' order.id %}" class="btn-ghost-sm" style="text-decoration:none;">&#128196; PDF</a>
+                        {% else %}
+                        <span style="color:#6b7280;font-size:12px;">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="account-empty">No orders yet</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Contact Banner -->
+<div style="background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px 18px; margin-top: 20px; display: flex; align-items: center; gap: 12px;">
+    <span style="font-size:20px;">💬</span>
+    <div>
+        <span style="color:#c9d1d9; font-size:13px;">Need help with billing or your plan?</span>
+        <span style="color:#6b7280; font-size:12px; display:block; margin-top:2px;">Contact us at <a href="mailto:notification@cortex-ide.app" style="color:#58a6ff;">notification@cortex-ide.app</a> — we respond within 24 hours.</span>
+    </div>
+</div>
+{% endblock %}

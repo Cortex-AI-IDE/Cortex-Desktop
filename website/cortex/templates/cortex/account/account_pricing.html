@@ -1,0 +1,226 @@
+{% extends 'cortex/account/account_base.html' %}
+{% load static %}
+
+{% block extra_head %}
+<!-- PayPal JS SDK — client-id auto-switches sandbox/live via settings.py -->
+<script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id|default:'sb' }}&currency=USD"></script>
+<!-- Razorpay Checkout — loaded on-demand when user clicks Pay button (faster page load) -->
+<style>
+    .mode-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 12px; border-radius: 20px; font-size: 0.75rem;
+        font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+        margin-bottom: 12px;
+    }
+    .mode-badge-sandbox {
+        background: rgba(255, 193, 7, 0.15); color: #ffc107;
+        border: 1px solid rgba(255, 193, 7, 0.3);
+    }
+    .mode-badge-live {
+        background: rgba(40, 167, 69, 0.15); color: #28a745;
+        border: 1px solid rgba(40, 167, 69, 0.3);
+    }
+    .mode-badge .mode-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+    }
+    .mode-badge-sandbox .mode-dot { background: #ffc107; }
+    .mode-badge-live .mode-dot { background: #28a745; }
+</style>
+{% endblock %}
+
+{% block account_content %}
+<div class="account-page">
+    <h1 class="account-page-title">Choose Your Plan</h1>
+    <p class="account-page-desc">Get OCR, embeddings, and web search. Use any AI model with your own API keys — no lock-in.</p>
+
+    {% if paypal_mode == 'sandbox' or razorpay_mode == 'test' %}
+    <div style="text-align:center;margin-bottom:16px;">
+        <span class="mode-badge mode-badge-sandbox">
+            <span class="mode-dot"></span>
+            Sandbox Mode — Payments are simulated
+        </span>
+    </div>
+    {% endif %}
+
+    <div class="pricing-grid-account">
+        <!-- PRO MONTHLY -->
+        <div class="pricing-card-account featured {% if current_plan == 'pro' %}current{% endif %}">
+            <div class="pricing-featured-badge-account">Popular</div>
+            {% if current_plan == 'pro' %}
+            <div class="pricing-current-badge-account">Current Plan</div>
+            {% endif %}
+
+            <div class="pricing-card-header-account">
+                <h3 class="pricing-plan-name-account">Pro Monthly</h3>
+                <div class="pricing-price-account">
+                    <span class="pricing-amount-account">$10</span>
+                    <span class="pricing-period-account">/month</span>
+                </div>
+                <p class="pricing-desc-account">Perfect for getting started</p>
+            </div>
+
+            <ul class="pricing-features-account">
+                <li><span class="pricing-check-account">&#10003;</span> Mistral OCR (image text extraction)</li>
+                <li><span class="pricing-check-account">&#10003;</span> SiliconFlow embeddings (semantic search)</li>
+                <li><span class="pricing-check-account">&#10003;</span> Web search included</li>
+                <li><span class="pricing-check-account">&#10003;</span> All LLM models via BYOK</li>
+                <li><span class="pricing-check-account">&#10003;</span> Full IDE features</li>
+                <li><span class="pricing-check-account">&#10003;</span> MCP Server access</li>
+            </ul>
+
+            <div class="pricing-cta-account">
+                {% if current_plan == 'pro' %}
+                <button class="btn-pricing-account btn-pricing-current" disabled>Current Plan</button>
+                {% else %}
+                <!-- PayPal Button for Pro Monthly -->
+                <div id="paypal-btn-pro-acct" class="paypal-btn-container-acct"></div>
+                <!-- Razorpay Button for Pro Monthly (hidden while Razorpay
+                     account verification is pending — flip RAZORPAY_ENABLED
+                     in .env to bring it back; all backend code stays live) -->
+                {% if razorpay_enabled %}
+                <button class="btn-pricing-account btn-pricing-razorpay" onclick="razorpayCheckout('pro')">&#127470;&#127475; Pay with INR (899)</button>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- PRO YEARLY -->
+        <div class="pricing-card-account {% if current_plan == 'pro_yearly' %}current{% endif %}">
+            <div class="pricing-featured-badge-account">Save 33%</div>
+            {% if current_plan == 'pro_yearly' %}
+            <div class="pricing-current-badge-account">Current Plan</div>
+            {% endif %}
+
+            <div class="pricing-card-header-account">
+                <h3 class="pricing-plan-name-account">Pro Yearly</h3>
+                <div class="pricing-price-account">
+                    <span class="pricing-amount-account">$80</span>
+                    <span class="pricing-period-account">/year</span>
+                </div>
+                <p class="pricing-desc-account">Best value — $6.67/month</p>
+            </div>
+
+            <ul class="pricing-features-account">
+                <li><span class="pricing-check-account">&#10003;</span> Everything in Pro Monthly</li>
+                <li><span class="pricing-check-account">&#10003;</span> Save $40/year</li>
+                <li><span class="pricing-check-account">&#10003;</span> Priority support</li>
+                <li><span class="pricing-check-account">&#10003;</span> Early access features</li>
+                <li><span class="pricing-check-account">&#10003;</span> MCP Server access</li>
+            </ul>
+
+            <div class="pricing-cta-account">
+                {% if current_plan == 'pro_yearly' %}
+                <button class="btn-pricing-account btn-pricing-current" disabled>Current Plan</button>
+                {% else %}
+                <!-- PayPal Button for Pro Yearly -->
+                <div id="paypal-btn-pro-yearly-acct" class="paypal-btn-container-acct"></div>
+                <!-- Razorpay Button for Pro Yearly (hidden while verification pending) -->
+                {% if razorpay_enabled %}
+                <button class="btn-pricing-account btn-pricing-razorpay" onclick="razorpayCheckout('pro_yearly')">&#127470;&#127475; Pay with INR (6999)</button>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <p class="pricing-note-account">
+        &#128274; <strong>All AI models (MiMo, DeepSeek, OpenAI, Qwen, OpenRouter)</strong> use your own API keys.
+        You pay those providers directly. Our subscription covers OCR (Mistral), embeddings (SiliconFlow), and web search.
+    </p>
+</div>
+
+<!-- Payment Scripts -->
+<style>
+    .paypal-btn-container-acct { margin-top: 10px; min-height: 50px; }
+    .btn-pricing-razorpay {
+        display: block; width: 100%; padding: 12px 24px; margin-top: 8px;
+        background: linear-gradient(135deg, #3395ff, #0b84ea); color: #fff;
+        border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
+        cursor: pointer; transition: all 0.2s;
+    }
+    .btn-pricing-razorpay:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(11,132,234,0.3); }
+</style>
+<script>
+function getCSRFToken() {
+    var n = 'csrftoken', c = document.cookie.split(';');
+    for (var i = 0; i < c.length; i++) { c[i] = c[i].trim(); if (c[i].startsWith(n+'=')) return decodeURIComponent(c[i].substring(n.length+1)); }
+    return '';
+}
+function handlePayPalCapture(data, details, amount, plan) {
+    fetch('/payment/paypal/create-order/', {
+        method: 'POST', headers: {'Content-Type':'application/json','X-CSRFToken':getCSRFToken()},
+        body: JSON.stringify({order_id:data.orderID, amount:amount, currency:'USD', plan:plan})
+    }).then(function(){
+        return fetch('/payment/paypal/capture-order/', {
+            method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCSRFToken()},
+            body: JSON.stringify({order_id:data.orderID, capture_id:details.id, payer_id:details.payer.payer_id,
+                payer_email:details.payer.email_address, status:details.status,
+                amount:details.purchase_units[0].payments.captures[0].amount.value})
+        });
+    }).then(function(r){return r.json();})
+      .then(function(r){window.location.href=(r.status==='success'||r.status==='already_completed')?'/payment/success/':'/payment/failed/';})
+      .catch(function(){window.location.href='/payment/failed/';});
+}
+// PayPal Pro Monthly
+paypal.Buttons({style:{layout:'vertical',color:'gold',shape:'rect',label:'subscribe',height:42},
+    createOrder:function(d,a){return a.order.create({purchase_units:[{amount:{value:'10.00',currency_code:'USD'},description:'Cortex Pro Monthly'}]});},
+    onApprove:function(d,a){return a.order.capture().then(function(det){handlePayPalCapture(d,det,'10.00','pro');});},
+    onError:function(){window.location.href='/payment/failed/';}
+}).render('#paypal-btn-pro-acct');
+// PayPal Pro Yearly
+paypal.Buttons({style:{layout:'vertical',color:'gold',shape:'rect',label:'subscribe',height:42},
+    createOrder:function(d,a){return a.order.create({purchase_units:[{amount:{value:'80.00',currency_code:'USD'},description:'Cortex Pro Yearly'}]});},
+    onApprove:function(d,a){return a.order.capture().then(function(det){handlePayPalCapture(d,det,'80.00','pro_yearly');});},
+    onError:function(){window.location.href='/payment/failed/';}
+}).render('#paypal-btn-pro-yearly-acct');
+
+// Razorpay (lazy-loaded SDK) — NO prices in frontend, backend creates order with correct amount
+function razorpayCheckout(plan) {
+    if (typeof Razorpay === 'undefined') {
+        var s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = function() { doRazorpayCheckout(plan); };
+        s.onerror = function() { alert('Failed to load Razorpay. Please refresh and try again.'); };
+        document.head.appendChild(s);
+    } else {
+        doRazorpayCheckout(plan);
+    }
+}
+function doRazorpayCheckout(plan) {
+    // Cancel any stale pending payments before creating a new one
+    fetch('/payment/cancel-pending/', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
+        body: JSON.stringify({ gateway: 'razorpay' })
+    }).then(function() {
+        return fetch('/payment/razorpay/create-order/', {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCSRFToken()}, body:JSON.stringify({plan:plan})});
+    })
+    .then(function(r){if(!r.ok) return r.json().then(function(e){throw new Error(e.error);}); return r.json();})
+    .then(function(d){
+        var rzp = new Razorpay({
+            key: d.key_id, amount: d.amount, currency: d.currency, name: 'Cortex AI IDE',
+            description: plan.charAt(0).toUpperCase()+plan.slice(1)+' Plan', order_id: d.order_id,
+            handler: function(resp) {
+                fetch('/payment/razorpay/verify/', {
+                    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCSRFToken()},
+                    body: JSON.stringify({razorpay_order_id:resp.razorpay_order_id, razorpay_payment_id:resp.razorpay_payment_id, razorpay_signature:resp.razorpay_signature})
+                })
+                .then(function(r){return r.json();})
+                .then(function(r){window.location.href=(r.status==='success'||r.status==='already_completed')?'/payment/success/':'/payment/failed/';})
+                .catch(function(){window.location.href='/payment/failed/';});
+            },
+            theme: {color:'#e8c547'},
+            modal: {
+                ondismiss: function() {
+                    // Mark pending payment as cancelled so user can retry immediately
+                    fetch('/payment/cancel-pending/', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
+                        body: JSON.stringify({ gateway: 'razorpay', order_id: d.order_id })
+                    });
+                }
+            }
+        });
+        rzp.open();
+    }).catch(function(e){ alert('Payment error: ' + e.message); });
+}
+</script>
+{% endblock %}

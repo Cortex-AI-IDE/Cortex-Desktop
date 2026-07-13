@@ -1,0 +1,35 @@
+# =============================================================================
+# Cortex Server — Python Dependencies
+# =============================================================================
+
+# --- Core Framework ----------------------------------------------------------
+Django>=5.1,<6.1
+
+# --- Production Server -------------------------------------------------------
+gunicorn>=22.0                   # Production WSGI server
+whitenoise>=6.7                  # Static file serving (no Nginx needed)
+
+# --- Environment & Config ----------------------------------------------------
+python-decouple>=3.8             # Read .env files cleanly
+
+# --- CORS (IDE ↔ Server) ----------------------------------------------------
+django-cors-headers>=4.4         # CORS headers for API endpoints
+
+# --- Password Hashing ---------------------------------------------------------
+argon2-cffi>=25.1                # Argon2id password hashing (primary hasher)
+
+# --- Image Processing ---------------------------------------------------------
+Pillow>=12.3                     # ImageField support (avatars, uploads)
+
+# --- Utilities ---------------------------------------------------------------
+python-dateutil>=2.9             # Date parsing for telemetry cleanup
+
+# --- HTTP Client (proxy forwarding + PayPal) ---------------------------------
+requests>=2.31                   # HTTP client for provider API calls & PayPal
+
+# --- Payment Gateways -------------------------------------------------------
+razorpay>=1.0                    # Razorpay payment gateway (India)
+social-auth-app-django>=5.4      # Google & GitHub OAuth2 social login
+
+# --- PDF Generation ------------------------------------------------------------
+xhtml2pdf>=0.2                   # HTML-to-PDF invoice generation
