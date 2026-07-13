@@ -3,7 +3,7 @@
 # Public open-source repository
 # ============================================================
 
-# ── Python ──────────────────────────────────────────────────
+# ── Python ────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -15,7 +15,7 @@ eggs/
 *.egg
 .eggs/
 
-# ── Virtual Environment ─────────────────────────────────────
+# ── Virtual Environment ───────────────────────────────────────
 venv/
 .venv/
 env/
@@ -23,7 +23,7 @@ env/
 *.env
 !.env.example
 
-# ── IDE / Editor ────────────────────────────────────────────
+# ── IDE / Editor ──────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
@@ -32,17 +32,17 @@ env/
 .DS_Store
 Thumbs.db
 
-# ── Logs ────────────────────────────────────────────────────
+# ── Logs ──────────────────────────────────────────────────────
 *.log
 *.log.txt
 
-# ── Cortex Private Files (DO NOT COMMIT) ────────────────────
+# ── Cortex Private Files (DO NOT COMMIT) ──────────────────────
 .cortex/
 .cortexrc.json
 .cortexrc*
 .cortex_project_state/
 
-# ── Private source code (excluded from public repo) ─────────
+# ── Private source code (excluded from public repo) ───────────
 src/agent/
 src/ai/agent_bridge.py
 src/ai/agent_safety.py
@@ -73,7 +73,7 @@ src/config/points_manager.py
 src/main.py
 src/main_window.py
 
-# ── Build / Installer Files ─────────────────────────────────
+# ── Build / Installer Files ───────────────────────────────────
 cortex.spec
 cortex_setup.iss
 build.ps1
@@ -87,20 +87,20 @@ bin/
 license.rtf
 launch_cortex.bat
 
-# ── Pyright / LSP Audit ─────────────────────────────────────────────────────
+# ── Pyright / LSP Audit ───────────────────────────────────────
 pyright_audit.py
 pyright_report.json
 
-# ── Runtime Hooks (PyInstaller build helpers) ────────────────────────────────
+# ── Runtime Hooks (PyInstaller build helpers) ─────────────────
 runtime_hook_encodings.py
 runtime_hook_asyncio.py
 runtime_hook_certifi.py
 runtime_hook_noconsole.py
 
-# ── Node Modules ────────────────────────────────────────────
+# ── Node Modules ──────────────────────────────────────────────
 node_modules/
 
-# ── Testing ─────────────────────────────────────────────────
+# ── Testing ───────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 htmlcov/
@@ -108,12 +108,7 @@ htmlcov/
 benchmarks/
 .benchmarks/
 
-# ── Misc ────────────────────────────────────────────────────
-*.png
-*.jpg
-!assets/**/*.png
-!assets/**/*.jpg
-!src/**/icons/*.svg
+# ── Misc (dev-only files, not for public) ─────────────────────
 demo_*.html
 diff_card_demo.html
 folder_icons_demo.html
@@ -125,8 +120,33 @@ THEME_NOTIFICATION_FEATURE.md
 MEMORY_SYSTEM_AUDIT.md
 Docs/app.md
 
-# ── MCP / Playwright ────────────────────────────────────────
+# ── Django website — internal docs (sensitive, do NOT leak) ───
+website/Docs/app.md
+website/Docs/CORTEX_REVENUE_PLAN.md
+website/Docs/LAUNCH_PLAN_WINDOWS_BYOK.md
+website/Docs/INDUSTRY_REVENUE_COMPARISON.md
+website/Docs/AGENTIC_LOOP_IMPLEMENTATION.md
+
+# ── Django website — secrets / runtime (NEVER commit) ─────────
+website/.env
+website/db.sqlite3
+website/*.log
+website/server.log
+website/error.txt
+website/client_secret_*.json
+website/twilio_2FA_recovery_code.txt
+website/*_recovery_code*.txt
+website/*.pem
+website/*.key
+website/__pycache__/
+website/**/__pycache__/
+website/*.pyc
+website/**/*.pyc
+website/staticfiles/
+website/media/
+
+# ── MCP / Playwright ──────────────────────────────────────────
 .playwright-mcp/
 
-# ── Claude ──────────────────────────────────────────────────
+# ── Claude ────────────────────────────────────────────────────
 .claude/

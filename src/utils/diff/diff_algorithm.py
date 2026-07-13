@@ -20,11 +20,8 @@ Usage:
     # }
 """
 
-import logging
 import re
 from typing import List, Tuple
-
-log = logging.getLogger("cortex.diff_algorithm")
 
 
 def tokenize(text: str) -> List[str]:
@@ -283,37 +280,37 @@ if __name__ == '__main__':
     print(f"Hello {name}")
     return False'''
     
-    log.debug("=" * 60)
-    log.debug("WORD-LEVEL DIFF")
-    log.debug("=" * 60)
+    print("=" * 60)
+    print("WORD-LEVEL DIFF")
+    print("=" * 60)
     
     result = compute_word_diff(old_code, new_code)
     
-    log.debug(f"\nRemoved ranges in old text:")
+    print(f"\nRemoved ranges in old text:")
     for start, end in result['removed_ranges']:
-        log.debug(f"  [{start}:{end}] = '{old_code[start:end]}'")
+        print(f"  [{start}:{end}] = '{old_code[start:end]}'")
     
-    log.debug(f"\nAdded ranges in new text:")
+    print(f"\nAdded ranges in new text:")
     for start, end in result['added_ranges']:
-        log.debug(f"  [{start}:{end}] = '{new_code[start:end]}'")
+        print(f"  [{start}:{end}] = '{new_code[start:end]}'")
     
-    log.debug("\n" + "=" * 60)
-    log.debug("LINE-LEVEL DIFF")
-    log.debug("=" * 60)
+    print("\n" + "=" * 60)
+    print("LINE-LEVEL DIFF")
+    print("=" * 60)
     
     line_result = get_changed_lines(old_code, new_code)
     
     for marker, line in line_result['lines']:
         if marker == '-':
-            log.debug(f"- {line}")
+            print(f"- {line}", end='')
         elif marker == '+':
-            log.debug(f"+ {line}")
+            print(f"+ {line}", end='')
         else:
-            log.debug(f"  {line}")
+            print(f"  {line}", end='')
     
-    log.debug("\n" + "=" * 60)
-    log.debug("ADJACENT PAIRS")
-    log.debug("=" * 60)
+    print("\n" + "=" * 60)
+    print("ADJACENT PAIRS")
+    print("=" * 60)
     
     pairs = find_adjacent_pairs(line_result['markers'])
-    log.debug(f"Paired delete/add lines: {pairs}")
+    print(f"Paired delete/add lines: {pairs}")

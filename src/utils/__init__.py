@@ -1,1 +1,1 @@
-"""src.utils module."""
+"""Utils module for Cortex IDE."""
