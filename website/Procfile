@@ -1,4 +1,0 @@
-# Cortex — Procfile (DigitalOcean App Platform / Render / Railway)
-# This tells the hosting platform how to run the app.
-
-web: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
