@@ -1,0 +1,132 @@
+# ============================================================
+# Cortex OSS — .gitignore
+# Public open-source repository
+# ============================================================
+
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+.eggs/
+
+# ── Virtual Environment ─────────────────────────────────────
+venv/
+.venv/
+env/
+.env
+*.env
+!.env.example
+
+# ── IDE / Editor ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Logs ────────────────────────────────────────────────────
+*.log
+*.log.txt
+
+# ── Cortex Private Files (DO NOT COMMIT) ────────────────────
+.cortex/
+.cortexrc.json
+.cortexrc*
+.cortex_project_state/
+
+# ── Private source code (excluded from public repo) ─────────
+src/agent/
+src/ai/agent_bridge.py
+src/ai/agent_safety.py
+src/ai/conversation_compactor.py
+src/ai/cortex_project_context.py
+src/ai/project_context.py
+src/ai/stub_agent.py
+src/ai/usage_tracker.py
+src/core/auth_manager.py
+src/core/key_manager.py
+src/core/security.py
+src/core/secure_http.py
+src/core/secure_transmission.py
+src/core/sandbox_manager.py
+src/core/win_cred.py
+src/core/stability_engine.py
+src/core/crash_persistence.py
+src/core/cortex_api.py
+src/core/security_audit.py
+src/core/autonomy_manager.py
+src/core/agent_memory.py
+src/core/agent_session_manager.py
+src/core/chat_history.py
+src/core/project_manager.py
+src/core/session_manager.py
+src/core/worker_entrypoint.py
+src/config/points_manager.py
+src/main.py
+src/main_window.py
+
+# ── Build / Installer Files ─────────────────────────────────
+cortex.spec
+cortex_setup.iss
+build.ps1
+build_installer.bat
+build_error.log
+build_output.log
+pyinstaller_build.log
+iscc_build.log
+installer_output/
+bin/
+license.rtf
+launch_cortex.bat
+
+# ── Pyright / LSP Audit ─────────────────────────────────────────────────────
+pyright_audit.py
+pyright_report.json
+
+# ── Runtime Hooks (PyInstaller build helpers) ────────────────────────────────
+runtime_hook_encodings.py
+runtime_hook_asyncio.py
+runtime_hook_certifi.py
+runtime_hook_noconsole.py
+
+# ── Node Modules ────────────────────────────────────────────
+node_modules/
+
+# ── Testing ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+benchmarks/
+.benchmarks/
+
+# ── Misc ────────────────────────────────────────────────────
+*.png
+*.jpg
+!assets/**/*.png
+!assets/**/*.jpg
+!src/**/icons/*.svg
+demo_*.html
+diff_card_demo.html
+folder_icons_demo.html
+fix_escape.py
+behaviour.txt
+error.log
+error.txt
+THEME_NOTIFICATION_FEATURE.md
+MEMORY_SYSTEM_AUDIT.md
+Docs/app.md
+
+# ── MCP / Playwright ────────────────────────────────────────
+.playwright-mcp/
+
+# ── Claude ──────────────────────────────────────────────────
+.claude/

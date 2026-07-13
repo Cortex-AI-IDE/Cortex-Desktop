@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mermaid Diagram Viewer</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --bg-panel: #131722;
+      --border: #2f3542;
+      --text: #ffffff;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter", "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    .toolbar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .toolbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      opacity: 0.95;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toolbar-title svg { color: var(--accent); }
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .toolbar button {
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border-radius: 6px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 40px;
+    }
+    .toolbar button:hover {
+      background: rgba(255,255,255,0.15);
+      border-color: rgba(255,255,255,0.25);
+    }
+    .zoom-label {
+      min-width: 58px;
+      text-align: center;
+      font-size: 12px;
+      opacity: 0.9;
+      font-weight: 500;
+    }
+    .stage {
+      position: relative;
+      width: 100%;
+      height: calc(100% - 46px);
+      overflow: hidden;
+      background: #0b1220;
+      cursor: grab;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .stage.dragging { cursor: grabbing; }
+    .content {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+      cursor: grab;
+      display: inline-block;
+    }
+    .content svg, .content svg * { cursor: inherit !important; }
+    .content svg {
+      text-rendering: optimizeLegibility;
+      shape-rendering: geometricPrecision;
+      max-width: none !important;
+      max-height: none !important;
+    }
+    .stage.dragging .content,
+    .stage.dragging .content svg,
+    .stage.dragging .content svg * { cursor: grabbing !important; }
+    .loading, .error {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 13px;
+      opacity: 0.9;
+      text-align: center;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(19, 23, 34, 0.9);
+    }
+    .error pre {
+      margin: 8px 0 0 0;
+      text-align: left;
+      white-space: pre-wrap;
+      max-width: min(900px, 90vw);
+      max-height: 56vh;
+      overflow: auto;
+      background: #0f172a;
+      border: 1px solid #2f3542;
+      border-radius: 8px;
+      padding: 12px;
+      color: #fff;
+    }
+    svg .edgePath .path, svg .flowchart-link {
+      shape-rendering: crispEdges;
+    }
+    /* Theme colors: use semi-transparent white for edges/lines,
+       dark fills for shapes, and bright white for text. */
+    svg text, svg tspan {
+      fill: #e2e8f0 !important;
+    }
+    svg .edgePath .path, svg .flowchart-link {
+      stroke: rgba(255,255,255,0.45) !important;
+      stroke-width: 1.5px;
+    }
+    svg marker path {
+      stroke: rgba(255,255,255,0.45) !important;
+    }
+    svg .node rect, svg .node polygon {
+      fill: #1e293b !important;
+      stroke: rgba(255,255,255,0.3) !important;
+    }
+    svg .node circle {
+      fill: #1e293b !important;
+      stroke: rgba(255,255,255,0.4) !important;
+    }
+    svg .cluster rect {
+      fill: rgba(15,23,42,0.7) !important;
+      stroke: rgba(255,255,255,0.2) !important;
+    }
+    svg .edgeLabel {
+      background-color: rgba(11,18,32,0.85) !important;
+      color: #94a3b8 !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="toolbar-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 14.66V20h-5.34l2.33-2.33-2.66-2.67 1.33-1.33 2.67 2.66L20 14.66zm-14.66-4.66H4v5.34l2.33-2.33 2.67 2.66 1.33-1.33-2.66-2.67L10 10H5.34zm10.66-4v2.67l-2-2V6h-4V4h6zm-8 2.67L6.67 4H10v2.67h2V4h3.33l-2 2H12zm4 7.33l2 2V14h2.67l-2-2H16zm-7.33-4l-2-2H8v-.67l-2-2V10h4v2h-.67z"/></svg> Mermaid Diagram Viewer</div>
+    <div class="toolbar-actions">
+      <button id="zoomOutBtn" type="button" title="Zoom Out"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg></button>
+      <span id="zoomLabel" class="zoom-label">100%</span>
+      <button id="zoomInBtn" type="button" title="Zoom In"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+      <button id="resetBtn" type="button" title="Reset View"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg></button>
+      <button id="fitBtn" type="button" title="Fit to Screen"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
+      <button id="closeBtn" type="button" title="Close Viewer" style="padding:6px 14px;font-size:12px;font-weight:600;gap:0;">Close</button>
+    </div>
+  </div>
+  <div id="stage" class="stage">
+    <div id="loading" class="loading">Loading Mermaid...</div>
+    <div id="content" class="content"></div>
+  </div>
+
+  <script>
+    (function() {
+      var stage = document.getElementById('stage');
+      var content = document.getElementById('content');
+      var loading = document.getElementById('loading');
+      var zoomLabel = document.getElementById('zoomLabel');
+      var minScale = 0.05;
+      var maxScale = 25;
+      var scale = 1;
+      var tx = 0;
+      var ty = 0;
+      var drag = null;
+      var touchStart = null;
+      var contentSize = { width: 800, height: 600, x: 0, y: 0 };
+      var mermaidReady = false;
+
+      function applyTransform() {
+        content.style.transform = 'translate3d(' + Math.round(tx) + 'px,' + Math.round(ty) + 'px,0) scale(' + scale + ')';
+        zoomLabel.textContent = Math.round(scale * 100) + '%';
+      }
+
+      function updateContentSize() {
+        var svg = content.querySelector('svg');
+        if (!svg) return;
+        var bb = svg.getBBox ? svg.getBBox() : null;
+        var vb = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : null;
+        var x = (bb && isFinite(bb.x)) ? bb.x : ((vb && isFinite(vb.x)) ? vb.x : 0);
+        var y = (bb && isFinite(bb.y)) ? bb.y : ((vb && isFinite(vb.y)) ? vb.y : 0);
+        var w = (bb && bb.width) || (vb && vb.width) || svg.clientWidth || 800;
+        var h = (bb && bb.height) || (vb && vb.height) || svg.clientHeight || 600;
+        contentSize.width = Math.max(1, w);
+        contentSize.height = Math.max(1, h);
+        contentSize.x = x;
+        contentSize.y = y;
+      }
+
+      function centerContent() {
+        var sw = stage.clientWidth;
+        var sh = stage.clientHeight;
+        tx = (sw - contentSize.width * scale) / 2 - (contentSize.x * scale);
+        ty = (sh - contentSize.height * scale) / 2 - (contentSize.y * scale);
+      }
+
+      function setScale(next, cx, cy) {
+        var old = scale;
+        scale = Math.max(minScale, Math.min(maxScale, next));
+        if (cx != null && cy != null) {
+          var ratio = scale / old;
+          tx = cx - (cx - tx) * ratio;
+          ty = cy - (cy - ty) * ratio;
+        }
+        applyTransform();
+      }
+
+      function resetView() {
+        scale = 1;
+        updateContentSize();
+        centerContent();
+        applyTransform();
+      }
+
+      function fitToView() {
+        updateContentSize();
+        var w = contentSize.width;
+        var h = contentSize.height;
+        var sw = Math.max(200, stage.clientWidth - 40);
+        var sh = Math.max(200, stage.clientHeight - 40);
+        var fit = Math.min(sw / w, sh / h);
+        scale = Math.max(minScale, Math.min(maxScale, fit));
+        centerContent();
+        applyTransform();
+      }
+
+      function showError(message, code) {
+        var escaped = (code || '').replace(/[&<>]/g, function(ch) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[ch];
+        });
+        content.innerHTML = '<div class="error">' + message + (code ? '<pre>' + escaped + '</pre>' : '') + '</div>';
+      }
+
+      function normalizeMermaidCode(code) {
+        var normalized = (code || '').trim();
+
+        // ── HEADER NORMALISATION (always run). DeepSeek v4 sometimes emits
+        // the header and first statement on one line with no newline between
+        // them, e.g. "flowchart TB subgraph WEB[...]" or "sequenceDiagramparticipant Foo".
+        // This happens even when the rest of the diagram has correct newlines,
+        // so we cannot gate this on a global newline count.
+        var _parts = normalized.split(/("[^"]*")/);
+        for (var _pi = 0; _pi < _parts.length; _pi += 2) {
+          _parts[_pi] = _parts[_pi]
+            .replace(/^(flowchart|graph)[ \t]+(TB|TD|LR|RL|BT)[ \t]+/i, '$1 $2\n')
+            .replace(/^(sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|mindmap|timeline)[ \t]*/i, '$1\n');
+        }
+        normalized = _parts.join('');
+
+        // ── STEP 0: Fully LINEARIZED diagram. If the code has (almost) no
+        // newlines, reconstruct all statement boundaries. Quoted label text
+        // is masked first so words like "end" or "graph" inside labels are
+        // never split.
+        var _nlCount = (normalized.match(/\n/g) || []).length;
+        if (normalized.length > 60 && _nlCount < 2) {
+          _parts = normalized.split(/("[^"]*")/);
+          for (_pi = 0; _pi < _parts.length; _pi += 2) {
+            _parts[_pi] = _parts[_pi]
+              .replace(/^(flowchart|graph)[ \t]+(TB|TD|LR|RL|BT)[ \t]+/i, '$1 $2\n')
+              .replace(/^(sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|mindmap|timeline)[ \t]+/i, '$1\n')
+              .replace(/[ \t]+(subgraph|participant|actor|autonumber|note|loop|alt|else|opt|classDef|linkStyle|style|click|direction)(?=[ \t])/gi, '\n$1')
+              .replace(/[ \t]+end(?=[ \t]|$)/gi, '\nend\n');
+          }
+          normalized = _parts.join('');
+        }
+
+        // ── STEP 1: Split MERGED EDGE DEFINITIONS (line breaks lost) ──
+        // When line breaks are lost during extraction/injection, edges merge:
+        //   "E[types.py] --> C E --> D" or "A --> B    end"
+        // We need to split these back into separate lines.
+
+        // Mermaid keywords that should NOT be treated as edge-split points
+        var _kw = /^(?:graph|flowchart|subgraph|end|style|classdef|class|click|linkstyle|interpolate|fill|stroke|direction|acctitle|accdescr|title|note|participant|actor|activate|deactivate|loop|alt|else|opt|par|break|critical|rect|region|annotation|autonumber)$/i;
+
+        // Pass 1: Split "wordTarget wordNext -->" → "wordTarget\nwordNext -->"
+        // After a single-word arrow target, if the next word is followed by an arrow, split.
+        // This handles: "C E --> D" → "C\nE --> D"
+        // Also handles: "] E --> D" → "]\nE --> D" (bracket close + word + arrow)
+        normalized = normalized.replace(
+          /(\w+|\])([ \t]+)(\w[\w]*\s*(?:-->|-.->|==>|--x|===|--\s>))/g,
+          function(m, target, gap, nextEdge) {
+            // 'end' is a statement terminator — an edge glued after it is
+            // always a lost line break ("end    L --> M"), so split there.
+            if (_kw.test(target) && !/^end$/i.test(target)) return m;
+            return target + '\n' + nextEdge;
+          }
+        );
+
+        // Pass 2: Split "target    end" → "target\nend" (subgraph close)
+        normalized = normalized.replace(
+          /(\w+|\])([ \t]+)(end\b)/gm,
+          function(m, target, gap, endKw) {
+            if (_kw.test(target)) return m;
+            return target + '\n' + endKw;
+          }
+        );
+
+        // Pass 2b: Split statement keywords glued onto the previous line by a
+        // lost line break — e.g. "L --> M    subgraph GUARD[...]" (the exact
+        // parse error: "Expecting 'SEMI', 'NEWLINE', ... got 'subgraph'").
+        // Requires 2+ spaces (stream glue keeps the old line's indentation)
+        // so single-spaced words inside node labels are left untouched.
+        normalized = normalized.replace(
+          /([^\s])[ \t]{2,}(?=(?:subgraph|participant|actor|direction|autonumber|activate|deactivate|loop|alt|else|opt|par|critical|break|rect|note)\b)/gi,
+          '$1\n'
+        );
+
+        // Pass 3: Split style/classDef/class statements merged with edges
+        // e.g. "] -.-> H    style H fill:#2d5a27" → "] -.-> H\n    style H fill:#2d5a27"
+        normalized = normalized.replace(/([^\n])([ \t]+)(style\s+\w+)/g, '$1\n$3');
+        normalized = normalized.replace(/([^\n])([ \t]+)(classDef\s+)/g, '$1\n$3');
+        normalized = normalized.replace(/([^\n])([ \t]+)(class\s+\w+)/g, '$1\n$3');
+        // Convert unicode arrows to ASCII
+        normalized = normalized.replace(/[ \t]*[\u27F6\u27F7\u2192\u21D2\u2794\u279C][ \t]*/g, ' --> ');
+        normalized = normalized.replace(/[ \t]*\u2014>[ \t]*/g, ' --> ');
+        // FIX: Only replace backslashes inside label text (between quotes/brackets),
+        // NOT globally — global replacement breaks regex patterns and escape sequences.
+        normalized = normalized.replace(/"([^"]*)"/g, function(m, inner) {
+          return '"' + inner.replace(/\\/g, '/') + '"';
+        });
+        normalized = normalized.replace(/\[([^\]]*)\]/g, function(m, inner) {
+          return '[' + inner.replace(/\\/g, '/') + ']';
+        });
+        // Normalize smart quotes
+        normalized = normalized.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+        // Fix keyword casing
+        var trimmed = normalized.toLowerCase();
+        if (trimmed.startsWith('graph ')) normalized = 'graph' + normalized.slice(5);
+        else if (trimmed.startsWith('sequencediagram')) normalized = 'sequenceDiagram' + normalized.slice(16);
+        else if (trimmed.startsWith('classdiagram')) normalized = 'classDiagram' + normalized.slice(12);
+        else if (trimmed.startsWith('flowchart ')) normalized = 'flowchart' + normalized.slice(9);
+        else if (trimmed.startsWith('statediagram')) normalized = 'stateDiagram' + normalized.slice(13);
+        else if (trimmed.startsWith('gantt')) normalized = 'gantt' + normalized.slice(5);
+        else if (trimmed.startsWith('pie')) normalized = 'pie' + normalized.slice(3);
+        // Ensure 'graph TD' has space
+        normalized = normalized.replace(/^(graph|flowchart)(TD|LR|BT|RL)/i, '$1 $2');
+        return normalized;
+      }
+
+      function loadMermaid() {
+        if (window.mermaid) {
+          mermaidReady = true;
+          return Promise.resolve();
+        }
+        // Local bundle first (instant, works offline, no OneDrive lock issue
+        // when running from IDE), then CDN as fallback for missing vendor file
+        var sources = [
+          './vendor/mermaid.min.js',
+          'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js',
+          'https://unpkg.com/mermaid@11/dist/mermaid.min.js',
+        ];
+        var idx = 0;
+        return new Promise(function(resolve, reject) {
+          function tryNext(lastErr) {
+            if (idx >= sources.length) {
+              reject(lastErr || new Error('All Mermaid sources failed'));
+              return;
+            }
+            var src = sources[idx++];
+            var script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            var timeout = setTimeout(function() {
+              script.remove();
+              tryNext(new Error('Timeout loading ' + src));
+            }, 10000);
+            script.onload = function() {
+              clearTimeout(timeout);
+              if (window.mermaid) {
+                mermaidReady = true;
+                resolve();
+              } else {
+                tryNext(new Error('Loaded but mermaid missing: ' + src));
+              }
+            };
+            script.onerror = function() {
+              clearTimeout(timeout);
+              script.remove();
+              tryNext(new Error('Failed loading ' + src));
+            };
+            document.head.appendChild(script);
+          }
+          tryNext();
+        });
+      }
+
+      function renderDiagram(code) {
+        if (!code) return;
+        code = normalizeMermaidCode(code);
+        loading.style.display = 'block';
+        content.innerHTML = '';
+
+        loadMermaid().then(function() {
+          try {
+            mermaid.initialize({
+              startOnLoad: false,
+              theme: 'dark',
+              securityLevel: 'strict',
+              fontFamily: '"Inter", "Segoe UI", sans-serif',
+              flowchart: {
+                curve: 'basis',
+                padding: 18,
+                nodeSpacing: 60,
+                rankSpacing: 70,
+                useMaxWidth: false,
+                htmlLabels: false
+              },
+              themeVariables: {
+                primaryColor: '#1e293b',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: 'rgba(255,255,255,0.3)',
+                lineColor: 'rgba(255,255,255,0.45)',
+                secondaryColor: '#0f172a',
+                tertiaryColor: '#1e293b',
+                textColor: '#e2e8f0',
+                mainBkg: '#0b1220',
+                nodeBorder: 'rgba(255,255,255,0.3)',
+                clusterBkg: 'rgba(15,23,42,0.7)',
+                clusterBorder: 'rgba(255,255,255,0.2)',
+                titleColor: '#e2e8f0',
+                edgeLabelBackground: 'rgba(11,18,32,0.85)',
+                fontSize: '14px'
+              }
+            });
+            var id = 'mermaid-' + Date.now();
+            mermaid.render(id, code).then(function(result) {
+              loading.style.display = 'none';
+              content.innerHTML = result.svg;
+              var svg = content.querySelector('svg');
+              if (svg) {
+                var vb = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : null;
+                if (!svg.getAttribute('width') && vb && vb.width) svg.setAttribute('width', String(vb.width));
+                if (!svg.getAttribute('height') && vb && vb.height) svg.setAttribute('height', String(vb.height));
+                svg.style.display = 'block';
+                svg.style.overflow = 'visible';
+                svg.style.maxWidth = 'none';
+                svg.style.maxHeight = 'none';
+                svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+              }
+              updateContentSize();
+              fitToView();
+            }).catch(function(err) {
+              loading.style.display = 'none';
+              showError('Diagram render failed', code);
+              console.warn('[Mermaid] Render error:', err);
+            });
+          } catch (e) {
+            loading.style.display = 'none';
+            showError('Mermaid initialization failed', code);
+            console.warn('[Mermaid] Init error:', e);
+          }
+        }).catch(function(err) {
+          loading.style.display = 'none';
+          showError('Mermaid library could not be loaded. Check network.', code);
+          console.warn('[Mermaid] Load error:', err);
+        });
+      }
+
+      // Pan & Zoom handlers
+      stage.addEventListener('mousedown', function(e) {
+        if (e.target.closest('button')) return;
+        drag = { x: e.clientX - tx, y: e.clientY - ty };
+        stage.classList.add('dragging');
+        e.preventDefault();
+      });
+      window.addEventListener('mousemove', function(e) {
+        if (!drag) return;
+        tx = e.clientX - drag.x;
+        ty = e.clientY - drag.y;
+        applyTransform();
+      });
+      window.addEventListener('mouseup', function() {
+        drag = null;
+        stage.classList.remove('dragging');
+      });
+      stage.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        var rect = stage.getBoundingClientRect();
+        var cx = e.clientX - rect.left;
+        var cy = e.clientY - rect.top;
+        var factor = e.deltaY < 0 ? 1.12 : 0.9;
+        setScale(scale * factor, cx, cy);
+      }, { passive: false });
+
+      // Button handlers
+      document.getElementById('zoomInBtn').addEventListener('click', function() {
+        setScale(scale * 1.25, stage.clientWidth/2, stage.clientHeight/2);
+      });
+      document.getElementById('zoomOutBtn').addEventListener('click', function() {
+        setScale(scale * 0.8, stage.clientWidth/2, stage.clientHeight/2);
+      });
+      document.getElementById('resetBtn').addEventListener('click', resetView);
+      document.getElementById('fitBtn').addEventListener('click', fitToView);
+      document.getElementById('closeBtn').addEventListener('click', function() {
+        // Navigate to custom scheme — PyQt intercepts this via acceptNavigationRequest
+        window.location.href = 'cortex://mermaid/close';
+      });
+
+      // Expose to bridge / parent
+      window.renderMermaidDiagram = renderDiagram;
+      window.renderDiagram = renderDiagram;       // alias for Python bridge
+      window.resetMermaidView = resetView;
+      window.fitMermaidToView = fitToView;
+
+      // Safety timeout: if no renderDiagram() call within 5s, show helpful error
+      // (prevents stuck "Loading Mermaid..." when bridge fails to inject code)
+      setTimeout(function() {
+        if (!mermaidReady && loading.style.display !== 'none') {
+          showError('No diagram code received. Close and reopen this viewer.');
+        }
+      }, 5000);
+
+      // Listen for code from Python bridge
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'render_mermaid') {
+          renderDiagram(e.data.code);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

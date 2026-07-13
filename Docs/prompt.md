@@ -1,0 +1,10 @@
+on my project have grep is very week sometime finding something "Grep isn't finding matches — possibly encoding issues in the large files. Let me search directly: 
+PowerShell variable escaping issues. Let me write a test script file: 
+PowerShell — need semicolons. Let me redo all searches. "C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\tools\GrepTool\GrepTool.py & its prmopt.py , C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\tools\GlobTool\GlobTool.py & it prompt.py , all propely understnd it read C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\tools\FileReadTool\FileReadTool.py, it prompt.py , C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\core\semantic_search.py , C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\utils\searchStrategy.py ,C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\tools\ToolSearchTool\ToolSearchTool.py,C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\tools\SementicSearch\SementicSearchTool.py, C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\agent\src\memdir\semanticSearch.py , C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\ai\agent_safety.py , C:\Users\Hakeem1\OneDrive\Desktop\Cortex_Ai_Agent\cortex-Cortex-Engine\src\ai\agent_bridge.py all propel understnd it why grep is slipping & something search with meaning or fucntion fialing that issue find it 
+
+
+another one issue 
+
+You're right — I got stuck in "research mode" reading file after file instead of just writing the document. That's on me. I already had enough info from the code to write it. Let me create it right now. 
+
+it means without create file after reserched it ai is failing 
