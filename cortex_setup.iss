@@ -89,8 +89,14 @@ Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; \
 ; Manager writes can diverge from normal launches.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
-; Add Windows Defender exclusions (prevents subprocess scanning lag)
-Filename: "powershell"; Parameters: "-ExecutionPolicy Bypass -Command ""Add-MpExclusion -Path '{app}'; Add-MpExclusion -Path '{localappdata}\Cortex'; Add-MpExclusion -Process 'Cortex.exe'"""; StatusMsg: "Adding Windows Defender exclusions..."; Flags: runhidden skipifsilent
+; Add Windows Defender exclusions (prevents real-time scanning lag on the
+; app dir and Cortex's data dir). BUG HISTORY: this used a nonexistent
+; cmdlet name ("Add-MpExclusion" — the real one is Add-MpPreference) and
+; excluded the wrong data folder ({localappdata}\Cortex — Cortex's data
+; actually lives in %USERPROFILE%\.cortex), so it failed silently on every
+; install since it was added. Defender only; third-party AVs cannot be
+; configured programmatically — users follow the docs guide for those.
+Filename: "powershell"; Parameters: "-ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}','{%USERPROFILE}\.cortex' -ExclusionProcess 'Cortex.exe'"""; StatusMsg: "Adding Windows Defender exclusions..."; Flags: runhidden skipifsilent
 
 [Messages]
 ; Custom message for Windows security warning
