@@ -1,1 +1,0 @@
-"""src.ui.components module."""
