@@ -1,1 +1,1 @@
-"""src module."""
+"""src.agent package — Agent framework internals."""
