@@ -9,7 +9,7 @@ commands and iterate until the work is done, inside a real IDE.
 
 **Version 3.0.41** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11
 
-[Website](https://cortexide.ai) &nbsp;·&nbsp; [Documentation](https://docs.cortexide.ai) &nbsp;·&nbsp; [Issues](https://github.com/Cortex-AI-IDE/Cortex-Desktop/issues)
+[Website](https://cortex-ide.app/) &nbsp;·&nbsp; [Documentation](https://cortex-ide.app/docs/) &nbsp;·&nbsp; [Pricing](https://cortex-ide.app/pricing/) &nbsp;·&nbsp; [Issues](https://github.com/Cortex-AI-IDE/Cortex-Desktop/issues)
 
 </div>
 
@@ -61,7 +61,7 @@ panels that would be painful to build natively:
   a rule system (exact match, wildcard) for the commands you trust.
 - **Verified iteration.** A loop engine can run your tests, lint and build,
   then feed the failures back to the model until the checks pass.
-- **Bring your own key.** Ten providers are supported natively. Keys are stored
+- **Bring your own key.** Eight providers are supported natively. Keys are stored
   encrypted on your machine and never leave it except to the provider you chose.
 - **Project memory.** Markdown memories in `~/.cortex/memory` carry decisions
   and preferences across sessions.
@@ -95,8 +95,8 @@ layer and the security modules. See [Project layout](#project-layout).
 | Build and packaging pipeline | PyInstaller specs, the Inno Setup installer script, the MSIX manifest and code signing configuration |
 | Automated test suite | Not part of this release |
 | Hosted services | The account, billing and update-check backends run separately |
-| The test suite, `Docs/`, `plugins/` | Not part of this release |
-| Release binaries | Download the signed build from [cortexide.ai](https://cortexide.ai) |
+| `Docs/` and `plugins/` | Not part of this release |
+| Release binaries | Download the signed build from [cortex-ide.app](https://cortex-ide.app/) |
 
 The remaining pieces are being prepared for release separately. Until that work
 finishes, treat this as the source release of the desktop application. Please
@@ -406,18 +406,31 @@ to go through the Recycle Bin where possible.
 
 ## Supported model providers
 
+### BYOK providers
+
+These eight connect directly from your machine to the provider using your own
+key. Your traffic does not pass through Cortex.
+
 | Provider | Notes |
 |----------|-------|
 | Anthropic | Claude models |
 | OpenAI | GPT and o-series |
 | DeepSeek | DeepSeek models |
-| Mistral | Including vision models |
 | Alibaba / DashScope | Including the separate Token Plan billing endpoint |
 | Xiaomi MiMo | Note that token-plan (`tp-`) keys reject images; `sk-` keys do vision |
-| OpenRouter | Aggregator, many models |
-| SiliconFlow | Also used for cloud embeddings |
-| InferenceHub | |
+| OpenRouter | Aggregator, many models, including free tiers |
+| InferenceHub | One key for many models |
 | Google | Gemini models |
+
+### Managed services
+
+Two further integrations belong to the optional subscription rather than to
+BYOK:
+
+| Service | Used for |
+|---------|----------|
+| Mistral | OCR and vision fallback |
+| SiliconFlow | Cloud embeddings |
 
 Model limits, context windows and capability flags live in
 `src/ai/model_limits.py` and `src/ai/model_registry.py`.

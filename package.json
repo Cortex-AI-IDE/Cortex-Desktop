@@ -4,6 +4,7 @@
   "private": true,
   "description": "Node.js runtime assets for Cortex AI IDE. The editor pane loads Monaco Editor from node_modules/monaco-editor, so this manifest must be installed before running the app from source.",
   "license": "Apache-2.0",
+  "homepage": "https://cortex-ide.app/",
   "repository": {
     "type": "git",
     "url": "https://github.com/Cortex-AI-IDE/Cortex-Desktop.git"
