@@ -1,1 +1,1 @@
-"""Services module for Cortex IDE."""
+# Cortex IDE services package

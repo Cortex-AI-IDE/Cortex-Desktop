@@ -1,0 +1,20 @@
+{
+  "name": "cortex-ai-ide",
+  "version": "3.0.41",
+  "private": true,
+  "description": "Node.js runtime assets for Cortex AI IDE. The editor pane loads Monaco Editor from node_modules/monaco-editor, so this manifest must be installed before running the app from source.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cortex-AI-IDE/Cortex-Desktop.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "comments": {
+    "monaco-editor": "Pinned to 0.52.x on purpose. Cortex injects node_modules/monaco-editor/min/vs/loader.js (the AMD loader) into editor.html. Newer major lines may drop the AMD build, so keep this on 0.52 until the editor is migrated to the ESM bundle."
+  },
+  "dependencies": {
+    "monaco-editor": "0.52.2"
+  }
+}

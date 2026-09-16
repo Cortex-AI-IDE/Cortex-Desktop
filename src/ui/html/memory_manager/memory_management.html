@@ -1,0 +1,1287 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cortex Settings</title>
+  <link rel="stylesheet" href="./memory_management.css?v=12">
+</head>
+
+<body>
+  <div class="settings-shell">
+    <!-- Left Nav -->
+    <nav class="settings-nav">
+      <div class="nav-header">
+        <button class="back-btn" id="backBtn" title="Back to app">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+          <span>Back to app</span>
+        </button>
+      </div>
+      <div class="nav-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input type="text" id="settingsSearch" placeholder="Search settings..." autocomplete="off">
+      </div>
+      <div class="nav-sections">
+        <div class="nav-group">
+          <div class="nav-group-label">Personal</div>
+          <button class="nav-item active" data-section="general"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span>General</span></button>
+          <button class="nav-item" data-section="appearance"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg><span>Appearance</span></button>
+          <button class="nav-item" data-section="profile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Profile</span></button>
+          <button class="nav-item" data-section="usage"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg><span>Usage & Billing</span></button>
+
+
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">AI & Agent</div>
+          <button class="nav-item" data-section="models"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg><span>Models & Providers</span></button>
+          <button class="nav-item" data-section="memory"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Memory</span></button>
+          <button class="nav-item" data-section="skills"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg><span>Skills</span></button>
+          <button class="nav-item" data-section="personalization"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>Personalization</span></button>
+          <button class="nav-item" data-section="safety"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>Safety & Permissions</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Integrations</div>
+          <button class="nav-item" data-section="mcp"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>MCP Servers</span></button>
+          <button class="nav-item" data-section="git"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg><span>Git</span></button>
+          <button class="nav-item" data-section="extensions"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span>Extensions</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Advanced</div>
+          <button class="nav-item" data-section="terminal"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span>Terminal</span></button>
+          <button class="nav-item" data-section="about"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span>About Cortex</span></button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="settings-content">
+
+      <!-- GENERAL -->
+      <section class="settings-section active" data-section="general">
+        <div class="section-header">
+          <div>
+            <h1>General</h1>
+            <p class="section-desc">Core application settings and behavior.</p>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Startup</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Restore previous session</label>
+              <p>Reopen tabs and chat history when Cortex starts.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="restoreSession" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Check for updates on startup</label>
+              <p>Automatically check for new versions of Cortex.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="checkUpdates" checked><span class="switch-slider"></span></label>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Notifications</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Desktop notifications</label>
+              <p>Show system notifications when AI tasks complete.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="notifications" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Sound alerts</label>
+              <p>Play a sound when long-running tasks finish.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="soundAlerts"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Telemetry</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Send anonymous usage data</label>
+              <p>Help improve Cortex by sending anonymous crash reports. No code or content is ever sent.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="telemetry"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- APPEARANCE -->
+      <section class="settings-section" data-section="appearance">
+        <div class="section-header">
+          <div>
+            <h1>Appearance</h1>
+            <p class="section-desc">Customize the look and feel of Cortex.</p>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Theme</h3>
+          <div class="theme-picker" id="themePicker">
+            <!-- data-theme-choice (NOT data-theme): data-theme is reserved for
+                 the page root theme. Putting data-theme="light" on this button
+                 made CSS vars [data-theme="light"] apply to the button itself,
+                 so the "Light" label rendered with light-mode colors on a dark
+                 page (washed-out / invisible text). -->
+            <button class="theme-option" data-theme-choice="dark" id="themeDark">
+              <div class="theme-preview dark-preview"></div>
+              <span>Dark</span>
+            </button>
+            <button class="theme-option" data-theme-choice="light" id="themeLight">
+              <div class="theme-preview light-preview"></div>
+              <span>Light</span>
+            </button>
+            <button class="theme-option" data-theme-choice="system" id="themeSystem">
+              <div class="theme-preview system-preview"></div>
+              <span>System</span>
+            </button>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Editor</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Font size</label>
+              <p>Font size for the code editor.</p>
+            </div>
+            <div class="range-control">
+              <input type="range" id="editorFontSize" min="10" max="24" value="14" class="setting-range"><span class="range-value" id="editorFontSizeVal">14px</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Font family</label>
+              <p>Monospace font for code editing.</p>
+            </div>
+            <select class="setting-select" id="editorFont"><option value="cascadia" selected>Cascadia Code</option><option value="fira">Fira Code</option><option value="jetbrains">JetBrains Mono</option><option value="consolas">Consolas</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Tab size</label>
+              <p>Number of spaces per tab character.</p>
+            </div>
+            <select class="setting-select" id="tabSize"><option value="2" selected>2 spaces</option><option value="4">4 spaces</option><option value="8">8 spaces</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Word wrap</label>
+              <p>Wrap long lines in the editor.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="wordWrap" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Minimap</label>
+              <p>Show a minimap overview on the right side of the editor.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="minimap" checked><span class="switch-slider"></span></label>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Interface</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>UI Scale</label>
+              <p>Zoom level for the entire Cortex interface.</p>
+            </div>
+            <div class="range-control">
+              <input type="range" id="uiScale" min="80" max="150" value="100" class="setting-range"><span class="range-value" id="uiScaleVal">100%</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Sidebar position</label>
+              <p>Place the sidebar on the left or right side.</p>
+            </div>
+            <select class="setting-select" id="sidebarPosition"><option value="left" selected>Left</option><option value="right">Right</option></select>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROFILE -->
+      <section class="settings-section" data-section="profile">
+        <div class="section-header">
+          <div>
+            <h1>Profile</h1>
+            <p class="section-desc">Manage your account and view usage statistics.</p>
+          </div>
+        </div>
+
+        <!-- Login Card (shown when not logged in) -->
+        <div class="settings-card" id="loginCard" style="display:none;">
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div
+              style="width:56px;height:56px;background:#0078d4;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+              </svg>
+            </div>
+            <div>
+              <h3 style="margin:0 0 4px 0;">Sign in to Cortex</h3>
+              <p style="margin:0;color:var(--muted);font-size:13px;">Sync your profile, usage, and billing across devices.
+              </p>
+            </div>
+          </div>
+          <button class="setting-btn primary" id="loginBrowserBtn" onclick="startBrowserLogin()" style="margin-top:16px;width:100%;padding:12px;font-size:14px;">
+            Sign in with Browser
+          </button>
+          <div id="loginStatus" style="margin-top:12px;color:var(--muted);font-size:12px;"></div>
+          <div id="loginError" style="margin-top:8px;color:#f85149;font-size:12px;display:none;"></div>
+        </div>
+
+        <!-- Profile Hero Card (shown when logged in) -->
+        <div class="settings-card profile-hero" id="profileHero" style="display:none;">
+          <div class="profile-avatar" id="profileAvatar">U</div>
+          <div class="profile-info">
+            <h2 class="profile-name" id="profileName">User</h2>
+            <p class="profile-meta">
+              <span class="profile-username" id="profileEmail"></span>
+              <span class="profile-separator">·</span>
+              <span class="profile-plan" id="profilePlan">Free</span>
+            </p>
+          </div>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:12px;">
+            <span id="serverStatus" style="font-size:11px;color:#00c853;">Connected</span>
+            <button class="setting-btn" id="logoutBtn" onclick="logoutUser()" style="padding:8px 16px;font-size:12px;color:#f85149;border-color:rgba(248,81,73,0.3);">
+              Sign Out
+            </button>
+          </div>
+        </div>
+
+        <!-- Usage Stats Cards -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="lifetimeTokens">0</div>
+            <div class="stat-label">Lifetime tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="peakTokens">0</div>
+            <div class="stat-label">Peak tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="longestTask">0m 0s</div>
+            <div class="stat-label">Longest task</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="currentStreak">0 days</div>
+            <div class="stat-label">Current streak</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="longestStreak">0 days</div>
+            <div class="stat-label">Longest streak</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="inputTokens">0</div>
+            <div class="stat-label">Input tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="outputTokens">0</div>
+            <div class="stat-label">Output tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="cachedTokens">0</div>
+            <div class="stat-label">Cached (of input)</div>
+          </div>
+        </div>
+
+        <!-- Token Activity Heatmap, dense contribution graph, accent-themed -->
+        <div class="settings-card tok-card">
+          <div class="tok-head">
+            <div class="tok-title">
+              <h3>Token activity</h3>
+              <span class="sub" id="heatmapSub">Last 18 weeks</span>
+            </div>
+            <div class="tok-total">
+              <div class="big" id="heatmapTotal">0</div>
+              <div class="lbl">tokens this period</div>
+            </div>
+          </div>
+
+          <div class="tok-stats" id="heatmapStats"></div>
+
+          <div class="tok-graph">
+            <div class="tok-months" id="heatmapMonths"></div>
+            <div class="tok-body">
+              <div class="tok-days">
+                <span></span><span>Mon</span><span></span><span>Wed</span>
+                <span></span><span>Fri</span><span></span>
+              </div>
+              <div id="heatmapGrid" class="tok-grid lv0"></div>
+            </div>
+          </div>
+
+          <div class="tok-foot">
+            <div class="tok-legend lv0">
+              <span>Less</span>
+              <span class="c"></span><span class="c l1"></span><span class="c l2"></span>
+              <span class="c l3"></span><span class="c l4"></span>
+              <span>More</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Insights Row -->
+        <div class="insights-row">
+          <div class="settings-card insights-card">
+            <h3>Activity insights</h3>
+            <div class="insight-item">
+              <span class="insight-label">Skills used</span>
+              <span class="insight-value" id="totalSkills">0</span>
+            </div>
+            <div class="insight-item">
+              <span class="insight-label">Recently used</span>
+              <span class="insight-value" id="skillsExplored" style="font-size:12px;">None yet</span>
+            </div>
+          </div>
+
+          <div class="settings-card insights-card">
+            <h3>Most used models</h3>
+            <div id="modelUsageList" class="model-usage-list">
+              <div class="empty-state-small">
+                <p>No model usage data yet</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- USAGE & BILLING -->
+      <section class="settings-section" data-section="usage">
+        <div class="section-header">
+          <div>
+            <h1>Usage & billing</h1>
+            <p class="section-desc">View invoices, manage payment, and track your AI usage limits.</p>
+          </div>
+        </div>
+
+        <!-- Plan Card -->
+        <div class="settings-card plan-card">
+          <h3>Your plan</h3>
+          <div class="plan-info">
+            <div class="plan-details">
+              <span class="plan-name" id="planName">Free plan</span>
+              <span class="plan-price" id="planPrice">$0/mo</span>
+            </div>
+            <button class="setting-btn primary-btn" id="upgradePlanBtn" onclick="openUpgradePage()">Upgrade plan</button>
+          </div>
+          <div id="planFeatures" style="margin-top:12px;display:none;">
+            <span style="font-size:13px;color:var(--muted);">Includes: Mistral OCR · SiliconFlow Embeddings · Web Search</span>
+          </div>
+        </div>
+
+        <!-- Service Usage -->
+        <div class="settings-card" id="serviceUsageBlock">
+          <h3 id="serviceUsageTitle">Service Usage (Billing Period)</h3>
+          <div id="serviceUsageCounters" style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div style="text-align:center;min-width:80px;">
+              <div style="font-size:24px;font-weight:600;color:var(--text);" id="ocrPages">0</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px;">OCR pages</div>
+            </div>
+            <div style="text-align:center;min-width:80px;">
+              <div style="font-size:24px;font-weight:600;color:var(--text);" id="embeddingsCount">0</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px;">embeddings</div>
+            </div>
+            <div style="text-align:center;min-width:80px;">
+              <div style="font-size:24px;font-weight:600;color:var(--text);" id="webSearches">0</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px;">web searches</div>
+            </div>
+          </div>
+          <div id="serviceUsageSubscribe" style="display:none;font-size:13px;color:var(--muted);padding:8px 0;">
+            Subscribe to <a href="#" onclick="openUpgradePage();return false" style="color:#58a6ff;">Cortex Pro</a> to
+            unlock: Mistral OCR, embeddings, and web search.
+          </div>
+        </div>
+
+        <!-- Server Usage (when logged in) -->
+        <div class="settings-card" id="serverUsageCard" style="display:none;">
+          <h3>Server usage</h3>
+          <div id="serverUsageInfo" style="font-size:13px;color:var(--muted);">
+            Loading server data...
+          </div>
+        </div>
+
+        <!-- Per-Model Breakdown -->
+        <div class="settings-card">
+          <h3>Per-model tokens</h3>
+          <div id="modelBreakdown" style="display:flex;flex-wrap:wrap;gap:12px;">
+            <!-- Dynamically populated, token count pills -->
+          </div>
+        </div>
+      </section>
+
+      <!-- MODELS & PROVIDERS -->
+      <section class="settings-section" data-section="models">
+        <div class="section-header">
+          <div>
+            <h1>Models & Providers</h1>
+            <p class="section-desc">Configure AI model providers and API keys.</p>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Default Model</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Primary model</label>
+              <p>The default model used for new chats.</p>
+            </div>
+            <select class="setting-select" id="defaultModel">
+              <option value="auto" selected>Auto (Smart routing)</option>
+              <optgroup label="Xiaomi MiMo">
+                <option value="mimo-v2.5-pro">MiMo V2.5 Pro, 1M · 42B MoE agentic</option>
+                <option value="mimo-v2.5">MiMo V2.5, 1M · full-modal</option>
+              </optgroup>
+              <optgroup label="DeepSeek V4">
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro, 1.6T params · 1M ctx</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash, 1M ctx · fast · cost-effective</option>
+                <option value="deepseek-v4-flash-vision-exp">DeepSeek V4 Flash Vision Exp, 1M ctx · 64k out · vision</option>
+              </optgroup>
+              <optgroup label="Anthropic, Claude">
+                <option value="claude-fable-5">Claude Fable 5, 1M ctx · 64k out · new</option>
+                <option value="claude-opus-4-8">Claude Opus 4.8, 1M ctx · 64k out · flagship</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5, 1M ctx · 64k out</option>
+                <option value="claude-sonnet-5">Claude Sonnet 5, 1M ctx · 64k out · new</option>
+                <option value="claude-sonnet-4-5">Claude Sonnet 4.5, 1M ctx · 64k out</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5, 1M ctx · 64k out · fast</option>
+              </optgroup>
+              <optgroup label="OpenAI GPT">
+                <option value="gpt-5.6-luna-pro">GPT-5.6 Luna Pro, 1M ctx · 64k out · flagship</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna, 1M ctx · 64k out · new</option>
+                <option value="gpt-5.6-terra-pro">GPT-5.6 Terra Pro, 1M ctx · 64k out · flagship</option>
+                <option value="gpt-5.6-terra">GPT-5.6 Terra, 1M ctx · 64k out · new</option>
+                <option value="gpt-5.6-sol-pro">GPT-5.6 Sol Pro, 1M ctx · 64k out · flagship</option>
+                <option value="gpt-5.6-sol">GPT-5.6 Sol, 1M ctx · 64k out · new</option>
+                <option value="gpt-5.5">GPT-5.5, 1.05M ctx · newest frontier</option>
+                <option value="gpt-5.4">GPT-5.4, 1.05M ctx · frontier</option>
+              </optgroup>
+              <optgroup label="OpenRouter, Anthropic">
+                <option value="anthropic/claude-fable-5">Claude Fable 5, 1M ctx · 64k out · new</option>
+                <option value="anthropic/claude-opus-4.8">Claude Opus 4.8, 1M ctx · 64k out · flagship</option>
+                <option value="anthropic/claude-opus-4.5">Claude Opus 4.5, 1M ctx · 64k out</option>
+                <option value="anthropic/claude-sonnet-5">Claude Sonnet 5, 1M ctx · 64k out · new</option>
+                <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5, 1M ctx · 64k out</option>
+                <option value="anthropic/claude-haiku-4.5">Claude Haiku 4.5, 1M ctx · 64k out · fast</option>
+              </optgroup>
+              <optgroup label="OpenRouter, OpenAI">
+                <option value="openai/gpt-5.6-luna-pro">GPT-5.6 Luna Pro, 1M ctx · 64k out · flagship</option>
+                <option value="openai/gpt-5.6-luna">GPT-5.6 Luna, 1M ctx · 64k out · new</option>
+                <option value="openai/gpt-5.6-terra-pro">GPT-5.6 Terra Pro, 1M ctx · 64k out · flagship</option>
+                <option value="openai/gpt-5.6-terra">GPT-5.6 Terra, 1M ctx · 64k out · new</option>
+                <option value="openai/gpt-5.6-sol-pro">GPT-5.6 Sol Pro, 1M ctx · 64k out · flagship</option>
+                <option value="openai/gpt-5.6-sol">GPT-5.6 Sol, 1M ctx · 64k out · new</option>
+              </optgroup>
+              <optgroup label="OpenRouter, Google">
+                <option value="google/gemini-3.5-flash">Gemini 3.5 Flash, 1M ctx · 64k out · new</option>
+                <option value="google/gemini-2.5-pro">Gemini 2.5 Pro, 1M ctx · 65k out</option>
+                <option value="google/gemini-2.5-flash">Gemini 2.5 Flash, 1M ctx · fast</option>
+              </optgroup>
+              <optgroup label="OpenRouter, Z.ai (GLM)">
+                <option value="z-ai/glm-5.2">GLM 5.2, 1M ctx · 744B MoE · coding-first</option>
+              </optgroup>
+              <optgroup label="OpenRouter, xAI (Grok)">
+                <option value="x-ai/grok-4.5">Grok 4.5, 500k ctx · 32k out</option>
+                <option value="x-ai/grok-4.3">Grok 4.3, 1M ctx · 64k out</option>
+              </optgroup>
+              <optgroup label="OpenRouter, Moonshot (Kimi)">
+                <option value="moonshotai/kimi-k3">Kimi K3, 1M ctx · 2.8T MoE · vision</option>
+              </optgroup>
+              <optgroup label="Alibaba, Qwen (Model Studio)">
+                <option value="qwen3.7-plus">Qwen 3.7 Plus, 1M ctx · agentic flagship</option>
+                <option value="qwen3.6-plus">Qwen 3.6 Plus, 1M ctx · agentic</option>
+                <option value="qwen3-coder-plus">Qwen3 Coder Plus, 1M ctx · best for code</option>
+                <option value="qwen-flash">Qwen Flash, 1M ctx · fast</option>
+                <option value="qwen-turbo">Qwen Turbo, 1M ctx · low cost</option>
+              </optgroup>
+              <optgroup label="Google Gemini (AI Studio)">
+                <option value="gemini-pro-latest">Gemini Pro (latest), 1M ctx · always newest Pro</option>
+                <option value="gemini-3.6-flash">Gemini 3.6 Flash, 1M ctx · newest Flash</option>
+                <option value="gemini-3.5-flash">Gemini 3.5 Flash, 1M ctx · 65k out</option>
+                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite, 1M ctx · fastest, low cost</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro, 1M ctx</option>
+              </optgroup>
+              <optgroup label="InferenceHub (one key, all models)">
+                <option value="ih/glm-5.2">GLM 5.2, 1M ctx · 64k out · coding-first</option>
+                <option value="ih/kimi-k3">Kimi K3, 1M ctx · 64k out · vision</option>
+                <option value="ih/sonnet-5">Claude Sonnet 5, 1M ctx · 64k out · flagship coding</option>
+                <option value="ih/opus-5">Claude Opus 5, 1M ctx · 64k out · flagship</option>
+                <option value="ih/haiku">Claude Haiku 4.5, 1M ctx · 64k out · fast</option>
+                <option value="ih/fable-5">Claude Fable 5, 1M ctx · 64k out · new</option>
+                <option value="ih/gpt-5.6-sol">GPT-5.6 Sol, 1M ctx · 64k out · new</option>
+                <option value="ih/gpt-5.6-terra">GPT-5.6 Terra, 1M ctx · 64k out · new</option>
+                <option value="ih/gpt-5.6-luna">GPT-5.6 Luna, 1M ctx · 64k out · new</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Subscription Services</h3>
+          <p class="card-desc">Included with Cortex subscription, OCR, embeddings, and web search.</p>
+          <div class="provider-row" style="opacity:0.8">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#f43f5e;color:white">M</div>
+              <div><label>Mistral Large</label>
+                <p>OCR · Image text extraction · Vision</p>
+              </div>
+            </div>
+            <div class="provider-key">
+              <span class="setting-btn" style="background:#3fb950;color:white;cursor:default;">Included</span>
+            </div>
+          </div>
+          <div class="provider-row" style="opacity:0.8">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#10b981;color:white">S</div>
+              <div><label>SiliconFlow</label>
+                <p>Embeddings · Semantic search</p>
+              </div>
+            </div>
+            <div class="provider-key">
+              <span class="setting-btn" style="background:#3fb950;color:white;cursor:default;">Included</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Provider API Keys</h3>
+          <p class="card-desc">Store your API keys locally. Keys are encrypted and never leave your device. Use the
+            toggle to show a provider's models in the chat dropdown, MiMo &amp; DeepSeek are on by default.</p>
+          <div class="provider-row" data-provider="mimo">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#f97316;color:white">X</div>
+              <div><label>MiMo</label>
+                <p>V2.5 Pro · 1M ctx</p>
+                <a class="get-key-link" data-url="https://platform.xiaomimimo.com" title="https://platform.xiaomimimo.com">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="mimoKey" placeholder="Paste key..." data-provider="mimo">
+              <span class="key-mask" id="mimoKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="mimoTest" title="Test" data-provider="mimo">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="mimoRemove" title="Remove" data-provider="mimo" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show MiMo models in the chat dropdown"><input type="checkbox" class="provider-enable" id="mimoEnable" data-provider="mimo" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="deepseek">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#a78bfa;color:white">D</div>
+              <div><label>DeepSeek</label>
+                <p>V4 Pro · 1M ctx</p>
+                <a class="get-key-link" data-url="https://platform.deepseek.com/api_keys" title="https://platform.deepseek.com/api_keys">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="deepseekKey" placeholder="Paste key..." data-provider="deepseek">
+              <span class="key-mask" id="deepseekKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="deepseekTest" title="Test" data-provider="deepseek">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="deepseekRemove" title="Remove" data-provider="deepseek" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show DeepSeek models in the chat dropdown"><input type="checkbox" class="provider-enable" id="deepseekEnable" data-provider="deepseek" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="anthropic">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#d77b4a;color:white">A</div>
+              <div><label>Anthropic</label>
+                <p>Claude · native API</p>
+                <a class="get-key-link" data-url="https://console.anthropic.com/settings/keys" title="https://console.anthropic.com/settings/keys">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="anthropicKey" placeholder="Paste key..." data-provider="anthropic">
+              <span class="key-mask" id="anthropicKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="anthropicTest" title="Test" data-provider="anthropic">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="anthropicRemove" title="Remove" data-provider="anthropic" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show Claude models in the chat dropdown"><input type="checkbox" class="provider-enable" id="anthropicEnable" data-provider="anthropic"><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="openai">
+            <div class="provider-info">
+              <div class="provider-logo openai">O</div>
+              <div><label>OpenAI</label>
+                <p>GPT-5.5, 5.4</p>
+                <a class="get-key-link" data-url="https://platform.openai.com/api-keys" title="https://platform.openai.com/api-keys">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="openaiKey" placeholder="Paste key..." data-provider="openai">
+              <span class="key-mask" id="openaiKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="openaiTest" title="Test" data-provider="openai">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="openaiRemove" title="Remove" data-provider="openai" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show OpenAI models in the chat dropdown"><input type="checkbox" class="provider-enable" id="openaiEnable" data-provider="openai"><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="openrouter">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#8b5cf6;color:white">R</div>
+              <div><label>OpenRouter</label>
+                <p>Multi-model</p>
+                <a class="get-key-link" data-url="https://openrouter.ai/keys" title="https://openrouter.ai/keys">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="openrouterKey" placeholder="Paste key..." data-provider="openrouter">
+              <span class="key-mask" id="openrouterKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="openrouterTest" title="Test" data-provider="openrouter">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="openrouterRemove" title="Remove" data-provider="openrouter" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show OpenRouter models in the chat dropdown"><input type="checkbox" class="provider-enable" id="openrouterEnable" data-provider="openrouter"><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="alibaba">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#f59e0b;color:white">Q</div>
+              <div><label>Qwen</label>
+                <p>3.7 Plus</p>
+                <a class="get-key-link" data-url="https://modelstudio.console.alibabacloud.com/ap-southeast-1?tab=dashboard#/api-key" title="https://modelstudio.console.alibabacloud.com/ap-southeast-1?tab=dashboard#/api-key">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="alibabaKey" placeholder="Paste key..." data-provider="alibaba">
+              <span class="key-mask" id="alibabaKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="alibabaTest" title="Test" data-provider="alibaba">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="alibabaRemove" title="Remove" data-provider="alibaba" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show Qwen models in the chat dropdown"><input type="checkbox" class="provider-enable" id="alibabaEnable" data-provider="alibaba"><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="inferencehub">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#7c5cff;color:white">IH</div>
+              <div><label>InferenceHub</label>
+                <p>One key: Claude, GPT, GLM, Kimi</p>
+                <a class="get-key-link" data-url="https://app.inferencehub.tech" title="https://app.inferencehub.tech">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="inferencehubKey" placeholder="Paste key..." data-provider="inferencehub">
+              <span class="key-mask" id="inferencehubKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="inferencehubTest" title="Test" data-provider="inferencehub">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="inferencehubRemove" title="Remove" data-provider="inferencehub" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show InferenceHub models in the chat dropdown"><input type="checkbox" class="provider-enable" id="inferencehubEnable" data-provider="inferencehub"><span class="switch-slider"></span></label>
+          </div>
+          <div class="provider-row" data-provider="google">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#4285f4;color:white">G</div>
+              <div><label>Google Gemini</label>
+                <p>3.6 Flash, 3.5 Flash, Pro</p>
+                <a class="get-key-link" data-url="https://aistudio.google.com/apikey" title="https://aistudio.google.com/apikey">Get API key ↗</a>
+              </div>
+            </div>
+            <div class="provider-key" style="position:relative;">
+              <input type="password" class="setting-input key-input" id="googleKey" placeholder="Paste key..." data-provider="google">
+              <span class="key-mask" id="googleKeyMask" style="display:none;">••••••••••••••••</span>
+              <div class="key-actions">
+                <button class="setting-btn icon-btn test-btn" id="googleTest" title="Test" data-provider="google">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="setting-btn icon-btn remove-btn" id="googleRemove" title="Remove" data-provider="google" style="display:none">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="switch" title="Show Gemini models in the chat dropdown"><input type="checkbox" class="provider-enable" id="googleEnable" data-provider="google"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+        <div class="settings-card" style="border:1px dashed rgba(100,100,100,0.4); background:rgba(255,255,255,0.02)">
+          <h3 style="color:#888">Available via OpenRouter</h3>
+          <p class="card-desc">These providers are accessible using your OpenRouter API key.</p>
+          >
+          <div class="provider-row" style="opacity:0.8">
+            <div class="provider-info">
+              <div class="provider-logo" style="background:#1da1f2;color:white">X</div>
+              <div><label>xAI (Grok)</label>
+                <p>Grok 4.5 &amp; 4.3 · via OpenRouter</p>
+              </div>
+            </div>
+            <div class="provider-key">
+              <span class="setting-btn" style="background:#3fb950;color:white;cursor:default;">Via OpenRouter</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MEMORY -->
+      <section class="settings-section" data-section="memory">
+        <div class="section-header">
+          <div>
+            <h1>Memory</h1>
+            <p class="section-desc">Persistent project memory for the current workspace.</p>
+          </div>
+          <div class="section-actions">
+            <button class="setting-btn" id="statsBtn">Stats</button><button class="setting-btn" id="consolidateBtn">Consolidate</button><button class="setting-btn" id="openRulesBtn">Rules Setup</button><button class="setting-btn" id="refreshBtn">Refresh</button><button class="setting-btn danger-btn" id="clearBtn">Clear All</button>
+          </div>
+        </div>
+        <div class="settings-card memory-hero">
+          <div class="memory-hero-copy"><span class="status-dot" id="statusDot"></span>
+            <div>
+              <h3>Automatic memory generation</h3>
+              <p>Save preferences, project context, and long-term notes the agent can reuse later.</p>
+            </div>
+          </div>
+          <label class="switch"><input type="checkbox" id="enabledToggle" checked><span class="switch-slider"></span></label>
+        </div>
+        <div class="settings-card">
+          <div class="memory-toolbar">
+            <div>
+              <h3>Memory List</h3>
+              <p id="countLabel" class="card-desc">0 memories</p>
+            </div>
+            <div class="memory-toolbar-meta">
+              <div id="scopeSwitch" class="scope-switch" role="tablist">
+                <button type="button" class="scope-tab active" data-scope="project">Project</button><button type="button" class="scope-tab" data-scope="global">Global</button><button type="button" class="scope-tab" data-scope="shared">Shared</button>
+              </div><button class="setting-btn" id="syncGlobalBtn">Sync</button>
+            </div>
+          </div>
+          <div class="memory-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg><input type="text" id="searchInput" placeholder="Find by title, keyword, path, or content"><button class="semantic-btn" id="semanticSearchBtn" title="Semantic Search (AI)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg></button>
+          </div>
+          <div id="typeFilters" class="type-filters"></div>
+          <div id="emptyState" class="memory-empty hidden">
+            <div class="empty-glyph">M</div>
+            <h3>No memories saved yet</h3>
+            <p>The agent will populate this space as it learns your preferences and project rules.</p>
+          </div>
+          <div id="listView" class="memory-list"></div>
+        </div>
+      </section>
+
+      <!-- PERSONALIZATION -->
+      <section class="settings-section" data-section="skills">
+        <div class="section-header">
+          <div>
+            <h1>Skills</h1>
+            <p class="section-desc">Reusable instructions the agent can apply. Same list as AI &gt; Browse Skills.</p>
+          </div>
+          <div class="section-actions">
+            <input type="search" id="skillsSearch" class="skills-search" placeholder="Search skills..." autocomplete="off" spellcheck="false">
+            <button class="setting-btn" id="skillsFolderBtn">Add skill</button><button class="setting-btn" id="skillsRefreshBtn">Refresh</button>
+          </div>
+        </div>
+        <div class="settings-card">
+          <p class="skills-note" id="skillsCost">An enabled skill is added to every request, so leaving one on costs tokens on each turn.</p>
+          <p class="skills-note skills-paths">Skills load from <code>~/.claude/skills</code>, <code>~/.cortex/skills</code>, and the same folders inside a project. A project copy overrides a global one with the same name.</p>
+          <div id="skillsList" class="skills-list"><p class="skills-empty">Loading skills...</p></div>
+        </div>
+      </section>
+
+      <section class="settings-section" data-section="personalization">
+        <div class="section-header">
+          <div>
+            <h1>Personalization</h1>
+            <p class="section-desc">Customize how Cortex's AI behaves and responds.</p>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>AI Behavior</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Custom system instructions</label>
+              <p>Add custom instructions that the AI follows in every conversation.</p>
+            </div>
+          </div>
+          <textarea class="setting-textarea" id="systemInstructions" placeholder="e.g., Always respond in a concise, technical style. Prefer TypeScript over JavaScript."></textarea>
+        </div>
+        <div class="settings-card">
+          <h3>Response Style</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Verbosity</label>
+              <p>How detailed should AI responses be?</p>
+            </div>
+            <select class="setting-select" id="verbosity"><option value="concise">Concise</option><option value="balanced" selected>Balanced</option><option value="detailed">Detailed</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Code style preference</label>
+              <p>Preferred code formatting style.</p>
+            </div>
+            <select class="setting-select" id="codeStyle"><option value="standard" selected>Standard</option><option value="airbnb">Airbnb</option><option value="google">Google</option></select>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Memory & Context</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Remember conversations</label>
+              <p>Allow the AI to reference previous conversations.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="rememberConvos" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Context window size</label>
+              <p>Maximum context tokens per conversation.</p>
+            </div>
+            <select class="setting-select" id="contextWindow"><option value="32k">32K tokens</option><option value="128k" selected>128K tokens</option><option value="200k">200K tokens</option><option value="1m">1M tokens</option></select>
+          </div>
+        </div>
+      </section>
+
+      <!-- SAFETY & PERMISSIONS -->
+      <section class="settings-section" data-section="safety">
+        <div class="section-header">
+          <div>
+            <h1>Safety & Permissions</h1>
+            <p class="section-desc">Control what the AI agent can access and modify.</p>
+          </div>
+        </div>
+
+        <!-- AGENTIC LOOP MODE TOGGLE -->
+        <div class="settings-card"
+          style="background:rgba(0,120,212,0.06); border:1px solid rgba(0,120,212,0.2);">
+          <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+            </svg>
+            Agentic Loop Mode
+          </h3>
+          <p style="color:#888; font-size:13px; margin:0 0 12px 0;">
+            Controls whether the AI may run an autonomous verified loop for iterative problem-solving. In
+            <strong>Normal Mode</strong>, the AI can only work one task at a time and cannot start a loop. In
+            <strong>Loop Mode</strong>, the AI may automatically repeat fix → verify → revise until the goal
+            passes its verification gates or a limit is reached.
+          </p>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>Enable autonomous looping</label>
+              <p>Allows Cortex to run multi-iteration agent loops with automated verification. Requires explicit goal
+                and success criteria.</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="agenticLoopMode">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
+          <!-- HOW THE LOOP WORKS, flow diagram -->
+          <div id="loopFlowDiagram" class="loop-flow-diagram"
+            style="margin-top:14px; padding:14px 12px 8px; border:1px solid var(--border, #2a2a2e); border-radius:8px;">
+            <div
+              style="font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted, #888); margin-bottom:10px;">
+              How the agentic loop works</div>
+            <svg viewBox="0 0 640 232" width="100%" role="img"
+              aria-label="Agentic loop flow: goal, discover, plan, act, verify; pass goes to review then done; fail goes to revise and back to plan; budget, stall or stop halts the loop"
+              style="display:block; max-width:640px; margin:0 auto; font-family:var(--font-ui, 'Segoe UI', system-ui, sans-serif);">
+              <defs>
+                <marker id="alm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6"
+                  orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="var(--muted, #8b949e)" />
+                </marker>
+                <marker id="alm-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6"
+                  orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#3fb950" />
+                </marker>
+                <marker id="alm-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6"
+                  orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#f5a623" />
+                </marker>
+              </defs>
+
+              <!-- ═══ Row 1: main pipeline ═══ -->
+              <!-- GOAL -->
+              <rect x="8" y="22" width="72" height="36" rx="8" fill="rgba(88,166,255,0.10)"
+                stroke="var(--accent, #58a6ff)" stroke-width="1.2" />
+              <text x="44" y="44" text-anchor="middle" font-size="12" font-weight="600"
+                fill="var(--text, #e6edf3)">GOAL</text>
+              <text x="44" y="72" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">+ success
+                criteria</text>
+
+              <!-- DISCOVER -->
+              <rect x="108" y="22" width="92" height="36" rx="8" fill="rgba(88,166,255,0.10)"
+                stroke="var(--accent, #58a6ff)" stroke-width="1.2" />
+              <text x="154" y="44" text-anchor="middle" font-size="12" font-weight="600"
+                fill="var(--text, #e6edf3)">DISCOVER</text>
+              <text x="154" y="72" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">baseline check</text>
+
+              <!-- PLAN -->
+              <rect x="228" y="22" width="72" height="36" rx="8" fill="rgba(88,166,255,0.10)"
+                stroke="var(--accent, #58a6ff)" stroke-width="1.2" />
+              <text x="264" y="44" text-anchor="middle" font-size="12" font-weight="600"
+                fill="var(--text, #e6edf3)">PLAN</text>
+              <text x="264" y="72" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">pick top
+                failure</text>
+
+              <!-- ACT -->
+              <rect x="328" y="22" width="64" height="36" rx="8" fill="rgba(88,166,255,0.10)"
+                stroke="var(--accent, #58a6ff)" stroke-width="1.2" />
+              <text x="360" y="44" text-anchor="middle" font-size="12" font-weight="600"
+                fill="var(--text, #e6edf3)">ACT</text>
+              <text x="360" y="72" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">one small fix</text>
+
+              <!-- VERIFY (gate) -->
+              <rect x="420" y="22" width="88" height="36" rx="8" fill="rgba(245,166,35,0.10)" stroke="#f5a623"
+                stroke-width="1.4" />
+              <text x="464" y="44" text-anchor="middle" font-size="12" font-weight="700" fill="#f5a623">VERIFY</text>
+              <text x="464" y="72" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">tests · lint ·
+                build</text>
+
+              <!-- Row 1 arrows -->
+              <line x1="80" y1="40" x2="104" y2="40" stroke="var(--muted, #8b949e)" stroke-width="1.4"
+                marker-end="url(#alm-arrow)" />
+              <line x1="200" y1="40" x2="224" y2="40" stroke="var(--muted, #8b949e)" stroke-width="1.4"
+                marker-end="url(#alm-arrow)" />
+              <line x1="300" y1="40" x2="324" y2="40" stroke="var(--muted, #8b949e)" stroke-width="1.4"
+                marker-end="url(#alm-arrow)" />
+              <line x1="392" y1="40" x2="416" y2="40" stroke="var(--muted, #8b949e)" stroke-width="1.4"
+                marker-end="url(#alm-arrow)" />
+
+              <!-- ═══ FAIL path: VERIFY ↓ REVISE → back up to PLAN ═══ -->
+              <path d="M 440 58 L 440 100 L 312 100" fill="none" stroke="#f5a623" stroke-width="1.4"
+                marker-end="url(#alm-arrow-orange)" />
+              <text x="452" y="88" font-size="10" font-weight="600" fill="#f5a623">fail</text>
+
+              <!-- REVISE -->
+              <rect x="228" y="84" width="80" height="32" rx="8" fill="rgba(245,166,35,0.08)" stroke="#f5a623"
+                stroke-width="1.1" stroke-dasharray="none" />
+              <text x="268" y="104" text-anchor="middle" font-size="11" font-weight="600"
+                fill="var(--text, #e6edf3)">REVISE</text>
+
+              <!-- REVISE back up to PLAN -->
+              <path d="M 264 84 L 264 62" fill="none" stroke="#f5a623" stroke-width="1.4"
+                marker-end="url(#alm-arrow-orange)" />
+              <text x="200" y="132" font-size="9" fill="var(--muted, #8b949e)">compare vs. baseline · count stalls · try
+                next approach</text>
+
+              <!-- ═══ PASS path: VERIFY ↓ REVIEW → DONE ═══ -->
+              <path d="M 488 58 L 488 148 L 460 148" fill="none" stroke="#3fb950" stroke-width="1.4"
+                marker-end="url(#alm-arrow-green)" />
+              <text x="496" y="92" font-size="10" font-weight="600" fill="#3fb950">pass</text>
+
+              <!-- REVIEW -->
+              <rect x="356" y="132" width="100" height="32" rx="8" fill="rgba(63,185,80,0.08)" stroke="#3fb950"
+                stroke-width="1.1" />
+              <text x="406" y="152" text-anchor="middle" font-size="11" font-weight="600"
+                fill="var(--text, #e6edf3)">REVIEW</text>
+              <text x="406" y="178" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">second AI audits the
+                diff</text>
+
+              <!-- REVIEW rejected → back to REVISE -->
+              <path d="M 352 148 L 268 148 L 268 120" fill="none" stroke="#f5a623" stroke-width="1.2"
+                stroke-dasharray="4 3" marker-end="url(#alm-arrow-orange)" />
+              <text x="284" y="142" font-size="9" fill="#f5a623">rejected</text>
+
+              <!-- DONE -->
+              <rect x="516" y="132" width="96" height="32" rx="16" fill="rgba(63,185,80,0.15)" stroke="#3fb950"
+                stroke-width="1.4" />
+              <text x="564" y="152" text-anchor="middle" font-size="11" font-weight="700" fill="#3fb950">✓ DONE</text>
+              <line x1="456" y1="148" x2="512" y2="148" stroke="#3fb950" stroke-width="1.4"
+                marker-end="url(#alm-arrow-green)" />
+              <text x="564" y="178" text-anchor="middle" font-size="9" fill="var(--muted, #8b949e)">report + review
+                diff</text>
+
+              <!-- ═══ Halt caption ═══ -->
+              <line x1="8" y1="200" x2="632" y2="200" stroke="var(--border, #2a2a2e)" stroke-width="1" />
+              <text x="8" y="220" font-size="10" fill="var(--muted, #8b949e)">
+                <tspan fill="#f47067" font-weight="600">⛔ Auto-stop:</tspan>
+                <tspan dx="4">max iterations reached · token / $ budget spent · no progress (stall) · you press Stop -
+                  the loop can never run forever</tspan>
+              </text>
+            </svg>
+          </div>
+          <div class="setting-row" id="loopModeWarning"
+            style="display:none; padding:12px; background:rgba(255,165,0,0.1); border:1px solid rgba(255,165,0,0.3); border-radius:4px; margin-top:12px;">
+            <div class="setting-info">
+              <label style="color:#f5a623;">⚠ Loop Mode Active</label>
+              <p style="color:#d89000; font-size:12px; margin:0;">
+                The AI may now start an autonomous fix → verify → revise loop toward a goal, iterating on its own
+                until the goal passes verification or a limit is reached. Set clear success criteria and allow
+                appropriate budgets (iterations, tokens, USD).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Agent Permissions</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Allow file creation</label>
+              <p>Let the AI agent create new files in your project.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="allowFileCreate" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Allow file deletion</label>
+              <p>Let the AI agent delete files. Requires confirmation.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="allowFileDelete"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Allow terminal commands</label>
+              <p>Let the AI agent execute terminal commands.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="allowTerminal" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Require approval for destructive actions</label>
+              <p>Always ask before deleting files or running dangerous commands.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="requireApproval" checked><span class="switch-slider"></span></label>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Data Privacy</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Privacy mode</label>
+              <p>Your code is never stored or used for training by any provider.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="privacyMode" checked><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Local-only mode</label>
+              <p>Restrict to local-only models. No data leaves your machine.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="localOnly"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- MCP SERVERS -->
+      <section class="settings-section" data-section="mcp">
+        <div class="section-header">
+          <div>
+            <h1>MCP Servers</h1>
+            <p class="section-desc">Connect external tools and data sources via the Model Context Protocol. Connected
+              servers' tools become available to the AI agent automatically.</p>
+          </div>
+          <button class="setting-btn" id="mcpRefreshBtn" title="Refresh status">↻ Refresh</button>
+        </div>
+
+        <!-- Server list -->
+        <div class="settings-card">
+          <div id="mcpServerList">
+            <div class="mcp-empty" id="mcpEmptyState">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                opacity="0.3">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              <h3 style="color:#888;">No servers configured</h3>
+              <p>Add a server below, or paste any standard <code>mcpServers</code> JSON config, the same format used by
+                Claude Desktop and Cursor.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add server -->
+        <div class="settings-card">
+          <h3 class="card-title">Add server</h3>
+          <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:8px;">
+            <input type="text" class="setting-input" id="mcpAddName" placeholder="Name, e.g. postgres" style="max-width:none;">
+            <input type="text" class="setting-input" id="mcpAddCommand" placeholder='Command, e.g. npx -y @modelcontextprotocol/server-postgres postgresql://localhost/db' style="max-width:none;">
+            <input type="text" class="setting-input" id="mcpAddEnv" placeholder="Environment (optional), KEY=value, KEY2=value2" style="max-width:none;">
+            <div style="display:flex; gap:8px;">
+              <button class="setting-btn primary-btn" id="mcpAddBtn">Add server</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import JSON -->
+        <div class="settings-card">
+          <h3 class="card-title">Import JSON config</h3>
+          <p class="section-desc" style="margin-bottom:8px;">Paste a standard <code>{"mcpServers": {...}}</code> block
+            from any MCP server's documentation.</p>
+          <textarea class="setting-textarea" id="mcpImportJson" rows="5" placeholder='{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."}}}}'></textarea>
+          <div style="margin-top:8px;">
+            <button class="setting-btn primary-btn" id="mcpImportBtn">Import</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- GIT -->
+      <section class="settings-section" data-section="git">
+        <div class="section-header">
+          <div>
+            <h1>Git</h1>
+            <p class="section-desc">Git integration settings and configuration.</p>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>General</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Auto-commit AI changes</label>
+              <p>Automatically create git commits when the AI makes changes.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="autoCommit"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Commit message prefix</label>
+              <p>Prefix for AI-generated commit messages.</p>
+            </div><input type="text" class="setting-input" id="commitPrefix" placeholder="[cortex-ai]" value="[cortex-ai]">
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Default branch</label>
+              <p>Default branch name for new repositories.</p>
+            </div><input type="text" class="setting-input" id="defaultBranch" placeholder="main" value="main">
+          </div>
+        </div>
+      </section>
+
+      <!-- EXTENSIONS -->
+      <section class="settings-section" data-section="extensions">
+        <div class="section-header">
+          <div>
+            <h1>Extensions</h1>
+            <p class="section-desc">Manage installed extensions and plugins.</p>
+          </div>
+        </div>
+        <div class="settings-card" style="border:1px dashed rgba(100,100,100,0.4); background:rgba(255,255,255,0.02);">
+          <div class="extension-empty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+              opacity="0.3">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+            <h3 style="color:#888;">Coming Soon</h3>
+            <p>Extensions support is planned for a future update. This will allow Cortex to be extended with new
+              features, themes, and integrations.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TERMINAL -->
+      <section class="settings-section" data-section="terminal">
+        <div class="section-header">
+          <div>
+            <h1>Terminal</h1>
+            <p class="section-desc">Configure the integrated terminal.</p>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Shell</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Default shell</label>
+              <p>The shell used for new terminal instances.</p>
+            </div>
+            <select class="setting-select" id="defaultShell"><option value="powershell" selected>PowerShell</option><option value="cmd">Command Prompt</option><option value="bash">Git Bash</option><option value="wsl">WSL</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Shell arguments</label>
+              <p>Additional arguments passed to the shell on startup.</p>
+            </div><input type="text" class="setting-input" id="shellArgs" placeholder="-NoLogo">
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Appearance</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Font size</label>
+              <p>Font size for the terminal.</p>
+            </div>
+            <div class="range-control">
+              <input type="range" id="termFontSize" min="10" max="24" value="14" class="setting-range"><span class="range-value" id="termFontSizeVal">14px</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Scrollback lines</label>
+              <p>Number of lines to keep in the terminal buffer.</p>
+            </div>
+            <select class="setting-select" id="scrollback"><option value="1000">1,000</option><option value="3000" selected>3,000</option><option value="10000">10,000</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Cursor style</label>
+              <p>Terminal cursor appearance.</p>
+            </div>
+            <select class="setting-select" id="cursorStyle"><option value="block" selected>Block</option><option value="underline">Underline</option><option value="bar">Bar</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Copy on select</label>
+              <p>Automatically copy selected text to clipboard.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="copyOnSelect"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- ABOUT -->
+      <section class="settings-section" data-section="about">
+        <div class="section-header">
+          <div>
+            <h1>About Cortex</h1>
+            <p class="section-desc">Version information and credits.</p>
+          </div>
+        </div>
+        <div class="settings-card about-card">
+          <div class="about-logo">
+            <div class="logo-glyph"><img class="cortex-wordmark cortex-wordmark-dark" alt="Cortex AI IDE" src="data:image/png;base64,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Duir23BKDWyEkNfXdV376KOPXsibNy/En8HO63McBwYPGVzn9u3blxFCyC8ESnvxRHtJsIG0tLTrgwYNqoU/690cDRg/+3PPPVfs6NGjG7EDEEVRiuthCpbTsDE9f/787tdff7288bMY0wKrz/n0008X2rNnzxIMEkqiJER1/11UF7JNGTDMACjRk38y1GEVRZNESZBlRUEIod27dn/bsGHDvKRev07durl///33+djrB3PBzCtLypaeIE1RAt/h559/nl65cuWEuzEaMHrWQoUKUd9++23viFzf+nrEwSGIhtRv48aN02rVqpXLaPAjS5WR3IGEhAQwdOjQetgZiIIRJFSJOANuiGyiKAnBkvSILG0A6tatmxshhExDK6cLKJtvBlmWFew9ZVmWxo8f3zwxMdESWTcCUbly5YITJ056WpECN0DwC7clg3Gy2nRuf06U1wa/ryzJkt/vT0MIoVu3bl3q06fPY3aG7E7O9du3b1/y1KlT23BubYr9OBgC4zU1YkNh4KDJa8hS+L4YNmxYfVwOJAUJK1eunLBx48apBuMlRBu12BkwnAIsXbp0YJYEgk0NgBw7gmoEgLZu3fpVcnLNJDs03fizZs2a3Xvw4MHv8efB5ScrI6RGWn633l8mN3bYqClBAszq1atH3H///UxkleJO9folSpRgFi1a1NeYT9seCtn9AbI0ACZ7BONB27Zt+7px48b3AAOT0AqzMP6ua9euZf/++++UsPTFTbTnsNdxCrB48eJ+WdoA1K9f3z4FILSkmGaLEEKpt25dGjhwYDK+YVaEHvwZChYsSH399devZmCExZLbyxY3XHaPahurB8bo5tKlS0e6du1a7k4sFxq95quvdi178eLFQ6Fri/s+5DikVLJ5+uf02rIsK5iEhRBCX3/9dRfcW2CWXhm5A3gv3XvvvdQXX3zxSngqIytO0SpJ7wo2AN9///2w7EsEIvScoiAI6SSQjVOMebITjbdt27b3nThxYgu25JIkSdHWbmOu/8ruSl2YSrx06dKBhQsXpu8E8pDR65crV441qalnvDZy/Orn7ptuJEmWJAUhhE6cOLHF2JthpGVHAoXGffXUU0/du2fPnu8QQkglxotUi1JgNuMBEGEAsjnYZyyXXbly5Wj37t0rRDaFWBF6ihcvTs+dO7cb3px+v/82MeAYdaeiSoYSkxuMEI35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"><img class="cortex-wordmark cortex-wordmark-light" alt="Cortex AI IDE" src="data:image/png;base64,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"></div>
+            <p class="version" id="appVersion">Version ...</p>
+          </div>
+          <div class="about-links"><a href="#" class="about-link" data-url="https://cortex-ide.app">Website</a><a href="#"
+              class="about-link" data-url="https://cortex-ide.app/docs/">Documentation</a><a href="#" class="about-link" data-url="https://github.com/Cortex-AI-IDE/Cortex-Desktop">GitHub</a><a href="#"
+              class="about-link" data-url="https://cortex-ide.app/changelog/">Changelog</a><a href="#" class="about-link" data-url="https://cortex-ide.app/license/">License</a></div>
+          <p class="about-credit">Developed &amp; maintained by
+            <a href="#" class="about-link about-credit-link" data-url="https://pasonsme.com/">Pasons Group</a>
+          </p>
+          <p class="about-footer">Built with PyQt6 + Qt WebEngine. Powered by industry-leading AI models with 1M+
+            context windows.<br>&copy; 2026 Cortex AI IDE. All rights reserved.
+          </p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Toast + Modal Hosts -->
+  <div id="toastHost" class="toast-host"></div>
+  <div id="modalHost" class="modal-overlay hidden"></div>
+  <div id="consolidationModal" class="modal-overlay hidden">
+    <div class="consolidation-modal">
+      <div class="modal-header">
+        <h2>Consolidation Report</h2>
+        <button class="modal-close" id="closeConsolidationModal"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <div id="consolidationStats"></div>
+        <div id="consolidationClusters"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="setting-btn primary-btn" id="mergeAllBtn">Merge All Duplicates</button><button class="setting-btn" id="closeConsolidationModalBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js" onerror="console.warn('qrc qwebchannel.js failed to load')"></script>
+  <script>
+    window.__memMgrDebug = { loaded: false, errors: [] };
+    window.onerror = function(msg, src, line) { window.__memMgrDebug.errors.push({msg,src,line}); return false; };
+    window.receiveMemoryState = window.receiveMemoryState || function(s) { window.__memMgrDebug.fallbackState = s; };
+  </script>
+  <script src="./memory_management.js?v=15"></script>
+</body>
+
+</html>
