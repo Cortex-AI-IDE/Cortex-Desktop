@@ -1,10 +1,13 @@
 <div align="center">
 
-# Running Cortex AI IDE on macOS
+# Cortex AI IDE on macOS
 
-### An unofficial port guide
+### The official port roadmap
 
-**Cortex 3.0.47** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10/11 and Linux are the official platforms
+**Cortex 3.0.47** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Maintainer-authorized porting guide
+
+**Windows 10/11 and Linux ship today.** This is the step-by-step roadmap for
+building the macOS version, published with the maintainer's permission.
 
 </div>
 
@@ -12,24 +15,30 @@
 
 ## Dear Mac user
 
-Cortex does not ship a macOS build, and there is no macOS release on the
-roadmap. That is the honest position, stated first so nothing below reads as a
-promise.
+You are holding the roadmap to a **maintainer-authorized macOS port**. Cortex
+ships a Windows build (including the Microsoft Store) and Linux packages
+(`.deb` and `.rpm`, from [cortex-ide.app/download](https://cortex-ide.app/download/)),
+and the macOS build is not published yet. Rather than leave you waiting, the
+maintainer grants you permission to build it, and this document is the official
+step-by-step guide for doing that.
 
-Here is what that means for you:
+**Permission is granted.** You can port Cortex to macOS, run it, change it, add
+your own features, and share your build. This is an approved port, not a
+tolerated workaround.
 
-- The **official** platforms are **Windows** (including the Microsoft Store
-  build) and **Linux**. Linux users get `.deb` and `.rpm` packages from
-  [cortex-ide.app/download](https://cortex-ide.app/download/).
-- **The build pipeline is not published.** The repository you are reading is
-  the application source. The PyInstaller spec, the Windows installer script,
-  the MSIX manifest and the code signing configuration for the official builds
-  are in a separate, private folder. Nothing in this repository builds an
-  installer out of the box, on any platform.
-- **You can fix both of those yourself.** The code is Apache-2.0. You can port
-  it, build it, ship it, sell it, and modify it however you like. The one thing
-  the licence does not give you is the Cortex name and logo, so do not present
-  your build as the official product.
+Here is the full picture:
+
+- **Windows and Linux are the released builds.** Windows covers Windows 10/11
+  and the Microsoft Store; Linux users get `.deb` and `.rpm` packages. Those are
+  tested, signed and updated automatically.
+- **The private build pipeline stays private.** The repository you are reading
+  is the application source. The PyInstaller spec, the Windows installer script,
+  the MSIX manifest and the code-signing configuration for the released builds
+  live in a separate folder and are not part of this repository.
+- **That does not block you, and it is not meant to.** This guide replaces that
+  pipeline for the macOS case. It hands you a complete macOS PyInstaller spec,
+  the terminal and shell changes, and the `.dmg` recipe. Nothing in it depends on
+  anything that is not published, and nothing you need is hidden.
 - **The port is small.** This is not a rewrite. The codebase already branches on
   `sys.platform` in the places that matter, and there is already a macOS code
   path in the key store. What is missing is a POSIX terminal backend and a set
@@ -904,7 +913,7 @@ app = BUNDLE(
     coll,
     name='Cortex.app',
     icon=os.path.join(ROOT, 'icon.icns'),
-    bundle_identifier='app.cortex.ide.unofficial',
+    bundle_identifier='app.cortex.ide.macos',
     info_plist={
         'CFBundleName': 'Cortex',
         'CFBundleDisplayName': 'Cortex AI IDE',
@@ -1077,8 +1086,8 @@ back to a pure-Python search and says so in the result.
 
 ## What to do with your build
 
-You have a working Cortex on macOS. Here is the honest summary of what that is
-and what the licence lets you do with it.
+You have a working Cortex on macOS. Here is what that is, and what you are
+permitted to do with it.
 
 ### What you have
 
@@ -1095,18 +1104,30 @@ backend and shell names where yours needed them.
 | The visible terminal uses `QProcess` if you only fixed the AI session | Full-screen terminal apps misbehave | Medium |
 | No signed or notarized build | Gatekeeper warns on other people's Macs | Needs a paid Apple Developer account |
 | The PowerShell tool stays in the tool list unless you gate it | The model may offer PowerShell on macOS | Small |
-| No macOS `.dmg` on the official download page | Expected. There is no official macOS release | Not yours to fix |
+| The maintainer does not publish a macOS `.dmg` yet | You are the one filling that gap, with permission | This document |
 
-### Licence and naming
+### Licence, naming and permission
 
 Cortex is **Apache-2.0**. You may use, modify, redistribute and sell software
 built on this code, including commercially, provided you keep the licence and
 copyright notices and state what you changed. There is an explicit patent grant.
 
-**The Cortex name and logo are trademarks, and the licence does not grant
-rights to them.** A modified build must not be presented as the official Cortex
-product. If you distribute your port, give it your own name, or make it
-unmistakably clear that it is an unofficial community build.
+On top of that licence, the maintainer **grants explicit permission for this
+macOS port**. You may build it, keep it private, share it with your team, or
+distribute it. Keep the licence and copyright notices, keep the Cortex name and
+logo attribution, and identify the build as the macOS port of Cortex, for
+example "Cortex for macOS, built from the official source". Say what you
+changed. That is all that is asked of you.
+
+One distinction to keep clear, for your users rather than for legal reasons:
+identify your build as the macOS port, not as the maintainer's signed Windows
+and Linux release. Yours is not Apple-notarized and does not use the
+maintainer's automatic update channel, so say both of those in your release
+notes and nobody will expect the same update experience.
+
+The general trademark position in [README.md](README.md) is unchanged by this
+document. The permission above covers this port; the usual rule still applies to
+modified builds you create for anything else.
 
 ### Contributing back
 
@@ -1116,15 +1137,17 @@ improvements that do not alter Windows behavior. Open a pull request at
 [Cortex-AI-IDE/Cortex-Desktop](https://github.com/Cortex-AI-IDE/Cortex-Desktop).
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
 
-### Where to get the official builds
+### The released builds
 
-If you also use Windows or Linux, the official and supported releases are:
+If you also use Windows or Linux, the maintainer's signed and supported builds
+are:
 
 - **Windows**, including the Microsoft Store build: [cortex-ide.app](https://cortex-ide.app/)
 - **Linux**, `.deb` and `.rpm`: [cortex-ide.app/download](https://cortex-ide.app/download/)
 
-Those builds are tested, signed and updated. Yours is not, and that is the
-trade you made for having Cortex on a Mac today.
+Your macOS build runs the same source and the same feature set. The practical
+differences are that it is not Apple-notarized and it does not use the
+maintainer's update channel, so note both of those in your release notes.
 
 ---
 
@@ -1132,6 +1155,6 @@ trade you made for having Cortex on a Mac today.
 
 **Cortex AI IDE** &nbsp;·&nbsp; Think Limitless. Build Beyond.
 
-*Unofficial macOS port guide. Not supported, not endorsed, and yours to improve.*
+*The official macOS port roadmap. Authorized by the maintainer, published for you to build.*
 
 </div>
