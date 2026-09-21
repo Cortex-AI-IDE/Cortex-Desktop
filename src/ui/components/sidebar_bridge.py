@@ -178,6 +178,7 @@ class SidebarBridge(QObject):
     file_renamed = pyqtSignal(str, str)
     file_deleted = pyqtSignal(str)
     settings_requested = pyqtSignal()
+    health_map_requested = pyqtSignal()
     chat_selected = pyqtSignal(str)
     chat_renamed = pyqtSignal(str, str)
     chat_delete_requested = pyqtSignal(str)
@@ -1514,6 +1515,12 @@ class SidebarBridge(QObject):
         """Open settings (JS calls via btnSettings click)."""
         log.info("[SidebarBridge] onSettingsRequested called, emitting settings_requested signal")
         self.settings_requested.emit()
+
+    @pyqtSlot()
+    def onHealthMapRequested(self):
+        """Open the Project Health map (JS calls via btnHealthMap click)."""
+        log.info("[SidebarBridge] onHealthMapRequested called, emitting health_map_requested signal")
+        self.health_map_requested.emit()
 
     @pyqtSlot(str, bool)
     def onFolderToggle(self, path: str, expanded: bool):

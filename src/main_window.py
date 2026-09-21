@@ -979,8 +979,29 @@ class CortexMainWindow(QMainWindow):
         # Window geometry
         w = self._settings.get("window", "width") or 1400
         h = self._settings.get("window", "height") or 900
+        x, y = 100, 100
+        # A saved "normal" size that already fills the screen makes the
+        # title bar's maximize/restore button look dead: both states cover
+        # the same area, so clicking it changes nothing on screen. Measured:
+        # saved 1536x793 on a 1536x816 work area, i.e. the window restored to
+        # exactly the maximized rectangle. Such a size is saved on exit and
+        # re-loaded forever, so it is corrected here: fall back to 80% of the
+        # screen, centred, which gives restore a visibly different state.
+        try:
+            _scr = QApplication.primaryScreen()
+            _avail = _scr.availableGeometry() if _scr is not None else None
+        except Exception:
+            _avail = None
+        if _avail is not None and _avail.width() > 0:
+            if w >= _avail.width() * 0.95 or h >= _avail.height() * 0.92:
+                log.info(f"[WINDOW] saved normal size {w}x{h} fills the "
+                         f"{_avail.width()}x{_avail.height()} screen, using 80%")
+                w, h = int(_avail.width() * 0.8), int(_avail.height() * 0.8)
+            w, h = min(w, _avail.width()), min(h, _avail.height())
+            x = _avail.x() + (_avail.width() - w) // 2
+            y = _avail.y() + (_avail.height() - h) // 2
         self.resize(w, h)
-        self.setGeometry(100, 100, w, h)
+        self.setGeometry(x, y, w, h)
         self._want_maximized = bool(self._settings.get("window", "maximized"))
 
         # DEFERRED SHOW, avoids ACCESS VIOLATION during __init__ when
@@ -1263,6 +1284,70 @@ class CortexMainWindow(QMainWindow):
         theme (the QTimer startup callsite predates light mode)."""
         self._apply_title_bar_theme(self._theme_manager.is_dark)
 
+    def event(self, e):
+        # Qt rebuilds the native window once the web views attach (they need
+        # a GPU surface). The rebuilt window keeps the maximized size as its
+        # RESTORE size too, so the title bar's restore/maximize button
+        # switched between two identical rectangles and looked dead
+        # (measured: HWND 1706074 -> 43321532, restore rect = maximized rect).
+        # Repair the placement whenever the handle changes.
+        try:
+            from PyQt6.QtCore import QEvent
+            if e.type() == QEvent.Type.WinIdChange:
+                QTimer.singleShot(0, self._repair_window_placement)
+                QTimer.singleShot(500, self._repair_window_placement)
+        except Exception:
+            pass
+        return super().event(e)
+
+    def _repair_window_placement(self):
+        """Give the window a restore size that differs from maximized.
+
+        Works in Windows' own coordinates (GetWindowPlacement), so DPI
+        scaling never enters into it. Only acts when the restore size covers
+        the work area; a real, smaller restore size is left alone.
+        """
+        if sys.platform != 'win32' or not self.isVisible() or self.isMinimized():
+            return
+        try:
+            from ctypes import wintypes
+
+            class _WINDOWPLACEMENT(ctypes.Structure):
+                _fields_ = [('length', wintypes.UINT), ('flags', wintypes.UINT),
+                            ('showCmd', wintypes.UINT), ('ptMinPosition', wintypes.POINT),
+                            ('ptMaxPosition', wintypes.POINT), ('rcNormalPosition', wintypes.RECT)]
+
+            class _MONITORINFO(ctypes.Structure):
+                _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT),
+                            ('rcWork', wintypes.RECT), ('dwFlags', wintypes.DWORD)]
+
+            user32 = ctypes.windll.user32
+            hwnd = int(self.winId())
+            wp = _WINDOWPLACEMENT()
+            wp.length = ctypes.sizeof(wp)
+            if not user32.GetWindowPlacement(hwnd, ctypes.byref(wp)):
+                return
+            mi = _MONITORINFO()
+            mi.cbSize = ctypes.sizeof(mi)
+            if not user32.GetMonitorInfoW(user32.MonitorFromWindow(hwnd, 2), ctypes.byref(mi)):
+                return
+            ww = mi.rcWork.right - mi.rcWork.left
+            wh = mi.rcWork.bottom - mi.rcWork.top
+            n = wp.rcNormalPosition
+            if (n.right - n.left) < ww * 0.95 and (n.bottom - n.top) < wh * 0.92:
+                return  # a real restore size: leave it
+            w, h = int(ww * 0.8), int(wh * 0.8)
+            # rcNormalPosition is in workspace coordinates (work-area origin).
+            x, y = (ww - w) // 2, (wh - h) // 2
+            wp.rcNormalPosition = wintypes.RECT(x, y, x + w, y + h)
+            wp.flags = 0
+            wp.showCmd = 3 if self.isMaximized() else 1  # SW_SHOWMAXIMIZED / SW_SHOWNORMAL
+            user32.SetWindowPlacement(hwnd, ctypes.byref(wp))
+            log.info(f"[WINDOW] restore size was the whole screen, set to {w}x{h} "
+                     f"(HWND={hwnd}, maximized={self.isMaximized()})")
+        except Exception as ex:
+            log.debug(f"[WINDOW] placement repair skipped: {ex}")
+
     def showEvent(self, a0):
         """Re-assert the title bar theme EVERY time the window is shown.
 
@@ -1296,6 +1381,16 @@ class CortexMainWindow(QMainWindow):
         SetWindowPos(SWP_FRAMECHANGED) nudge forces the repaint now.
         """
         try:
+            # Never before the window is shown. winId() CREATES the native
+            # window, and one created during __init__ is a plain raster
+            # window; when the web views attach, Qt has to throw it away and
+            # build a GPU one. The rebuilt window came back full-size but NOT
+            # maximized (measured: HWND 985198 zoomed -> HWND 1050734
+            # zoomed=False at the maximized rect), which is why the title
+            # bar's maximize/restore button did nothing visible. showEvent
+            # applies the theme to the real window once it exists.
+            if not self.isVisible():
+                return
             hwnd = int(self.winId())
             if not hwnd:
                 return
@@ -2704,6 +2799,16 @@ class CortexMainWindow(QMainWindow):
         # Sidebar footer gear button → Memory Manager
         self._sidebar.settings_requested.connect(self._show_memory_manager)
 
+        # Sidebar Project Health icon → Health Map (EXPERIMENTAL). Bound only
+        # when the feature flag is on, so CORTEX_HEALTH_MAP=0 leaves the signal
+        # unconnected and the icon hidden: no reachable code path at all.
+        try:
+            from src.core.project_health import health_map_enabled
+            if health_map_enabled():
+                self._sidebar.health_map_requested.connect(self._show_health_map)
+        except Exception as e:
+            _log.warning(f"Health map wiring skipped: {e}")
+
         # Chat history panel signals (inside sidebar, index 4)
         self._sidebar.chat_selected.connect(self._on_chat_selected)
         self._sidebar.chat_renamed.connect(self._on_chat_renamed)
@@ -3545,6 +3650,28 @@ class CortexMainWindow(QMainWindow):
         """
         import threading
         import json as _json
+
+        # One render at a time, and never the same file twice.
+        #
+        # 2026-09-21 15:23: one click on a 161 MB / 28-page PDF logged
+        # "Opening file" TWICE two seconds apart, so two pdf-render threads
+        # rasterized it at once. PyMuPDF does NOT release the GIL while
+        # rendering (measured: 520 ms for one page, 395 ms of it with the
+        # GUI thread unable to run any Python at all), so the worker thread
+        # this was moved onto never protected the GUI - and two of them
+        # starved it outright. The window went Not Responding for 11.1 s and
+        # the stall stack landed inside Thread.start(), which only blocks
+        # waiting for the GIL.
+        _gen = getattr(self, "_pdf_render_gen", 0) + 1
+        if (getattr(self, "_pdf_render_active", False)
+                and getattr(self, "_pdf_render_path", None) == filepath):
+            log.info(f"[PDF] already rendering {Path(filepath).name}, "
+                     f"ignoring duplicate open")
+            return
+        self._pdf_render_gen = _gen
+        self._pdf_render_path = filepath
+        self._pdf_render_active = True
+
         try:
             from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -3587,7 +3714,7 @@ class CortexMainWindow(QMainWindow):
                     # Import fitz OFF the GUI thread so the native .pyd load
                     # never blocks the event loop (was 38.7s freeze).
                     import fitz  # noqa: F401
-                    self._render_pdf_progressive(filepath, _bridge)
+                    self._render_pdf_progressive(filepath, _bridge, _gen)
                 except ImportError:
                     _bridge.pages_ready.emit(
                         filepath,
@@ -3597,13 +3724,19 @@ class CortexMainWindow(QMainWindow):
                     _bridge.pages_ready.emit(
                         filepath,
                         f"<p style='color:#f66'>Could not read PDF: {_e}</p>", True)
+                finally:
+                    # Only the newest render owns the flag; an older worker
+                    # finishing late must not unlock a render still running.
+                    if getattr(self, "_pdf_render_gen", 0) == _gen:
+                        self._pdf_render_active = False
 
             threading.Thread(target=_work, daemon=True, name="pdf-render").start()
         except Exception as e:
+            self._pdf_render_active = False
             log.error(f"Error opening PDF file {filepath}: {e}", exc_info=True)
             QMessageBox.warning(self, "Error", f"Could not open PDF: {e}")
 
-    def _render_pdf_progressive(self, filepath: str, bridge):
+    def _render_pdf_progressive(self, filepath: str, bridge, gen: int = 0):
         """Render PDF pages in progressive batches, emitting a signal after
         each batch so the UI shows content incrementally instead of waiting
         for all pages. Runs on a WORKER thread - must NOT touch Qt widgets.
@@ -3616,9 +3749,20 @@ class CortexMainWindow(QMainWindow):
         """
         import base64
         import html as _html_mod
+        import time as _time
         import fitz
 
         _MAX_PAGES = 50
+        # Hand the GIL to the GUI thread between pages.
+        #
+        # PyMuPDF holds it for the whole of get_pixmap (measured 2026-09-21 on
+        # KINGCHEF MENU.pdf: 312 ms per page, and a 3-page batch starved a
+        # heartbeat thread for 368 ms). Back-to-back pages therefore give the
+        # event loop no usable slice and the window goes Not Responding. A
+        # real sleep - not sleep(0) - drops the GIL for its whole duration,
+        # so the GUI gets a guaranteed turn after every page. Costs ~0.1 s
+        # over 28 pages against ~9 s of rendering.
+        _GIL_YIELD = 0.004
         _TARGET_W = 900
         _JPEG_QUALITY = 72
         _FIRST_BATCH = 3
@@ -3643,6 +3787,10 @@ class CortexMainWindow(QMainWindow):
                               "flex-direction:column;gap:12px;align-items:center;"
                               "padding-bottom:16px'>")
 
+            def _superseded() -> bool:
+                """Another PDF was opened: stop burning the GIL on this one."""
+                return gen and getattr(self, "_pdf_render_gen", gen) != gen
+
             def _render_page(page_num: int) -> str:
                 page = doc[page_num]
                 zoom = _TARGET_W / max(page.rect.width, 1)
@@ -3654,6 +3802,7 @@ class CortexMainWindow(QMainWindow):
                     data = pix.tobytes("png")
                     mime = "image/png"
                 b64 = base64.b64encode(data).decode("ascii")
+                _time.sleep(_GIL_YIELD)   # GUI thread's turn
                 return (f"<img src='data:{mime};base64,{b64}' "
                         f"alt='Page {page_num + 1}' title='Page {page_num + 1}' "
                         f"style='max-width:100%;border-radius:4px;"
@@ -3663,6 +3812,8 @@ class CortexMainWindow(QMainWindow):
             first_end = min(_FIRST_BATCH, shown)
             parts = [header, container_open]
             for i in range(first_end):
+                if _superseded():
+                    return
                 parts.append(_render_page(i))
 
             if first_end >= shown:
@@ -3682,6 +3833,8 @@ class CortexMainWindow(QMainWindow):
                 batch_end = min(batch_start + _BATCH_SIZE, shown)
                 batch_parts = []
                 for i in range(batch_start, batch_end):
+                    if _superseded():
+                        return
                     batch_parts.append(_render_page(i))
 
                 is_last = (batch_end >= shown)
@@ -4248,6 +4401,21 @@ class CortexMainWindow(QMainWindow):
         """
         import threading
 
+        # Unchanged file -> serve the last read. _push_changes_to_sidebar
+        # re-resolves EVERY row on every AI edit, and each row came through
+        # here: one os.stat replaces a full read plus a thread spawn (30 rows
+        # = 30 threads per edit). Keyed on the identity git itself uses to
+        # decide a file is untouched, so a real write always misses.
+        try:
+            st = os.stat(file_path)
+            stamp = (st.st_mtime_ns, st.st_size)
+            wt_cache = self.__dict__.setdefault("_worktree_read_cache", {})
+            hit = wt_cache.get(file_path)
+            if hit is not None and hit[0] == stamp:
+                return hit[1]
+        except OSError:
+            stamp = None  # gone or unreadable: fall through to the real read
+
         result: dict = {}
 
         def _read():
@@ -4263,6 +4431,10 @@ class CortexMainWindow(QMainWindow):
         worker.join(self._WORKTREE_READ_TIMEOUT)
 
         if "text" in result:
+            if stamp is not None:
+                if len(wt_cache) > 300:
+                    wt_cache.clear()
+                wt_cache[file_path] = (stamp, result["text"])
             return result["text"]
         if "error" in result:
             log.debug(f"[Diff] worktree read failed for {file_path}: {result['error']}")
@@ -4623,8 +4795,28 @@ class CortexMainWindow(QMainWindow):
         return rows
 
     def _compute_diff_counts(self, original: str, modified: str):
-        """Return (additions, deletions) line counts between two file versions."""
+        """Return (additions, deletions) line counts between two file versions.
+
+        Memoized on content. _push_changes_to_sidebar rebuilds EVERY row on
+        every AI edit, but one edit changes one file: the other rows are
+        diffed again to reach the answer they already had. Measured on this
+        repo 2026-09-19, difflib alone: chat_panel 14.7 ms, agent_bridge
+        16.8 ms, main_window 10.6 ms -> ~271 ms of GUI thread per edit on a
+        30-row list, and it grows with the list, so a long turn gets slower
+        the more files it touches. Both UI stalls that day (14:16:31 and
+        15:00:13, ~1.8 s) sampled inside this rebuild.
+
+        The result depends on nothing but the two strings, so a hit is
+        exactly what difflib would have returned. Length is carried beside
+        the hash so a hash collision cannot swap two files' counts.
+        """
         import difflib
+        key = (hash(original), len(original or ""),
+               hash(modified), len(modified or ""))
+        cache = self.__dict__.setdefault("_diff_counts_cache", {})
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
         try:
             o = (original or "").splitlines()
             m = (modified or "").splitlines()
@@ -4635,7 +4827,11 @@ class CortexMainWindow(QMainWindow):
                     deleted += (i2 - i1)
                 if tag in ("replace", "insert"):
                     added += (j2 - j1)
-            return int(added), int(deleted)
+            out = (int(added), int(deleted))
+            if len(cache) > 400:
+                cache.clear()
+            cache[key] = out
+            return out
         except Exception:
             return 0, 0
 
@@ -4751,6 +4947,8 @@ class CortexMainWindow(QMainWindow):
         agent_bridge.file_edited_diff). Dedupes the raw/normalized duplicate
         keys that _on_file_edited_diff_for_js writes.
         """
+        import time as _t_push
+        _t0_push = _t_push.perf_counter()
         store = getattr(self, "_diff_data_store", None) or {}
         # Seed from the persisted diff cache so edits survive an app restart.
         # A fresh process starts with an empty in-memory store; without this the
@@ -4837,6 +5035,20 @@ class CortexMainWindow(QMainWindow):
             })
         if pruned:
             self._forget_changes(pruned)
+        # Cost of this rebuild, reported only when it is worth reporting.
+        #
+        # This runs on the GUI thread on every AI edit, so whatever it costs
+        # is time the chat is not painting. It used to re-read and re-diff
+        # every row each time (67-271 ms on a 30-row list here); the caches
+        # in _read_worktree_content and _compute_diff_counts brought that to
+        # ~0.05 ms. Silence below means the caches are doing their job - the
+        # line only appears if the rebuild is slow again, which is the exact
+        # regression that made streaming feel slow on 2026-09-19.
+        _ms_push = (_t_push.perf_counter() - _t0_push) * 1000
+        if _ms_push >= 25:
+            _log.info("[CHANGES] rebuild of %d row(s) took %.0f ms on the GUI thread",
+                      len(by_norm), _ms_push)
+
         # Modified first, then alphabetical by path
         changes.sort(key=lambda c: (c["edit_type"] != "M", c["path"].lower()))
         try:
@@ -4933,6 +5145,17 @@ class CortexMainWindow(QMainWindow):
 
         if not hasattr(self, '_diff_data_store'):
             self._diff_data_store = {}
+
+        # The agent just wrote this file, so drop its cached worktree read.
+        # _read_worktree_content keys on (mtime_ns, size), which is git's
+        # "racily clean" case: two writes inside one filesystem timestamp
+        # tick that land on the same byte count would serve the first one's
+        # content. The one writer that can hit that is the agent, and it
+        # tells us which file it wrote - so the ambiguity never arises here.
+        try:
+            self.__dict__.get("_worktree_read_cache", {}).pop(file_path, None)
+        except Exception:
+            pass
 
         # Canonical key: one entry per real file (normcase + normpath).
         canon = os.path.normcase(os.path.normpath(file_path or ""))
@@ -7627,14 +7850,34 @@ class CortexMainWindow(QMainWindow):
             self._find_replace_dialog.activateWindow()
 
     def _rename_file(self):
-        """Rename file (F2)."""
-        # Check if left sidebar explorer is focused
-        if self._sidebar.is_explorer_focused():
-            if self._sidebar.rename_selected_item():
-                return
-            return
+        """Rename, on F2: the Explorer's selection, or the open editor file.
 
-        # Otherwise rename the currently open file in editor
+        F2 is a window-wide QAction shortcut (see the Edit menu), and Qt
+        resolves a shortcut before the key event reaches any widget, so the
+        sidebar's own eventFilter never sees this key. That makes this method
+        the one place that has to decide which half of the window the user
+        meant.
+
+        It used to decide with `self._sidebar.is_explorer_focused()`, a stub
+        that always returned False. The sidebar branch was dead code, so every
+        F2 went on to rename whichever file happened to be open in the editor;
+        with a folder selected nothing was open to rename, so the key silently
+        did nothing. That is why renaming a FOLDER appeared broken while files
+        appeared to work.
+
+        The sidebar now answers for itself: rename_selected_item() asks the
+        page what is highlighted and reports whether the page even had the
+        keyboard. When it did not, it calls back into
+        _rename_open_editor_file, so the editor behaviour is unchanged.
+        """
+        sidebar = getattr(self, "_sidebar", None)
+        if sidebar is not None and sidebar.rename_selected_item(
+                self._rename_open_editor_file):
+            return
+        self._rename_open_editor_file()
+
+    def _rename_open_editor_file(self):
+        """Rename the file currently open in the editor (F2 fallback)."""
         current_file = self._webview_panel.get_active_file() or self._editor_tabs.current_filepath()
         if not current_file:
             return
@@ -10151,6 +10394,64 @@ class CortexMainWindow(QMainWindow):
             dlg.exec()
         except Exception as exc:
             logging.getLogger("main_window").error(f"[MainWindow] Memory manager failed: {exc}", exc_info=True)
+
+    def _show_health_map(self):
+        """Open the Project Health map (sidebar activity-bar icon, EXPERIMENTAL).
+
+        Deferred via QTimer.singleShot(0, ...) for the same reason as
+        ``_show_memory_manager``: the click arrives from inside a QWebChannel
+        JS callback, and running a nested ``exec()`` loop from there starves
+        the dialog's QWebEngineView of the event-loop turns it needs to
+        finish loading its page.
+        """
+        import logging
+        from PyQt6.QtCore import QTimer
+        logging.getLogger("main_window").info("[MainWindow] _show_health_map called")
+        QTimer.singleShot(0, self._do_show_health_map)
+
+    def _do_show_health_map(self):
+        """Actual Health Map dialog creation, deferred to the next loop tick."""
+        import logging
+        log = logging.getLogger("main_window")
+        try:
+            from src.ui.dialogs.health_map import HealthMapDialog
+        except Exception as exc:
+            log.error(f"[MainWindow] Health map import failed: {exc}", exc_info=True)
+            return
+        try:
+            from src.config.settings import get_settings
+            settings = get_settings()
+        except Exception:
+            settings = None
+        project_root = getattr(self, '_current_project_path', None) or os.getcwd()
+        try:
+            # Cache the dialog across opens, exactly like the memory manager:
+            # rebuilding it spawns a fresh Chromium renderer and replays the
+            # whole HTML/CSS/JS bundle, which reads as a multi-second white
+            # page on every reopen. The cache is keyed on the project root
+            # because the health map is strictly per-project.
+            dlg = getattr(self, '_health_map_dlg', None)
+            cached_root = getattr(self, '_health_map_dlg_root', None)
+            if dlg is not None and cached_root != project_root:
+                try:
+                    dlg.deleteLater()
+                except RuntimeError:
+                    pass
+                dlg = None
+            if dlg is None:
+                dlg = HealthMapDialog(project_root, settings=settings, parent=self)
+                self._health_map_dlg = dlg
+                self._health_map_dlg_root = project_root
+            else:
+                # Reopening the live page: rescan so edits made since the last
+                # look are reflected instead of showing a stale graph.
+                try:
+                    dlg.refresh()
+                except Exception:
+                    pass
+            dlg.exec()
+        except Exception as exc:
+            log.error(f"[MainWindow] Health map failed: {exc}", exc_info=True)
 
     # Phase 4: Real-time UI Update Handlers
     # NOTE: The following handlers are LEGACY stubs. The _todo_manager has been removed.

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cortex Project Health</title>
+  <link rel="stylesheet" href="./health_map.css?v=6">
+</head>
+
+<body>
+  <div class="app">
+
+    <header class="top">
+      <div class="brand">Cortex <span>Project Health</span></div>
+      <div class="proj-name" id="projName" title="">no project</div>
+      <div class="top-spacer"></div>
+      <div class="scan-meta" id="scanMeta"></div>
+      <div class="live" id="liveBadge"><i class="dot"></i> <span id="liveText">Idle</span></div>
+    </header>
+
+    <section class="content">
+
+      <!-- ── left: numbers, filters, file tree ─────────────────────── -->
+      <aside class="left">
+        <h3>Summary</h3>
+        <div class="stats">
+          <div class="stat broken"><b id="stBroken">0</b><small>Broken</small></div>
+          <div class="stat warning"><b id="stWarning">0</b><small>Warning</small></div>
+          <div class="stat affected"><b id="stAffected">0</b><small>Affected</small></div>
+          <div class="stat new"><b id="stNew">0</b><small>New</small></div>
+          <div class="stat healthy"><b id="stHealthy">0</b><small>Healthy</small></div>
+          <div class="stat"><b id="stFiles">0</b><small>Files</small></div>
+          <div class="stat dead" title="Symbols defined but never referenced anywhere in the project"><b id="stUnused">0</b><small>Unused</small></div>
+          <div class="stat dead" title="Python modules no other file imports"><b id="stOrphans">0</b><small>Orphans</small></div>
+        </div>
+
+        <h3>Status mix</h3>
+        <div class="mix" id="mixBar" role="img" aria-label="File status distribution"></div>
+        <div class="mix-legend" id="mixLegend"></div>
+
+        <h3>Find</h3>
+        <input class="search" id="search" type="search" placeholder="File, symbol or path"
+               autocomplete="off" spellcheck="false" aria-label="Filter the health map">
+
+        <h3>Show</h3>
+        <div class="filters" id="filters">
+          <button class="chip broken"   data-status="broken"   aria-pressed="true"><i></i>broken</button>
+          <button class="chip warning"  data-status="warning"  aria-pressed="true"><i></i>warning</button>
+          <button class="chip affected" data-status="affected" aria-pressed="true"><i></i>affected</button>
+          <button class="chip new"      data-status="new"      aria-pressed="true"><i></i>new</button>
+          <button class="chip healthy"  data-status="healthy"  aria-pressed="true"><i></i>healthy</button>
+        </div>
+
+        <h3>Files</h3>
+        <div class="tree" id="tree" role="tree" aria-label="Project files by status"></div>
+      </aside>
+
+      <!-- ── centre: dependency graph ──────────────────────────────── -->
+      <main class="center">
+        <div class="toolbar">
+          <div class="viewtabs" role="tablist" aria-label="Health views">
+            <button class="vtab" id="tabGraph" role="tab" aria-selected="true">Graph</button>
+            <button class="vtab" id="tabDead" role="tab" aria-selected="false">Dead code<b id="deadBadge" class="dead-badge" hidden>0</b></button>
+          </div>
+          <button class="btn primary" id="btnRescan" title="Re-parse every file, ignoring the cache">Rescan</button>
+          <button class="btn" id="btnExport" title="Save this scan as a Markdown or JSON report">Export report</button>
+          <button class="btn" id="btnFit" title="Reset zoom and scroll to the start">Fit</button>
+          <button class="btn" id="btnFocus" title="Centre the graph on the selected file" disabled>Focus selection</button>
+          <div class="spacer"></div>
+          <span class="hint" id="graphHint"></span>
+        </div>
+
+        <!-- map-wrap is a NON-scrolling shell around the scrollable canvas.
+             Overlays (wiring legend) dock here: an absolute child of #map
+             would live in scroll coordinates and drift into mid-canvas. -->
+        <div class="map-wrap" id="mapWrap">
+        <div id="map">
+          <svg id="graph" xmlns="http://www.w3.org/2000/svg" role="img"
+               aria-label="Project dependency graph"></svg>
+
+          <div class="state" id="stateLoading">
+            <div class="spinner"></div>
+            <h2>Scanning project</h2>
+            <p>Parsing source files and resolving the import graph. Large projects take a few seconds the first time; later opens reuse the cached map.</p>
+          </div>
+
+          <div class="state" id="stateEmpty" hidden>
+            <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 7l9-4 9 4-9 4-9-4z" />
+              <path d="M3 12l9 4 9-4" />
+              <path d="M3 17l9 4 9-4" />
+            </svg>
+            <h2>Nothing to map yet</h2>
+            <p id="emptyText">This project has no recognised source files. Open a folder containing code and the health map will build itself.</p>
+          </div>
+
+          <div class="state" id="stateError" hidden>
+            <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3l9.5 16.5H2.5L12 3z" />
+              <path d="M12 9v5" />
+              <path d="M12 17.2v.1" />
+            </svg>
+            <h2>The health map could not be built</h2>
+            <p id="errorText">The scanner returned no data.</p>
+          </div>
+        </div>
+
+          <!-- Docked to .map-wrap (not #map) so it never scrolls with the
+               graph; visible only while a node is selected. -->
+          <div class="wire-legend" id="wireLegend" hidden>
+            <span class="wl-title">Wiring</span>
+            <span class="wl-item out"><i></i>imports</span>
+            <span class="wl-item in"><i></i>imported by</span>
+            <span class="wl-item bad"><i></i>touches broken</span>
+          </div>
+        </div>
+
+        <!-- Dead-code view: shares the centre grid cell with #map; exactly
+             one of the two is visible at a time (see switchView). -->
+        <div id="deadPanel" role="tabpanel" aria-label="Dead code" hidden>
+          <div class="dead-intro" id="deadIntro"></div>
+          <div class="dead-body" id="deadGroups"></div>
+        </div>
+
+        <div class="eventbar">
+          <h3>Scan log</h3>
+          <div id="events"></div>
+        </div>
+      </main>
+
+      <!-- ── right: selection detail ───────────────────────────────── -->
+      <aside class="right">
+        <h3>Selection</h3>
+        <div id="detail">
+          <div class="notes">
+            <p>Pick a file in the graph or the list to see its problems, symbols and import relationships.</p>
+          </div>
+        </div>
+
+        <h3>About this scan</h3>
+        <div class="notes">
+          <ul id="notes"></ul>
+        </div>
+      </aside>
+
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"
+          onerror="console.warn('qrc qwebchannel.js failed to load')"></script>
+  <script>
+    // Diagnostics + a pre-defined receiver, mirroring memory_management.html.
+    // The Python side pushes state on a timer as soon as the page loads; if
+    // health_map.js has not defined the receiver yet the payload would be
+    // dropped silently, so stash it here and let the script pick it up.
+    window.__healthDebug = { loaded: false, errors: [], pendingState: null };
+    window.onerror = function (msg, src, line) {
+      window.__healthDebug.errors.push({ msg: msg, src: src, line: line });
+      return false;
+    };
+    window.receiveHealthState = window.receiveHealthState || function (s) {
+      window.__healthDebug.pendingState = s;
+    };
+  </script>
+  <script src="./health_map.js?v=6"></script>
+</body>
+
+</html>
