@@ -1226,11 +1226,8 @@ class XTermWidget(QWidget):
             except Exception:
                 pass
             self._process = None
-            
-    def _on_shell_changed(self, shell_name: str):
-        if self._shell_started:
-            self._restart()
-            
+
+
     # ── Edit-menu actions ────────────────────────────────────────────────
     # main_window's edit-action router calls term.copy()/paste()/cut()/
     # select_all() when the terminal has focus. None of these existed -
