@@ -1709,6 +1709,12 @@
       <svg viewBox="0 0 24 24"><path d="M12 1C5.93 1 1 5.93 1 12s4.93 11 11 11 11-4.93 11-11S18.07 1 12 1zm0 20c-4.97 0-9-4.03-9-9s4.03-9 9-9 9 4.03 9 9-4.03 9-9 9zm-1-14h2v6h-2zm0 8h2v2h-2z"/></svg>
     </button>
       <div class="spacer"></div>
+      <!-- Project Health (EXPERIMENTAL). Hidden until Python confirms the
+           feature flag is on, so CORTEX_HEALTH_MAP=0 leaves the activity bar
+           pixel-identical to before this feature existed. -->
+      <button class="icon-btn" title="Project Health" id="btnHealthMap" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="18" cy="12" r="2.4"/><path d="M7.1 7.1 15.8 11"/><path d="M7.1 16.9 15.8 13"/></svg>
+    </button>
       <button class="icon-btn" title="Settings / Memory Manager" id="btnSettings">
       <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
     </button>
@@ -2282,6 +2288,15 @@ document.querySelectorAll('.icon-btn[data-panel]').forEach(btn => {
   btn.addEventListener('click', () => switchPanel(parseInt(btn.dataset.panel)));
 });
 document.getElementById('btnSettings').addEventListener('click', () => callBridge('onSettingsRequested'));
+document.getElementById('btnHealthMap').addEventListener('click', () => callBridge('onHealthMapRequested'));
+
+// Python calls this once it has read the CORTEX_HEALTH_MAP feature flag. The
+// button ships display:none so that a flag-off start leaves the activity bar
+// pixel-identical to the layout from before this feature existed.
+window.__cortexSetHealthMapEnabled = function (enabled) {
+  const btn = document.getElementById('btnHealthMap');
+  if (btn) btn.style.display = enabled ? '' : 'none';
+};
 
 // ─── TOAST NOTIFICATIONS ───────────────────────────────
 let toastTimer = null;
@@ -3392,6 +3407,31 @@ function addTreeNode(parentDir, name, isDir) {
   console.log('[Sidebar] AJAX added: ' + newPath);
 }
 
+function _rekeyPaths(oldPath, newPath) {
+  // Move oldPath and everything beneath it to newPath, in expandedPaths and in
+  // selectedPath. Matched on the path plus its separator, so renaming "src"
+  // never catches a sibling called "srcfoo".
+  var sep = oldPath.indexOf('\\') !== -1 ? '\\' : '/';
+  var prefix = oldPath + sep;
+  var moved = [];
+  expandedPaths.forEach(function (p) {
+    if (p === oldPath || p.indexOf(prefix) === 0) moved.push(p);
+  });
+  moved.forEach(function (p) {
+    expandedPaths.delete(p);
+    expandedPaths.add(newPath + p.slice(oldPath.length));
+  });
+  if (typeof selectedPath !== 'undefined' && selectedPath &&
+      (selectedPath === oldPath || selectedPath.indexOf(prefix) === 0)) {
+    // Without this the row stays highlighted but a second F2 would rename a
+    // path that no longer exists.
+    selectedPath = newPath + selectedPath.slice(oldPath.length);
+  }
+  if (moved.length) {
+    console.log('[Sidebar] rename kept ' + moved.length + ' folder(s) open');
+  }
+}
+
 function renameTreeNode(oldPath, newName) {
   // Rename a node in the tree without rebuilding
   var el = document.querySelector('[data-path="' + _escPath(oldPath) + '"]');
@@ -3428,11 +3468,40 @@ function renameTreeNode(oldPath, newName) {
   
   // Update fileTreeData
   _renameInTreeData(fileTreeData, oldPath, newPath, newName);
+
+  // Carry the open/selected state across to the new path. buildTree() reads
+  // expandedPaths BY PATH, so a renamed folder whose old key is still in the
+  // set comes back closed - and so does everything under it, because those
+  // paths changed too. That is what made a rename look like a collapse.
+  _rekeyPaths(oldPath, newPath);
   
   // Flash blue highlight to show "renamed"
   _flashNode(el, '#1a2a3a', 1500);
   
   console.log('[Sidebar] AJAX renamed: ' + oldPath + ' → ' + newName);
+}
+
+function _reparentPaths(node, oldPath, newPath) {
+  // Every descendant's path starts with the folder that was renamed, so each
+  // one has to move too. Without this a renamed FOLDER kept children pointing
+  // at a directory that no longer exists: the folder showed its new name, and
+  // opening, renaming or deleting anything inside it failed. Files have no
+  // descendants, which is why only folders looked broken.
+  if (!node || !node.children) return;
+  for (var i = 0; i < node.children.length; i++) {
+    var c = node.children[i];
+    if (typeof c.path === 'string' && c.path.length > oldPath.length &&
+        c.path.slice(0, oldPath.length) === oldPath) {
+      var rest = c.path.slice(oldPath.length);
+      if (rest.charAt(0) === '/' || rest.charAt(0) === '\\') {
+        var was = c.path;
+        c.path = newPath + rest;
+        var el = document.querySelector('[data-path="' + _escPath(was) + '"]');
+        if (el) el.setAttribute('data-path', c.path);
+      }
+    }
+    _reparentPaths(c, oldPath, newPath);
+  }
 }
 
 function _renameInTreeData(node, oldPath, newPath, newName) {
@@ -3441,6 +3510,8 @@ function _renameInTreeData(node, oldPath, newPath, newName) {
     if (node.children[i].path === oldPath) {
       node.children[i].path = newPath;
       node.children[i].name = newName;
+      // A folder carries its whole subtree with it.
+      if (node.children[i].isDir) _reparentPaths(node.children[i], oldPath, newPath);
       return true;
     }
     if (_renameInTreeData(node.children[i], oldPath, newPath, newName)) return true;

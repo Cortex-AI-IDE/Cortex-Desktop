@@ -12,6 +12,25 @@ from src.utils.logger import get_logger
 
 log = get_logger("sidebar")
 
+# Asked of the page before any sidebar rename, because the answer has to come
+# from the DOM the user is looking at rather than a cached path: clicking a
+# folder triggers a lazy-load re-render, and the highlighted row is what
+# actually survived it. `var` is the page's selectedPath, `dom` is the row
+# carrying .tree-node.selected, and both are reported so a disagreement shows
+# up in cortex.log instead of being guessed at.
+# `focus` is document.hasFocus(): the page is the only thing that can say
+# whether it is the half of the window the keystroke was aimed at, and unlike
+# a Qt focus probe it does not depend on Chromium's internal focus widget.
+_SELECTION_JS = (
+    "(function(){"
+    "var v=(typeof selectedPath!=='undefined'&&selectedPath)?selectedPath:'';"
+    "var el=document.querySelector('.tree-node.selected');"
+    "var d=(el&&el.dataset&&el.dataset.path)?el.dataset.path:'';"
+    "return JSON.stringify({var:v,dom:d,"
+    "focus:(typeof document.hasFocus==='function')?document.hasFocus():false});"
+    "})()"
+)
+
 
 def _sidebar_resource_path(relative_path: str) -> str:
     """Resolve a path to a bundled resource, works for dev and PyInstaller .exe."""
@@ -49,6 +68,7 @@ class SidebarWidget(QWidget):
     file_renamed = pyqtSignal(str, str)
     file_deleted = pyqtSignal(str)
     settings_requested = pyqtSignal()
+    health_map_requested = pyqtSignal()
     chat_selected = pyqtSignal(str)
     chat_renamed = pyqtSignal(str, str)
     chat_delete_requested = pyqtSignal(str)
@@ -176,6 +196,7 @@ class SidebarWidget(QWidget):
         self._bridge.file_renamed.connect(self.file_renamed)
         self._bridge.file_deleted.connect(self.file_deleted)
         self._bridge.settings_requested.connect(self.settings_requested)
+        self._bridge.health_map_requested.connect(self.health_map_requested)
         self._bridge.chat_selected.connect(self.chat_selected)
         self._bridge.chat_renamed.connect(self.chat_renamed)
         self._bridge.chat_delete_requested.connect(self.chat_delete_requested)
@@ -218,6 +239,30 @@ class SidebarWidget(QWidget):
         except Exception:
             pass
 
+    def _push_health_map_flag(self):
+        """Reveal the Project Health icon only if its feature flag is on.
+
+        sidebar.html ships ``#btnHealthMap`` with ``display:none`` so that a
+        start with ``CORTEX_HEALTH_MAP=0`` leaves the activity bar
+        pixel-identical to the layout from before the feature existed. The
+        verdict therefore has to come from Python, and it is re-pushed on every
+        page load because the sidebar reloads on theme switch and on renderer
+        recovery - a one-shot push at startup would leave the icon hidden after
+        any reload.
+        """
+        try:
+            from src.core.project_health import health_map_enabled
+            enabled = health_map_enabled()
+        except Exception:
+            enabled = False
+        try:
+            if getattr(self, '_web_view', None):
+                self._web_view.page().runJavaScript(
+                    "window.__cortexSetHealthMapEnabled&&window.__cortexSetHealthMapEnabled(%s);"
+                    % ("true" if enabled else "false"))
+        except Exception:
+            pass
+
     def _on_page_loaded(self, ok):
         if hasattr(self, '_load_safety_timer'):
             self._load_safety_timer.stop()
@@ -252,6 +297,7 @@ class SidebarWidget(QWidget):
         # sidebar stayed dark on light-theme startups.
         if self._pending_is_dark is not None:
             self.set_theme(self._pending_is_dark)
+        self._push_health_map_flag()
         if self._bridge:
             self._bridge._flush_pending_js()
             QTimer.singleShot(500, self._proactive_tree_load)
@@ -396,9 +442,13 @@ class SidebarWidget(QWidget):
             path = data.get('path', '')
             name = data.get('name', '')
             if mtype == 'rename':
+                log.info("[RENAME] dialog opening for %r (name=%r)", path, name)
                 new_name, ok = QInputDialog.getText(self, "Rename", "New name:", text=name)
+                log.info("[RENAME] dialog closed ok=%s new_name=%r", ok, new_name)
                 if ok and new_name and new_name != name:
                     self._bridge.onRename(path, new_name)
+                else:
+                    log.info("[RENAME] no change requested, nothing done")
             elif mtype == 'delete':
                 reply = QMessageBox.question(self, "Delete", f'Delete "{name}"?',
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -433,12 +483,26 @@ class SidebarWidget(QWidget):
             key = event.key()
             ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             if key == Qt.Key.Key_F2 and event.type() == QEvent.Type.KeyPress:
-                if self._web_view and self._is_focused():
-                    self._web_view.page().runJavaScript(
-                        "if(typeof selectedPath!=='undefined'&&selectedPath){"
-                        "var n=selectedPath.split(/[\\\\/]/).pop();"
-                        "if(window._pendingNativeModals===undefined)window._pendingNativeModals=[];"
-                        "window._pendingNativeModals.push({type:'rename',path:selectedPath,name:n});}")
+                # Fallback route only. F2 carries a window-wide QAction shortcut
+                # (Edit > Rename), and Qt resolves a shortcut before the key
+                # event reaches any widget, so what normally runs is
+                # MainWindow._rename_file, which asks this sidebar first via
+                # rename_selected_item(). Keeping this branch means F2 still
+                # works if that shortcut is ever unregistered, and both routes
+                # end in the same method so they cannot drift apart.
+                #
+                # This used to push {type:'rename'} into
+                # window._pendingNativeModals instead. Nothing drains that queue
+                # once the QWebChannel is up: _on_bridge_connected() stops
+                # _modal_poll (correctly - the page calls Python directly from
+                # then on), and the page's own flush at channel init runs once,
+                # before any F2 can happen. So every F2 pushed an entry that was
+                # never read and the key did nothing, while right-click >
+                # Rename kept working because it calls bridge.nativeModal()
+                # directly.
+                _foc = self._is_focused()
+                log.info("[RENAME] F2 reached eventFilter (sidebar focused=%s)", _foc)
+                if _foc and self.rename_selected_item():
                     return True
             if ctrl and key in (Qt.Key.Key_C, Qt.Key.Key_X, Qt.Key.Key_V):
                 if self._web_view and self._is_focused():
@@ -447,10 +511,64 @@ class SidebarWidget(QWidget):
                     return True
         return super().eventFilter(obj, event)
 
+    def _rename_selected_path(self, payload: str):
+        """Open the rename dialog for whatever the page reports as selected.
+
+        `payload` is {"var": selectedPath, "dom": the highlighted row's path,
+        "focus": document.hasFocus()}. All three are logged, so a mismatch
+        between the row the user sees highlighted and the path the page
+        variable holds is visible in cortex.log instead of being guessed at.
+
+        A page that reports no focus means this F2 was aimed at the other half
+        of the window (the editor), so the pending fallback runs instead of
+        opening a rename dialog over a tree the user was not looking at.
+        """
+        import json as _json
+        try:
+            info = _json.loads(payload) if payload else {}
+        except Exception:
+            info = {"var": payload or "", "dom": "", "focus": True}
+        path = info.get("var") or info.get("dom") or ""
+        log.info("[RENAME] selection: focus=%s var=%r dom=%r -> using %r",
+                 info.get("focus"), info.get("var"), info.get("dom"), path)
+        fallback = getattr(self, "_pending_rename_fallback", None)
+        self._pending_rename_fallback = None
+        if info.get("focus") is False:
+            log.info("[RENAME] page has no keyboard focus, not the sidebar's F2")
+            if fallback:
+                fallback()
+            return
+        if not path:
+            log.warning("[RENAME] nothing selected in the page, no dialog")
+            return
+        name = path.replace("\\", "/").rstrip("/").split("/")[-1]
+        self._handle_native_modal(_json.dumps(
+            {"type": "rename", "path": path, "name": name}))
+
     def _is_focused(self):
+        """Is the sidebar the thing the user is typing into?
+
+        Walking parents from QApplication.focusWidget() is not enough on its
+        own. A QWebEngineView keeps keyboard focus on an internal Chromium
+        render widget reached through focusProxy(), and clicking a FOLDER
+        rebuilds the tree (lazy load -> _scheduleTreeRender), which destroys
+        the element holding focus. The walk then matched nothing, this returned
+        False, and F2 was dropped - for folders only, because clicking a file
+        never re-renders. Ask the view itself first.
+        """
+        try:
+            if self._web_view is not None:
+                if self._web_view.hasFocus():
+                    return True
+                proxy = self._web_view.focusProxy()
+                if proxy is not None and proxy.hasFocus():
+                    return True
+        except RuntimeError:
+            return False          # the view is already gone
         w = QApplication.focusWidget()
         while w:
-            if w is self or w is self._web_view: return True
+            if w is self or w is self._web_view:
+                return True
             w = w.parent()
         return False
 
@@ -479,8 +597,49 @@ class SidebarWidget(QWidget):
         theme = "dark" if is_dark else "light"
         js = f"document.documentElement.setAttribute('data-theme', '{theme}');"
         self._web_view.page().runJavaScript(js)
-    def is_explorer_focused(self): return False
-    def rename_selected_item(self): return False
+    def is_explorer_focused(self):
+        """Is the keyboard in this sidebar? Routes F2 and the clipboard actions.
+
+        This was a hardcoded `return False`, which quietly disabled both of its
+        callers: MainWindow._rename_file never took its sidebar branch (so F2
+        fell through to renaming whichever file happened to be open in the
+        editor, and did nothing at all when a folder was selected), and Edit >
+        Copy / Cut / Paste was always routed to the editor even with the
+        Explorer focused.
+        """
+        return self._is_focused()
+
+    def rename_selected_item(self, on_declined=None):
+        """Rename whatever the Explorer has selected, folders included.
+
+        MainWindow._rename_file calls this before falling back to the open
+        editor tab. F2 carries a window-wide QAction shortcut, so the key never
+        reaches Sidebar.eventFilter; this method is how the sidebar answers
+        that action.
+
+        `on_declined` runs when the page reports it does not hold the keyboard,
+        i.e. the keystroke was meant for the editor after all.
+
+        Returns True once the request has been handed to the page, so the
+        caller stops instead of renaming an unrelated editor tab.
+        """
+        if not self._web_view:
+            if on_declined:
+                on_declined()
+            return False
+        import time as _time
+        now = _time.monotonic()
+        # One dialog per key press. Qt delivers either the shortcut or the
+        # widget key event, never both, but a duplicate opens the modal twice,
+        # and that double dialog has been a bug here before. Make it a promise.
+        if now - getattr(self, "_rename_dispatch_at", 0.0) < 0.4:
+            log.info("[RENAME] second F2 within 400ms ignored")
+            return True
+        self._rename_dispatch_at = now
+        self._pending_rename_fallback = on_declined
+        self._web_view.page().runJavaScript(_SELECTION_JS, self._rename_selected_path)
+        return True
+
     def get_expanded_paths(self): return []
     def switch_panel(self, idx: int):
         """Move the sidebar to a panel (0 Explorer, 2 Changes, 3 Git Review).

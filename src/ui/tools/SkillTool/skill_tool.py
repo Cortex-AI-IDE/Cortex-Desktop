@@ -19,6 +19,13 @@ from typing import List, Optional, Dict, Any
 from functools import lru_cache
 import logging
 
+# Command and get_command_name live canonically in src.commands, the module
+# that actually supplies the data (see its docstring for why it exists). Keeping
+# a second definition here is what let the broken `from src.commands import ...`
+# look harmless: the local Command satisfied the type hints while the real
+# import silently failed. One definition, no drift.
+from src.commands import Command, get_command_name
+
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -28,18 +35,6 @@ CHARS_PER_TOKEN = 4
 DEFAULT_CHAR_BUDGET = 8_000  # Fallback: 1% of 200k tokens × 4
 MAX_LISTING_DESC_CHARS = 250  # Per-entry hard cap to prevent verbose descriptions
 MIN_DESC_LENGTH = 20
-
-
-@dataclass
-class Command:
-    """Represents a skill/command that can be executed by agents."""
-    name: str
-    description: str
-    whenToUse: Optional[str] = None
-    type: str = 'prompt'  # 'prompt', 'action', etc.
-    source: str = 'bundled'  # 'bundled', 'plugin', 'user'
-    userFacingName: Optional[str] = None
-    disableModelInvocation: bool = False
 
 
 @dataclass
@@ -57,11 +52,6 @@ class SkillOutput:
     status: str  # 'inline' or 'forked'
     message: Optional[str] = None
     error: Optional[str] = None
-
-
-def get_command_name(cmd: Command) -> str:
-    """Get the display name for a command, preferring userFacingName if available."""
-    return cmd.userFacingName or cmd.name
 
 
 def get_command_description(cmd: Command) -> str:

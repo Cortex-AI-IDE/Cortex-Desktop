@@ -1,0 +1,924 @@
+/* CORTEX PROJECT HEALTH, Full CSS
+ *
+ * Palette is taken from src/ui/tokens.py (DARK / LIGHT), the single source of
+ * truth for theming. Do not invent new hex values here: if a colour is needed
+ * that is not in tokens.py, add it there first. The variable names below map
+ * 1:1 onto token keys so a token rename is greppable.
+ *
+ * Status colours are the semantic tokens, and they carry meaning across the
+ * whole panel (graph node, tree dot, badge, legend, problem row) so a user
+ * learns red-once:
+ *   broken   -> red       (#f85149)  file does not parse / invalid JSON
+ *   warning  -> gold      (#e5c07b)  parses, but imports something missing
+ *   affected -> orange    (#ff8c00)  fine itself, imports a broken file
+ *   new      -> cyan      (#06b6d4)  appeared since the last scan
+ *   healthy  -> green     (#3fb950)  nothing wrong
+ */
+:root {
+    --bg: #1e1e1e;              /* tokens bg */
+    --surface: #252526;         /* tokens bg_card */
+    --surface-2: #2d2d2d;       /* tokens bg_secondary */
+    --surface-3: #18181c;       /* tokens bg_tertiary */
+    --hover: #2a2a2a;           /* tokens bg_hover */
+    --border: #3c3c3c;          /* tokens border */
+    --border-dim: #2a2a2e;      /* tokens border_dim */
+    --text: rgba(255, 255, 255, .85);
+    --text-dim: rgba(255, 255, 255, .55);
+    --muted: rgba(255, 255, 255, .35);
+    --accent: #06b6d4;          /* tokens accent */
+
+    --broken: #f85149;          /* tokens red */
+    --warning: #e5c07b;         /* tokens warning */
+    --affected: #ff8c00;        /* tokens orange */
+    --new: #06b6d4;             /* tokens blue */
+    --healthy: #3fb950;         /* tokens green */
+
+    --broken-bg: rgba(248, 81, 73, .12);
+    --warning-bg: rgba(229, 192, 123, .12);
+    --affected-bg: rgba(255, 140, 0, .12);
+    --new-bg: rgba(6, 182, 212, .12);
+    --healthy-bg: rgba(63, 185, 80, .10);
+
+    --edge: #3c3c3c;
+    --edge-impact: #ff8c00;
+    --grid: rgba(255, 255, 255, .025);
+
+    /* Windows stacks, matching src/ui/html/memory_manager/memory_management.css. */
+    --font-ui: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Cascadia Code", "Consolas", monospace;
+
+    --left-w: 268px;
+    --right-w: 320px;
+    --radius: 10px;             /* tokens radius_lg */
+    --radius-sm: 6px;           /* tokens radius_sm */
+}
+
+html[data-theme="light"] {
+    --bg: #ECE9E0;
+    --surface: #EDEAE1;
+    --surface-2: #E4E1D8;
+    --surface-3: #DDDAD0;
+    --hover: #DDDAD0;
+    --border: #CCC9C0;
+    --border-dim: #DDDAD0;
+    --text: rgba(26, 24, 20, .92);
+    --text-dim: rgba(26, 24, 20, .62);
+    --muted: rgba(26, 24, 20, .45);
+    --accent: #C96A3E;
+
+    --broken: #B83232;
+    --warning: #8A5C00;
+    --affected: #C96A3E;
+    --new: #5B7A96;
+    --healthy: #3B7A4A;
+
+    --broken-bg: rgba(184, 50, 50, .10);
+    --warning-bg: rgba(138, 92, 0, .12);
+    --affected-bg: rgba(201, 106, 62, .12);
+    --new-bg: rgba(91, 122, 150, .14);
+    --healthy-bg: rgba(59, 122, 74, .10);
+
+    --edge: #B9B5AA;
+    --edge-impact: #C96A3E;
+    --grid: rgba(26, 24, 20, .035);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+button { font-family: inherit; font-size: inherit; color: inherit; cursor: pointer; }
+input { font-family: inherit; font-size: inherit; color: inherit; }
+
+/* ── shell ─────────────────────────────────────────────────────────── */
+.app {
+    display: grid;
+    /* minmax(0,1fr), not 1fr: a bare 1fr track has an AUTO minimum, i.e. the
+       tallest child's content height. With 700+ dead-code rows that minimum
+       is thousands of px, the track blows past the window and the scrollable
+       child never gets a bounded height (nothing scrolls). minmax(0,…) pins
+       the track to the free space so overflow:auto can do its job. */
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100vh;
+}
+
+.top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+.brand {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--text);
+}
+
+.brand span { color: var(--muted); font-weight: 500; }
+
+.proj-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 2px 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius-sm);
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.top-spacer { flex: 1; }
+
+.scan-meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.live .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--healthy);
+    box-shadow: 0 0 0 0 var(--healthy-bg);
+    animation: pulse 2.4s ease-out infinite;
+}
+
+.live.scanning .dot { background: var(--accent); animation-duration: .9s; }
+
+@keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(63, 185, 80, .5); }
+    70%  { box-shadow: 0 0 0 7px rgba(63, 185, 80, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .live .dot { animation: none; }
+    * { transition-duration: .01ms !important; }
+}
+
+.content {
+    display: grid;
+    grid-template-columns: var(--left-w) 1fr var(--right-w);
+    min-height: 0;
+}
+
+aside {
+    background: var(--surface);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 12px 24px;
+}
+
+.left  { border-right: 1px solid var(--border); }
+.right { border-left: 1px solid var(--border); }
+
+aside h3 {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 18px 0 8px;
+}
+
+aside h3:first-child { margin-top: 0; }
+
+/* ── stats ─────────────────────────────────────────────────────────── */
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+.stat {
+    background: var(--surface-2);
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius-sm);
+    padding: 8px 9px;
+}
+
+.stat b {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.15;
+}
+
+.stat small {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    margin-top: 2px;
+}
+
+.stat.broken  b { color: var(--broken); }
+.stat.warning b { color: var(--warning); }
+.stat.affected b { color: var(--affected); }
+.stat.new b { color: var(--new); }
+.stat.healthy b { color: var(--healthy); }
+/* Dead-code tiles reuse the dead-badge gold so "unused/orphan" reads as the
+   same concept everywhere in the panel (tab badge, tiles, lists). */
+.stat.dead b { color: var(--warning); }
+
+/* ── status mix ── one proportional segment per status, healthy included.
+   Zero-count statuses render no segment, so the bar never lies about a mix. */
+.mix {
+    display: flex;
+    height: 8px;
+    margin: 2px 0 7px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--surface-2);
+}
+.mix[hidden] { display: none; }
+.mix i { display: block; height: 100%; min-width: 3px; }
+.mix i.broken   { background: var(--broken); }
+.mix i.warning  { background: var(--warning); }
+.mix i.affected { background: var(--affected); }
+.mix i.new      { background: var(--new); }
+.mix i.healthy  { background: var(--healthy); }
+
+.mix-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 4px; }
+.mix-legend[hidden] { display: none; }
+.mix-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-dim);
+    font: 500 10px/1.5 var(--font-ui);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.mix-legend span i { width: 7px; height: 7px; border-radius: 2px; }
+.mix-legend span b { color: var(--text); font: 700 10px/1.5 var(--font-mono); }
+.mix-legend span.broken   i { background: var(--broken); }
+.mix-legend span.warning  i { background: var(--warning); }
+.mix-legend span.affected i { background: var(--affected); }
+.mix-legend span.new      i { background: var(--new); }
+.mix-legend span.healthy  i { background: var(--healthy); }
+
+/* ── search ────────────────────────────────────────────────────────── */
+.search {
+    width: 100%;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 9px;
+    color: var(--text);
+    outline: none;
+}
+
+.search:focus { border-color: var(--accent); }
+.search::placeholder { color: var(--muted); }
+
+/* ── filters ───────────────────────────────────────────────────────── */
+.filters { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-dim);
+    border-radius: 999px;
+    padding: 3px 9px 3px 7px;
+    font-size: 11px;
+    color: var(--text-dim);
+    transition: background .12s, border-color .12s, color .12s;
+}
+
+.chip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip:hover { background: var(--hover); color: var(--text); }
+.chip[aria-pressed="true"] { border-color: currentColor; color: var(--text); background: var(--hover); }
+.chip[aria-pressed="false"] { opacity: .45; }
+
+.chip.broken  { color: var(--broken); }
+.chip.warning { color: var(--warning); }
+.chip.affected{ color: var(--affected); }
+.chip.new     { color: var(--new); }
+.chip.healthy { color: var(--healthy); }
+
+/* ── tree ──────────────────────────────────────────────────────────── */
+.tree { font-family: var(--font-mono); font-size: 11.5px; }
+
+.tree-dir {
+    color: var(--text-dim);
+    padding: 2px 4px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tree-dir:hover { color: var(--text); background: var(--hover); border-radius: 3px; }
+
+.tree-file {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    border-radius: 3px;
+    /* Same off-screen skip as .dead-row: the tree lists every project file. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 21px;
+}
+
+.tree-file:hover { background: var(--hover); }
+.tree-file.selected { background: var(--surface-2); outline: 1px solid var(--border); }
+.tree-file.dimmed { opacity: .28; }
+
+.tree-file i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.tree-file .nm { overflow: hidden; text-overflow: ellipsis; }
+.tree-file .ct { margin-left: auto; color: var(--muted); font-size: 10px; flex: none; }
+
+.i-broken   { background: var(--broken); }
+.i-warning  { background: var(--warning); }
+.i-affected { background: var(--affected); }
+.i-new      { background: var(--new); }
+.i-healthy  { background: var(--healthy); }
+
+/* ── centre / graph ────────────────────────────────────────────────── */
+.center {
+    display: grid;
+    /* Same trap as .app: the middle track must be minmax(0,1fr) or the
+       dead-code list (row 2) stretches the grid past the window instead of
+       scrolling inside its cell, pushing the event bar off-screen. */
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg);
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-dim);
+    background: var(--surface);
+    flex-wrap: wrap;
+}
+
+.btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 5px 11px;
+    font-size: 12px;
+    color: var(--text-dim);
+    transition: background .12s, color .12s, border-color .12s;
+}
+
+.btn:hover { background: var(--hover); color: var(--text); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn.primary { border-color: var(--accent); color: var(--accent); }
+.btn.primary:hover { background: var(--new-bg); }
+.btn[disabled] { opacity: .45; cursor: default; }
+
+.toolbar .spacer { flex: 1; }
+
+.hint { font-size: 11px; color: var(--muted); }
+
+#map {
+    position: relative;
+    overflow: auto;
+    height: 100%;
+    min-height: 0;
+    overscroll-behavior: contain;   /* wheel never chains into the dialog */
+    scrollbar-gutter: stable;       /* no layout jump when the bar appears */
+    background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+}
+
+#map svg { display: block; }
+
+.edge {
+    fill: none;
+    stroke: var(--edge);
+    stroke-width: 1.3;
+    opacity: .75;
+}
+
+.edge.impact { stroke: var(--edge-impact); stroke-width: 1.8; opacity: .95; }
+.edge.dimmed { opacity: .07; }
+.edge.hl { opacity: 1; stroke-width: 2.2; }
+
+/* Electrical-wiring trace for the selected node: direction is colour, not
+   just thickness. Green = current flows out (this file imports), yellow =
+   current flows in (imported by), red = the wire touches a broken file.
+   Colours reuse the status palette so nothing new enters the theme. */
+.edge.wire-out { stroke: var(--healthy); stroke-width: 2.4; opacity: 1; }
+.edge.wire-in  { stroke: var(--warning); stroke-width: 2.4; opacity: 1; }
+.edge.wire-bad { stroke: var(--broken);  stroke-width: 2.6; opacity: 1; }
+
+/* Wiring legend chip, docked bottom-left of the map shell (.map-wrap, NOT
+   the scrolling #map) while a node is selected — it must never drift with
+   the canvas scroll. */
+.wire-legend {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    pointer-events: none;
+}
+.wire-legend .wl-title {
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+}
+.wire-legend .wl-item { display: inline-flex; align-items: center; gap: 6px; }
+.wire-legend .wl-item i {
+    display: inline-block;
+    width: 18px;
+    height: 0;
+    border-top: 2.5px solid;
+    border-radius: 2px;
+}
+.wire-legend .out i { border-color: var(--healthy); }
+.wire-legend .in  i { border-color: var(--warning); }
+.wire-legend .bad i { border-color: var(--broken); }
+
+.node { cursor: pointer; }
+.node rect {
+    fill: var(--surface);
+    stroke: var(--border);
+    stroke-width: 1;
+    transition: stroke .12s, fill .12s;
+}
+
+.node text { font-family: var(--font-ui); fill: var(--text); pointer-events: none; }
+.node text.nm { font-size: 12px; font-weight: 600; }
+.node text.sub { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }
+.node text.st { font-size: 9.5px; font-weight: 700; letter-spacing: .08em; }
+
+.node.broken  rect { stroke: var(--broken);   fill: var(--broken-bg); }
+.node.warning rect { stroke: var(--warning);  fill: var(--warning-bg); }
+.node.affected rect{ stroke: var(--affected); fill: var(--affected-bg); }
+.node.new     rect { stroke: var(--new);      fill: var(--new-bg); }
+.node.healthy rect { stroke: var(--border);   fill: var(--surface); }
+
+.node.broken  text.st { fill: var(--broken); }
+.node.warning text.st { fill: var(--warning); }
+.node.affected text.st{ fill: var(--affected); }
+.node.new     text.st { fill: var(--new); }
+.node.healthy text.st { fill: var(--healthy); }
+
+.node:hover rect { stroke-width: 2; }
+.node.dimmed { opacity: .16; }
+.node.selected rect { stroke-width: 2.5; stroke: var(--accent); }
+
+.node.broken rect { animation: breathe 2.8s ease-in-out infinite; }
+@keyframes breathe {
+    0%, 100% { stroke-opacity: 1; }
+    50%      { stroke-opacity: .45; }
+}
+
+.layer-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    fill: var(--muted);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+/* ── empty / loading states ────────────────────────────────────────── */
+.state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    padding: 32px;
+    background: var(--bg);
+}
+
+.state[hidden] { display: none; }
+
+.state svg { opacity: .5; }
+
+.state h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: .01em;
+}
+
+.state p {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    max-width: 46ch;
+    line-height: 1.6;
+}
+
+.state code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-dim);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--text);
+}
+
+.spinner {
+    width: 26px; height: 26px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── event bar ─────────────────────────────────────────────────────── */
+.eventbar {
+    border-top: 1px solid var(--border-dim);
+    background: var(--surface);
+    padding: 7px 12px;
+    max-height: 116px;
+    overflow-y: auto;
+}
+
+.eventbar h3 {
+    font-size: 9.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.event {
+    display: grid;
+    grid-template-columns: 62px 62px 1fr;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 1px 0;
+}
+
+.event .time { color: var(--muted); }
+.event .etype { font-weight: 700; letter-spacing: .06em; color: var(--text-dim); }
+.event.error .etype { color: var(--broken); }
+.event.warn .etype { color: var(--warning); }
+.event.ok .etype { color: var(--healthy); }
+.event.info .etype { color: var(--new); }
+
+/* ── right pane ────────────────────────────────────────────────────── */
+.detail {
+    background: var(--surface-2);
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius-sm);
+    padding: 11px;
+    margin-bottom: 10px;
+}
+
+.detail .title {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    word-break: break-all;
+    margin-bottom: 6px;
+}
+
+.badge {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+}
+
+.badge.broken   { color: var(--broken);   background: var(--broken-bg); }
+.badge.warning  { color: var(--warning);  background: var(--warning-bg); }
+.badge.affected { color: var(--affected); background: var(--affected-bg); }
+.badge.new      { color: var(--new);      background: var(--new-bg); }
+.badge.healthy  { color: var(--healthy);  background: var(--healthy-bg); }
+
+.kv {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 4px 0;
+    border-top: 1px solid var(--border-dim);
+    font-size: 11.5px;
+}
+
+.kv:first-of-type { border-top: 0; }
+.kv span { color: var(--muted); flex: none; }
+
+.kv strong {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    text-align: right;
+    word-break: break-all;
+    color: var(--text);
+}
+
+.problem {
+    border-left: 2px solid var(--broken);
+    background: var(--broken-bg);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    padding: 8px 10px;
+    margin-bottom: 7px;
+}
+
+.problem.warning { border-left-color: var(--warning); background: var(--warning-bg); }
+
+.problem .msg {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text);
+    word-break: break-word;
+}
+
+.problem .loc {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 3px;
+}
+
+.problem .detail-txt {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-top: 5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.link-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.link-row:hover { background: var(--hover); }
+.link-row i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.link-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-row .arrow { color: var(--muted); flex: none; }
+/* Direction arrows in the detail panel match the wire colours on canvas. */
+.link-row.w-out .arrow { color: var(--healthy); }
+.link-row.w-in  .arrow { color: var(--warning); }
+
+.sym {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.sym:hover { background: var(--hover); }
+.sym .kind {
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    flex: none;
+    width: 52px;
+}
+.sym .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sym .ln { margin-left: auto; color: var(--muted); font-size: 10px; flex: none; }
+
+.more { font-size: 10.5px; color: var(--muted); padding: 4px 6px; font-style: italic; }
+
+.notes { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.notes li { margin-left: 15px; margin-bottom: 3px; }
+
+/* ── toast ─────────────────────────────────────────────────────────── */
+.toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    max-width: 340px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: 10px 13px;
+    font-size: 12px;
+    color: var(--text);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition: opacity .18s, transform .18s;
+    z-index: 50;
+}
+
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.error { border-left-color: var(--broken); }
+.toast.warn { border-left-color: var(--warning); }
+.toast.ok { border-left-color: var(--healthy); }
+
+/* ── view tabs (Graph / Dead code) ───────────────────────────────────── */
+.viewtabs {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    margin-right: 6px;
+}
+
+.vtab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    font: 600 11.5px/1.4 var(--font-ui);
+    cursor: pointer;
+}
+
+.vtab:hover { color: var(--text); background: var(--hover); }
+.vtab[aria-selected="true"] { color: var(--text); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
+
+.dead-badge {
+    min-width: 17px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--warning-bg);
+    color: var(--warning);
+    font: 700 10px/17px var(--font-ui);
+    text-align: center;
+}
+
+/* ── dead-code panel ────────────────────────────────────────────────────
+ * Shares the centre grid cell with #map: both are pinned to row 2 and
+ * exactly one is hidden at a time (switchView in health_map.js). */
+.center > .map-wrap,
+.center > #deadPanel { grid-row: 2; grid-column: 1; min-height: 0; }
+
+/* Non-scrolling shell around the canvas: the grid item AND the containing
+   block for docked overlays (wiring legend). #map scrolls inside it. */
+.map-wrap {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+}
+
+#deadPanel {
+    overflow: auto;
+    padding: 14px 18px 24px;
+    background: var(--bg);
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.dead-intro {
+    max-width: 86ch;
+    margin-bottom: 14px;
+    padding: 9px 12px;
+    border-left: 2px solid var(--warning);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 11.5px;
+    line-height: 1.55;
+}
+
+.dead-group { margin-bottom: 20px; }
+
+.dead-head h3 {
+    margin: 0 0 2px;
+    color: var(--text);
+    font: 600 12px/1.4 var(--font-ui);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.dead-head p {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 11px;
+    max-width: 90ch;
+}
+
+.dead-count {
+    display: inline-block;
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font: 700 10.5px/18px var(--font-mono);
+    text-align: center;
+    vertical-align: 1px;
+}
+
+.dead-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 9px;
+    border-left: 2px solid var(--border);
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    /* 700+ rows: skip layout/paint for everything off-screen so scrolling
+       stays smooth. contain-intrinsic-size reserves the real row height so
+       the scrollbar thumb is truthful before a row is ever painted. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 27px;
+}
+
+.dead-row:hover, .dead-row:focus-visible { background: var(--hover); outline: none; }
+.dead-row:focus-visible { border-left-color: var(--accent); }
+
+.dead-row.orphan { border-left-color: var(--warning); }
+.dead-row.sym-function,
+.dead-row.sym-method { border-left-color: var(--new); }
+.dead-row.sym-class { border-left-color: var(--affected); }
+.dead-row.sym-variable { border-left-color: var(--text-dim); }
+
+.dead-name { color: var(--text); white-space: nowrap; }
+.dead-loc {
+    color: var(--muted);
+    font-size: 10.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── narrow windows ────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+    .content { grid-template-columns: 220px 1fr 260px; }
+}
+
+@media (max-width: 900px) {
+    .content { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+    .left, .right { border: 0; border-bottom: 1px solid var(--border); max-height: 30vh; }
+}

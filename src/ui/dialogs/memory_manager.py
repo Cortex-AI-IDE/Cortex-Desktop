@@ -1830,7 +1830,10 @@ class MemoryManagerDialog(QDialog):
                 main_window = self.window()
 
             if main_window:
-                main_window.showNormal()
+                # Only un-minimize. showNormal() on a maximized window
+                # un-maximizes it, so every sign-in shrank Cortex.
+                if main_window.isMinimized():
+                    main_window.showNormal()
                 main_window.raise_()
                 main_window.activateWindow()
                 # Windows-specific: force foreground

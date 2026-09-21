@@ -51,6 +51,38 @@ _ORPHAN_CONTROL_TAG_LINE = re.compile(
     r'^[ \t]*</?(?:' + '|'.join(_ORPHAN_CONTROL_TAGS) + r')(?:\s[^>\n]*)?>[ \t]*$',
     re.MULTILINE | re.IGNORECASE)
 
+# JSON file-entry fragment lines left behind when a <task_summary> block is
+# cleaned in pieces. Pass 8 of strip_all_control_tags only removes JSON that
+# starts with '{' and ends with '}', so a piece that begins or ends MID an
+# entry keeps its fragments as visible text: the 2026-09-18 screenshot showed
+# exactly this, a sealed piece starting part-way through the "files" array
+# ("}, "action": "created", "path": ...},") plus whole and truncated entry
+# lines. Each alternative below is a line shape that only JSON fragments
+# produce; code fences and inline code are stashed before either caller runs
+# this, so real code samples are untouched.
+_JSON_ENTRY_FRAG_LINE = re.compile(
+    r'^[ \t]*(?:'
+    # any line carrying an entry action, incl. dangling tails like "}, ...
+    r'[^\n]*?"action"\s*:\s*"(?:modified|created|deleted)"[^\n]*$'
+    # "files": [ opener, whole or with first entries glued on
+    r'|"(?:files)"\s*:\s*\[[^\n]*$'
+    # dangling value then a key: "chat_panel.py", "path": "...
+    r'|"[^"]*"\s*,\s*"(?:name|path)"\s*:[^\n]*$'
+    # a lone key line: "name": "x.py", / "title": "...",
+    r'|"(?:name|path|title)"\s*:\s*"[^"]*"\s*,?\s*$'
+    # lone bracket/brace lines: ]  ],  {  }
+    r'|[\]{}][ \t]*,?\s*$'
+    # lone dangling tail: "},
+    r'|"\}[ \t]*,?\s*$'
+    r')',
+    re.MULTILINE)
+
+# Unambiguous signature of a task_summary "files" entry. Two or more of these
+# lines in one indented run means the run is leaked JSON, not code, so
+# auto_fix_broken_code_fences must not fence it (fencing stashes it away from
+# _JSON_ENTRY_FRAG_LINE and renders it as a raw JSON code card).
+_JSON_ENTRY_STRONG = re.compile(r'"action"\s*:\s*"(?:modified|created|deleted)"')
+
 
 def clean_assistant_response(text: str) -> str:
     """Strip agent reasoning leaks and meta-commentary from response text."""
@@ -219,6 +251,12 @@ def strip_all_control_tags(text: str) -> str:
     clean = re.sub(r'^\s*[{}]\s*$', '', clean, flags=re.MULTILINE)
     # Remove residual "key": "value", patterns on a line (broken JSON fragments)
     clean = re.sub(r'(?:^|\n)\s*"[a-z_]+"\s*:\s*(?:"[^"]*"|\[[\s\S]*?\]|\{[\s\S]*?\})\s*,?\s*(?=\n|$)', '', clean)
+
+    # Pass 8b: JSON file-entry fragment lines. The regexes above only match
+    # JSON that arrives as complete objects; when this block was cleaned in
+    # pieces a piece can hold entry lines cut mid-object, which nothing above
+    # removes. See _JSON_ENTRY_FRAG_LINE for the shapes and the screenshot.
+    clean = _JSON_ENTRY_FRAG_LINE.sub('', clean)
 
     # Pass 9: Topic/status headings that precede prose
     clean = re.sub(r'^###?\s*Topic:.*\n?', '', clean, flags=re.MULTILINE)
@@ -399,15 +437,24 @@ def auto_fix_broken_code_fences(text: str) -> str:
                                or _ind_lines[_j].startswith('\t')):
                 _j += 1
             if (_j - _i) >= 3 and (_j == _n or not _ind_lines[_j].strip()):
-                _body = _dedent_indented_block('\n'.join(_ind_lines[_i:_j]))
-                if _body:
-                    # Trailing \n only at end-of-text: mid-text the join()
-                    # separator supplies the newline before the next line,
-                    # matching the old regex replacement byte-for-byte.
-                    _ind_out.append('\n```\n' + _body + '\n```'
-                                    + ('\n' if _j == _n else ''))
-                    _i = _j
-                    continue
+                _run = _ind_lines[_i:_j]
+                # 2026-09-18: an indented run of <task_summary> "files"
+                # entries is leaked JSON, not code. Fencing it here hides it
+                # from _JSON_ENTRY_FRAG_LINE (fenced blocks are stashed and
+                # restored verbatim) and renders it as a raw JSON code card,
+                # which is the 2026-09-18 broken-summary screenshot. Two or
+                # more entry-action lines never occur in real code blocks.
+                if sum(1 for _l in _run
+                       if _JSON_ENTRY_STRONG.search(_l)) < 2:
+                    _body = _dedent_indented_block('\n'.join(_run))
+                    if _body:
+                        # Trailing \n only at end-of-text: mid-text the join()
+                        # separator supplies the newline before the next line,
+                        # matching the old regex replacement byte-for-byte.
+                        _ind_out.append('\n```\n' + _body + '\n```'
+                                        + ('\n' if _j == _n else ''))
+                        _i = _j
+                        continue
         _ind_out.append(_ln)
         _i += 1
     fixed = '\n'.join(_ind_out)
@@ -602,6 +649,11 @@ def streaming_clean(text: str) -> str:
     # AFTER the rule above so an opening tag still hides the rest while it
     # streams.
     text = _ORPHAN_CONTROL_TAG_LINE.sub('', text)
+    # A piece sealed part-way through a <task_summary> "files" array holds
+    # entry lines cut mid-object; no paired-tag or paired-brace regex matches
+    # them, so they rendered as raw JSON (2026-09-18 screenshot). Drop the
+    # fragment line shapes here too, not only in strip_all_control_tags.
+    text = _JSON_ENTRY_FRAG_LINE.sub('', text)
     # Strip HTML-like tags, only known HTML tags to protect tree chars like <src/
     _COMMON_HTML_TAGS = (
         'div|span|p|br|hr|img|a|b|i|u|em|strong|h[1-6]|ul|ol|li|table|tr|td|th|'

@@ -33,7 +33,7 @@ from src.utils.logger import get_logger as _get_cortex_logger
 # routing decision was invisible when debugging streaming issues.
 log = _get_cortex_logger(__name__)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QSize, QEvent, QPoint, QRect as _QRect
-from PyQt6.QtGui import QTextOption, QAction, QKeyEvent, QColor, QKeySequence, QIcon, QTextCharFormat, QTextCursor, QTextFormat
+from PyQt6.QtGui import QTextOption, QAction, QKeyEvent, QColor, QKeySequence, QIcon, QTextCharFormat, QTextCursor, QTextFormat, QTextBlockFormat, QTextDocument
 from PyQt6.sip import isdeleted as _sip_isdeleted
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -1052,7 +1052,17 @@ def _fix_prose_code_blocks(html: str) -> str:
             if code_match:
                 pre_end, inner, pre_close = code_match.groups()
                 inner = re.sub(r'<code\b[^>]*>', _style_pre_code, inner, count=1)
-                result.append('<pre' + pre_end + inner + pre_close)
+                # Everything AFTER </pre> belongs to the document too.
+                #
+                # re.match anchors at the start of `part`, so its groups cover
+                # only the code block itself. Rebuilding the part from the
+                # groups alone DELETED whatever followed it - a table, a
+                # heading, the rest of the answer. Reported 2026-09-21 as the
+                # chat "design fully collapsed" after a restore; a table
+                # placed BEFORE the first fence always survived because it
+                # sits in parts[0], which is why it looked intermittent.
+                tail = part[code_match.end():]
+                result.append('<pre' + pre_end + inner + pre_close + tail)
             else:
                 result.append('<pre' + part)
         return ''.join(result)
@@ -5469,39 +5479,224 @@ from src.ai.model_registry import MODEL_GROUPS, get_model_groups
 
 
 # ============================================================
+# 6c. PAINT AUDIT, counts repaints per widget during one turn
+# ============================================================
+class _PaintAudit(QObject):
+    """Counts paint events per widget while one assistant turn streams.
+
+    Flicker is a repaint the reader can see, and it cannot be measured
+    offscreen: this sandbox has no fonts and no compositor, so a harness run
+    here measures a layout that is not the one on screen. The running app has
+    to report it instead (Docs/CHAT_STREAM_FLICKER_HANDOFF.md, section 6).
+
+    How to read the report:
+      * HEALTHY - one hot widget, the live _ChatBrowser being written into,
+        plus the typing wave. Earlier cards and messages barely repaint.
+      * H1 CONFIRMED - the container, or cards from earlier messages, repaint
+        about as often as frames are painted. That means the whole chat column
+        is being redrawn on every streaming frame, which is exactly what
+        _freeze_block/_thaw_block exist to stop.
+
+    Paint COUNT alone overstates the problem, so full repaints are counted
+    separately. A paint whose rect covers the widget is a full repaint: the
+    background is redrawn and the children paint over it, which is what can
+    read as a flash. A small rect is a partial update or the exposed strip of
+    a scroll blit, and does not flash. "Repainted often" and "flickered" are
+    different claims, and only the full count supports the second.
+
+    Costs one event filter and a dict increment per paint, and does not change
+    what gets painted. Reports once per turn at INFO, and only when something
+    actually repainted, so a quiet turn logs nothing.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.counts: dict = {}
+        self.full: dict = {}
+        self.armed = False
+
+    def arm(self) -> None:
+        self.counts = {}
+        self.full = {}
+        self.armed = True
+
+    def disarm(self) -> list:
+        """Stop counting and return (key, paints, full repaints), busiest first."""
+        self.armed = False
+        top = sorted(self.counts.items(), key=lambda kv: -kv[1])[:12]
+        out = [(k, v, self.full.get(k, 0)) for k, v in top]
+        self.counts = {}
+        self.full = {}
+        return out
+
+    def watch(self, widget) -> None:
+        """Follow a widget for the rest of its life (idempotent).
+
+        The marker is a dynamic property, not a set of ids: Python reuses the
+        id of a destroyed widget, which would silently skip the replacement.
+        """
+        if widget is None:
+            return
+        try:
+            if widget.property('_paintAudited'):
+                return
+            widget.setProperty('_paintAudited', True)
+            widget.installEventFilter(self)
+        except RuntimeError:
+            pass  # widget destroyed by Qt
+
+    def eventFilter(self, obj, ev):
+        if self.armed and ev.type() == QEvent.Type.Paint:
+            k = f"{obj.__class__.__name__}#{id(obj) & 0xffff:x}"
+            self.counts[k] = self.counts.get(k, 0) + 1
+            try:
+                r = ev.rect()
+                w, h = obj.width(), obj.height()
+                if w > 0 and h > 0 and r.width() * r.height() >= 0.9 * w * h:
+                    self.full[k] = self.full.get(k, 0) + 1
+            except Exception:
+                pass
+        return False
+
+
+# ============================================================
 # 6d. STREAMING CURSOR, blinking bar during text streaming
 # ============================================================
 class StreamingCursor(QWidget):
-    """Thin vertical cyan bar that blinks during active text streaming.
-    Appended after the prose QTextBrowser to show the AI is still writing."""
+    """Three dots in a travelling wave, parked right after the last character.
+
+    It lives INSIDE the prose view (a child of its viewport), positioned at
+    the frontier by ChatPanel._place_stream_cursor, so the eye always knows
+    where the next word lands. It used to be a bar in its own row under the
+    block: it never sat where text was being written, and removing that row
+    at the end of a turn shrank the card by its height.
+
+    The wave never touches the text: it paints only its own 24x12 px, so
+    animating it costs no layout (the frontier fade did, which is why that
+    is off). Two tempos: brisk while text arrives, slow while the model is
+    thinking or a tool runs. Static when Windows animations are turned off.
+    """
+    _W, _H = 24, 12
+    _DOTS = 3
+    _PERIOD_ACTIVE = 0.9   # s per wave cycle while text arrives
+    _PERIOD_IDLE = 1.6     # s per cycle while waiting
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(12, 16)
-        self._bar = QWidget(self)
-        self._bar.setFixedSize(2, 14)
-        self._bar.setStyleSheet(f"background:{T['streaming_cursor']};")
-        self._bar.move(0, 1)
-        self._bar.setVisible(True)
-        self._blink = QTimer(self)
-        self._blink.timeout.connect(lambda: self._bar.setVisible(not self._bar.isVisible()))
-        self._blink.start(530)  # ~1 Hz blink
-        # NOTE: self.show() removed, widget is shown automatically when
-        # added to layout. Calling show() here with parent=None creates a
-        # top-level native window (capsule with [-][□][X]) on Windows.
+        self.setFixedSize(self._W, self._H)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._t0 = time.perf_counter()
+        self._period = self._PERIOD_IDLE
+        self._phase_base = 0.0
+        self._still = not self._motion_allowed()
+        # How hard the wave is being driven: 1.0 the instant text lands, then
+        # decaying to 0 while the model thinks. This is what makes the cursor
+        # read as "being written" rather than "waiting" - the animation
+        # responds to typing instead of running on a fixed clock. Costs one
+        # float per frame and changes no geometry, so it adds no repaint.
+        self._energy = 0.0
+        self._last_active = 0.0
+        self._tick = QTimer(self)
+        self._tick.setInterval(33)
+        self._tick.timeout.connect(self._on_tick)
+        if not self._still:
+            self._tick.start()
+        # NOTE: never show() while parent is None: on Windows that creates a
+        # top-level native window (the "capsule" with [-][□][X]).
+
+    def _on_tick(self):
+        """Repaint only while the wave is actually on screen.
+
+        The cursor is parked inside the answer view and hidden whenever the
+        frontier is empty, but the timer kept firing regardless - about 30
+        pointless update() calls a second for as long as the panel sat idle.
+        """
+        if self.isVisible():
+            self.update()
+        else:
+            self._energy = 0.0  # nothing painted: don't carry a stale kick
+
+    @staticmethod
+    def _motion_allowed() -> bool:
+        """False when Windows 'Show animations' is off (reduced motion)."""
+        if sys.platform != 'win32':
+            return True
+        try:
+            import ctypes
+            on = ctypes.c_int(1)
+            # SPI_GETCLIENTAREAANIMATION
+            if ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0):
+                return bool(on.value)
+        except Exception:
+            pass
+        return True
+
+    def _set_period(self, period: float) -> None:
+        # Keep the wave continuous across a tempo change: carry the phase.
+        now = time.perf_counter()
+        self._phase_base += (now - self._t0) / self._period
+        self._t0 = now
+        self._period = period
 
     def pause_blink(self):
-        """Make cursor SOLID during active streaming, no distracting blink."""
-        self._blink.stop()
-        self._bar.setVisible(True)
+        """Text is arriving: kick the wave (eases back to idle on its own)."""
+        self._last_active = time.perf_counter()
+        self._energy = 1.0
+        if self._period != self._PERIOD_ACTIVE:
+            self._set_period(self._PERIOD_ACTIVE)
 
     def resume_blink(self):
-        """Resume blinking when stream is idle or done."""
-        self._bar.setVisible(True)
-        self._blink.start(530)
+        """Waiting on the model or a tool: slow, calm wave."""
+        if self._period != self._PERIOD_IDLE:
+            self._set_period(self._PERIOD_IDLE)
 
     def stop(self):
-        self._blink.stop()
-        self._bar.hide()
+        self._tick.stop()
+        self.hide()
+
+    def paintEvent(self, _ev):
+        import math
+        from PyQt6.QtCore import QPointF
+        from PyQt6.QtGui import QPainter
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        color, alpha = ChatPanel._theme_color(T['streaming_cursor'])
+        if (self._period == self._PERIOD_ACTIVE
+                and time.perf_counter() - self._last_active > 0.5):
+            self._set_period(self._PERIOD_IDLE)  # no text for a while: calm down
+        # Decay the kick pause_blink() gave us. Per FRAME rather than per
+        # second, so the rate follows the tick interval: at 33 ms this halves
+        # in about 0.22 s and is gone inside a second of silence.
+        self._energy *= 0.90
+        if self._energy < 0.01:
+            self._energy = 0.0
+        e = self._energy
+        phase = self._phase_base + (time.perf_counter() - self._t0) / self._period
+        cy = self._H / 2.0
+        for i in range(self._DOTS):
+            if self._still:
+                lift, a, r = 0.0, 0.7, 2.0
+            else:
+                # Each dot trails the one before it by a sixth of a cycle,
+                # so the crest travels left to right: toward the next word.
+                s = math.sin(2 * math.pi * (phase - i / 6.0))
+                wave = max(0.0, s)            # rest flat, rise on the crest
+                # Energy raises the wave, brightens it and swells the dots
+                # while text is really arriving, then lets all three settle
+                # back to a calm idle. Same 24x12 px and same tick rate as
+                # before, so this costs no extra painting; the peaks stay
+                # inside the widget (lift <= 3.5, r <= 2.35, cy = 6).
+                lift = (2.0 + 1.5 * e) * wave
+                a = 0.30 + 0.45 * wave + 0.25 * e * wave
+                r = 2.0 + 0.35 * e * wave
+            c = QColor(color)
+            c.setAlphaF(max(0.0, min(1.0, a * alpha)))
+            p.setBrush(c)
+            p.drawEllipse(QPointF(3.0 + i * 7.0, cy - lift), r, r)
+        p.end()
 
 
 # ============================================================
@@ -8101,6 +8296,8 @@ class ChatPanel(QWidget):
         # The answer is being written: the live block may only grow while this
         # holds (see the height rule in _apply_prose_render).
         self._turn_active = True
+        # Count what actually repaints this turn; reported in on_turn_done.
+        self._get_paint_audit().arm()
         self._open_kind = None; self._open_block = None; self._prose_buf = ""
         # Thinking left over from the previous turn must not open this one.
         self._think_buf = ""
@@ -8181,9 +8378,15 @@ class ChatPanel(QWidget):
                 self._post_render_pos = None
                 self._raw_run_start = 0
                 self._fade_from = None
-                # Append blinking cursor after the prose text browser
-                self._cursor = StreamingCursor()
-                self._cur_msg._card_v.addWidget(self._cursor)
+                # Renders requested for the block just left must never land
+                # on this one.
+                self._prose_barrier_seq = getattr(self, '_prose_seq', 0)
+                # The typing wave sits inside the prose view, at the frontier
+                # (placed by _place_stream_cursor once there is text). Not a
+                # layout row: that added a line of height under the answer
+                # and took it away again when the turn ended.
+                self._cursor = StreamingCursor(self._open_block.viewport())
+                self._cursor.hide()
             elif kind == "tools":
                 # Each tool call gets its own group
                 self._open_block = self._cur_msg.new_tool_group()
@@ -8197,7 +8400,7 @@ class ChatPanel(QWidget):
             was_at_bottom = self._is_at_bottom(200)
             if was_at_bottom:
                 try:
-                    bar.setValue(bar.maximum())
+                    self._pin_bottom(bar)
                 except RuntimeError:
                     pass
             else:
@@ -8215,11 +8418,57 @@ class ChatPanel(QWidget):
         if self._cursor is not None:
             try:
                 self._cursor.stop()
-                self._cursor.setParent(None)
+                # No setParent(None): a parentless widget is a top-level
+                # window on Windows (the "capsule"). deleteLater is enough.
                 self._cursor.deleteLater()
             except RuntimeError:
                 pass
             self._cursor = None
+
+    def _place_stream_cursor(self) -> None:
+        """Park the typing wave just after the last visible character.
+
+        Called after every reveal frame and every render. Moving a child
+        widget touches no text and no layout: only the wave's old and new
+        24x12 px are repainted.
+        """
+        cur = self._cursor
+        block = self._open_block
+        if cur is None or block is None or self._open_kind != "prose":
+            return
+        try:
+            vp = block.viewport()
+            if cur.parent() is not vp:
+                # A seal moved the answer into a fresh block.
+                cur.setParent(vp)
+            doc = block.document()
+            pos = doc.characterCount() - 1
+            # Step back over trailing whitespace and empty paragraphs, so
+            # the wave follows the last word rather than a blank line.
+            lo = max(0, pos - 64)
+            while pos > lo and doc.characterAt(pos - 1) in (' ', '\t', '\n', ' ', ' ', '﻿'):
+                pos -= 1
+            if pos <= 0:
+                cur.hide()
+                return
+            tc = QTextCursor(doc)
+            tc.setPosition(pos)
+            r = block.cursorRect(tc)
+            w, h = cur.width(), cur.height()
+            x = r.right() + 5
+            y = r.center().y() - h // 2 + 1
+            if x + w > vp.width() - 2:
+                # No room at the end of the line: sit where the next word
+                # will wrap to, if the block already has that line.
+                if r.bottom() + 2 + h <= vp.height():
+                    x, y = 0, r.bottom() + 2
+                else:
+                    x = max(0, vp.width() - w - 2)
+            cur.move(x, max(0, y))
+            if not cur.isVisible():
+                cur.show()
+        except RuntimeError:
+            pass  # widget destroyed by Qt
 
     def on_thinking(self, chunk: str):
         self._ensure("think")
@@ -8300,14 +8549,15 @@ class ChatPanel(QWidget):
     # 12k threshold the buffer grew to 12000 chars before sealing, so each
     # tick paid ~10ms of GUI work and prose_debounce_interval() backed the
     # redraw rate off to 400ms (2.5 fps) — exactly when answers are longest
-    # is when the chat felt slowest/choppiest.  Sealing at 2000 keeps the
-    # live tail small, so each tick costs ~2ms and the adaptive debounce
-    # stays in its snappy 150ms band (~6 fps) no matter how long the answer
-    # gets.  Seals land on paragraph / fence-close boundaries, so the split
-    # is invisible (reads as normal paragraph spacing).  Completed prefixes
-    # are frozen QTextBrowser widgets that are never re-rendered again while
-    # streaming, so total work stays LINEAR in answer length, not quadratic.
-    _PROSE_SEAL_CHARS = 2000
+    # is when the chat felt slowest/choppiest.  Sealing at 1400 keeps the
+    # live tail smaller still: in rendered-reveal mode EVERY frame rebuilds
+    # the tail via setHtml, and the rebuild cost is proportional to its
+    # size, so the tail length is directly the per-frame flash cost.  Seals
+    # land on paragraph / fence-close boundaries, so the split is invisible
+    # (reads as normal paragraph spacing).  Completed prefixes are frozen
+    # QTextBrowser widgets that are never re-rendered again while streaming,
+    # so total work stays LINEAR in answer length, not quadratic.
+    _PROSE_SEAL_CHARS = 1400
     # Hard cap: if the buffer passes this with NO paragraph/fence-close
     # boundary (one giant open code fence / table / mermaid — none contain
     # "\n\n"), fall back to fence/table-aware splits so the live tail can
@@ -8315,7 +8565,7 @@ class ChatPanel(QWidget):
     # Lowered with _PROSE_SEAL_CHARS so even the pathological single-giant-
     # block case keeps a small, cheap live tail.
     _PROSE_HARD_CAP = 6000
-    _PROSE_TAIL_TARGET = 2500
+    _PROSE_TAIL_TARGET = 1800
 
     def on_text(self, chunk: str):
         # ── Whitespace-only chunk arriving where it would OPEN a new prose
@@ -8469,6 +8719,10 @@ class ChatPanel(QWidget):
         with self._stabilize_scroll():
             self._ensure("prose")
         self._prose_buf = tail
+        if self._RENDERED_REVEAL:
+            # The revealed part of the tail belongs on the new block now;
+            # waiting for the next frame would blank it for one paint.
+            self._flush_prose()
         log.debug(f"[ChatPanel] Sealed prose block at {len(prefix)} chars, tail={len(tail)}")
 
     def _render_stream_html(self, block, text: str):
@@ -8523,6 +8777,38 @@ class ChatPanel(QWidget):
     # Shrinks up to this are held until the turn ends (they are re-flow
     # jitter); anything larger is a wrong height and is corrected at once.
     _MAX_HELD_SHRINK = 40
+    # ── Block-boundary sync ───────────────────────────────────────────────
+    # Raw text and rendered markdown disagree about STRUCTURE: a paragraph
+    # break is an empty line in raw text but a margin once rendered, and a
+    # heading is typed at body size and only enlarges when rendered. When a
+    # render landed on its own schedule it reconciled all of that at once,
+    # far above where the reader was looking. Measured on a fast stream:
+    # one repaint changed the look of 360 characters that were already on
+    # screen - 336 of them because a blank line became a margin and every
+    # line below it moved. That is the "whole answer jerks together" effect.
+    #
+    # So the reveal stops at the end of each block (a line break), asks for
+    # a render, and resumes only once that render has landed. The block is
+    # reconciled while it is still the frontier, with nothing below it yet
+    # to move. The pause is a render's latency, a few ms, and reads as the
+    # natural rhythm of text arriving line by line. Capped, so a slow render
+    # can never stall the stream.
+    _BOUNDARY_SYNC = True
+    _BOUNDARY_HOLD_MS = 120
+    # ── Rendered reveal ───────────────────────────────────────────────────
+    # Every frame shows RENDERED markdown of the text revealed so far, never
+    # raw text. The raw layer above (type now, style later) cannot be made
+    # still: replaying a real DeepSeek-flash answer (4,477 chars, a table,
+    # three code blocks, two lists) through it measured 19 repaints that
+    # restyled already-visible text (591 chars) and 17 height jumps over
+    # 30px, the biggest +203px - bold snapping in, bullets indenting, table
+    # rows and code lines jumping into their boxes, all after being read.
+    # This is how VS Code and Claude stream: styled from the first frame, so
+    # nothing on screen ever changes look; only the frontier advances.
+    # The render runs on the background thread (1-5 ms); the GUI pays for
+    # one setHtml per frame. _stabilize_frontier keeps half-written markdown
+    # from rendering one way and then another.
+    _RENDERED_REVEAL = True
     # ── Frontier fade ─────────────────────────────────────────────────────
     # OFF by default. The intent was for revealed characters to arrive dim
     # and settle to full contrast as more text passes them, so the text
@@ -8550,6 +8836,35 @@ class ChatPanel(QWidget):
     # whose own colours (links, code, headings) must not be flattened.
     # Only read while _STREAM_FADE is True.
     _FADE_BANDS = ((8, 0.40), (16, 0.64), (26, 0.84))
+    # ── Render coalescing (rendered reveal) ─────────────────────────────
+    # In rendered-reveal mode text becomes visible ONLY when a render
+    # lands, and every render is a full setHtml rebuild of the live block.
+    # Requesting one per 33ms frame repainted the whole tail ~30x/s; on a
+    # large stream that is the residual flash the paint audit measured
+    # (534 full block repaints in one turn). A frame is worth a rebuild
+    # once this many new characters have been revealed since the last
+    # request - at the 90 chars/s floor and a 33ms cadence that is every
+    # second frame (15 updates/s, still fluid to read), and on a fast
+    # backlog the per-frame release is larger, so renders keep frame pace.
+    _RENDER_MIN_CHARS = 6
+    # Even below the char threshold, never let styling lag longer than
+    # this: a slow trickle still gets its markdown resolved 10x/s, and a
+    # burst's last frame is always rendered (nothing strands).
+    _RENDER_MAX_GAP_MS = 100
+
+    def _render_request_due(self) -> bool:
+        """Whether this frame's frontier advance is worth a full rebuild."""
+        pending = getattr(self, '_stream_pending', '')
+        if not pending:
+            return True   # last frame of a burst: never strand its text
+        revealed = len(self._prose_buf) - len(pending)
+        last_len = getattr(self, '_render_req_len', None)
+        if last_len is None:
+            return True
+        if revealed - last_len >= self._RENDER_MIN_CHARS:
+            return True
+        return ((time.perf_counter() - getattr(self, '_render_req_ts', 0.0))
+                * 1000.0 >= self._RENDER_MAX_GAP_MS)
 
     def _stream_frame_interval(self) -> int:
         """Cadence for the block being written into right now."""
@@ -8743,9 +9058,77 @@ class ChatPanel(QWidget):
     # in place, instead of the whole line sliding three characters left.
     _MD_HEADING = re.compile(r'^#{1,6}[ \t]+')
 
+    _body_fmt_cache: dict = {}
+
+    @classmethod
+    def _body_formats(cls, block):
+        """(block format, char format) of a plain rendered paragraph.
+
+        Taken from Qt itself: a one-word paragraph rendered with this block's
+        own stylesheet. Raw streamed text is always body text, so typing it in
+        exactly this format means the render that follows has nothing to
+        change about it - same font, size, colour and paragraph spacing.
+        Cached per stylesheet, so a theme switch gets fresh values.
+        """
+        try:
+            css = block.document().defaultStyleSheet()
+        except RuntimeError:
+            return None
+        hit = cls._body_fmt_cache.get(css)
+        if hit is not None:
+            return hit
+        probe = QTextDocument()
+        probe.setDefaultStyleSheet(css)
+        probe.setHtml("<p>x</p>")
+        first = probe.begin()
+        it = first.begin()
+        char_fmt = QTextCharFormat()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid() and frag.length():
+                char_fmt = frag.charFormat()
+                break
+            it += 1
+        result = (QTextBlockFormat(first.blockFormat()), QTextCharFormat(char_fmt))
+        cls._body_fmt_cache[css] = result
+        return result
+
+    @classmethod
+    def _insert_raw(cls, block, cursor, text: str) -> None:
+        """Type raw streamed text in the body format, one block per line.
+
+        insertText() alone continues in whatever format sits at the cursor.
+        After a rendered heading that is the HEADING's size and margins, so
+        the next paragraph was typed large and shrunk by the following render
+        - measured as 70 characters changing size in one repaint. Raw text is
+        never a heading or code (fences are not revealed raw, and heading
+        markers are stripped), so body format is always the right one.
+        """
+        fmts = cls._body_formats(block)
+        if fmts is None:
+            cursor.insertText(text)
+            return
+        block_fmt, char_fmt = fmts
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if i:
+                cursor.insertBlock(block_fmt, char_fmt)
+            if line:
+                cursor.insertText(line, char_fmt)
+
+    # Two or more line breaks: a paragraph break in markdown.
+    _MD_BLANK_LINES = re.compile(r'\n{2,}')
+
     @classmethod
     def _display_form(cls, raw: str) -> str:
         """Raw markdown as the reader will see it once the render lands."""
+        # A blank line is a paragraph break, and rendered it is the
+        # paragraph's MARGIN, not an empty paragraph of its own. Shown raw it
+        # was an empty block, which the next render removed - so every line
+        # after it moved up at once (measured: 70 characters restyled in one
+        # repaint, all "moved to another paragraph"). One line break here
+        # starts the next paragraph exactly where the render will put it.
+        raw = cls._MD_BLANK_LINES.sub('\n', raw)
         if not ('*' in raw or '`' in raw or '#' in raw):
             return raw
         out = []
@@ -8784,6 +9167,67 @@ class ChatPanel(QWidget):
                 cut = hits[-1]
                 last = last[:cut] + last[cut + len(marker):]
         return f"{head}\n{last}" if head or text.startswith("\n") else last
+
+    # A line that is only the START of a structure: its meaning (and so its
+    # look) is not known until the line is finished. "|" table rows, "```"
+    # fences, "#" headings, "-"/"*"/"=" bullets, rules or setext underlines,
+    # "1." numbers, ">" quotes.
+    _MD_PARTIAL_LINE = re.compile(
+        r'^\s*(?:\|.*|`{1,3}[\w+#.-]*|~{1,3}|#{1,6}|[-*_=+]+|\d+[.)]?|>)\s*$')
+    _MD_TABLE_ROW = re.compile(r'^\s*\|')
+    _MD_TABLE_SEP = re.compile(r'^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$')
+
+    @classmethod
+    def _stabilize_frontier(cls, text: str) -> str:
+        """The revealed text, cut so it renders the way it will stay.
+
+        For the rendered reveal: whatever this returns is rendered and put on
+        screen, and every later frame must only ADD to it, never re-style it.
+        Three things would otherwise render one way now and another later:
+
+        * An unfinished last line that is only the start of a structure
+          (a "|" table row, a "```" fence, "#", "-", "1.") - held back until
+          its line break arrives.
+        * A table header with no separator row yet renders as a paragraph of
+          pipes, then snaps into a table - held until the separator lands.
+        * An open inline span ("**bold te") - closed here, so it is bold
+          from its first letter instead of literal stars and then bold.
+        """
+        if not text:
+            return text
+        head, nl, last = text.rpartition('\n')
+        in_fence = (head.count('```') % 2) == 1
+        if in_fence and re.match(r'^\s*`{1,3}\s*$', last):
+            text, last = head + nl, ''  # the closing fence, half typed
+        if not in_fence:
+            if last and (cls._MD_PARTIAL_LINE.match(last) or cls._MD_TABLE_ROW.match(last)):
+                text, last = head + nl, ''
+            # Table rows at the end with no separator yet: not a table yet.
+            lines = text.split('\n')
+            end = len(lines) - (1 if lines and lines[-1] == '' else 0)
+            i = end
+            while i > 0 and cls._MD_TABLE_ROW.match(lines[i - 1]):
+                i -= 1
+            run = lines[i:end]
+            if run and not any(cls._MD_TABLE_SEP.match(l) for l in run):
+                text = '\n'.join(lines[:i]) + ('\n' if i else '')
+                last = ''
+        if last and not in_fence and '```' not in last:
+            # Close open inline spans in the last line (innermost first).
+            opened = []
+            for pos, tok in cls._marker_spans(last):
+                if opened and opened[-1][1] == tok:
+                    opened.pop()
+                else:
+                    opened.append((pos, tok))
+            if opened:
+                if last.rstrip().endswith(opened[-1][1]) and \
+                        opened[-1][0] + len(opened[-1][1]) >= len(last.rstrip()):
+                    # Marker with nothing after it yet: hide it for now.
+                    p, tok = opened.pop()
+                    text = text[:len(text) - len(last) + p]
+                text = text + ''.join(tok for _, tok in reversed(opened))
+        return text
 
     def _display_delta(self, raw_all: str, a: int, b: int) -> str:
         """What to put on screen for raw_all[a:b], in its rendered spelling.
@@ -8856,6 +9300,45 @@ class ChatPanel(QWidget):
             n = max(_floor, -(-len(pending) // self._STREAM_SMOOTH_FRAMES))
         else:
             n = len(pending)
+        if self._RENDERED_REVEAL:
+            # Advance the frontier and render it; no raw text is ever typed.
+            self._stream_pending = pending[n:]
+            self._stream_frames = getattr(self, '_stream_frames', 0) + 1
+            if not getattr(self, '_t_first_paint', 0.0):
+                self._t_first_paint = time.perf_counter()
+            if paced:
+                # A render is a FULL rebuild of the live block (setHtml +
+                # re-layout + full repaint), and its cost grows with the
+                # tail. Requesting one on every frame repainted the whole
+                # block ~30x/s even when the frontier moved a few chars -
+                # the flash a large stream shows. Coalesce: only ask when
+                # enough new text has accumulated to be worth a rebuild, or
+                # when the gap forces one so styling never lags behind.
+                if self._render_request_due():
+                    self._flush_prose_async()
+            else:
+                # A drain (turn end, block switch): the block is about to be
+                # left, so its text must be on it now, not in a result that
+                # would arrive after the switch and be dropped.
+                self._flush_prose()
+            if self._stream_pending:
+                self._arm_stream_timer()
+            return
+        # Block-boundary sync (see _BOUNDARY_SYNC): hold while the render for
+        # the block just completed is in flight, and never release past the
+        # next line break in one frame.
+        _boundary = False
+        if paced and self._BOUNDARY_SYNC:
+            _held = getattr(self, '_await_boundary_render', 0.0)
+            if _held:
+                if (time.perf_counter() - _held) * 1000.0 < self._BOUNDARY_HOLD_MS:
+                    self._arm_stream_timer()
+                    return
+                self._await_boundary_render = 0.0
+            _nl = pending.find('\n', 0, n)
+            if _nl != -1:
+                n = _nl + 1
+                _boundary = True
         # Show it the way it will be styled, so the render that follows
         # changes only the LOOK of these characters, never their number.
         _buf = self._prose_buf
@@ -8874,17 +9357,22 @@ class ChatPanel(QWidget):
         # One freeze for the whole frame. This path runs up to 30x/s under a
         # fast provider, and with no freeze each of its mutations (insert,
         # fade, height, scrollbar) repaints on its own; that burst of
-        # repaints is the flicker a fast stream shows. Same pattern
-        # _apply_prose_render already uses, so a frame costs one paint like
-        # every other card. Scroll is read before the freeze and resolved
+        # repaints is the flicker a fast stream shows.
+        #
+        # Scoped to the BLOCK, not the container. Freezing self.container
+        # here meant every thaw repainted the entire chat column 30x/s (Qt's
+        # setUpdatesEnabled(True) calls update()); only this one block
+        # changes, so only this one block is frozen and repainted. See
+        # _freeze_block. Scroll is read before the freeze and resolved
         # after, so the position the reader had is the one restored.
         _saved_pos = None
         _was_bottom = False
+        _froze_block = False
         try:
             _bar0 = self.scroll.verticalScrollBar()
             _saved_pos = _bar0.value()
             _was_bottom = self._is_at_bottom(200)
-            self._freeze_viewport()
+            _froze_block = self._freeze_block(block)
         except RuntimeError:
             _saved_pos = None  # widget gone: skip the freeze/thaw pair
         try:
@@ -8906,9 +9394,12 @@ class ChatPanel(QWidget):
                 cursor.setPosition(min(anchor, block.document().characterCount() - 1))
                 cursor.movePosition(QTextCursor.MoveOperation.End,
                                     QTextCursor.MoveMode.KeepAnchor)
-            cursor.insertText(text)
+            self._insert_raw(block, cursor, text)
             # Dim the characters just written; the ones before them brighten.
             self._paint_frontier(block, clear=not paced)
+            if self._cursor is not None:
+                self._cursor.pause_blink()
+            self._place_stream_cursor()
             self._optimistic_chars = getattr(self, '_optimistic_chars', 0) + len(text)
             self._stream_frames = getattr(self, '_stream_frames', 0) + 1
             if not getattr(self, '_t_first_paint', 0.0):
@@ -8937,8 +9428,13 @@ class ChatPanel(QWidget):
             if _w > 10 and abs(_doc.textWidth() - _w) > 1:
                 _doc.setTextWidth(_w)
             doc_h = _math.ceil(_doc.size().height()) + 6
-            if doc_h > block.minimumHeight() + 2:
-                block.setMinimumHeight(doc_h)
+            _cur_h = block.minimumHeight()
+            if doc_h > _cur_h + 2:
+                # Grow in whole-line steps while the turn is live: one layout
+                # pass per line of text instead of one per frame.
+                block.setMinimumHeight(
+                    self._stepped_height(_cur_h, doc_h)
+                    if getattr(self, '_turn_active', False) else doc_h)
                 # The block just got taller, and nothing repaints the area
                 # that exposes: _thaw_viewport deliberately issues no
                 # update(). The render path already compensates this way
@@ -8957,15 +9453,72 @@ class ChatPanel(QWidget):
             if _saved_pos is not None:
                 try:
                     _bar = self.scroll.verticalScrollBar()
-                    _bar.setValue(_bar.maximum() if _was_bottom else _saved_pos)
+                    if _was_bottom:
+                        self._pin_bottom(_bar)
+                    else:
+                        _bar.setValue(_saved_pos)
                 except RuntimeError:
                     pass
-                self._thaw_viewport()
+            if _froze_block:
+                self._thaw_block(block)
+        # A block just completed: reconcile it now, while it is the frontier.
+        if _boundary:
+            self._await_boundary_render = time.perf_counter()
+            self._flush_prose_async()
         # Keep the reveal running while anything is queued: chunks may stop
         # arriving (a provider pause, or the last chunk of the answer) long
         # before the text they carried has finished appearing.
         if self._stream_pending:
             self._arm_stream_timer()
+
+    def _audit_card_geometry(self, msg=None) -> None:
+        """Name whatever is holding empty space in the finished turn.
+
+        Blank gaps between cards have been reported repeatedly and cannot be
+        reproduced where fonts are not installed - the offscreen harness
+        measures a layout that is not the one on screen. So the running app
+        reports it instead: at the end of a turn, every row of the card is
+        compared with the content inside it, and only offenders are logged.
+
+        Two shapes are caught:
+          * a VISIBLE row taller than its content (the blank the reader sees)
+          * a HIDDEN row still carrying real height (stale geometry, which
+            makes the layout reserve space for something invisible)
+
+        Silent when the card is healthy, which is the normal case.
+        """
+        try:
+            # The caller passes the card: on_turn_done clears _cur_msg, so
+            # reading it here (250ms later) always found None and the audit
+            # silently did nothing.
+            msg = msg if msg is not None else self._cur_msg
+            inner = getattr(msg, '_card_v', None) if msg is not None else None
+            if inner is None:
+                return
+            offenders = []
+            for i in range(inner.count()):
+                w = inner.itemAt(i).widget()
+                if w is None:
+                    continue
+                h = w.height()
+                name = w.__class__.__name__
+                if not w.isVisible():
+                    if h > 40:
+                        offenders.append(f"{name}(hidden, h={h})")
+                    continue
+                content = None
+                if hasattr(w, 'document'):
+                    try:
+                        content = round(w.document().size().height())
+                    except RuntimeError:
+                        content = None
+                if content is not None and h - content > 40:
+                    offenders.append(f"{name}(h={h}, content={content}, blank={h - content})")
+            if offenders:
+                log.info("[CARD AUDIT] card h=%s rows with empty space: %s",
+                         msg.height(), "; ".join(offenders))
+        except Exception:
+            pass
 
     def _log_stream_perf(self) -> None:
         """One aggregate line per turn, never per token.
@@ -9063,8 +9616,11 @@ class ChatPanel(QWidget):
         # snapshot index above stays measured on the RAW text: it is how much
         # of the buffer this render covers.
         if getattr(self, '_turn_active', False):
-            _text = self._hide_open_markers(_text)
+            _text = (self._stabilize_frontier(_text) if self._RENDERED_REVEAL
+                     else self._hide_open_markers(_text))
         built = _build_prose_html(_text, self._prose_doc_width())
+        # Anything still in flight is older than what is about to be shown.
+        self._prose_applied_seq = self._prose_seq
         if built is None:
             log.debug(f"[ChatPanel] _flush_prose: nothing displayable, buf_len={len(self._prose_buf)}")
             return
@@ -9094,7 +9650,13 @@ class ChatPanel(QWidget):
         # Same spelling the reveal put on screen (see the note in
         # _flush_prose); the snapshot index stays on the raw text.
         if getattr(self, '_turn_active', False):
-            _text = self._hide_open_markers(_text)
+            _text = (self._stabilize_frontier(_text) if self._RENDERED_REVEAL
+                     else self._hide_open_markers(_text))
+        # Bookkeeping for the coalescing gate (_render_request_due): where
+        # the frontier stood when this rebuild was asked for, and when.
+        self._render_req_ts = time.perf_counter()
+        self._render_req_len = len(self._prose_buf) - len(
+            getattr(self, '_stream_pending', ''))
         self._get_prose_render_thread().request(
             (self._prose_seq, _text, self._prose_doc_width()))
 
@@ -9112,18 +9674,32 @@ class ChatPanel(QWidget):
 
     def _on_prose_render(self, job):
         seq, built = job
-        if seq != getattr(self, '_prose_seq', 0):
-            # Stale: superseded by a newer request or a sync flush. Counted
-            # so the turn-end line shows how far the renderer ran behind.
+        if seq <= getattr(self, '_prose_barrier_seq', 0):
+            # Made for a block that is no longer the one being written.
             self._stale_renders = getattr(self, '_stale_renders', 0) + 1
             return
+        if seq != getattr(self, '_prose_seq', 0):
+            # Rendered reveal requests a render every frame, so the newest
+            # sequence has always moved on by the time a result lands. Taking
+            # only the exact newest would drop every result whenever a render
+            # outlasts a frame and freeze the answer; any result newer than
+            # what is on screen, and made for this block, moves it forward.
+            _newer = (self._RENDERED_REVEAL and getattr(self, '_turn_active', False)
+                      and seq > max(getattr(self, '_prose_applied_seq', 0),
+                                    getattr(self, '_prose_barrier_seq', 0)))
+            if not _newer:
+                # Stale: superseded by a newer request or a sync flush. Counted
+                # so the turn-end line shows how far the renderer ran behind.
+                self._stale_renders = getattr(self, '_stale_renders', 0) + 1
+                return
         if built is None:
             return
+        self._prose_applied_seq = seq
         html, display_text, had_mermaid = built
         self._apply_prose_render(html, display_text, had_mermaid)
 
     @staticmethod
-    def _queue_block_repaint(block):
+    def _queue_block_repaint(block, strip_px: int = 0):
         """Repaint one streaming block after Qt applies its new height.
 
         At most one repaint stays pending per block. A fast provider grows
@@ -9131,15 +9707,36 @@ class ChatPanel(QWidget):
         its own 0ms callback, so a burst produced a burst of full-viewport
         repaints. Only the newest state is worth painting, so a repaint
         already queued absorbs the ones behind it.
+
+        ``strip_px`` > 0 repaints ONLY the bottom strip the growth exposed
+        (plus a small margin) instead of the whole viewport. The full
+        ``viewport().update()`` this replaces was a second full-block flash
+        on top of the render's own repaint - the residual flicker the paint
+        audit showed on large streams (534 full repaints of one live block
+        in a single turn). The sliced line the repaint exists to fix lives
+        entirely inside the exposed strip, so the strip is all that needs
+        painting. Callers that pass 0 keep the full repaint.
         """
         if getattr(block, '_repaint_queued', False):
+            # Absorb: keep the largest strip so no exposed line is missed.
+            block._repaint_strip = max(getattr(block, '_repaint_strip', 0),
+                                       strip_px)
             return
         block._repaint_queued = True
+        block._repaint_strip = strip_px
 
         def _paint():
             block._repaint_queued = False
+            _strip = getattr(block, '_repaint_strip', 0)
+            block._repaint_strip = 0
             try:
-                block.viewport().update()
+                vp = block.viewport()
+                if _strip > 0:
+                    _h = vp.height()
+                    vp.update(0, max(0, _h - _strip - 8), vp.width(),
+                              min(_h, _strip + 8))
+                else:
+                    vp.update()
             except RuntimeError:
                 pass  # widget destroyed by Qt
 
@@ -9157,6 +9754,10 @@ class ChatPanel(QWidget):
         if not hasattr(self._open_block, 'setHtml'):
             return
 
+        # Follow the block being written into, so the turn-end report can say
+        # whether it was the only thing repainting (see _PaintAudit).
+        self._get_paint_audit().watch(self._open_block)
+
         # Show "New messages" pill if user is scrolled up during streaming
         if not self._scroll_locked and not getattr(self, '_rapid_insert_mode', False):
             self._show_new_msg_pill()
@@ -9167,7 +9768,18 @@ class ChatPanel(QWidget):
 
         prev_text = getattr(self._open_block, '_rendered_text', '')
         if display_text == prev_text and not had_mermaid:
-            return
+            # Same text: nothing to repaint - unless the block is holding far
+            # more height than its text needs. The rendered reveal re-renders
+            # identical text often, so skipping here would keep a wrong
+            # height on screen until new text happened to arrive.
+            try:
+                import math as _math
+                _over = self._open_block.minimumHeight() - (
+                    _math.ceil(self._open_block.document().size().height()) + 6)
+            except RuntimeError:
+                return
+            if _over <= self._MAX_HELD_SHRINK:
+                return
 
         log.debug(f"[ChatPanel] _apply_prose_render: rendering {len(display_text)} chars")
 
@@ -9175,8 +9787,23 @@ class ChatPanel(QWidget):
         # ── SINGLE FREEZE: batch ALL mutations (mermaid + render + height + scroll) ──
         # into ONE paint frame. Previously had two freeze/thaw cycles, the mid-function
         # thaw between mermaid check and render caused a visible flash/vibration at 20fps.
+        #
+        # Scoped to the BLOCK, except when this frame adds a widget (the
+        # mermaid card): that is a structural change to the card's layout and
+        # still wants the container frozen as one unit. Freezing the
+        # container on every render frame repainted the whole chat column up
+        # to 30x/s, because Qt's setUpdatesEnabled(True) calls update() on
+        # the widget it re-enables. Only this block changed. See _freeze_block.
+        _structural = (bool(had_mermaid) and self._cur_msg is not None
+                       and not getattr(self, '_mermaid_streaming_card', None))
+        _froze_container = False
+        _froze_block = False
         if not already_frozen:
-            self._freeze_viewport()
+            if _structural:
+                self._freeze_viewport()
+                _froze_container = True
+            else:
+                _froze_block = self._freeze_block(self._open_block)
         try:
             # Mermaid card: create inside freeze if needed
             if had_mermaid and self._cur_msg is not None:
@@ -9245,12 +9872,20 @@ class ChatPanel(QWidget):
             # purpose (mermaid, question blocks) stays removed.
             _ws = getattr(self, '_prose_snap_ws', '')
             self._post_render_ws = '' if (not _ws or display_text.endswith(_ws)) else _ws
+            # Restore a paragraph break as ONE block break. Restoring the
+            # literal "\n\n" put back an empty paragraph after the rendered
+            # one, and the following render removed it again, moving every
+            # line below. Spaces are still restored exactly ("lazy dog").
+            if '\n' in self._post_render_ws:
+                self._post_render_ws = '\n'
             # setHtml replaced the document: the raw run restarts here, and
             # no earlier position is still dimmed.
             self._raw_run_start = _content_end
             self._fade_from = None
             _snap = getattr(self, '_prose_snap_len', None)
-            if _snap is not None:
+            # Rendered reveal: the next frame's render brings the rest; raw
+            # catch-up text is exactly what that mode exists to avoid.
+            if _snap is not None and not self._RENDERED_REVEAL:
                 _vis = self._visible_prose()
                 _catchup = self._post_render_ws + self._display_delta(_vis, _snap, len(_vis))
                 if _catchup:
@@ -9260,16 +9895,56 @@ class ChatPanel(QWidget):
                                          self._open_block.document().characterCount() - 1))
                     _cur.movePosition(QTextCursor.MoveOperation.End,
                                       QTextCursor.MoveMode.KeepAnchor)
-                    _cur.insertText(_catchup)
+                    self._insert_raw(self._open_block, _cur, _catchup)
                     self._open_block._rendered_text = display_text + _catchup
                     self._post_render_pos = _content_end + len(_catchup)
                     self._paint_frontier(self._open_block)
             self._prose_renders = getattr(self, '_prose_renders', 0) + 1
+            # ── Flicker trace (DEBUG) ────────────────────────────────────
+            # Flicker during streaming is layout movement the reader notices,
+            # and it cannot be measured where fonts are not installed - it
+            # needs the real machine. One line per render records what the
+            # renderer decided and how far the block moved, so a "it keeps
+            # flashing" report can be read back instead of guessed at:
+            # a structure that flips between renders (paragraph <-> code
+            # block, which four spaces of indent is enough to cause, so
+            # pretty-printed JSON does it) and a height that swings are the
+            # two signatures. DEBUG, so it costs nothing until asked for.
+            try:
+                _struct = ("code" if "<pre" in html or "<code" in html else "") + \
+                          ("+table" if "<table" in html else "") + \
+                          ("+list" if "<li" in html else "") or "para"
+                _prev_struct = getattr(self, '_last_struct', None)
+                _prev_h = getattr(self, '_last_render_h', None)
+                _h_now = self._open_block.minimumHeight()
+                _recl = bool(_prev_struct) and _prev_struct != _struct
+                _jump = isinstance(_prev_h, int) and abs(_h_now - _prev_h) > 40
+                # INFO, but only when something actually moved. A render that
+                # changes neither the structure nor the height by more than
+                # 40px is the normal case and says nothing, so it is not
+                # logged: this stays quiet until there is something to see.
+                # (DEBUG would be invisible here - the file handler is pinned
+                # at INFO, see utils/logger.py.)
+                if _recl or _jump:
+                    log.info(
+                        "[RENDER TRACE] chars=%d struct=%s%s height=%s%s render=%.1fms",
+                        len(display_text), _struct,
+                        " RECLASSIFIED" if _recl else "",
+                        _h_now,
+                        f" ({_h_now - _prev_h:+d})" if isinstance(_prev_h, int) else "",
+                        _render_ms,
+                    )
+                self._last_struct, self._last_render_h = _struct, _h_now
+            except Exception:
+                pass
             self._render_ms_total = getattr(self, '_render_ms_total', 0.0) + _render_ms
             self._render_ms_max = max(getattr(self, '_render_ms_max', 0.0), _render_ms)
             if not getattr(self, '_t_first_render', 0.0):
                 self._t_first_render = time.perf_counter()
             self._last_render_ts = time.perf_counter()
+            # The render the reveal was holding for has landed: release it.
+            self._await_boundary_render = 0.0
+            self._place_stream_cursor()
 
             # ── HEIGHT: only adjust when height actually changes ──
             # Previous code called _fit() every tick → setMinimumHeight() triggered
@@ -9277,7 +9952,21 @@ class ChatPanel(QWidget):
             if hasattr(self._open_block, '_fit'):
                 try:
                     import math as _math
-                    _doc_h = _math.ceil(self._open_block.document().size().height()) + 6
+                    # Measure at the width the text is laid out to (the same
+                    # guard the raw reveal has): a stale or unset textWidth
+                    # reports the height for THAT width - enormous when narrow
+                    # - and the block grows to fit a phantom, leaving a tall
+                    # blank under the text.
+                    _pdoc = self._open_block.document()
+                    try:
+                        _pw = int(self._open_block._get_effective_width() or 0) \
+                            if hasattr(self._open_block, '_get_effective_width') \
+                            else int(self._open_block.viewport().width() or 0)
+                    except RuntimeError:
+                        _pw = 0
+                    if _pw > 10 and abs(_pdoc.textWidth() - _pw) > 1:
+                        _pdoc.setTextWidth(_pw)
+                    _doc_h = _math.ceil(_pdoc.size().height()) + 6
                     _cur_h = self._open_block.minimumHeight()
                     # While the answer is still being written, the live block
                     # may only GROW. A render replaces raw text with styled
@@ -9299,6 +9988,14 @@ class ChatPanel(QWidget):
                             and (_cur_h - _doc_h) <= self._MAX_HELD_SHRINK):
                         _doc_h = _cur_h
                     if _doc_h > 0 and abs(_doc_h - _cur_h) > 2:
+                        # Whole-line steps while the turn is live, so the card
+                        # and scroll-container layout runs about once per line
+                        # of text instead of once per frame (see
+                        # _stepped_height). The final render of a finished
+                        # turn is not live, so it applies the exact height and
+                        # the reserved headroom goes away.
+                        if _doc_h > _cur_h and getattr(self, '_turn_active', False):
+                            _doc_h = self._stepped_height(_cur_h, _doc_h)
                         self._open_block.setMinimumHeight(_doc_h)
                         # Shrinks don't propagate to the layout without an
                         # explicit updateGeometry() (see fit() note), without
@@ -9317,10 +10014,12 @@ class ChatPanel(QWidget):
                             # reply keeps its sliced last line on screen.
                             # Repaint this one block on the next turn of the
                             # event loop, once the height has been applied.
-                            # Scoped to a single viewport, so it cannot cause
-                            # the container-background flash that made
-                            # container.update() unusable in _thaw_viewport.
-                            self._queue_block_repaint(self._open_block)
+                            # Scoped to the strip the growth exposed (see
+                            # _queue_block_repaint), so fixing the sliced
+                            # line no longer costs a second full-block flash
+                            # per growth on top of the render's own repaint.
+                            self._queue_block_repaint(self._open_block,
+                                                      _doc_h - _cur_h)
                 except RuntimeError:
                     pass
 
@@ -9330,7 +10029,7 @@ class ChatPanel(QWidget):
             # each seeing a different bar.maximum() = vertical jitter.
             if was_at_bottom:
                 try:
-                    bar.setValue(bar.maximum())
+                    self._pin_bottom(bar)
                 except RuntimeError:
                     pass
             else:
@@ -9339,8 +10038,12 @@ class ChatPanel(QWidget):
                 except RuntimeError:
                     pass
         finally:
-            # ── SINGLE THAW: release freeze → ONE paint frame for ALL mutations ──
-            if not already_frozen:
+            # ── SINGLE THAW: release the freeze → ONE paint frame for ALL
+            # mutations. Block-scoped, so that frame repaints this block and
+            # not every card in the chat column.
+            if _froze_block:
+                self._thaw_block(self._open_block)
+            if _froze_container:
                 self._thaw_viewport()
 
     def on_tool_start(self, tool_id, name, arg):
@@ -9755,6 +10458,15 @@ class ChatPanel(QWidget):
                 f"renders={getattr(self, '_prose_renders', 0)}"
             )
             self._log_stream_perf()
+            # Which widgets actually repainted this turn. Read before the
+            # counters below are cleared, so the frame count is this turn's.
+            self._report_paint_audit()
+            # Runs after the final render has given every block its true
+            # height, so anything still holding blank space is a real defect.
+            # The card is captured now: on_turn_done clears _cur_msg below.
+            _audit_msg = self._cur_msg
+            if _audit_msg is not None:
+                QTimer.singleShot(250, lambda m=_audit_msg: self._audit_card_geometry(m))
         except Exception:
             pass
         # Stream counters belong to one turn; the queued tail is superseded
@@ -11489,6 +12201,94 @@ class ChatPanel(QWidget):
                         self._unlock_fit_guard = False
             # During streaming, just unlock, _autoscroll will pin soon.
 
+    # Share of the remaining distance covered per 16 ms tick. 0.35 settles a
+    # 200px step in ~150 ms and keeps the frontier within ~2 lines of the
+    # bottom edge at the fastest measured stream (~900 px/s of code).
+    _FOLLOW_EASE = 0.35
+    # Finish the glide in one move once this close to the target.
+    #
+    # Every scroll step repaints the scrolled widget, and measuring a real
+    # 4,917-character replay put the glide at ~71% of ALL container repaints
+    # during a stream (1017 paints, against 298 with the glide disabled and
+    # 9 with the render path disabled too). The tail was the expensive part:
+    # easing at 0.35 with a floor of 1px spends one 16 ms tick per remaining
+    # pixel, so the last few pixels of every line cost three or four repaints
+    # of the whole chat column to move a distance the eye does not track as
+    # motion. Snapping them removes those paints and looks identical.
+    _FOLLOW_SNAP_PX = 6
+
+    def _follow_bottom(self) -> None:
+        """Glide to the bottom instead of snapping (while a turn streams).
+
+        Snapping moved EVERYTHING on screen by the height the answer just
+        gained, in one frame - measured up to +202 px when a burst of short
+        code lines landed together, which is the "whole answer jerks" feel.
+        And the snap could not even be right: it ran inside the paint
+        freeze, before the new height reached the layout, so it landed
+        short and the next snap made up the difference. This follower reads
+        the real maximum on every tick and eases toward it, so the text
+        above slides up continuously instead of jumping.
+        """
+        t = getattr(self, '_follow_timer', None)
+        if t is None:
+            t = self._follow_timer = QTimer(self)
+            t.setTimerType(Qt.TimerType.PreciseTimer)
+            t.setInterval(16)
+            t.timeout.connect(self._follow_tick)
+        self._following = True
+        self._follow_idle = 0
+        if not t.isActive():
+            self._follow_last = None
+            t.start()
+
+    def _stop_follow(self) -> None:
+        self._following = False
+        t = getattr(self, '_follow_timer', None)
+        if t is not None:
+            t.stop()
+
+    def _follow_tick(self) -> None:
+        import math as _math
+        try:
+            bar = self.scroll.verticalScrollBar()
+            cur, target = bar.value(), bar.maximum()
+        except RuntimeError:
+            self._stop_follow()
+            return
+        last = getattr(self, '_follow_last', None)
+        if self._scroll_locked or (last is not None and cur < last - 2):
+            self._stop_follow()  # the reader scrolled up: leave them there
+            return
+        d = target - cur
+        if d <= 0:
+            self._follow_last = cur
+            self._follow_idle = getattr(self, '_follow_idle', 0) + 1
+            if self._follow_idle > 30 and not getattr(self, '_turn_active', False):
+                self._stop_follow()
+            return
+        self._follow_idle = 0
+        if d <= self._FOLLOW_SNAP_PX:
+            step = d          # close enough to land in one move (see above)
+        else:
+            step = max(1, _math.ceil(d * self._FOLLOW_EASE))
+            # Speed cap: a burst of lines scrolls in over ~100 ms instead of
+            # moving a third of itself in one frame. Loosens when far behind
+            # (a pasted block), so the view never trails by more than a moment.
+            step = min(step, max(24, _math.ceil(d * 0.15)))
+        self._smooth_scrolling = True   # not a user scroll (see _on_scroll_value_changed)
+        try:
+            bar.setValue(cur + step)
+        finally:
+            self._smooth_scrolling = False
+        self._follow_last = cur + step
+
+    def _pin_bottom(self, bar) -> None:
+        """Bottom-pin for streaming paths: glide during a turn, snap otherwise."""
+        if getattr(self, '_turn_active', False):
+            self._follow_bottom()
+        else:
+            bar.setValue(bar.maximum())
+
     def _is_at_bottom(self, threshold: int = 200) -> bool:
         """Check if user is scrolled near the bottom of the chat.
 
@@ -11500,6 +12300,9 @@ class ChatPanel(QWidget):
         appears silently when the user is reading above, but pins to
         bottom when they're near the end.
         """
+        # Mid-glide the view trails the bottom on purpose; it is still pinned.
+        if getattr(self, '_following', False) and not self._scroll_locked:
+            return True
         try:
             bar = self.scroll.verticalScrollBar()
             if bar.maximum() <= 0:
@@ -11542,6 +12345,136 @@ class ChatPanel(QWidget):
             self.container.setUpdatesEnabled(True)
             log.debug(f"[ChatRestore] Viewport THAWED (depth={self._freeze_depth})")
 
+    # ── Block-scoped paint freeze (streaming hot path) ──────────────────
+    # _freeze_viewport() freezes self.container, the widget holding EVERY
+    # card in the chat. Qt's setUpdatesEnabled(True) does not merely undo
+    # the False: when the widget is visible it also calls update() on it.
+    # So each thaw marked the whole chat column - every earlier message,
+    # every tool card, every thought card - for repainting. The streaming
+    # paths run that pair up to 30x/s, which is a full-column repaint 30
+    # times a second while only ONE block actually changed. On Windows,
+    # with QWebEngineViews composited in the same window, that is the
+    # flicker the handoff (Docs/CHAT_STREAM_FLICKER_HANDOFF.md, H1) ranks
+    # first.
+    #
+    # These helpers freeze the single block being written into instead.
+    # The implicit update() on thaw then repaints that block's own
+    # viewport, which is the only thing that changed. _freeze_viewport is
+    # untouched and still correct for STRUCTURAL changes (adding a card,
+    # sealing a block, ending a turn), where the container really does
+    # need to relayout as one unit.
+    def _freeze_block(self, block) -> bool:
+        """Freeze paint on one block. Returns True if THIS call took it."""
+        if block is None:
+            return False
+        try:
+            if not block.updatesEnabled():
+                return False  # an outer scope already froze it
+            block.setUpdatesEnabled(False)
+            return True
+        except RuntimeError:
+            return False  # widget destroyed by Qt
+
+    def _thaw_block(self, block) -> None:
+        """Release a block freeze. Repaints that block only."""
+        if block is None:
+            return
+        try:
+            if not block.updatesEnabled():
+                block.setUpdatesEnabled(True)
+        except RuntimeError:
+            pass
+
+    def _stream_line_px(self) -> int:
+        """Pixel height of one body-text line in the live block.
+
+        Used to grow the block in whole-line steps (see _apply_prose_render).
+        Measured from the document's own layout when it has one, so it
+        tracks the real font and line spacing rather than a guess; falls
+        back to font metrics, then to 0 (meaning "do not step").
+        """
+        block = self._open_block
+        if block is None:
+            return 0
+        try:
+            doc = block.document()
+            b = doc.begin()
+            while b.isValid():
+                lay = b.layout()
+                if lay is not None and lay.lineCount() > 0:
+                    h = lay.lineAt(0).height()
+                    if h and h > 4:
+                        return int(h) + 1
+                b = b.next()
+        except RuntimeError:
+            return 0
+        try:
+            from PyQt6.QtGui import QFontMetrics
+            fm = QFontMetrics(block.document().defaultFont())
+            return max(8, int(fm.height() * 1.2))
+        except Exception:
+            return 0
+
+    def _stepped_height(self, cur_h: int, want_h: int) -> int:
+        """Height to set while streaming: whole lines, with one line spare.
+
+        setMinimumHeight re-runs the layout of the card and the scroll
+        container and repaints the siblings around it. Given the exact
+        measured height it fires on nearly every frame while a fast model
+        writes, which is a layout storm for a change the reader cannot see:
+        the difference between this frame's height and the next is a few
+        pixels of space below the last line.
+
+        Growing in whole-line steps with one line of headroom moves the
+        height about once per line of text instead of once per frame, and
+        the reserved space stays inside the same card, under the last line.
+        The turn's final render runs with _turn_active False and so applies
+        the exact height, which removes the headroom.
+
+        Shrinks are returned unchanged: whether a shrink may land mid-turn
+        is the caller's decision (see _MAX_HELD_SHRINK).
+        """
+        if want_h <= cur_h:
+            return want_h
+        line = self._stream_line_px()
+        if line <= 4:
+            return want_h
+        steps = -(-(want_h - cur_h) // line)   # ceiling
+        return cur_h + (steps + 1) * line
+
+    def _get_paint_audit(self) -> "_PaintAudit":
+        """The turn's repaint counter, created on first use.
+
+        The container and the scroll viewport are watched from the start:
+        the container is the widget the old freeze repainted wholesale, so
+        its count is what confirms or clears H1.
+        """
+        a = getattr(self, '_paint_audit', None)
+        if a is None:
+            a = self._paint_audit = _PaintAudit(self)
+            a.watch(self.container)
+            try:
+                a.watch(self.scroll.viewport())
+            except RuntimeError:
+                pass
+        return a
+
+    def _report_paint_audit(self) -> None:
+        """Log what repainted during the turn. Quiet when nothing did."""
+        try:
+            audit = getattr(self, '_paint_audit', None)
+            if audit is None:
+                return
+            top = audit.disarm()
+            if not top:
+                return
+            log.info("[PAINT AUDIT] frames=%d renders=%d busiest=%s",
+                     getattr(self, '_stream_frames', 0),
+                     getattr(self, '_prose_renders', 0),
+                     ", ".join(f"{k}={v}({f} full)" for k, v, f in top))
+        except Exception:
+            pass
+
     def _render_frame(self):
         """Legacy no-op. Previously deferred thaw via 80ms timer, removed.
         Freeze/thaw is now strictly synchronous. This method is kept as a
@@ -11577,7 +12510,7 @@ class ChatPanel(QWidget):
             finally:
                 if was_at_bottom:
                     try:
-                        bar.setValue(bar.maximum())
+                        self._pin_bottom(bar)
                     except RuntimeError:
                         pass
                 else:
@@ -12235,7 +13168,36 @@ class ChatPanel(QWidget):
                         m = MessageWidget(role="assistant", parent=self)
                         m.set_created_ts(msg.get("ts") or msg.get("timestamp"))
                         pb = m.new_prose(streaming=False)
-                        pb.setPlainText(content)
+                        # Render the markdown, do not dump it.
+                        #
+                        # crash_recovery_log stores what the MODEL wrote, which
+                        # is markdown; the timeline stores a rendered prose
+                        # block. This path used setPlainText on it, so every
+                        # recovered answer came back as literal "### Summary",
+                        # "```js" and "| Step | Result |" - reported
+                        # 2026-09-21 after a force-quit, and the reason it only
+                        # ever shows up after a crash: the normal restore at
+                        # ~5366 renders the same text through this pipeline.
+                        _md_src = content
+                        if len(_md_src) > 6000:
+                            _md_src = _md_src[:6000] + (
+                                "\n\n… *(long output truncated on restore, "
+                                "full text is in the conversation history)*")
+                        try:
+                            _r = _markdown_to_clean_html(
+                                normalize_table_markdown(_md_src),
+                                table_normalized=True)
+                            _r = _fix_prose_tables(_r)
+                            _r = _fix_prose_code_blocks(_r)
+                            _css = (build_markdown_css().replace('<style>', '')
+                                    .replace('</style>', '').strip())
+                            pb.document().setDefaultStyleSheet(_css)
+                            pb.setHtml(_r)
+                            pb._rendered_text = _md_src   # keeps it saveable
+                        except Exception as _md_err:
+                            log.warning(f"[CrashRecovery] markdown render failed, "
+                                        f"showing plain text: {_md_err}")
+                            pb.setPlainText(_md_src)
                         self.col.addWidget(m)
                         # Collect QTextBrowser children for prebuilt refit
                         for child in m.findChildren(QTextBrowser):
@@ -12380,6 +13342,30 @@ class ChatPanel(QWidget):
                     continue  # skip other collapsible cards
             except RuntimeError:
                 continue
+        # Messages that were never built into widgets still belong to the
+        # conversation.
+        #
+        # A long chat restores only its tail (see the lazy split in
+        # load_timeline_async); the older prefix waits in _pending_messages
+        # for the scroll-up loader. This method reads the WIDGET TREE, so
+        # without the prefix it reports only what happens to be loaded - and
+        # the caller writes that straight over the stored timeline.
+        #
+        # 2026-09-21, cortex.log, conversation 73c22633:
+        #     18:25:55  [ChatPersist] Saved 32 messages
+        #     18:25:58  session killed
+        #     18:26:16  [ChatRestore] Lazy load: 12 msgs of 32, 20 pending
+        #     18:26:20  [ChatPersist] Saved 15 messages   <- 20 destroyed
+        # It is not crash-specific: any restart of a long chat followed by a
+        # save truncated the stored history to whatever was on screen, so a
+        # conversation lost a chunk every time it was reopened.
+        #
+        # _pending_messages holds the ORIGINAL serialized dicts and shrinks as
+        # the loader consumes them, so prepending is exact and cannot double
+        # up a message that has since become a widget.
+        pending = getattr(self, '_pending_messages', None) or []
+        if pending:
+            messages = list(pending) + messages
         return {
             "conversation_id": self._conversation_id,
             "messages": messages,
