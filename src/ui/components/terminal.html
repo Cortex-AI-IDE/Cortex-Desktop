@@ -147,12 +147,20 @@
             gap: 8px;
             user-select: none;
             -webkit-user-select: none;
+            /* Never let the header spill sideways out of a narrow column. */
+            overflow: hidden;
         }
         /* Terminal dropdown selector, custom div-based (native <select> popups don't render in QWebEngine) */
         #terminal-header .term-select-wrap {
             position: relative;
             display: inline-flex;
             align-items: center;
+            /* Allow the selector to shrink so the header never overflows the
+               editor column when it is dragged to its 320px minimum. Without
+               this the fixed-width row (~364px) clipped the + New / Clear /
+               restart buttons off the right edge and made them unreachable. */
+            flex: 0 1 auto;
+            min-width: 0;
             border-right: 1px solid #3e3e42;
             padding-right: 8px;
             margin-right: 4px;
@@ -168,7 +176,10 @@
             padding: 3px 24px 3px 8px;
             cursor: pointer;
             outline: none;
-            min-width: 120px;
+            /* Natural width follows the label up to 220px, but may shrink
+               (label ellipsizes) so the header row still fits when the editor
+               column is at its minimum width. */
+            min-width: 0;
             max-width: 220px;
             white-space: nowrap;
             overflow: hidden;
@@ -192,12 +203,18 @@
             font-size: 10px;
             pointer-events: none;
         }
-        /* The dropdown list panel */
+        /* The dropdown list panel.
+           position: fixed, NOT absolute. The header carries overflow: hidden
+           (kept so the row can never spill sideways out of a narrow editor
+           column), and an absolutely-positioned child is clipped by that
+           ancestor the moment it drops below the 32px bar, which is exactly
+           why the panel never appeared. A fixed-position box is laid out
+           against the viewport and escapes a non-transformed overflow: hidden
+           ancestor, so the panel shows. Its left/top are set in JS from the
+           button's rect when it opens. */
         #terminal-header .term-dropdown {
             display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
+            position: fixed;
             z-index: 9999;
             min-width: 160px;
             max-width: 260px;
@@ -206,7 +223,6 @@
             border-radius: 4px;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
             padding: 4px 0;
-            margin-top: 2px;
             max-height: 240px;
             overflow-y: auto;
         }
@@ -246,6 +262,9 @@
             cursor: pointer;
             white-space: nowrap;
             line-height: 1.4;
+            /* Buttons keep their full labels; the selector to the left absorbs
+               any shrink so action buttons stay readable and reachable. */
+            flex: 0 0 auto;
         }
         #terminal-header .term-btn:hover {
             background: #3e3e42;
@@ -935,10 +954,47 @@
             const termDropdown = document.getElementById('term-dropdown');
             let _termList = [];  // cached list of {index, name, active}
 
-            // Toggle dropdown open/close
+            // Toggle dropdown open/close.
+            // The panel is position: fixed (see CSS) so it is NOT clipped by
+            // the header's overflow: hidden. Place it under the button from the
+            // live rect, clamp to the viewport, and grow upward if there is no
+            // room below (the terminal header sits at the top of a tall panel,
+            // so there usually is, but stay safe on short windows).
+            function _positionTermDropdown() {
+                const r = termSelectBtn.getBoundingClientRect();
+                const dh = termDropdown.offsetHeight;
+                const dw = termDropdown.offsetWidth;
+                let left = r.left;
+                if (left + dw > window.innerWidth - 4) left = window.innerWidth - dw - 4;
+                if (left < 4) left = 4;
+                // Anchor below the header bar, not just below the button: the
+                // button's rect ends ~3px above the bar's bottom border, and
+                // overlapping it looked like the panel was tucked under the
+                // header. Fall back to the button bottom if there is no header.
+                const hdr = document.getElementById('terminal-header');
+                const below = hdr ? hdr.getBoundingClientRect().bottom : r.bottom;
+                let top = Math.max(r.bottom, below) + 2;
+                if (top + dh > window.innerHeight - 4) {
+                    // No room below: flip above the button.
+                    top = r.top - dh - 2;
+                    if (top < 4) top = 4;
+                }
+                termDropdown.style.left = left + 'px';
+                termDropdown.style.top = top + 'px';
+            }
+
             termSelectBtn.addEventListener('click', function(e) {
                 e.stopPropagation();
+                const willOpen = !termDropdown.classList.contains('open');
                 termDropdown.classList.toggle('open');
+                if (willOpen) {
+                    // Measure after display: block so offsetHeight/Width are real.
+                    _positionTermDropdown();
+                }
+            });
+            // Keep the open panel anchored if the window resizes.
+            window.addEventListener('resize', function() {
+                if (termDropdown.classList.contains('open')) _positionTermDropdown();
             });
 
             // Close dropdown when clicking outside
@@ -970,6 +1026,11 @@
                 const active = _termList.find(function(t) { return t.active; });
                 if (active) {
                     termSelectBtn.textContent = active.name;
+                }
+                // If the panel is open, its size may have changed with the new
+                // item set, re-anchor it under the button.
+                if (termDropdown.classList.contains('open')) {
+                    _positionTermDropdown();
                 }
             }
 

@@ -31,6 +31,19 @@ log = get_logger("webview_panel")
 # re-shipped the whole file on every switch back to that tab.
 _LARGE_CHAR_THRESHOLD = 200_000
 
+# Hard ceiling for anything handed to the Monaco renderer. A ~40 MB JSON file
+# (geo/ne_10m_admin_1_states_provinces.json, 39,959,249 chars) was serialized
+# with json.dumps() and pushed through runJavaScript() as one string literal.
+# V8 could not allocate it -> SIGTRAP (exit 133) -> the shared Chromium render
+# process died, taking editor + sidebar + terminal with it.
+#
+# The old 200 KB guard only ran on the BACKGROUND branch of _run_open_now; a
+# user click took the activate=True branch that returned before the guard, so
+# nothing capped the click path. Every path now routes through
+# _deliver_to_editor(), which enforces this ceiling, so no caller can bypass it
+# by choosing a different code path.
+_MAX_EDITOR_CHARS = 20_000_000  # 20 MB of text: refuse to open above this
+
 # Large-file XHR must hit a same-origin temp path under %TEMP%/cortex_webview.
 # editor.html itself is loaded from that folder. XHR to the real project path
 # (especially OneDrive Desktop) often hangs forever in QWebEngine, leaving the
@@ -690,13 +703,13 @@ class WebviewPanel(QWidget):
 
             safe_path = json.dumps(fp)
             safe_lang = json.dumps(lang)
-            safe_content = json.dumps(content)
-            self._safe_run_js(
-                f"setIntendedActive({safe_path}); "
-                f"openFile({safe_path}, {safe_content}, {safe_lang}, true);"
-            )
+            # Route through the choke point: re-inlining a multi-MB string here
+            # was the crash-recovery loop (XHR fails -> inline 40MB -> SIGTRAP
+            # -> reload -> re-queue -> inline again). The choke point refuses
+            # oversized content and uses XHR for large-but-editable files.
+            self._deliver_to_editor(fp, content, lang, activate=True)
             log.info(
-                f"[WebviewPanel] large-file fallback via inline openFile: "
+                f"[WebviewPanel] large-file fallback via _deliver_to_editor: "
                 f"{fp} ({len(content)} chars)"
             )
         except Exception as e:
@@ -746,6 +759,34 @@ class WebviewPanel(QWidget):
         priority=False is meant for bulk/session restore (throttle during startup).
         """
         log.info(f"[WebviewPanel] open_file: {file_path} (lang={language}, len={len(content)}, page_loaded={self._page_loaded})")
+
+        # ── Oversized-file gate ──────────────────────────────────────────
+        # Anything above the ceiling is refused before it can reach the
+        # renderer. We keep only the size (not the buffer) so a 20MB+ string is
+        # never retained in Python nor shipped over IPC. The editor shows a
+        # read-only notice tab instead. See _MAX_EDITOR_CHARS.
+        _too_large = bool(content) and len(content) > _MAX_EDITOR_CHARS
+        if _too_large:
+            log.warning(
+                f"[WebviewPanel] open_file refusing oversized file "
+                f"({len(content)} chars > {_MAX_EDITOR_CHARS}): {file_path}"
+            )
+            self._open_files[file_path] = {
+                "path": file_path,
+                "language": language,
+                "content": "",
+                "disk_baseline": None,
+                "too_large": True,
+                "size": len(content),
+            }
+            self._active_file_path = file_path
+            self.file_opened.emit(file_path)
+            if self._page_loaded:
+                self._deliver_to_editor(file_path, "", language, activate=True)
+            else:
+                self._pending_opens.append((file_path, "", language))
+            return
+
         self._open_files[file_path] = {
             "path": file_path,
             "language": language,
@@ -763,6 +804,36 @@ class WebviewPanel(QWidget):
         else:
             self._pending_opens.append((file_path, content, language))
             log.debug(f"[WebviewPanel] Queued open for: {file_path}")
+
+    def open_too_large(self, file_path: str, size: int,
+                       language: str = "plaintext", *, priority: bool = True):
+        """Show the read-only "file too large" notice tab for an oversized file.
+
+        Called from main_window when a file's on-disk size is over the editor
+        ceiling. The file's bytes are NEVER read or passed here - only its path
+        and byte size - so no multi-MB buffer is ever loaded into Python or
+        shipped over IPC (the 40MB inline string literal that crashed the shared
+        Chromium renderer, SIGTRAP/133). Registers a contentless `too_large`
+        entry and delivers openTooLarge() to JS.
+        """
+        log.warning(
+            f"[WebviewPanel] open_too_large: {file_path} "
+            f"({size} bytes, refusing to load)"
+        )
+        self._open_files[file_path] = {
+            "path": file_path,
+            "language": language,
+            "content": "",
+            "disk_baseline": None,
+            "too_large": True,
+            "size": int(size or 0),
+        }
+        self._active_file_path = file_path
+        self.file_opened.emit(file_path)
+        if self._page_loaded:
+            self._deliver_to_editor(file_path, "", language, activate=True)
+        else:
+            self._pending_opens.append((file_path, "", language))
 
     def show_diff(self, file_path: str, language: str = "plaintext",
                   additions: int = 0, deletions: int = 0, hunks=None):
@@ -829,11 +900,9 @@ class WebviewPanel(QWidget):
         if hasattr(self, '_open_queue') and file_path in self._open_queue:
             args = self._open_queue.pop(file_path)
             fp, content, language = args
-            safe_path = json.dumps(fp)
-            safe_content = json.dumps(content)
-            safe_lang = json.dumps(language)
-            js_open = f"setIntendedActive({safe_path}); openFile({safe_path}, {safe_content}, {safe_lang}, true);"
-            self._safe_run_js(js_open)
+            # Route through the choke point so the size ceiling applies here
+            # too (this path used to inline unconditionally).
+            self._deliver_to_editor(fp, content, language, activate=True)
             # NOTE: Do NOT add to _files_delivered_to_js here.
             # The JS ACK (bridge.onContentDelivered) is the reliable signal.
             log.info(f"[WebviewPanel] switch_to_file: flushed pending content for {file_path}")
@@ -879,12 +948,28 @@ class WebviewPanel(QWidget):
             fdata = self._open_files.get(path, {})
             py_content = fdata.get("content", "")
             py_lang = fdata.get("language", "plaintext")
+
+            # Oversized files have no buffer and must show the refusal notice,
+            # never a giant inline string. _deliver_to_editor handles the switch
+            # (setIntendedActive) for the refused case from the activate flag.
+            if fdata.get("too_large"):
+                self._deliver_to_editor(path, "", py_lang, activate=True)
+                self._pending_switch_path = None
+                return
+
             safe_lang = json.dumps(py_lang)
 
-            # Always push content inline on tab switch. openFileFromUri here used to
-            # repaint "// Loading..." and re-XHR; if the first open stalled, every
-            # later single-click looked dead until a second click / timeout.
-            # Python already holds py_content — ship it directly.
+            # Large-but-editable files: route through the choke point, which
+            # re-caches and uses openFileFromUri (JS switches instantly when it
+            # already holds real content, and XHRs only if it doesn't). Never
+            # inline >200KB here.
+            if path and len(py_content) > _LARGE_CHAR_THRESHOLD:
+                self._deliver_to_editor(path, py_content, py_lang, activate=True)
+                self._pending_switch_path = None
+                return
+
+            # Always push content inline on tab switch (small files). Python
+            # already holds py_content — ship it directly.
             safe_content = json.dumps(py_content)
             # openFile(path, content, lang, false) updates JS cache without switching,
             # then switchToFile(path) shows the file with the fresh cache.
@@ -892,6 +977,73 @@ class WebviewPanel(QWidget):
                 f"setIntendedActive({safe_path}); openFile({safe_path}, {safe_content}, {safe_lang}, false); switchToFile({safe_path});"
             )
         self._pending_switch_path = None
+
+    def _deliver_to_editor(self, file_path: str, content: str, language: str,
+                           activate: bool) -> bool:
+        """The single choke point for handing file text to the Monaco renderer.
+
+        Every delivery path (user click, tab switch, crash recovery, XHR
+        fallback) routes through here so the size ceiling cannot be bypassed by
+        choosing a different path. Returns True if delivered, False if the file
+        was refused as too large.
+
+        Three tiers:
+          <= _LARGE_CHAR_THRESHOLD  -> inline openFile (fastest, safest)
+          <= _MAX_EDITOR_CHARS      -> same-origin XHR openFileFromUri: stays
+                                       editable, but the text never becomes one
+                                       multi-MB JS string literal (the exact V8
+                                       allocation that crashed the renderer)
+          >  _MAX_EDITOR_CHARS      -> refuse with a read-only notice tab
+        """
+        fp = file_path or ""
+        fdata = self._open_files.get(fp) or {}
+        safe_path = json.dumps(fp)
+        safe_lang = json.dumps(language or "plaintext")
+        act = "true" if activate else "false"
+        prefix = f"setIntendedActive({safe_path}); " if activate else ""
+
+        # Tier 3: refused. fdata carries the true size (content was cleared in
+        # open_file so a 20MB+ buffer is never retained or shipped).
+        if fdata.get("too_large"):
+            n = int(fdata.get("size") or 0)
+            safe_name = json.dumps(os.path.basename(fp) or fp)
+            self._safe_run_js(
+                f"openTooLarge({safe_path}, {n}, {safe_lang}, {act}, {safe_name});"
+            )
+            log.warning(
+                f"[WebviewPanel] REFUSED oversized file ({n} chars > "
+                f"{_MAX_EDITOR_CHARS}): {fp}"
+            )
+            return False
+
+        n = len(content or "")
+
+        # Tier 2: large but under the ceiling -> same-origin XHR.
+        if fp and n > _LARGE_CHAR_THRESHOLD:
+            try:
+                file_uri = _cache_large_file_uri(fp, content)
+                safe_uri = json.dumps(file_uri)
+                self._safe_run_js(
+                    f"{prefix}openFileFromUri({safe_path}, {safe_lang}, "
+                    f"{safe_uri}, {act});"
+                )
+                log.info(
+                    f"[WebviewPanel] large file via same-origin cache: "
+                    f"{fp} ({n} chars)"
+                )
+                return True
+            except Exception as e:
+                log.warning(
+                    f"[WebviewPanel] large-file cache failed ({e}); "
+                    f"falling back to inline openFile for {fp}"
+                )
+
+        # Tier 1: small file -> inline openFile.
+        safe_content = json.dumps(content or "")
+        self._safe_run_js(
+            f"{prefix}openFile({safe_path}, {safe_content}, {safe_lang}, {act});"
+        )
+        return True
 
     def _open_file_js(self, file_path: str, content: str, language: str, *, priority: bool = True):
         """Send openFile() to JS, heavily throttled during first 60s warmup.
@@ -914,56 +1066,27 @@ class WebviewPanel(QWidget):
             self._open_timer: Optional[QTimer] = None
 
         def _run_open_now(fp: str, c: str, lang: str, activate: bool):
-            safe_path = json.dumps(fp)
-            safe_lang = json.dumps(lang)
-
             # NOTE: Do NOT mark as delivered before the JS call succeeds.
             # The JS ACK (bridge.onContentDelivered) is the reliable signal.
             # Premature marking caused "empty editor" bugs when the JS call
             # was throttled or the page hadn't loaded yet.
-
-            # USER CLICK / priority activate: always inline openFile.
-            # openFileFromUri paints "// Loading..." then XHRs; on OneDrive /
-            # QWebEngine that XHR often hangs, so search/tree single-click
-            # looked broken until a later retry. Python already has the bytes.
+            #
+            # ALL paths (user click, background restore) now go through
+            # _deliver_to_editor, the single choke point that enforces the size
+            # ceiling. Previously this function had its own inline logic and a
+            # user click (activate=True) RETURNED before the 200 KB guard, so a
+            # 40 MB file was json.dumps()'d into one JS string literal and
+            # crashed the renderer (SIGTRAP/133). Do not reintroduce a direct
+            # openFile() here.
+            if fp and hasattr(self, "_large_fallback_done"):
+                # Allow the XHR fallback to be re-attempted for a fresh open.
+                self._large_fallback_done.discard(fp)
+            self._deliver_to_editor(fp, c, lang, activate)
             if activate:
-                safe_content = json.dumps(c)
-                self._safe_run_js(
-                    f"setIntendedActive({safe_path}); "
-                    f"openFile({safe_path}, {safe_content}, {safe_lang}, true);"
-                )
                 log.info(
-                    f"[WebviewPanel] priority open via inline openFile: "
+                    f"[WebviewPanel] priority open via _deliver_to_editor: "
                     f"{fp} ({len(c)} chars)"
                 )
-                return
-
-            # Background / bulk restore only: large files may use same-origin
-            # XHR to avoid shipping multi-MB strings during warmup.
-            try:
-                if fp and len(c) > _LARGE_CHAR_THRESHOLD:
-                    if hasattr(self, "_large_fallback_done"):
-                        self._large_fallback_done.discard(fp)
-                    file_uri = _cache_large_file_uri(fp, c)
-                    safe_uri = json.dumps(file_uri)
-                    self._safe_run_js(
-                        f"openFileFromUri({safe_path}, {safe_lang}, {safe_uri}, false);"
-                    )
-                    log.info(
-                        f"[WebviewPanel] large file via same-origin cache: "
-                        f"{fp} ({len(c)} chars)"
-                    )
-                    return
-            except Exception as e:
-                log.warning(
-                    f"[WebviewPanel] large-file cache failed ({e}); "
-                    f"falling back to inline openFile for {fp}"
-                )
-
-            safe_content = json.dumps(c)
-            self._safe_run_js(
-                f"openFile({safe_path}, {safe_content}, {safe_lang}, false);"
-            )
 
         # Dedupe: keep only the latest call per file
         if file_path:

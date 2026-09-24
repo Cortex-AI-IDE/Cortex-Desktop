@@ -1106,11 +1106,9 @@ class ProjectHealthScanner:
           anything with an ``if __name__ == "__main__"`` guard, files under
           ``tests/``/``scripts/``/``examples/`` etc.). The stem-mention rule
           catches dynamic loading: providers registered as
-          ``"src.ai.providers.x_provider"`` strings and nested source trees
-          whose internal imports do not resolve from the project root.
-          PyInstaller hooks (``hook-<module>.py``) never reach this rule at
-          all: they are exempted by filename convention in step 2, because a
-          hyphenated name cannot be tokenised into a stem mention.
+          ``"src.ai.providers.x_provider"`` strings, PyInstaller hooks named
+          in ``cortex.spec``, and nested source trees whose internal imports
+          do not resolve from the project root.
         * Broken files are skipped: their symbol list is unreliable.
 
         Remaining blind spots (documented in the payload note): names built
@@ -1224,18 +1222,6 @@ class ProjectHealthScanner:
             if fname == "__init__.py" or fname in _ENTRY_FILENAMES:
                 continue
             if fname.startswith("test_") or fname.endswith("_test.py"):
-                continue
-            # PyInstaller loads hooks by FILENAME convention
-            # (``hook-<module>.py`` in a directory on its hook search path),
-            # never by import, so no file in the project references them and
-            # the stem-mention rescue below cannot help either: the census
-            # tokeniser only emits ``[A-Za-z_]\w*``, every hook name contains
-            # a hyphen, so its hit count is structurally stuck at zero. A
-            # hyphenated filename can never be imported as a module at all,
-            # which is also why it can never have an import edge. A hook is a
-            # build input, not dead code - exempt for the same "entry point
-            # by convention" reason as _ENTRY_FILENAMES above.
-            if fname.startswith("hook-"):
                 continue
             parts = fh.rel.split("/")
             if any(seg in _ENTRY_DIRS for seg in parts[:-1]):
