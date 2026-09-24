@@ -3473,7 +3473,34 @@ class CortexMainWindow(QMainWindow):
         if file_ext in office_extensions:
             self._open_office_file(filepath)
             return
-            
+
+        # ── Oversized-file gate (before reading a single byte) ──────────
+        # A 40 MB JSON file read + json.dumps()'d into one runJavaScript
+        # string crashed the shared Chromium renderer (SIGTRAP/133). Refuse
+        # here so the file is never even loaded into Python memory; the panel
+        # shows a read-only notice tab instead. Ceiling mirrors
+        # webview_panel._MAX_EDITOR_CHARS.
+        try:
+            _size = path.stat().st_size
+        except Exception:
+            _size = 0
+        if _size > 20_000_000:
+            log.warning(
+                f"[Oversized] refusing to open {filepath} "
+                f"({_size} bytes > 20MB editor limit)"
+            )
+            # Hand the panel the path + size only; it renders a read-only
+            # notice tab and never receives file content.
+            try:
+                self._webview_panel.open_too_large(
+                    filepath, _size, detect_language(filepath), priority=priority
+                )
+            except Exception as e:
+                log.error(f"[Oversized] could not show notice for {filepath}: {e}")
+            self._update_status_file(filepath)
+            return
+
+
         # Initialize file snapshots dict for diff generation
         if not hasattr(self, '_file_snapshots'):
             self._file_snapshots = {}

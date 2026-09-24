@@ -554,6 +554,78 @@
             display: block;
         }
 
+        /* ── Oversized-file notice ────────────────────────────────────────
+           Read-only tab shown instead of loading a file above the editor's
+           size ceiling. Owns the panel like #image-preview / #sheet-preview
+           (flex:1 sibling), so the flex layout lives here, not inline. */
+        #too-large-view {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: #1e1e1e;
+            padding: 24px;
+        }
+        #too-large-view.hidden { display: none; }
+        .too-large-card {
+            max-width: 560px;
+            text-align: center;
+            font-family: var(--font-ui);
+            color: #cccccc;
+        }
+        .too-large-icon {
+            font-size: 40px;
+            line-height: 1;
+            color: #d7a44a;
+            margin-bottom: 14px;
+        }
+        .too-large-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e6e6e6;
+            margin-bottom: 10px;
+        }
+        .too-large-name {
+            font-family: var(--font-mono, monospace);
+            font-size: 13px;
+            color: #6fb3e8;
+            word-break: break-all;
+            margin-bottom: 6px;
+        }
+        .too-large-detail {
+            font-size: 13px;
+            color: #969696;
+            margin-bottom: 16px;
+        }
+        .too-large-hint {
+            font-size: 12px;
+            line-height: 1.6;
+            color: #8a8a8a;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 14px;
+        }
+        .too-large-hint code {
+            font-family: var(--font-mono, monospace);
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 3px;
+            padding: 1px 5px;
+            color: #cccccc;
+        }
+        body.light-theme #too-large-view { background: #E4E1D8; }
+        body.light-theme .too-large-card { color: #3A3833; }
+        body.light-theme .too-large-title { color: #1A1814; }
+        body.light-theme .too-large-name { color: #0a5a99; }
+        body.light-theme .too-large-detail { color: #6B6860; }
+        body.light-theme .too-large-hint {
+            color: #6B6860;
+            border-top-color: rgba(26, 24, 20, 0.12);
+        }
+        body.light-theme .too-large-hint code {
+            background: rgba(26, 24, 20, 0.08);
+            color: #1A1814;
+        }
+
         body.light-theme #sheet-preview { background: #E4E1D8; }
         body.light-theme #sheet-preview-info {
             color: #6B6860;
@@ -1059,6 +1131,24 @@
             </div>
             <div id="sheet-preview-body"></div>
             <div id="sheet-tabs" role="tablist" aria-label="Sheets"></div>
+        </div>
+        <!-- Oversized-file notice: a file above the editor's size ceiling is
+             never inlined into the renderer (a 40MB JSON string literal crashed
+             the Chromium process, SIGTRAP/133). Instead it opens this read-only
+             tab explaining why. No content is loaded, nothing can be saved. -->
+        <div id="too-large-view" class="hidden" role="region" aria-label="File too large">
+            <div class="too-large-card">
+                <div class="too-large-icon" aria-hidden="true">&#9888;</div>
+                <div class="too-large-title">File too large to open</div>
+                <div class="too-large-name" id="too-large-name"></div>
+                <div class="too-large-detail" id="too-large-detail"></div>
+                <div class="too-large-hint">
+                    This file is larger than the editor's safe limit, so opening it
+                    would crash the editor. Use an external tool, or the Cortex AI
+                    terminal (<code>head</code>, <code>jq</code>, <code>grep</code>) to
+                    inspect it.
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2135,6 +2225,9 @@ function setEditorContent(filePath) {
     // active tab, because we never touch another file's model.
     var f = openFiles[filePath];
     if (!f || !editor) return;
+    // Oversized files have no Monaco model (content was never loaded). Do not
+    // create one, that would defeat the whole point of refusing the file.
+    if (f.isTooLarge) return;
     var m = _getOrCreateModel(f);
     if (!m) return;
     var newVal = f.content || '';
@@ -2297,6 +2390,9 @@ function renderTabs() {
             container.classList.add('hidden');
             document.getElementById('image-preview').classList.add('hidden');
             _restoreSheetPreview(activeFilePath);
+        } else if (_activeF && _activeF.isTooLarge) {
+            // Oversized notice owns the panel, like image/sheet previews.
+            _restoreTooLarge(activeFilePath);
         } else {
             container.classList.remove('hidden');
         }
@@ -2408,6 +2504,7 @@ function switchToFile(filePath) {
         document.getElementById('editor-container').classList.add('hidden');
         document.getElementById('no-files-hint').style.display = 'none';
         hideSheetPreview();
+        hideTooLarge();
         document.getElementById('image-preview').classList.remove('hidden');
         activeFilePath = filePath;
         updateFilePathBar();
@@ -2421,7 +2518,17 @@ function switchToFile(filePath) {
         document.getElementById('editor-container').classList.add('hidden');
         document.getElementById('no-files-hint').style.display = 'none';
         hideImagePreview();
+        hideTooLarge();
         document.getElementById('sheet-preview').classList.remove('hidden');
+        activeFilePath = filePath;
+        updateFilePathBar();
+        renderTabs();
+        _notifyActiveFile();
+        return;
+    }
+    // Oversized-file notice tab: no content, no Monaco model, read-only.
+    if (openFiles[filePath].isTooLarge) {
+        _restoreTooLarge(filePath);
         activeFilePath = filePath;
         updateFilePathBar();
         renderTabs();
@@ -2430,6 +2537,7 @@ function switchToFile(filePath) {
     }
     hideImagePreview();
     hideSheetPreview();
+    hideTooLarge();
     document.getElementById('editor-container').classList.remove('hidden');
     if (filePath === activeFilePath && editor) {
         // Already showing this file, just ensure content is up to date and return.
@@ -2595,6 +2703,70 @@ function showImagePreview(filePath, dataUri, fileSize) {
 
 function hideImagePreview() {
     document.getElementById('image-preview').classList.add('hidden');
+}
+
+// ── Oversized-file notice tab ────────────────────────────────────────────
+// Python refuses to hand any file above its size ceiling to the renderer
+// (a 40MB JSON string literal crashed Chromium, SIGTRAP/133). It calls
+// openTooLarge() instead. This registers the path in openFiles with
+// isTooLarge so the tab lifecycle (switchToFile / close / renderTabs) treats
+// it like an image or sheet tab: no Monaco model, no content, and no way to
+// save it back over the real file (Ctrl+S only reads editor.getModel()).
+function hideTooLarge() {
+    document.getElementById('too-large-view').classList.add('hidden');
+}
+
+function _humanBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function _restoreTooLarge(filePath) {
+    var f = openFiles[filePath];
+    var name = (f && f.displayName) || filePath.split(/[/\\]/).pop();
+    document.getElementById('too-large-name').textContent = name;
+    document.getElementById('too-large-detail').textContent =
+        (f && f.size ? _humanBytes(f.size) + ' — ' : '') +
+        'too large for the in-editor limit.';
+    document.getElementById('editor-container').classList.add('hidden');
+    document.getElementById('no-files-hint').style.display = 'none';
+    hideImagePreview();
+    hideSheetPreview();
+    document.getElementById('too-large-view').classList.remove('hidden');
+}
+
+// Called by Python: openTooLarge(path, sizeChars, language, activate, name)
+function openTooLarge(filePath, sizeChars, language, activate, displayName) {
+    if (activate === undefined) activate = true;
+    var _hint = document.getElementById('no-files-hint');
+    if (_hint) _hint.style.display = 'none';
+    var shouldActivate = activate && (_intendedActiveFile === null || filePath === _intendedActiveFile);
+
+    if (!openFiles[filePath]) {
+        openFiles[filePath] = {
+            path: filePath,
+            language: language || 'plaintext',
+            content: '',
+            modified: false,
+            isTooLarge: true,
+            size: Number(sizeChars) || 0,
+            displayName: displayName || ''
+        };
+        openOrder.push(filePath);
+    } else {
+        openFiles[filePath].isTooLarge = true;
+        openFiles[filePath].size = Number(sizeChars) || 0;
+        if (displayName) openFiles[filePath].displayName = displayName;
+    }
+    if (shouldActivate || !activeFilePath) switchToFile(filePath);
+    else renderTabs();
+    if (bridge && bridge.onContentDelivered) {
+        try { bridge.onContentDelivered(filePath, 0); } catch (e) {}
+    }
+    console.warn('[Editor] refused oversized file: ' + filePath +
+        ' (' + (Number(sizeChars) || 0) + ' chars)');
 }
 
 // ── Rich preview: spreadsheet grids (.xlsx/.xls/.csv) AND PDF pages ──
@@ -3282,7 +3454,10 @@ function closeFile(filePath) {
                 _restoreImagePreview(activeFilePath);
             } else if (openFiles[activeFilePath] && openFiles[activeFilePath].isSheet) {
                 _restoreSheetPreview(activeFilePath);
+            } else if (openFiles[activeFilePath] && openFiles[activeFilePath].isTooLarge) {
+                _restoreTooLarge(activeFilePath);
             } else {
+                hideTooLarge();
                 setEditorContent(activeFilePath);
             }
         } else {
@@ -3290,6 +3465,7 @@ function closeFile(filePath) {
             // Keep model content, clearing it triggers tokenization that
             // makes the next openFile() more expensive (empty→content wave).
             // Just hide the editor area; the model will be overwritten on next open.
+            hideTooLarge();
             document.getElementById('no-files-hint').style.display = 'flex';
             document.getElementById('editor-container').classList.add('hidden');
         }
@@ -3334,6 +3510,7 @@ function closeAllFiles() {
     document.getElementById('editor-container').classList.add('hidden');
     hideImagePreview();
     hideSheetPreview();
+    hideTooLarge();
     renderTabs();
     // Release switching guard after a short settle
     switchStopTimer = setTimeout(function() {
