@@ -1,0 +1,1672 @@
+{
+ "files": [
+  {
+   "old": "src\\agent\\src\\DelFiles\\destructiveCommandWarning.py",
+   "new": "src\\agent\\src\\DelFiles\\destructive_command_warning.py",
+   "stub": false,
+   "size": 8486,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\api\\promptCacheBreakDetection.py",
+   "new": "src\\agent\\src\\api\\prompt_cache_break_detection.py",
+   "stub": true,
+   "size": 112,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\autoModeState.py",
+   "new": "src\\agent\\src\\auto_mode_state.py",
+   "stub": true,
+   "size": 170,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\bashClassifier.py",
+   "new": "src\\agent\\src\\bash_classifier.py",
+   "stub": true,
+   "size": 171,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\bridge\\bridgeConfig.py",
+   "new": "src\\agent\\src\\bridge\\bridge_config.py",
+   "stub": false,
+   "size": 641,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\classifierApprovals.py",
+   "new": "src\\agent\\src\\classifier_approvals.py",
+   "stub": true,
+   "size": 177,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\classifierDecision.py",
+   "new": "src\\agent\\src\\classifier_decision.py",
+   "stub": true,
+   "size": 175,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\constants\\errorIds.py",
+   "new": "src\\agent\\src\\constants\\error_ids.py",
+   "stub": false,
+   "size": 460,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\constants\\systemPromptSections.py",
+   "new": "src\\agent\\src\\constants\\system_prompt_sections.py",
+   "stub": false,
+   "size": 1149,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\denialTracking.py",
+   "new": "src\\agent\\src\\denial_tracking.py",
+   "stub": true,
+   "size": 171,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\envUtils.py",
+   "new": "src\\agent\\src\\env_utils.py",
+   "stub": true,
+   "size": 165,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\hooks\\toolPermission\\permissionLogging.py",
+   "new": "src\\agent\\src\\hooks\\toolPermission\\permission_logging.py",
+   "stub": false,
+   "size": 109,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\hooks\\useDiffData.py",
+   "new": "src\\agent\\src\\hooks\\use_diff_data.py",
+   "stub": false,
+   "size": 5602,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\hooks\\useDiffInIDE.py",
+   "new": "src\\agent\\src\\hooks\\use_diff_in_ide.py",
+   "stub": false,
+   "size": 19782,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\internalWrites.py",
+   "new": "src\\agent\\src\\internal_writes.py",
+   "stub": true,
+   "size": 171,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\lazySchema.py",
+   "new": "src\\agent\\src\\lazy_schema.py",
+   "stub": true,
+   "size": 168,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\crossProjectMemory.py",
+   "new": "src\\agent\\src\\memdir\\cross_project_memory.py",
+   "stub": false,
+   "size": 18777,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\findRelevantMemories.py",
+   "new": "src\\agent\\src\\memdir\\find_relevant_memories.py",
+   "stub": false,
+   "size": 8804,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\memoryAge.py",
+   "new": "src\\agent\\src\\memdir\\memory_age.py",
+   "stub": true,
+   "size": 982,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\memoryConsolidation.py",
+   "new": "src\\agent\\src\\memdir\\memory_consolidation.py",
+   "stub": false,
+   "size": 18315,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\memoryScan.py",
+   "new": "src\\agent\\src\\memdir\\memory_scan.py",
+   "stub": false,
+   "size": 5052,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\semanticSearch.py",
+   "new": "src\\agent\\src\\memdir\\semantic_search.py",
+   "stub": false,
+   "size": 18968,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\memoryShapeTelemetry.py",
+   "new": "src\\agent\\src\\memory_shape_telemetry.py",
+   "stub": true,
+   "size": 177,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\model\\antModels.py",
+   "new": "src\\agent\\src\\model\\ant_models.py",
+   "stub": true,
+   "size": 173,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\permissions\\dangerousPatterns.py",
+   "new": "src\\agent\\src\\permissions\\dangerous_patterns.py",
+   "stub": true,
+   "size": 187,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\privacyLevel.py",
+   "new": "src\\agent\\src\\privacy_level.py",
+   "stub": true,
+   "size": 169,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\AgentSummary\\agentSummary.py",
+   "new": "src\\agent\\src\\services\\AgentSummary\\agent_summary.py",
+   "stub": false,
+   "size": 8631,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\PromptSuggestion\\promptSuggestion.py",
+   "new": "src\\agent\\src\\services\\PromptSuggestion\\prompt_suggestion.py",
+   "stub": false,
+   "size": 21649,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\SessionMemory\\sessionMemory.py",
+   "new": "src\\agent\\src\\services\\SessionMemory\\session_memory.py",
+   "stub": false,
+   "size": 23091,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\SessionMemory\\sessionMemoryUtils.py",
+   "new": "src\\agent\\src\\services\\SessionMemory\\session_memory_utils.py",
+   "stub": false,
+   "size": 7414,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\compact\\autoCompact.py",
+   "new": "src\\agent\\src\\services\\compact\\auto_compact.py",
+   "stub": false,
+   "size": 20914,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\compact\\microCompact.py",
+   "new": "src\\agent\\src\\services\\compact\\micro_compact.py",
+   "stub": false,
+   "size": 10492,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\compact\\postCompactCleanup.py",
+   "new": "src\\agent\\src\\services\\compact\\post_compact_cleanup.py",
+   "stub": false,
+   "size": 2968,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\compact\\sessionMemoryCompact.py",
+   "new": "src\\agent\\src\\services\\compact\\session_memory_compact.py",
+   "stub": false,
+   "size": 13292,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\extractMemories\\extractMemories.py",
+   "new": "src\\agent\\src\\services\\extractMemories\\extract_memories.py",
+   "stub": false,
+   "size": 430,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\mcp\\mcpStringUtils.py",
+   "new": "src\\agent\\src\\services\\mcp\\mcp_string_utils.py",
+   "stub": true,
+   "size": 185,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\mcp\\vscodeSdkMcp.py",
+   "new": "src\\agent\\src\\services\\mcp\\vscode_sdk_mcp.py",
+   "stub": false,
+   "size": 453,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\oauth\\authCodeListener.py",
+   "new": "src\\agent\\src\\services\\oauth\\auth_code_listener.py",
+   "stub": false,
+   "size": 10779,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\remoteManagedSettings\\syncCacheState.py",
+   "new": "src\\agent\\src\\services\\remoteManagedSettings\\sync_cache_state.py",
+   "stub": true,
+   "size": 203,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\tokenEstimation.py",
+   "new": "src\\agent\\src\\services\\token_estimation.py",
+   "stub": false,
+   "size": 1886,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\toolUseSummary.py",
+   "new": "src\\agent\\src\\services\\tool_use_summary.py",
+   "stub": false,
+   "size": 315,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\sessionTranscript\\sessionTranscript.py",
+   "new": "src\\agent\\src\\sessionTranscript\\session_transcript.py",
+   "stub": true,
+   "size": 193,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\settingsCache.py",
+   "new": "src\\agent\\src\\settings_cache.py",
+   "stub": true,
+   "size": 170,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\shell\\shellProvider.py",
+   "new": "src\\agent\\src\\shell\\shell_provider.py",
+   "stub": false,
+   "size": 3789,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\skills\\bundledSkills.py",
+   "new": "src\\agent\\src\\skills\\bundled_skills.py",
+   "stub": false,
+   "size": 9978,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\skills\\loadSkillsDir.py",
+   "new": "src\\agent\\src\\skills\\load_skills_dir.py",
+   "stub": false,
+   "size": 44351,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\skills\\mcpSkillBuilders.py",
+   "new": "src\\agent\\src\\skills\\mcp_skill_builders.py",
+   "stub": false,
+   "size": 2201,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\state\\AppStateStore.py",
+   "new": "src\\agent\\src\\state\\app_state_store.py",
+   "stub": false,
+   "size": 525,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\task\\TaskOutput.py",
+   "new": "src\\agent\\src\\task\\task_output.py",
+   "stub": true,
+   "size": 172,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\DreamTask\\DreamTask.py",
+   "new": "src\\agent\\src\\tasks\\DreamTask\\dream_task.py",
+   "stub": false,
+   "size": 1228,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\LocalAgentTask\\LocalAgentTask.py",
+   "new": "src\\agent\\src\\tasks\\LocalAgentTask\\local_agent_task.py",
+   "stub": true,
+   "size": 194,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\MonitorMcpTask\\MonitorMcpTask.py",
+   "new": "src\\agent\\src\\tasks\\MonitorMcpTask\\monitor_mcp_task.py",
+   "stub": true,
+   "size": 194,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\stopTask.py",
+   "new": "src\\agent\\src\\tasks\\stop_task.py",
+   "stub": true,
+   "size": 173,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\agentMemory.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\agent_memory.py",
+   "stub": false,
+   "size": 6681,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\agentToolUtils.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\agent_tool_utils.py",
+   "stub": false,
+   "size": 24085,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\built-in\\exploreAgent.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\built-in\\explore_agent.py",
+   "stub": false,
+   "size": 5048,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\builtInAgents.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\built_in_agents.py",
+   "stub": false,
+   "size": 5426,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\forkSubagent.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\fork_subagent.py",
+   "stub": false,
+   "size": 8718,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\loadAgentsDir.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\load_agents_dir.py",
+   "stub": true,
+   "size": 186,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\resumeAgent.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\resume_agent.py",
+   "stub": false,
+   "size": 11824,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AskUserQuestionTool\\AskUserQuestionTool.py",
+   "new": "src\\agent\\src\\tools\\AskUserQuestionTool\\ask_user_question_tool.py",
+   "stub": false,
+   "size": 9197,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\BashTool.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\bash_tool.py",
+   "stub": false,
+   "size": 9784,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\bashCommandHelpers.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\bash_command_helpers.py",
+   "stub": false,
+   "size": 10918,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\bashCommandParser.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\bash_command_parser.py",
+   "stub": false,
+   "size": 561,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\bashPermissions.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\bash_permissions.py",
+   "stub": false,
+   "size": 91455,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\bashSecurity.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\bash_security.py",
+   "stub": false,
+   "size": 56688,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\commandSemantics.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\command_semantics.py",
+   "stub": false,
+   "size": 7076,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\destructiveCommandWarning.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\destructive_command_warning.py",
+   "stub": false,
+   "size": 4662,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\modeValidation.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\mode_validation.py",
+   "stub": false,
+   "size": 5057,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\pathValidation.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\path_validation.py",
+   "stub": false,
+   "size": 51929,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\sedValidation.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\sed_validation.py",
+   "stub": false,
+   "size": 26600,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\shouldUseSandbox.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\should_use_sandbox.py",
+   "stub": false,
+   "size": 1406,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool\\toolName.py",
+   "new": "src\\agent\\src\\tools\\BashTool\\tool_name.py",
+   "stub": false,
+   "size": 563,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\EnterPlanModeTool\\EnterPlanModeTool.py",
+   "new": "src\\agent\\src\\tools\\EnterPlanModeTool\\enter_plan_mode_tool.py",
+   "stub": false,
+   "size": 5480,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileEditTool\\FileEditTool.py",
+   "new": "src\\agent\\src\\tools\\FileEditTool\\file_edit_tool.py",
+   "stub": false,
+   "size": 44324,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileEditTool\\fileEditTypes.py",
+   "new": "src\\agent\\src\\tools\\FileEditTool\\file_edit_types.py",
+   "stub": false,
+   "size": 8956,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileReadTool\\FileReadTool.py",
+   "new": "src\\agent\\src\\tools\\FileReadTool\\file_read_tool.py",
+   "stub": false,
+   "size": 73985,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileReadTool\\imageProcessor.py",
+   "new": "src\\agent\\src\\tools\\FileReadTool\\image_processor.py",
+   "stub": false,
+   "size": 2159,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileWriteTool\\FileWriteTool.py",
+   "new": "src\\agent\\src\\tools\\FileWriteTool\\file_write_tool.py",
+   "stub": false,
+   "size": 33408,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\GlobTool\\GlobTool.py",
+   "new": "src\\agent\\src\\tools\\GlobTool\\glob_tool.py",
+   "stub": false,
+   "size": 16559,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\GrepTool\\GrepTool.py",
+   "new": "src\\agent\\src\\tools\\GrepTool\\grep_tool.py",
+   "stub": false,
+   "size": 53505,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\ListMcpResourcesTool\\ListMcpResourcesTool.py",
+   "new": "src\\agent\\src\\tools\\ListMcpResourcesTool\\list_mcp_resources_tool.py",
+   "stub": false,
+   "size": 5314,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\NotebookEditTool\\NotebookEditTool.py",
+   "new": "src\\agent\\src\\tools\\NotebookEditTool\\notebook_edit_tool.py",
+   "stub": false,
+   "size": 18049,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PlanBuildTool\\PlanBuildTool.py",
+   "new": "src\\agent\\src\\tools\\PlanBuildTool\\plan_build_tool.py",
+   "stub": false,
+   "size": 7530,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\PowerShellTool.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\power_shell_tool.py",
+   "stub": false,
+   "size": 12133,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\clmTypes.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\clm_types.py",
+   "stub": false,
+   "size": 7226,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\commandSemantics.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\command_semantics.py",
+   "stub": false,
+   "size": 4813,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\destructiveCommandWarning.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\destructive_command_warning.py",
+   "stub": false,
+   "size": 3738,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\gitSafety.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\git_safety.py",
+   "stub": false,
+   "size": 8751,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\modeValidation.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\mode_validation.py",
+   "stub": false,
+   "size": 20492,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\powershellPermissions.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\powershell_permissions.py",
+   "stub": false,
+   "size": 42544,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\powershellSecurity.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\powershell_security.py",
+   "stub": false,
+   "size": 29268,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool\\toolName.py",
+   "new": "src\\agent\\src\\tools\\PowerShellTool\\tool_name.py",
+   "stub": false,
+   "size": 71,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SementicSearch\\SementicSearchTool.py",
+   "new": "src\\agent\\src\\tools\\SementicSearch\\sementic_search_tool.py",
+   "stub": false,
+   "size": 21175,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SendMessageTool\\SendMessageTool.py",
+   "new": "src\\agent\\src\\tools\\SendMessageTool\\send_message_tool.py",
+   "stub": false,
+   "size": 18734,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SkillTool\\SkillTool.py",
+   "new": "src\\agent\\src\\tools\\SkillTool\\skill_tool.py",
+   "stub": false,
+   "size": 10990,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\TodoWriteTool\\TodoWriteTool.py",
+   "new": "src\\agent\\src\\tools\\TodoWriteTool\\todo_write_tool.py",
+   "stub": false,
+   "size": 11426,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\ToolSearchTool\\ToolSearchTool.py",
+   "new": "src\\agent\\src\\tools\\ToolSearchTool\\tool_search_tool.py",
+   "stub": false,
+   "size": 17940,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\WebFetchTool\\WebFetchTool.py",
+   "new": "src\\agent\\src\\tools\\WebFetchTool\\web_fetch_tool.py",
+   "stub": false,
+   "size": 1015,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\WebSearchTool\\WebSearchTool.py",
+   "new": "src\\agent\\src\\tools\\WebSearchTool\\web_search_tool.py",
+   "stub": false,
+   "size": 11948,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\ShellCommand.py",
+   "new": "src\\agent\\src\\utils\\shell_command.py",
+   "stub": false,
+   "size": 17539,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\agentId.py",
+   "new": "src\\agent\\src\\utils\\agent_id.py",
+   "stub": false,
+   "size": 627,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\argumentSubstitution.py",
+   "new": "src\\agent\\src\\utils\\argument_substitution.py",
+   "stub": false,
+   "size": 4694,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\configConstants.py",
+   "new": "src\\agent\\src\\utils\\config_constants.py",
+   "stub": false,
+   "size": 109,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\contextAnalysis.py",
+   "new": "src\\agent\\src\\utils\\context_analysis.py",
+   "stub": false,
+   "size": 425,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\frontmatterParser.py",
+   "new": "src\\agent\\src\\utils\\frontmatter_parser.py",
+   "stub": false,
+   "size": 4023,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\fsOperations.py",
+   "new": "src\\agent\\src\\utils\\fs_operations.py",
+   "stub": false,
+   "size": 20359,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\git\\gitFilesystem.py",
+   "new": "src\\agent\\src\\utils\\git\\git_filesystem.py",
+   "stub": false,
+   "size": 1163,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\hooks\\hooksConfigSnapshot.py",
+   "new": "src\\agent\\src\\utils\\hooks\\hooks_config_snapshot.py",
+   "stub": false,
+   "size": 987,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\inProcessTeammateHelpers.py",
+   "new": "src\\agent\\src\\utils\\in_process_teammate_helpers.py",
+   "stub": false,
+   "size": 875,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\markdownConfigLoader.py",
+   "new": "src\\agent\\src\\utils\\markdown_config_loader.py",
+   "stub": false,
+   "size": 4866,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\memory\\memoryTypes.py",
+   "new": "src\\agent\\src\\utils\\memory\\memory_types.py",
+   "stub": false,
+   "size": 1963,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\model\\modelAllowlist.py",
+   "new": "src\\agent\\src\\utils\\model\\model_allowlist.py",
+   "stub": false,
+   "size": 11872,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\model\\modelConfigs.py",
+   "new": "src\\agent\\src\\utils\\model\\model_configs.py",
+   "stub": false,
+   "size": 10257,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\model\\modelOptions.py",
+   "new": "src\\agent\\src\\utils\\model\\model_options.py",
+   "stub": false,
+   "size": 5470,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\model\\modelStrings.py",
+   "new": "src\\agent\\src\\utils\\model\\model_strings.py",
+   "stub": false,
+   "size": 7497,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\PermissionMode.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_mode.py",
+   "stub": false,
+   "size": 11389,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\PermissionPromptToolResultSchema.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_prompt_tool_result_schema.py",
+   "stub": false,
+   "size": 12897,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\PermissionResult.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_result.py",
+   "stub": false,
+   "size": 308,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\PermissionRule.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_rule.py",
+   "stub": false,
+   "size": 10720,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\PermissionUpdate.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_update.py",
+   "stub": false,
+   "size": 1543,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\PermissionUpdateSchema.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_update_schema.py",
+   "stub": false,
+   "size": 109,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\pathValidation.py",
+   "new": "src\\agent\\src\\utils\\permissions\\path_validation.py",
+   "stub": false,
+   "size": 1380,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionExplainer.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_explainer.py",
+   "stub": false,
+   "size": 16481,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionRuleParser.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_rule_parser.py",
+   "stub": false,
+   "size": 8379,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionSetup\\contextInit.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permissionSetup\\context_init.py",
+   "stub": false,
+   "size": 8197,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionSetup\\dangerousDetection.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permissionSetup\\dangerous_detection.py",
+   "stub": false,
+   "size": 9780,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionSetup\\dangerousPatterns.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permissionSetup\\dangerous_patterns.py",
+   "stub": false,
+   "size": 4508,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionSetup\\modeTransitions.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permissionSetup\\mode_transitions.py",
+   "stub": false,
+   "size": 5538,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionsLoader.py",
+   "new": "src\\agent\\src\\utils\\permissions\\permissions_loader.py",
+   "stub": false,
+   "size": 15491,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\shadowedRuleDetection.py",
+   "new": "src\\agent\\src\\utils\\permissions\\shadowed_rule_detection.py",
+   "stub": false,
+   "size": 16002,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\shellRuleMatching.py",
+   "new": "src\\agent\\src\\utils\\permissions\\shell_rule_matching.py",
+   "stub": false,
+   "size": 11401,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\yoloClassifier.py",
+   "new": "src\\agent\\src\\utils\\permissions\\yolo_classifier.py",
+   "stub": false,
+   "size": 55690,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\planModeV2.py",
+   "new": "src\\agent\\src\\utils\\plan_mode_v2.py",
+   "stub": false,
+   "size": 700,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\dependencyResolver.py",
+   "new": "src\\agent\\src\\utils\\plugins\\dependency_resolver.py",
+   "stub": false,
+   "size": 17885,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\hintRecommendation.py",
+   "new": "src\\agent\\src\\utils\\plugins\\hint_recommendation.py",
+   "stub": false,
+   "size": 13944,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\installedPluginsManager.py",
+   "new": "src\\agent\\src\\utils\\plugins\\installed_plugins_manager.py",
+   "stub": false,
+   "size": 53327,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\loadPluginAgents.py",
+   "new": "src\\agent\\src\\utils\\plugins\\load_plugin_agents.py",
+   "stub": false,
+   "size": 17130,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\loadPluginCommands.py",
+   "new": "src\\agent\\src\\utils\\plugins\\load_plugin_commands.py",
+   "stub": false,
+   "size": 23158,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\marketplaceHelpers.py",
+   "new": "src\\agent\\src\\utils\\plugins\\marketplace_helpers.py",
+   "stub": false,
+   "size": 9566,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\pluginAutoupdate.py",
+   "new": "src\\agent\\src\\utils\\plugins\\plugin_autoupdate.py",
+   "stub": false,
+   "size": 7506,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\pluginInstallationHelpers.py",
+   "new": "src\\agent\\src\\utils\\plugins\\plugin_installation_helpers.py",
+   "stub": false,
+   "size": 10987,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\pluginLoader.py",
+   "new": "src\\agent\\src\\utils\\plugins\\plugin_loader.py",
+   "stub": false,
+   "size": 5858,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\pluginOptionsStorage.py",
+   "new": "src\\agent\\src\\utils\\plugins\\plugin_options_storage.py",
+   "stub": false,
+   "size": 7883,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\pluginStartupCheck.py",
+   "new": "src\\agent\\src\\utils\\plugins\\plugin_startup_check.py",
+   "stub": false,
+   "size": 9648,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\plugins\\walkPluginMarkdown.py",
+   "new": "src\\agent\\src\\utils\\plugins\\walk_plugin_markdown.py",
+   "stub": false,
+   "size": 3549,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\powershell\\dangerousCmdlets.py",
+   "new": "src\\agent\\src\\utils\\powershell\\dangerous_cmdlets.py",
+   "stub": false,
+   "size": 6466,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\powershell\\staticPrefix.py",
+   "new": "src\\agent\\src\\utils\\powershell\\static_prefix.py",
+   "stub": false,
+   "size": 13625,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\promptShellExecution.py",
+   "new": "src\\agent\\src\\utils\\prompt_shell_execution.py",
+   "stub": false,
+   "size": 1529,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\searchStrategy.py",
+   "new": "src\\agent\\src\\utils\\search_strategy.py",
+   "stub": false,
+   "size": 4772,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\semanticBoolean.py",
+   "new": "src\\agent\\src\\utils\\semantic_boolean.py",
+   "stub": false,
+   "size": 109,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\sessionActivity.py",
+   "new": "src\\agent\\src\\utils\\session_activity.py",
+   "stub": false,
+   "size": 1006,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\sessionState.py",
+   "new": "src\\agent\\src\\utils\\session_state.py",
+   "stub": false,
+   "size": 1277,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\sessionStorage.py",
+   "new": "src\\agent\\src\\utils\\session_storage.py",
+   "stub": true,
+   "size": 177,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\settings\\managedPath.py",
+   "new": "src\\agent\\src\\utils\\settings\\managed_path.py",
+   "stub": false,
+   "size": 1081,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\settings\\pluginOnlyPolicy.py",
+   "new": "src\\agent\\src\\utils\\settings\\plugin_only_policy.py",
+   "stub": false,
+   "size": 2107,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\shell\\powershellDetection.py",
+   "new": "src\\agent\\src\\utils\\shell\\powershell_detection.py",
+   "stub": false,
+   "size": 2427,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\shell\\specPrefix.py",
+   "new": "src\\agent\\src\\utils\\shell\\spec_prefix.py",
+   "stub": false,
+   "size": 10674,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\sideQuery.py",
+   "new": "src\\agent\\src\\utils\\side_query.py",
+   "stub": false,
+   "size": 241,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\slowOperations.py",
+   "new": "src\\agent\\src\\utils\\slow_operations.py",
+   "stub": false,
+   "size": 1125,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\systemPrompt.py",
+   "new": "src\\agent\\src\\utils\\system_prompt.py",
+   "stub": false,
+   "size": 6522,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\systemPromptType.py",
+   "new": "src\\agent\\src\\utils\\system_prompt_type.py",
+   "stub": false,
+   "size": 1237,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\task\\diskOutput.py",
+   "new": "src\\agent\\src\\utils\\task\\disk_output.py",
+   "stub": true,
+   "size": 178,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\teammateContext.py",
+   "new": "src\\agent\\src\\utils\\teammate_context.py",
+   "stub": false,
+   "size": 510,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\toolErrors.py",
+   "new": "src\\agent\\src\\utils\\tool_errors.py",
+   "stub": false,
+   "size": 512,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\userPromptKeywords.py",
+   "new": "src\\agent\\src\\utils\\user_prompt_keywords.py",
+   "stub": false,
+   "size": 1680,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\voice\\voiceModeEnabled.py",
+   "new": "src\\agent\\src\\voice\\voice_mode_enabled.py",
+   "stub": false,
+   "size": 3094,
+   "target_exists": false,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\Task.py",
+   "new": "src\\agent\\src\\task.py",
+   "stub": true,
+   "size": 161,
+   "target_exists": true,
+   "pkg_clash": true
+  },
+  {
+   "old": "src\\agent\\src\\Tool.py",
+   "new": "src\\agent\\src\\tool.py",
+   "stub": false,
+   "size": 5051,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\UI.py",
+   "new": "src\\agent\\src\\ui.py",
+   "stub": true,
+   "size": 159,
+   "target_exists": true,
+   "pkg_clash": true
+  },
+  {
+   "old": "src\\agent\\src\\memdir\\memoryTypes.py",
+   "new": "src\\agent\\src\\memdir\\memory_types.py",
+   "stub": false,
+   "size": 20576,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool\\runAgent.py",
+   "new": "src\\agent\\src\\tools\\AgentTool\\run_agent.py",
+   "stub": false,
+   "size": 30884,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\WebFetchTool\\UI.py",
+   "new": "src\\agent\\src\\tools\\WebFetchTool\\ui.py",
+   "stub": false,
+   "size": 2351,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\abortController.py",
+   "new": "src\\agent\\src\\utils\\abort_controller.py",
+   "stub": false,
+   "size": 3729,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\agentContext.py",
+   "new": "src\\agent\\src\\utils\\agent_context.py",
+   "stub": true,
+   "size": 175,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\agentSwarmsEnabled.py",
+   "new": "src\\agent\\src\\utils\\agent_swarms_enabled.py",
+   "stub": false,
+   "size": 243,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\forkedAgent.py",
+   "new": "src\\agent\\src\\utils\\forked_agent.py",
+   "stub": false,
+   "size": 1377,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\shell\\outputLimits.py",
+   "new": "src\\agent\\src\\utils\\shell\\output_limits.py",
+   "stub": false,
+   "size": 236,
+   "target_exists": true,
+   "pkg_clash": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\stringUtils.py",
+   "new": "src\\agent\\src\\utils\\string_utils.py",
+   "stub": true,
+   "size": 175,
+   "target_exists": true,
+   "pkg_clash": false
+  }
+ ],
+ "dirs": [
+  {
+   "old": "src\\agent\\src\\utils\\permissions\\permissionSetup",
+   "new": "src\\agent\\src\\utils\\permissions\\permission_setup",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\remoteManagedSettings",
+   "new": "src\\agent\\src\\services\\remote_managed_settings",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\ListMcpResourcesTool",
+   "new": "src\\agent\\src\\tools\\list_mcp_resources_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\PromptSuggestion",
+   "new": "src\\agent\\src\\services\\prompt_suggestion",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AskUserQuestionTool",
+   "new": "src\\agent\\src\\tools\\ask_user_question_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\extractMemories",
+   "new": "src\\agent\\src\\services\\extract_memories",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\EnterPlanModeTool",
+   "new": "src\\agent\\src\\tools\\enter_plan_mode_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\SessionMemory",
+   "new": "src\\agent\\src\\services\\session_memory",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\ExitPlanModeTool",
+   "new": "src\\agent\\src\\tools\\exit_plan_mode_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\NotebookEditTool",
+   "new": "src\\agent\\src\\tools\\notebook_edit_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\processUserInput",
+   "new": "src\\agent\\src\\utils\\process_user_input",
+   "target_exists": true,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\AgentSummary",
+   "new": "src\\agent\\src\\services\\agent_summary",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SendMessageTool",
+   "new": "src\\agent\\src\\tools\\send_message_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\VisionAgentTool",
+   "new": "src\\agent\\src\\tools\\vision_agent_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\hooks\\toolPermission",
+   "new": "src\\agent\\src\\hooks\\tool_permission",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\LocalAgentTask",
+   "new": "src\\agent\\src\\tasks\\local_agent_task",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\MonitorMcpTask",
+   "new": "src\\agent\\src\\tasks\\monitor_mcp_task",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PowerShellTool",
+   "new": "src\\agent\\src\\tools\\power_shell_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SementicSearch",
+   "new": "src\\agent\\src\\tools\\sementic_search",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\ToolSearchTool",
+   "new": "src\\agent\\src\\tools\\tool_search_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileWriteTool",
+   "new": "src\\agent\\src\\tools\\file_write_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\PlanBuildTool",
+   "new": "src\\agent\\src\\tools\\plan_build_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\TodoWriteTool",
+   "new": "src\\agent\\src\\tools\\todo_write_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\WebSearchTool",
+   "new": "src\\agent\\src\\tools\\web_search_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\services\\MagicDocs",
+   "new": "src\\agent\\src\\services\\magic_docs",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileEditTool",
+   "new": "src\\agent\\src\\tools\\file_edit_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\FileReadTool",
+   "new": "src\\agent\\src\\tools\\file_read_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\WebFetchTool",
+   "new": "src\\agent\\src\\tools\\web_fetch_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\sessionTranscript",
+   "new": "src\\agent\\src\\session_transcript",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\utils\\computerUse",
+   "new": "src\\agent\\src\\utils\\computer_use",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tasks\\DreamTask",
+   "new": "src\\agent\\src\\tasks\\dream_task",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\AgentTool",
+   "new": "src\\agent\\src\\tools\\agent_tool",
+   "target_exists": false,
+   "hyphen_child": true
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SkillTool",
+   "new": "src\\agent\\src\\tools\\skill_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\SleepTool",
+   "new": "src\\agent\\src\\tools\\sleep_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\BashTool",
+   "new": "src\\agent\\src\\tools\\bash_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\GlobTool",
+   "new": "src\\agent\\src\\tools\\glob_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\GrepTool",
+   "new": "src\\agent\\src\\tools\\grep_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\tools\\REPLTool",
+   "new": "src\\agent\\src\\tools\\repl_tool",
+   "target_exists": false,
+   "hyphen_child": false
+  },
+  {
+   "old": "src\\agent\\src\\DelFiles",
+   "new": "src\\agent\\src\\del_files",
+   "target_exists": false,
+   "hyphen_child": false
+  }
+ ]
+}

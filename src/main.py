@@ -853,6 +853,37 @@ def main():
     except Exception as e:
         log.debug(f"[PRE-WARM] fitz pre-warm skipped: {e}")
 
+    # ═══════════════════════════════════════════════════════════════
+    # LOGIN GATE, Cortex requires an account
+    # ═══════════════════════════════════════════════════════════════
+    # Decided from the SAVED session only - see src/core/login_gate.py. No
+    # network call happens here on purpose: asking the server whether the
+    # token is good would mean that a slow, unreachable or mid-deploy
+    # cortex-ide.app locks every user out of an editor that works offline.
+    # An expired token still opens the app and refreshes behind the window;
+    # the server re-checks the token on every API call anyway, which is the
+    # right place for a revoked session to fail.
+    try:
+        from src.core.login_gate import evaluate as _gate_eval, refresh_in_background
+        _gate = _gate_eval()
+        log.info(f"[LoginGate] {_gate.reason}")
+        if _gate.blocked:
+            from src.ui.dialogs.login_dialog import require_login
+            if not require_login():
+                log.info("[LoginGate] sign-in cancelled, exiting")
+                sys.exit(0)
+            _gate = _gate_eval()          # re-read what the login just wrote
+        if _gate.should_refresh:
+            refresh_in_background()
+    except SystemExit:
+        raise
+    except Exception as _gate_err:
+        # A broken gate must never be what stops Cortex opening. Log it and
+        # continue: the API calls themselves still require a valid token.
+        log.error(f"[LoginGate] check failed, continuing unguarded: {_gate_err}",
+                  exc_info=True)
+    _profile("login_gate")
+
     window = CortexMainWindow()
     _profile("window_created")
     # window.show() is now called in __init__

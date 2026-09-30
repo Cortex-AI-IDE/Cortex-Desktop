@@ -1,0 +1,122 @@
+[
+ {
+  "old": "src\\agent\\src\\Task.py",
+  "new": "src\\agent\\src\\task.py",
+  "old_size": 161,
+  "old_kind": "EMPTY-STUB",
+  "collision": "CASE-ONLY",
+  "new_exists_on_disk": false,
+  "new_size": null,
+  "new_kind": null
+ },
+ {
+  "old": "src\\agent\\src\\Tool.py",
+  "new": "src\\agent\\src\\tool.py",
+  "old_size": 5051,
+  "old_kind": "REAL",
+  "collision": "CASE-ONLY",
+  "new_exists_on_disk": false,
+  "new_size": null,
+  "new_kind": null
+ },
+ {
+  "old": "src\\agent\\src\\UI.py",
+  "new": "src\\agent\\src\\ui.py",
+  "old_size": 159,
+  "old_kind": "EMPTY-STUB",
+  "collision": "CASE-ONLY",
+  "new_exists_on_disk": false,
+  "new_size": null,
+  "new_kind": null
+ },
+ {
+  "old": "src\\agent\\src\\memdir\\memoryTypes.py",
+  "new": "src\\agent\\src\\memdir\\memory_types.py",
+  "old_size": 20576,
+  "old_kind": "REAL",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 115,
+  "new_kind": "SHIM"
+ },
+ {
+  "old": "src\\agent\\src\\tools\\AgentTool\\runAgent.py",
+  "new": "src\\agent\\src\\tools\\AgentTool\\run_agent.py",
+  "old_size": 30884,
+  "old_kind": "REAL",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 185,
+  "new_kind": "EMPTY-STUB"
+ },
+ {
+  "old": "src\\agent\\src\\tools\\WebFetchTool\\UI.py",
+  "new": "src\\agent\\src\\tools\\WebFetchTool\\ui.py",
+  "old_size": 2351,
+  "old_kind": "REAL",
+  "collision": "CASE-ONLY",
+  "new_exists_on_disk": false,
+  "new_size": null,
+  "new_kind": null
+ },
+ {
+  "old": "src\\agent\\src\\utils\\abortController.py",
+  "new": "src\\agent\\src\\utils\\abort_controller.py",
+  "old_size": 3729,
+  "old_kind": "REAL",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 217,
+  "new_kind": "SHIM"
+ },
+ {
+  "old": "src\\agent\\src\\utils\\agentContext.py",
+  "new": "src\\agent\\src\\utils\\agent_context.py",
+  "old_size": 175,
+  "old_kind": "EMPTY-STUB",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 179,
+  "new_kind": "EMPTY-STUB"
+ },
+ {
+  "old": "src\\agent\\src\\utils\\agentSwarmsEnabled.py",
+  "new": "src\\agent\\src\\utils\\agent_swarms_enabled.py",
+  "old_size": 243,
+  "old_kind": "REAL",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 1245,
+  "new_kind": "REAL"
+ },
+ {
+  "old": "src\\agent\\src\\utils\\forkedAgent.py",
+  "new": "src\\agent\\src\\utils\\forked_agent.py",
+  "old_size": 1377,
+  "old_kind": "REAL",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 178,
+  "new_kind": "EMPTY-STUB"
+ },
+ {
+  "old": "src\\agent\\src\\utils\\stringUtils.py",
+  "new": "src\\agent\\src\\utils\\string_utils.py",
+  "old_size": 175,
+  "old_kind": "EMPTY-STUB",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 176,
+  "new_kind": "EMPTY-STUB"
+ },
+ {
+  "old": "src\\agent\\src\\utils\\shell\\outputLimits.py",
+  "new": "src\\agent\\src\\utils\\shell\\output_limits.py",
+  "old_size": 236,
+  "old_kind": "REAL",
+  "collision": "EXACT-DIFFERENT-FILE",
+  "new_exists_on_disk": true,
+  "new_size": 859,
+  "new_kind": "REAL"
+ }
+]

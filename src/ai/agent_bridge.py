@@ -5307,8 +5307,13 @@ Required behavior:
             # Determine provider type based on model ID
             provider_type = ProviderType.DEEPSEEK  # Default (fallback for unmatched models)
 
+            # Server-defined providers ("dp/<slug>/<model>") come first: their
+            # upstream ids contain slashes and would otherwise hit the generic
+            # "/" -> OpenRouter rule below.
+            if model_lower.startswith("dp/"):
+                provider_type = ProviderType.DYNAMIC
             # Reject removed/local provider prefixes, route to default instead
-            if model_lower.startswith("ollama/"):
+            elif model_lower.startswith("ollama/"):
                 log.warning(f"[BRIDGE] Ollama provider removed, falling back to default for '{model_id}'")
                 provider_type = ProviderType.DEEPSEEK
                 model_id = "deepseek-v4-pro"
@@ -5346,7 +5351,14 @@ Required behavior:
             elif model_lower.startswith("gpt-"):
                 provider_type = ProviderType.OPENAI
             
-            provider = registry.get_provider(provider_type)
+            if provider_type == ProviderType.DYNAMIC:
+                provider = registry.get_dynamic_for_model(model_id)
+                if provider is None:
+                    raise RuntimeError(
+                        f"'{model_id}' belongs to a provider Cortex has not synced yet. "
+                        f"Check your connection or sign in, then pick the model again.")
+            else:
+                provider = registry.get_provider(provider_type)
             model    = model_id
 
             # If get_provider returned a different type (e.g. MIMO→MISTRAL
@@ -15308,6 +15320,11 @@ Required behavior:
         # name still leaked into the status bar for fresh installs).
         model_id = model_id or 'deepseek-v4-flash'
         ml = model_id.lower()
+        if ml.startswith('dp/'):
+            _dp = get_provider_registry().get_dynamic_for_model(model_id)
+            if _dp is not None:
+                return _dp, model_id
+            model_id, ml = 'deepseek-v4-flash', 'deepseek-v4-flash'
         if ml.startswith('ih/'):
             pt = ProviderType.INFERENCEHUB
         elif ml.startswith('gemini'):
