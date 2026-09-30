@@ -1286,6 +1286,13 @@ scope: project
             from src.core.auth_manager import get_auth_manager
             auth = get_auth_manager()
             auth.logout()
+            # Cortex requires an account, so a sign-out has to return to the
+            # login screen rather than leaving a signed-out IDE on screen.
+            # singleShot(0) lets this slot return to the web channel before
+            # the gate goes modal.
+            from PyQt6.QtCore import QTimer
+            from src.ui.dialogs.login_dialog import relogin_or_quit
+            QTimer.singleShot(0, relogin_or_quit)
             return True
         except Exception as e:
             log.error(f"[MemoryManager] logout failed: {e}")
@@ -1363,6 +1370,131 @@ scope: project
         except Exception as e:
             log.debug(f"[MemoryManager] Hot-reload skipped: {e}")
 
+    def _dynamic_provider_rows(self) -> list:
+        """User-created / server-published providers, in panel-row shape."""
+        try:
+            from src.ai import dynamic_providers as dyn
+        except Exception as e:
+            log.debug(f"[MemoryManager] dynamic providers unavailable: {e}")
+            return []
+        out = []
+        for spec in dyn.all_providers():
+            slug = str(spec.get("slug") or "").strip()
+            if not slug:
+                continue
+            key_name = dyn.key_name(slug)
+            models = spec.get("models") or []
+            out.append({
+                "slug": slug,
+                "domKey": key_name,
+                "name": spec.get("name") or slug,
+                "description": spec.get("description") or "",
+                "color": spec.get("color") or "#6b7280",
+                "logoText": (spec.get("name") or slug)[:1].upper(),
+                "keyName": key_name,
+                "settingsKey": f"ai.{key_name}_key",
+                "signupUrl": spec.get("signup_url") or "",
+                "keyHint": spec.get("key_prefix_hint") or "",
+                "authStyle": spec.get("auth_style") or "bearer",
+                "kind": "byok",
+                "modelCount": len(models),
+                "source": "dynamic",
+                "defaultEnabled": False,
+            })
+        return out
+
+    def _builtin_provider_rows(self) -> list:
+        """The published built-in provider directory, in panel-row shape.
+
+        Rows the server marks ``togglable=False`` are skipped: "auto" is
+        smart routing (no key of its own) and the Mistral / SiliconFlow
+        subscription services are paid for by the Cortex subscription, so
+        neither belongs in a "paste your key" panel. They are rendered by
+        their own cards on the same page.
+        """
+        try:
+            from src.ai.remote_models import get_provider_directory
+            directory = get_provider_directory() or []
+        except Exception as e:
+            log.debug(f"[MemoryManager] provider directory unavailable: {e}")
+            return []
+
+        # Model counts come from the same catalog the dropdown renders, so
+        # the row's "N models" line can never disagree with the dropdown.
+        counts: dict = {}
+        try:
+            from src.ai.model_registry import get_model_groups
+            for _label, items, _tier, provider in get_model_groups():
+                counts[provider] = counts.get(provider, 0) + len(items)
+        except Exception:
+            pass
+
+        out = []
+        for p in directory:
+            slug = str(p.get("slug") or "").strip().lower()
+            if not slug or not p.get("togglable", True):
+                continue
+            name = p.get("name") or slug
+            out.append({
+                "slug": slug,
+                "domKey": slug,
+                "name": name,
+                "description": p.get("description") or "",
+                "color": p.get("color") or "#6b7280",
+                "logoText": p.get("logo_text") or name[:1].upper(),
+                "keyName": p.get("key_name") or slug,
+                "settingsKey": f"ai.{slug}_key",
+                "signupUrl": p.get("signup_url") or "",
+                "keyHint": p.get("key_prefix_hint") or "",
+                "authStyle": "bearer",
+                "kind": p.get("kind") or "byok",
+                "modelCount": counts.get(slug, 0),
+                "source": "builtin",
+                "defaultEnabled": bool(p.get("default_enabled")),
+            })
+        return out
+
+    @pyqtSlot(result=str)
+    def listProviders(self) -> str:
+        """Every row of the Settings → Provider API Keys panel, in one shape.
+
+        Built-ins first (in the published display order), then the user's own
+        and server-published providers. The page used to hand-write eight
+        ``<div>``s in HTML for the built-ins and build only the dynamic ones
+        at runtime, so a provider added in the admin panel needed a desktop
+        release before it had a row, and the two halves drifted - the
+        hand-written one carried its own logo colours, signup URLs and
+        default-on switches, duplicated from the server and from
+        model_registry.py.
+
+        The key itself is NOT returned: the page asks for it through
+        getApiKey(keyName) like every other row.
+        """
+        import json
+        try:
+            rows = self._builtin_provider_rows()
+            seen = {r["slug"] for r in rows}
+            rows += [r for r in self._dynamic_provider_rows() if r["slug"] not in seen]
+            return json.dumps(rows)
+        except Exception as e:
+            log.warning(f"[MemoryManager] listProviders error: {e}")
+            return "[]"
+
+    @pyqtSlot(result=str)
+    def listDynamicProviders(self) -> str:
+        """Just the user-created / server-published providers.
+
+        Kept as its own slot: the Custom Providers dialog and the guard tests
+        ask for this half specifically, and a caller that only wants the
+        dynamic rows should not have to filter the built-ins back out.
+        """
+        import json
+        try:
+            return json.dumps(self._dynamic_provider_rows())
+        except Exception as e:
+            log.warning(f"[MemoryManager] listDynamicProviders error: {e}")
+            return "[]"
+
     @pyqtSlot(str, result=str)
     def getApiKey(self, provider: str) -> str:
         """Get a stored API key (masked for display). Returns empty string if not found."""
@@ -1376,6 +1508,48 @@ scope: project
         except Exception as e:
             log.warning(f"[MemoryManager] getApiKey error: {e}")
             return ""
+
+    @pyqtSlot(str, result=str)
+    def getApiKeyStatuses(self, providers: str) -> str:
+        """Stored keys for many providers in ONE call, keyed by key name.
+
+        Opening Settings -> Models & Providers used to ask getApiKey() once
+        per provider row: N web-channel round trips, each a separate
+        GUI-thread slot call, and on Linux each one also re-read and re-parsed
+        keys.enc, because ``_get_os_keyring_key()`` is a no-op there and every
+        lookup falls through to the file. The cost of opening the panel was
+        therefore paid per provider, so a provider added in the admin panel
+        made every open slower. This answers the same question in one pass.
+
+        The values are exactly what getApiKey() returns for that name, so the
+        page still builds its own mask. A name that is unknown or absent comes
+        back as an empty string rather than missing, so no row can be left in
+        the "editing" state by a mismatch.
+        """
+        import json
+        names: object = []
+        try:
+            names = json.loads(providers or "[]")
+        except Exception as e:
+            log.debug(f"[MemoryManager] getApiKeyStatuses bad request: {e}")
+        if not isinstance(names, list):
+            return "{}"
+        try:
+            from src.core.key_manager import get_key_manager
+            km = get_key_manager()
+        except Exception as e:
+            log.warning(f"[MemoryManager] getApiKeyStatuses error: {e}")
+            return "{}"
+        out: dict = {}
+        for name in names:
+            if not isinstance(name, str) or not name:
+                continue
+            try:
+                out[name] = km.get_key(name) or ""
+            except Exception as e:
+                log.debug(f"[MemoryManager] key lookup failed for {name}: {e}")
+                out[name] = ""
+        return json.dumps(out)
 
     @pyqtSlot(str, str, result=bool)
     def setApiKey(self, provider: str, api_key: str) -> bool:

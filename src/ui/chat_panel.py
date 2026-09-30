@@ -5474,7 +5474,7 @@ class MessageWidget(QWidget):
 # ============================================================
 MODES = [("Agent", "Autonomous agent"), ("Ask", "Q&A"), ("Plan", "Planning")]
 
-from src.ai.model_registry import MODEL_GROUPS, get_model_groups
+from src.ai.model_registry import get_model_groups
 
 
 
@@ -6614,10 +6614,19 @@ class InputArea(QWidget):
         def _has_key(km_name: str) -> bool:
             # Group provider slug == KeyManager provider name for every BYOK
             # provider (mimo/deepseek/anthropic/openai/openrouter/alibaba).
+            # A server-published provider is the exception: its group says
+            # "nvidia" but the key is filed under "dyn_nvidia", so a bare
+            # lookup found nothing and every one of its models was drawn as
+            # "no key" even with the key pasted in.
             if _km is None or not km_name or km_name == "auto":
                 return False
             try:
-                return bool(_km.get_key(km_name))
+                if _km.get_key(km_name):
+                    return True
+                if not km_name.startswith("dyn_"):
+                    from src.ai.dynamic_providers import key_name as _dyn_key
+                    return bool(_km.get_key(_dyn_key(km_name)))
+                return False
             except Exception as e:
                 log.warning(f"[DROPDOWN] _has_key error for '{km_name}': {e}")
                 return False
@@ -6641,13 +6650,25 @@ class InputArea(QWidget):
 
         # ── Build model items ──
         _last_tier = None
-        # get_model_groups() returns the server-published list when one has
-        # been fetched, else the built-in MODEL_GROUPS. Called per build (not
-        # imported once) so a background refresh is picked up on the next open.
-        for group_label, items, tier, group_provider in get_model_groups():
-            # Provider activation filter, "auto" pseudo-provider always shows
+        _rendered_any = False
+        # get_model_groups() returns the published catalog: the server list
+        # when one has been fetched, else the disk cache from an earlier
+        # run. Called per build (not imported once) so a background refresh
+        # is picked up on the next open. With neither available the list is
+        # empty and the menu says so below, instead of opening blank.
+        groups = list(get_model_groups())
+        for group_label, items, tier, group_provider in groups:
+            # ONE rule: the switch in Settings > Models & Providers decides
+            # what appears here. "auto" is smart routing and always shows.
+            #
+            # There used to be a second rule - groups tagged "dyn_" skipped
+            # the check - so a user's own provider could not be switched off
+            # while a published one could, and the dropdown contradicted the
+            # switches next to it. Every group now reports its provider slug
+            # and every slug is a real toggle.
             if group_provider != "auto" and group_provider not in _enabled:
                 continue
+            _rendered_any = True
             # Section header on tier change
             if tier != _last_tier:
                 if tier == "subscription":
@@ -6751,6 +6772,28 @@ class InputArea(QWidget):
                         self._set_model(_v, _n)
                     item_btn.clicked.connect(_select_model)
                 _current_section_items_layout.addWidget(item_btn)
+
+        # ── Empty states ──
+        # The catalog is server-published now, so "nothing to show" has two
+        # distinct causes and the user deserves to know which: the server
+        # has never been reached (first run offline), or every switch in
+        # Settings is off. A blank menu answers neither question.
+        if not _rendered_any:
+            if groups:
+                _empty_msg = ("Every provider is switched off. Turn one on in "
+                              "Settings → Models & Providers.")
+            else:
+                _empty_msg = ("No models yet. The provider and model list syncs "
+                              "from your Cortex account — sign in while online, "
+                              "then reopen this menu.")
+            _empty_lbl = QLabel(_empty_msg)
+            _empty_lbl.setWordWrap(True)
+            _empty_lbl.setStyleSheet(
+                f"color:{T['muted']}; font-size:12px; padding:10px 14px;"
+                f"  background:transparent; border:none;"
+            )
+            _empty_lbl.setEnabled(False)
+            scroll_layout.addWidget(_empty_lbl)
 
         scroll_layout.addStretch()
 

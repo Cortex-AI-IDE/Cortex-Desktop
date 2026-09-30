@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse, parse_qs
 
-log = logging.getLogger("auth_manager")
+# get_logger(), not logging.getLogger(): the bare call attaches no
+# handler, so every line this module logged went nowhere. A browser
+# sign-in that failed its code exchange left "Login Successful" in the
+# browser, a spinning dialog, and NOT ONE line in cortex.log to say why.
+try:
+    from src.utils.logger import get_logger
+    log = get_logger("auth_manager")
+except Exception:
+    log = logging.getLogger("auth_manager")
 
 # Shared state between callback handler and auth manager
 _auth_code_ready = threading.Event()
@@ -30,7 +38,7 @@ _SUCCESS_HTML = b"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Cortex - Login Successful</title>
+    <title>Cortex - Authorized</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -95,7 +103,7 @@ _SUCCESS_HTML = b"""<!DOCTYPE html>
 <body>
     <div class="card">
         <div class="checkmark">&#10004;</div>
-        <h1>Login Successful</h1>
+        <h1>Authorized</h1>
         <p id="msg">Your account has been connected. Cortex is now in focus.</p>
         <a class="btn" id="mainBtn" href="javascript:closeTab()">Close This Tab</a>
         <p class="hint" id="hint"></p>
@@ -104,7 +112,7 @@ _SUCCESS_HTML = b"""<!DOCTYPE html>
         function closeTab() {
             window.open('', '_self', '');
             window.close();
-            document.getElementById('msg').textContent = 'You can safely close this tab now.';
+            document.getElementById('msg').textContent = 'Return to Cortex to finish signing in.';
             document.getElementById('msg').classList.add('done');
             document.getElementById('mainBtn').style.display = 'none';
             document.getElementById('hint').textContent = 'Return to the Cortex application window.';
@@ -239,6 +247,11 @@ class AuthManager:
         # A stale waiter's trailing sleep(60) + _stop_callback_server() could
         # also kill the NEWER attempt's callback server mid-login.
         self._login_generation = 0
+        # Why the last browser sign-in ended, or None while one is in flight.
+        # The callback runs on its own thread, so without somewhere to put the
+        # verdict a failed exchange is silent and whoever is waiting on
+        # is_logged_in() waits until its own timeout with nothing to show.
+        self._login_error: Optional[str] = None
 
     @property
     def api_client(self):
@@ -250,6 +263,11 @@ class AuthManager:
     def is_logged_in(self) -> bool:
         return self.api_client.is_logged_in()
 
+    def consume_login_error(self) -> Optional[str]:
+        """Take the reason the last browser sign-in ended, once."""
+        err, self._login_error = self._login_error, None
+        return err
+
     def get_user_info(self) -> Optional[dict]:
         return self.api_client.user_info
 
@@ -260,6 +278,7 @@ class AuthManager:
         """Start the OAuth2 login flow."""
         self._state = secrets.token_hex(16)
         self._login_generation += 1
+        self._login_error = None
 
         if not self.api_client.is_server_reachable():
             log.error("[AuthManager] Server not reachable")
@@ -359,6 +378,8 @@ class AuthManager:
 
         if not received:
             log.warning("[AuthManager] Login timed out after 5 minutes")
+            self._login_error = ("The browser sign-in was not completed in time. "
+                                 "Try again.")
             self._stop_callback_server()
             return
 
@@ -369,6 +390,8 @@ class AuthManager:
             # Callback fired but the code is gone/absent, never send an
             # empty exchange to the server (400 missing_code).
             log.warning("[AuthManager] Callback fired without an auth code, not exchanging")
+            self._login_error = ("The browser came back without an authorization "
+                                 "code. Try again.")
             self._stop_callback_server()
             return
 
@@ -378,7 +401,9 @@ class AuthManager:
         if success:
             log.info("[AuthManager] Login completed successfully")
         else:
-            log.error("[AuthManager] Failed to exchange auth code")
+            self._login_error = (getattr(self.api_client, "last_error", None)
+                                 or "The server refused the sign-in. Try again.")
+            log.error(f"[AuthManager] Failed to exchange auth code: {self._login_error}")
 
         # Keep server alive for 60s so the success page can load,
         # then shut down, unless a newer login attempt owns the server now.

@@ -10,14 +10,18 @@ add a row in the admin, and clients pick it up on their next launch.
 
 Design rules, in priority order
 -------------------------------
-1. **The app must never depend on the network.** ``MODEL_GROUPS`` in
-   model_registry stays the built-in fallback. If the server is unreachable,
-   returns junk, or has never been contacted, the dropdown is exactly what it
-   is today.
+1. **The server is the only source of the catalog.** There is no bundled
+   snapshot and no hand-written list in this build: the provider directory
+   and the model groups both arrive from ``GET /api/v1/models/config/``.
+   A bundled copy was tried and then removed - it froze the directory at
+   build time, which is exactly the staleness this module exists to end,
+   and it let a desktop keep showing providers an admin had switched off.
 2. **Never touch the GUI thread.** The fetch runs on a daemon thread. The UI
    reads whatever is cached at the moment it builds the dropdown.
-3. **Survive restarts offline.** A successful fetch is written to disk, so the
-   second launch on a plane still shows server models.
+3. **Survive restarts offline.** A successful fetch is written to a disk
+   cache, so the second launch on a plane still shows server models. A first
+   launch with no network shows an empty dropdown with a "sign in to sync"
+   hint instead of a fabricated list - an honest empty beats a wrong list.
 4. **A malformed row can never crash the dropdown.** Every entry is validated
    and skipped individually if wrong.
 
@@ -63,8 +67,16 @@ _state: Dict[str, Any] = {
     "vision": set(),       # model_ids that accept image input (server-authoritative)
     "aliases": {},        # shorthand alias -> model_id (server-published)
     "deprecations": {},   # model_id -> {"name", "date", "replacement"} (deprecated rows only)
+    # The built-in provider directory: one dict per provider the IDE has code
+    # for, in display order. Distinct from "providers" above, which maps a
+    # model id to the slug that should serve it.
+    "provider_directory": [],
+    "default_enabled": [],  # slugs whose Settings switch starts ON on a fresh install
     "fetched_at": 0.0,
     "loaded_from_disk": False,
+    # "disk" | "server" - where the active catalog came from. Empty string
+    # means the server has never been reached and no cache exists yet.
+    "source": "",
 }
 
 
@@ -83,6 +95,50 @@ def _clean_entry(raw: Any) -> Optional[Tuple[str, str, str, str]]:
     if not color.startswith("#") or len(color) not in (4, 7):
         color = "#8b5cf6"  # never feed junk into a stylesheet
     return (model_id, name, desc, color)
+
+
+def _clean_provider(raw: Any) -> Optional[Dict[str, Any]]:
+    """Validate one provider-directory dict from the server.
+
+    Same rule as ``_clean_entry``: a malformed row is dropped, never allowed
+    to break the panel. Only ``slug`` is required - everything else has a
+    usable default, because a provider with no colour or no signup link is
+    still a provider the user can paste a key into.
+    """
+    if not isinstance(raw, dict):
+        return None
+    slug = str(raw.get("slug") or "").strip().lower()
+    if not slug:
+        return None
+    name = str(raw.get("name") or "").strip() or slug
+    color = str(raw.get("color") or "").strip() or "#8b5cf6"
+    if not color.startswith("#") or len(color) not in (4, 7):
+        color = "#8b5cf6"  # never feed junk into a stylesheet
+    kind = str(raw.get("kind") or "byok").strip().lower()
+    if kind not in ("byok", "subscription", "router"):
+        kind = "byok"
+    try:
+        sort_order = int(raw.get("sort_order") or 0)
+    except (TypeError, ValueError):
+        sort_order = 0
+    return {
+        "slug": slug,
+        "name": name,
+        "description": str(raw.get("description") or "").strip(),
+        "color": color,
+        "logo_text": (str(raw.get("logo_text") or "").strip() or name[:1]).upper()[:2],
+        "signup_url": str(raw.get("signup_url") or "").strip(),
+        "key_prefix_hint": str(raw.get("key_prefix_hint") or "").strip(),
+        "kind": kind,
+        "togglable": bool(raw.get("togglable", True)),
+        "default_enabled": bool(raw.get("default_enabled", False)),
+        "sort_order": sort_order,
+        # Where the IDE stores this provider's key. Built-ins use the bare
+        # slug; the server sends it explicitly so a renamed row cannot orphan
+        # a key the user already saved.
+        "key_name": str(raw.get("key_name") or slug).strip() or slug,
+        "source": str(raw.get("source") or "builtin").strip() or "builtin",
+    }
 
 
 def _parse_payload(data: Any) -> Optional[Dict[str, Any]]:
@@ -167,6 +223,36 @@ def _parse_payload(data: Any) -> Optional[Dict[str, Any]]:
 
     if not groups:
         return None
+
+    # ── Provider directory ────────────────────────────────────────────────
+    # Published alongside the models so the Settings panel renders built-in
+    # providers through the same code path as server-published and
+    # user-created ones. Optional: an older server that only sends "groups"
+    # still parses, and the panel falls back to whatever it has locally.
+    directory: List[Dict[str, Any]] = []
+    raw_providers = data.get("providers")
+    if isinstance(raw_providers, list):
+        for raw_p in raw_providers:
+            cleaned_p = _clean_provider(raw_p)
+            if cleaned_p:
+                directory.append(cleaned_p)
+    directory.sort(key=lambda p: (p["sort_order"], p["name"].lower()))
+
+    raw_defaults = data.get("default_enabled_providers")
+    known_slugs = {p["slug"] for p in directory}
+    defaults: List[str] = []
+    if isinstance(raw_defaults, list):
+        # Trust the explicit list, but only for slugs that survived
+        # validation - a default naming a dropped row would render nothing.
+        defaults = [
+            str(s).strip().lower() for s in raw_defaults
+            if isinstance(s, str) and s.strip().lower() in known_slugs
+        ]
+    if not defaults:
+        # No list published (or every name in it was unusable): fall back to
+        # the per-row flag, which is the same fact stated row by row.
+        defaults = [p["slug"] for p in directory if p["default_enabled"]]
+
     return {
         "groups": groups,
         "limits": limits,
@@ -176,6 +262,8 @@ def _parse_payload(data: Any) -> Optional[Dict[str, Any]]:
         "vision": vision,
         "aliases": aliases,
         "deprecations": deprecations,
+        "provider_directory": directory,
+        "default_enabled": defaults,
         "version": str(data.get("version") or ""),
     }
 
@@ -206,7 +294,39 @@ def _load_cache() -> Optional[Dict[str, Any]]:
         return None
 
 
-def _apply(parsed: Dict[str, Any], *, from_disk: bool) -> None:
+def _ensure_base() -> None:
+    """Apply the disk cache from the last successful fetch, if there is one.
+
+    Cheap after the first call (the state memoises it), so every getter can
+    afford it and the registry never has to remember to call load_cached()
+    first. With no cache and no server contact yet the state stays empty on
+    purpose: the UI renders its empty state rather than a fabricated list.
+    """
+    with _lock:
+        if _state.get("groups") is not None:
+            return
+    raw = _load_cache()
+    if not raw:
+        return
+    parsed = _parse_payload(raw)
+    if not parsed:
+        return
+    _apply(parsed, from_disk=True, source="disk")
+    # Backdate the in-memory age to the cache file's mtime, not to "now".
+    # refresh_async()'s refetch floor measures fetched_at; stamping "now"
+    # here made every launch with a cache on disk look freshly fetched, so
+    # the server was never contacted again and the dropdown stayed frozen
+    # at whatever the disk cache held.
+    try:
+        mtime = _CACHE_PATH.stat().st_mtime
+    except OSError:
+        mtime = time.time()
+    with _lock:
+        _state["fetched_at"] = mtime
+    log.info(f"[remote_models] cache loaded, {sum(len(g[1]) for g in parsed['groups'])} models")
+
+
+def _apply(parsed: Dict[str, Any], *, from_disk: bool = False, source: str = "") -> None:
     with _lock:
         _state["groups"] = parsed["groups"]
         _state["limits"] = parsed["limits"]
@@ -216,46 +336,38 @@ def _apply(parsed: Dict[str, Any], *, from_disk: bool) -> None:
         _state["vision"] = parsed.get("vision") or set()
         _state["aliases"] = parsed.get("aliases") or {}
         _state["deprecations"] = parsed.get("deprecations") or {}
+        _state["provider_directory"] = parsed.get("provider_directory") or []
+        _state["default_enabled"] = parsed.get("default_enabled") or []
         _state["version"] = parsed["version"]
         _state["fetched_at"] = time.time()
-        _state["loaded_from_disk"] = from_disk
+        _state["loaded_from_disk"] = from_disk or source == "disk"
+        _state["source"] = source or ("disk" if from_disk else "server")
 
 
 # ─────────────────────────── public API ────────────────────────────
 
 def load_cached() -> bool:
-    """Load the last good config from disk. Cheap; safe on the GUI thread."""
-    raw = _load_cache()
-    if not raw:
-        return False
-    parsed = _parse_payload(raw)
-    if not parsed:
-        return False
-    _apply(parsed, from_disk=True)
-    # Backdate the in-memory age to the cache file's mtime, not to "now".
-    # refresh_async()'s refetch floor measures fetched_at; stamping "now"
-    # here made every launch with a cache on disk look freshly fetched, so
-    # the server was never contacted again and the dropdown stayed frozen
-    # at whatever snapshot the disk cache held.
-    try:
-        mtime = _CACHE_PATH.stat().st_mtime
-    except OSError:
-        mtime = time.time()
+    """Load the disk cache from the last successful fetch, if there is one.
+
+    Cheap; safe on the GUI thread. Returns True when a cache applied. The
+    server stays the only source of truth - this merely lets the dropdown
+    and the Settings panel survive a restart with no network.
+    """
+    _ensure_base()
     with _lock:
-        _state["fetched_at"] = mtime
-    log.info(f"[remote_models] cache loaded, {sum(len(g[1]) for g in parsed['groups'])} models")
-    return True
+        return _state.get("groups") is not None
 
 
 def refresh_async(app_version: str = "") -> None:
     """Fetch the model list in the background. Never raises, never blocks.
 
-    Called during startup. A failure is silent by design: the built-in list is
-    already correct, so a network problem must not surface as an error to a
-    user who only wanted to open the app.
+    Called during startup. A failure is silent by design: the disk cache (or
+    the honest empty state) is already in place, so a network problem must
+    not surface as an error to a user who only wanted to open the app.
     """
     def _worker() -> None:
         try:
+            _ensure_base()  # disk cache first, so an offline launch still has data
             with _lock:
                 age = time.time() - float(_state.get("fetched_at") or 0)
                 if _state.get("groups") is not None and age < _MIN_REFETCH_SECONDS:
@@ -277,7 +389,7 @@ def refresh_async(app_version: str = "") -> None:
             if not parsed:
                 log.debug("[remote_models] payload unusable, keeping built-in list")
                 return
-            _apply(parsed, from_disk=False)
+            _apply(parsed, from_disk=False, source="server")
             _write_cache(data)
             log.info(
                 f"[remote_models] {sum(len(g[1]) for g in parsed['groups'])} models "
@@ -293,19 +405,30 @@ def refresh_async(app_version: str = "") -> None:
 
 
 def get_remote_groups() -> Optional[List[ModelGroup]]:
-    """Server-published groups, or None to signal 'use the built-in list'."""
+    """The published model groups, or None if nothing at all is available."""
+    _ensure_base()
     with _lock:
         return _state.get("groups")
 
 
+def _dyn():
+    """dynamic_providers, imported lazily (it imports nothing from here)."""
+    from src.ai import dynamic_providers
+    return dynamic_providers
+
+
 def get_remote_limits(model_id: str) -> Optional[Dict[str, int]]:
     """Server-published context/output limits for one model, if any."""
+    if (model_id or "").lower().startswith("dp/"):
+        return _dyn().get_limits(model_id)
     with _lock:
         return (_state.get("limits") or {}).get(model_id)
 
 
 def get_remote_pricing(model_id: str) -> Optional[Tuple[float, float]]:
     """Server-published USD-per-1M-token rates for one model, if any."""
+    if (model_id or "").lower().startswith("dp/"):
+        return _dyn().get_pricing(model_id)
     with _lock:
         return (_state.get("pricing") or {}).get(model_id)
 
@@ -324,6 +447,8 @@ def remote_supports_thinking(model_id: str) -> Optional[bool]:
     needle = (model_id or "").strip().lower()
     if not needle:
         return None
+    if needle.startswith("dp/"):
+        return _dyn().supports_thinking(model_id)
     with _lock:
         groups = _state.get("groups")
         if groups is None:
@@ -354,6 +479,8 @@ def remote_supports_vision(model_id: str) -> Optional[bool]:
     needle = (model_id or "").strip().lower()
     if not needle:
         return None
+    if needle.startswith("dp/"):
+        return _dyn().supports_vision(model_id)
     with _lock:
         groups = _state.get("groups")
         if groups is None:
@@ -424,14 +551,55 @@ def get_remote_provider(model_id: str) -> Optional[str]:
         return (_state.get("providers") or {}).get(model_id)
 
 
+def get_provider_directory() -> List[Dict[str, Any]]:
+    """The built-in provider directory, in display order.
+
+    Server-published once the server has been reached, otherwise whatever the
+    disk cache holds from an earlier run; empty until then, and the Settings
+    panel shows its "sign in to sync" state instead of rows. Each dict has
+    the same shape as a provider row from ``/api/v1/providers/sync/``, so the
+    panel renders built-ins, server-published and user-created providers
+    through one code path.
+    """
+    _ensure_base()
+    with _lock:
+        return list(_state.get("provider_directory") or [])
+
+
+def get_default_enabled_providers() -> List[str]:
+    """Slugs whose Settings switch starts ON for a user who has never chosen.
+
+    Only consulted on first run - once the user has flipped a switch, their
+    own saved set wins and this is ignored.
+    """
+    _ensure_base()
+    with _lock:
+        return list(_state.get("default_enabled") or [])
+
+
+def get_provider_meta(slug: str) -> Optional[Dict[str, Any]]:
+    """One published provider row by slug, or None if it does not exist."""
+    needle = (slug or "").strip().lower()
+    if not needle:
+        return None
+    _ensure_base()
+    with _lock:
+        for p in _state.get("provider_directory") or []:
+            if p["slug"] == needle:
+                return dict(p)
+    return None
+
+
 def status() -> Dict[str, Any]:
     """Diagnostics for the settings screen / bug reports."""
+    _ensure_base()
     with _lock:
         groups = _state.get("groups")
         return {
             "active": groups is not None,
-            "source": "disk" if _state.get("loaded_from_disk") else "server",
+            "source": _state.get("source") or ("disk" if _state.get("loaded_from_disk") else "server"),
             "version": _state.get("version", ""),
             "model_count": sum(len(g[1]) for g in groups) if groups else 0,
+            "provider_count": len(_state.get("provider_directory") or []),
             "fetched_at": _state.get("fetched_at", 0.0),
         }

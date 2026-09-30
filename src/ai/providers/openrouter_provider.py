@@ -577,6 +577,22 @@ class OpenRouterProvider(BaseProvider):
             log.error(f"[{self.DISPLAY_NAME}] _sanitize_tools error: {e}")
             return None
 
+    # ── Request hooks (overridden by DynamicProvider) ──────────────────────────
+
+    def _build_headers(self) -> Dict[str, str]:
+        """HTTP headers for a chat request. Subclasses change auth/extra headers."""
+        return {
+            "Authorization":  f"Bearer {self.api_key}",
+            "Content-Type":   "application/json",
+            "HTTP-Referer":   self._site_url,
+            "X-Title":        self._app_name,
+            "X-OpenRouter-Title": self._app_name,
+        }
+
+    def _extra_payload(self) -> Dict[str, Any]:
+        """Provider-level body defaults. Never overrides keys already set."""
+        return {}
+
     # ── Core streaming request ─────────────────────────────────────────────────
 
     def _chat_raw(
@@ -596,13 +612,7 @@ class OpenRouterProvider(BaseProvider):
                 "Get one at https://openrouter.ai/keys and add it in Settings → Models & Providers"
             )
 
-        headers = {
-            "Authorization":  f"Bearer {self.api_key}",
-            "Content-Type":   "application/json",
-            "HTTP-Referer":   self._site_url,
-            "X-Title":        self._app_name,
-            "X-OpenRouter-Title": self._app_name,
-        }
+        headers = self._build_headers()
 
         # Strip non-API kwargs
         api_params = {
@@ -719,6 +729,10 @@ class OpenRouterProvider(BaseProvider):
         else:
             log.info(f"[{self.DISPLAY_NAME}] model={model} (no tools)")
 
+        for _k, _v in (self._extra_payload() or {}).items():
+            if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
+                payload.setdefault(_k, _v)
+
         url = f"{self.BASE_URL}/chat/completions"
 
         retry_callback = kwargs.pop("retry_callback", None)
@@ -832,16 +846,25 @@ class OpenRouterProvider(BaseProvider):
                             choices = data.get("choices", [])
                             if not choices:
                                 # usage-only chunk (some models send this at the end)
-                                if "usage" in data:
-                                    self._token_count["input"]  = data["usage"].get("prompt_tokens", 0)
-                                    self._token_count["output"] = data["usage"].get("completion_tokens", 0)
-                                    self._token_count["cached"] = cached_tokens_from(data["usage"])
+                                # `"usage" in data` is not enough: a provider
+                                # may send "usage": null on chunks that carry
+                                # none, and `data["usage"].get(...)` then dies
+                                # mid-stream, losing the whole answer. NVIDIA
+                                # NIM does exactly this on its final chunk.
+                                _usage = data.get("usage") or {}
+                                if _usage:
+                                    self._token_count["input"]  = _usage.get("prompt_tokens", 0)
+                                    self._token_count["output"] = _usage.get("completion_tokens", 0)
+                                    self._token_count["cached"] = cached_tokens_from(_usage)
                                 continue
 
-                            delta      = choices[0].get("delta", {})
-                            content    = delta.get("content", "")
-                            reasoning  = delta.get("reasoning", "") or delta.get("reasoning_content", "")
-                            tool_calls = delta.get("tool_calls", [])
+                            # `or {}` rather than a default: these keys are
+                            # sometimes present with a null value, and a
+                            # default only applies when the key is ABSENT.
+                            delta      = choices[0].get("delta") or {}
+                            content    = delta.get("content") or ""
+                            reasoning  = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                            tool_calls = delta.get("tool_calls") or []
 
                             if content:
                                 content = re.sub(
@@ -897,10 +920,12 @@ class OpenRouterProvider(BaseProvider):
                                 _yielded_content = True
                                 yield f"__TOOL_CALL_DELTA__:{json.dumps(tool_call_data)}"
 
-                            if "usage" in data:
-                                self._token_count["input"]  = data["usage"].get("prompt_tokens", 0)
-                                self._token_count["output"] = data["usage"].get("completion_tokens", 0)
-                                self._token_count["cached"] = cached_tokens_from(data["usage"])
+                            # See the note above: "usage" may be present and null.
+                            _usage = data.get("usage") or {}
+                            if _usage:
+                                self._token_count["input"]  = _usage.get("prompt_tokens", 0)
+                                self._token_count["output"] = _usage.get("completion_tokens", 0)
+                                self._token_count["cached"] = cached_tokens_from(_usage)
 
                         return  # Success
 

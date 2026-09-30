@@ -181,6 +181,7 @@ class ProviderType(Enum):
     ANTHROPIC = "anthropic"    # Anthropic — Claude native API (BYOK)
     INFERENCEHUB = "inferencehub"  # InferenceHub, one key for many models (BYOK)
     GOOGLE = "google"          # Google Gemini, native AI Studio API (BYOK)
+    DYNAMIC = "dynamic"        # Server-defined OpenAI-compatible providers (dp/<slug>/...)
 
 
 
@@ -531,6 +532,9 @@ class ProviderRegistry:
 
     def __init__(self):
         self._providers: Dict[ProviderType, BaseProvider] = {}
+        # Server-defined providers, one instance per slug: slug -> provider.
+        # Rebuilt when the synced spec's fingerprint changes (base URL, auth...).
+        self._dynamic: Dict[str, BaseProvider] = {}
         # Was ProviderType.MISTRAL, a leftover from when Mistral was the chat
         # provider during early development. It made the OCR service the
         # default answer for "which provider am I using?", so any unresolved
@@ -598,10 +602,43 @@ class ProviderRegistry:
     
 
         
+    def get_dynamic(self, slug: str) -> Optional[BaseProvider]:
+        """The live provider for a server-defined slug, or None if not synced."""
+        from src.ai import dynamic_providers as _dyn
+        spec = _dyn.get_provider_spec(slug)
+        if not spec:
+            return None
+        cached = self._dynamic.get(spec["slug"])
+        if cached is not None and getattr(cached, "fingerprint", None) == spec.get("_fingerprint"):
+            cached.reload_key()  # the key may have been added/changed since
+            return cached
+        from src.ai.providers.dynamic_provider import DynamicProvider
+        inst = DynamicProvider(spec)
+        self._dynamic[spec["slug"]] = inst
+        log.info(f"DynamicProvider registered: {spec['slug']} -> {spec['base_url']}")
+        return inst
+
+    def get_dynamic_for_model(self, model_id: str) -> Optional[BaseProvider]:
+        from src.ai import dynamic_providers as _dyn
+        parsed = _dyn.parse_model_id(model_id or "")
+        return self.get_dynamic(parsed[0]) if parsed else None
+
     def get_provider(self, provider_type: Optional[ProviderType] = None) -> BaseProvider:
         if provider_type is None:
             provider_type = self._current_provider
-        
+
+        # DYNAMIC is not one provider but one per slug: resolve it from the
+        # selected model (callers like the loop reviewer only know the type).
+        if provider_type == ProviderType.DYNAMIC:
+            try:
+                from src.config.settings import get_settings
+                _mid = get_settings().get("ai", "model_id", default="") or ""
+            except Exception:
+                _mid = ""
+            _dp = self.get_dynamic_for_model(_mid)
+            if _dp is not None:
+                return _dp
+
         provider = self._providers.get(provider_type)
         if not provider:
             # Try lazy-load before falling back to Mistral

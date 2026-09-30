@@ -17,7 +17,15 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-log = logging.getLogger("cortex_api")
+# get_logger(), not logging.getLogger(): the bare call attaches no
+# handler, so every line this module logged went nowhere. A browser
+# sign-in that failed its code exchange left "Login Successful" in the
+# browser, a spinning dialog, and NOT ONE line in cortex.log to say why.
+try:
+    from src.utils.logger import get_logger
+    log = get_logger("cortex_api")
+except Exception:
+    log = logging.getLogger("cortex_api")
 
 # App version, sent as X-Cortex-Version on every API request so the server
 # can track which IDE version each user runs (admin panel "App Versions in
@@ -62,6 +70,7 @@ class CortexAPIClient:
         self.expires_at: Optional[str] = None
         self.user_info: Optional[Dict] = None
         self._lock = threading.Lock()
+        self.last_error: Optional[str] = None
         self._token_file = Path.home() / ".cortex" / "auth.json"
         self._load_tokens()
 
@@ -93,8 +102,8 @@ class CortexAPIClient:
         except Exception as e:
             log.warning(f"[CortexAPI] Failed to load tokens: {e}")
 
-    def _save_tokens(self):
-        """Save tokens to disk."""
+    def _save_tokens(self) -> bool:
+        """Save tokens to disk. False when the session will not survive a restart."""
         try:
             self._token_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
@@ -104,8 +113,19 @@ class CortexAPIClient:
                 "user": self.user_info,
             }
             self._token_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            return True
         except Exception as e:
-            log.warning(f"[CortexAPI] Failed to save tokens: {e}")
+            # A sign-in that cannot be written to disk works until the app is
+            # closed and is then gone, so the login screen comes back on every
+            # launch with nothing explaining why. This used to be a warning on
+            # a logger that had no handler: invisible twice over. A full disk
+            # is the realistic cause.
+            log.error(f"[CortexAPI] Could not save the session to "
+                      f"{self._token_file}: {e}")
+            self.last_error = (
+                f"Signed in, but the session could not be saved to disk "
+                f"({e}). You will be asked to sign in again next launch.")
+            return False
 
     def _clear_tokens(self):
         """Clear tokens from memory and disk."""
@@ -163,13 +183,39 @@ class CortexAPIClient:
 
             if resp.status_code >= 400:
                 log.warning(f"[CortexAPI] {method} {path} → {resp.status_code}: {resp.text[:200]}")
+                # Keep the refusal. Returning a bare None here is what made a
+                # failed sign-in unexplainable: the caller knew only "falsy".
+                self.last_error = self._describe_error(resp)
                 return None
 
             return resp.json()
 
         except Exception as e:
-            log.debug(f"[CortexAPI] {method} {path} failed: {e}")
+            log.warning(f"[CortexAPI] {method} {path} failed: {e}")
+            self.last_error = f"Could not reach {self.base_url}: {e}"
             return None
+
+    @staticmethod
+    def _describe_error(resp) -> str:
+        """Turn a JSON error body into one line a human can act on."""
+        _HUMAN = {
+            "email_not_verified": "Verify your email address, then sign in again.",
+            "invalid_code":       "That sign-in link expired or was already used. Try again.",
+            "missing_code":       "The browser sent no authorization code. Try again.",
+            "invalid_body":       "The server rejected the sign-in request.",
+            "server_error":       "The server hit an error completing sign-in.",
+        }
+        try:
+            body = resp.json()
+            code = str(body.get("error", "") or "")
+            if code in _HUMAN:
+                return _HUMAN[code]
+            detail = body.get("detail") or code
+            if detail:
+                return f"{detail} (HTTP {resp.status_code})"
+        except Exception:
+            pass
+        return f"The server refused the sign-in (HTTP {resp.status_code})."
 
     def _try_refresh(self) -> bool:
         """Try to refresh the access token."""
@@ -231,6 +277,7 @@ class CortexAPIClient:
 
     def login_with_code(self, code: str, state: str = "", device_info: dict = None) -> bool:
         """Exchange auth code for tokens."""
+        self.last_error = None
         result = self._request("POST", "/api/v1/auth/callback/", json_data={
             "code": code,
             "state": state,
@@ -244,6 +291,7 @@ class CortexAPIClient:
             self._save_tokens()
             log.info(f"[CortexAPI] Logged in as {self.user_info.get('email')}")
             return True
+        log.error(f"[CortexAPI] Auth code exchange failed: {self.last_error}")
         return False
 
     def login_with_credentials(self, email: str, password: str) -> bool:

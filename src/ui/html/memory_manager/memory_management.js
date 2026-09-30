@@ -1497,16 +1497,14 @@ Use f-strings instead of .format().</code></pre>
        API KEY MANAGEMENT
        ═══════════════════════════════════════════════════════════════ */
     
-    const PROVIDER_CONFIG = {
-      mimo:      { input: 'mimoKey',      mask: 'mimoKeyMask',      eye: 'mimoEye',      test: 'mimoTest',      remove: 'mimoRemove',      settingsKey: 'ai.mimo_key',      kmName: 'mimo' },
-      deepseek:  { input: 'deepseekKey',  mask: 'deepseekKeyMask',  eye: 'deepseekEye',  test: 'deepseekTest',  remove: 'deepseekRemove',  settingsKey: 'ai.deepseek_key',  kmName: 'deepseek' },
-      anthropic: { input: 'anthropicKey', mask: 'anthropicKeyMask', eye: 'anthropicEye', test: 'anthropicTest', remove: 'anthropicRemove', settingsKey: 'ai.anthropic_key', kmName: 'anthropic' },
-      openai:    { input: 'openaiKey',    mask: 'openaiKeyMask',    eye: 'openaiEye',    test: 'openaiTest',    remove: 'openaiRemove',    settingsKey: 'ai.openai_key',    kmName: 'openai' },
-      openrouter:{ input: 'openrouterKey',mask: 'openrouterKeyMask',eye: 'openrouterEye',test: 'openrouterTest',remove: 'openrouterRemove',settingsKey: 'ai.openrouter_key',kmName: 'openrouter' },
-      alibaba:   { input: 'alibabaKey',  mask: 'alibabaKeyMask',   eye: 'alibabaEye',   test: 'alibabaTest',   remove: 'alibabaRemove',   settingsKey: 'ai.alibaba_key',   kmName: 'alibaba' },
-      inferencehub: { input: 'inferencehubKey', mask: 'inferencehubKeyMask', eye: 'inferencehubEye', test: 'inferencehubTest', remove: 'inferencehubRemove', settingsKey: 'ai.inferencehub_key', kmName: 'inferencehub' },
-      google:    { input: 'googleKey',    mask: 'googleKeyMask',    eye: 'googleEye',    test: 'googleTest',    remove: 'googleRemove',    settingsKey: 'ai.google_key',    kmName: 'google' },
-    };
+    /* Filled in by _renderProviders(), one entry per row it draws, keyed on
+       the row's DOM key ("mimo" for a built-in, "dyn_nvidia" for a provider
+       the user or the server published). This used to be a hand-written
+       literal of eight entries mirroring eight hand-written <div>s in the
+       HTML; both copies are gone and every row now comes from
+       bridge.listProviders(), so a provider added in the admin panel gets a
+       row, a key field and a toggle with no desktop release. */
+    const PROVIDER_CONFIG = {};
 
     /* Track which providers have keys stored */
     const _providerHasKey = {};
@@ -1703,8 +1701,14 @@ Use f-strings instead of .format().</code></pre>
       }
     }
 
-    /* Bind events for all providers */
-    Object.entries(PROVIDER_CONFIG).forEach(([provider, cfg]) => {
+    /* Bind events for one rendered row. Called by _renderProviders() as each
+       row is appended, so built-in and published rows get identical wiring -
+       the enable toggle is deliberately NOT here, it is delegated on the
+       document (see PROVIDER ACTIVATION TOGGLES below) because rows appear
+       after this script has run. */
+    function _wireProviderRow(key) {
+      const cfg = PROVIDER_CONFIG[key];
+      if (!cfg) return;
       const input = $(cfg.input);
       const eyeBtn = $(cfg.eye);
       const testBtn = $(cfg.test);
@@ -1712,22 +1716,22 @@ Use f-strings instead of .format().</code></pre>
 
       /* Eye toggle */
       if (eyeBtn) {
-        eyeBtn.addEventListener('click', () => _toggleEye(provider));
+        eyeBtn.addEventListener('click', () => _toggleEye(key));
       }
 
       /* Test connection */
       if (testBtn) {
-        testBtn.addEventListener('click', () => _testConnection(provider));
+        testBtn.addEventListener('click', () => _testConnection(key));
       }
 
       /* Remove key */
       if (removeBtn) {
-        removeBtn.addEventListener('click', () => _removeKey(provider));
+        removeBtn.addEventListener('click', () => _removeKey(key));
       }
 
       /* Save on blur */
       if (input) {
-        input.addEventListener('blur', () => _saveKey(provider));
+        input.addEventListener('blur', () => _saveKey(key));
         /* Also save on Enter */
         input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
@@ -1738,25 +1742,49 @@ Use f-strings instead of .format().</code></pre>
 
       /* Check if key exists and show masked state */
       /* Will be populated when bridge connects */
-      _providerHasKey[provider] = false;
-    });
+      _providerHasKey[key] = false;
+    }
 
-    /* Load stored key status when bridge connects */
+    /* Apply one row's stored-key state. Shared by the batched call below and
+       its one-at-a-time fallback, so both behave identically. */
+    function _applyKeyStatus(provider, cfg, key) {
+      /* Only show masked state if key is valid (not empty, not placeholder) */
+      if (key && key.length > 8 && key !== '***') {
+        _showMaskedState(provider, key);
+      } else {
+        /* No valid key, show empty input */
+        _showEditState(provider);
+        const input = $(cfg.input);
+        if (input) input.value = '';
+        _providerHasKey[provider] = false;
+      }
+    }
+
+    /* Load stored key status when bridge connects.
+       ONE call for every row. This used to ask getApiKey() once per provider,
+       which is N web-channel round trips through the GUI thread, and on Linux
+       each of those also re-read the key store, so opening this panel got
+       slower with every provider the account had - including each one the
+       admin panel publishes. */
     function _loadKeyStatus() {
-      Object.entries(PROVIDER_CONFIG).forEach(([provider, cfg]) => {
+      const entries = Object.entries(PROVIDER_CONFIG);
+      if (!entries.length) return;
+
+      if (bridge && typeof bridge.getApiKeyStatuses === 'function') {
+        const names = entries.map(([, cfg]) => cfg.kmName);
+        bridge.getApiKeyStatuses(JSON.stringify(names), (raw) => {
+          let keys;
+          try { keys = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { keys = null; }
+          if (!keys || typeof keys !== 'object') keys = {};
+          entries.forEach(([provider, cfg]) => _applyKeyStatus(provider, cfg, keys[cfg.kmName]));
+        });
+        return;
+      }
+
+      /* An older bridge without the batch slot: same answers, one call each. */
+      entries.forEach(([provider, cfg]) => {
         if (bridge && typeof bridge.getApiKey === 'function') {
-          bridge.getApiKey(cfg.kmName, (key) => {
-            /* Only show masked state if key is valid (not empty, not placeholder) */
-            if (key && key.length > 8 && key !== '***' && key !== '***') {
-              _showMaskedState(provider, key);
-            } else {
-              /* No valid key, show empty input */
-              _showEditState(provider);
-              const input = $(cfg.input);
-              if (input) input.value = '';
-              _providerHasKey[provider] = false;
-            }
-          });
+          bridge.getApiKey(cfg.kmName, (key) => _applyKeyStatus(provider, cfg, key));
         } else {
           /* No bridge, check settings for placeholder */
           const settingsVal = state?.settings?.[cfg.settingsKey];
@@ -1769,18 +1797,200 @@ Use f-strings instead of .format().</code></pre>
       });
     }
 
-    /* Load key status once the bridge is actually connected (see
-       whenBridgeReady, a fixed-delay one-shot missed in compiled builds). */
-    whenBridgeReady(_loadKeyStatus);
+    /* ═══════════════════════════════════════════════════════════════
+       PROVIDER ROWS
+       Every row of the "Provider API Keys" card is drawn here, from
+       bridge.listProviders(): the published built-in directory first,
+       then the user's own and server-published providers. One markup
+       builder, one wiring function, one key-name convention - a row
+       cannot behave differently because of where its provider came
+       from. This used to be two halves: eight hand-written <div>s in
+       the HTML with a matching eight-entry PROVIDER_CONFIG literal,
+       plus a runtime renderer for the dynamic ones into a second host.
+       The halves drifted, and a provider published from the admin
+       panel had no row at all until a desktop release shipped one.
+       ═══════════════════════════════════════════════════════════════ */
+
+    function _rowInitial(p) {
+      const from = p.logoText || p.name || p.slug || '?';
+      const c = String(from).trim().charAt(0).toUpperCase();
+      return /[A-Z0-9]/.test(c) ? c : '?';
+    }
+
+    function _rowHtml(p) {
+      /* textContent is used for every server-supplied string below; this
+         builds the skeleton only, so a provider name can never inject
+         markup into the settings page. */
+      const k = p.domKey;
+      /* Every element id derives from the DOM key, the same key
+         PROVIDER_CONFIG is built with in _renderProviders(). A hardcoded
+         "dyn_" prefix here gave builtin rows Test/Remove ids nobody looked
+         up, so clicking their X did nothing while user-added rows worked. */
+      return (
+        '<div class="provider-info">' +
+          '<div class="provider-logo js-logo"></div>' +
+          '<div><label class="js-name"></label>' +
+            '<p class="js-desc"></p>' +
+            '<a class="get-key-link js-signup" style="display:none"></a>' +
+          '</div>' +
+        '</div>' +
+        '<div class="provider-key" style="position:relative;">' +
+          '<input type="password" class="setting-input key-input" id="' + k + 'Key" placeholder="Paste key...">' +
+          '<span class="key-mask" id="' + k + 'KeyMask" style="display:none;">••••••••••••••••</span>' +
+          '<div class="key-actions">' +
+            '<button class="setting-btn icon-btn test-btn" id="' + k + 'Test" title="Test">' +
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' +
+            '</button>' +
+            '<button class="setting-btn icon-btn remove-btn" id="' + k + 'Remove" title="Remove" style="display:none">' +
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+        '<label class="switch"><input type="checkbox" class="provider-enable" id="' + k + 'Enable"><span class="switch-slider"></span></label>'
+      );
+    }
+
+    /* Which switches are on before the user has ever chosen: read off the
+       rows the bridge sent (defaultEnabled), i.e. off the server's
+       ProviderMeta table. This page used to hardcode ['mimo', 'deepseek']
+       here, a third copy of the same fact. */
+    let _defaultEnabled = [];
+
+    function _renderProviders(list) {
+      const host = document.getElementById('providerRows');
+      if (!host) return;
+      host.innerHTML = '';
+      /* The map describes the rows on the page; stale entries would point
+         _loadKeyStatus() at elements that no longer exist. */
+      Object.keys(PROVIDER_CONFIG).forEach((k) => delete PROVIDER_CONFIG[k]);
+      if (!Array.isArray(list) || !list.length) {
+        /* The catalog is server-published: an empty list means the server
+           has never been reached and no cache exists, and the user's own
+           providers list is empty too. Say that instead of showing a blank
+           card - a silent empty card reads as "the feature is broken". */
+        const empty = document.createElement('div');
+        empty.className = 'provider-empty';
+        empty.textContent =
+          'No providers yet. The provider and model list syncs from your ' +
+          'Cortex account — sign in while online and reopen this page. ' +
+          'Providers you add yourself appear here too.';
+        host.appendChild(empty);
+        return;
+      }
+
+      list.forEach((p) => {
+        if (!p || !p.slug || !p.domKey) return;
+        const key = p.domKey;
+        const row = document.createElement('div');
+        row.className = 'provider-row';
+        row.dataset.provider = key;
+        row.innerHTML = _rowHtml(p);
+
+        const logo = row.querySelector('.js-logo');
+        logo.style.background = p.color || '#6b7280';
+        logo.style.color = 'white';
+        logo.textContent = _rowInitial(p);
+
+        row.querySelector('.js-name').textContent = p.name || p.slug;
+
+        const bits = [];
+        if (p.description) bits.push(p.description);
+        else if (p.modelCount) bits.push(p.modelCount + (p.modelCount === 1 ? ' model' : ' models'));
+        if (p.authStyle === 'none') bits.push('no key needed');
+        else if (p.keyHint) bits.push('key starts ' + p.keyHint);
+        row.querySelector('.js-desc').textContent = bits.join(' · ');
+
+        if (p.signupUrl) {
+          const a = row.querySelector('.js-signup');
+          a.style.display = '';
+          a.dataset.url = p.signupUrl;
+          a.title = p.signupUrl;
+          a.textContent = 'Get API key ↗';
+          /* No click handler here on purpose: a delegated listener already
+             handles .get-key-link[data-url]. Adding another opened the
+             browser twice. */
+        }
+
+        /* A keyless provider (a user's own Ollama) has nothing to paste. */
+        if (p.authStyle === 'none') {
+          const inp = row.querySelector('.key-input');
+          inp.disabled = true;
+          inp.placeholder = 'No key required';
+        }
+
+        /* The TOGGLE is keyed on the provider slug ("nvidia"), not the DOM
+           key ("dyn_nvidia"): the chat dropdown groups these models under
+           the slug, and ai.enabled_providers is matched against it. Keyed on
+           the DOM key, the switch saved nothing, reverted on restart, and
+           the models never appeared. The key field above still uses the DOM
+           key - they are different identifiers for different jobs. */
+        const enable = row.querySelector('.provider-enable');
+        enable.dataset.provider = p.slug;
+        enable.closest('.switch').title =
+          `Show ${p.name || p.slug} models in the chat dropdown`;
+        host.appendChild(row);
+
+        /* Same shape for every row, so _saveKey/_testConnection/_removeKey/
+           _toggleEye work without knowing where the provider came from. */
+        PROVIDER_CONFIG[key] = {
+          input:  key + 'Key',
+          mask:   key + 'KeyMask',
+          eye:    key + 'Eye',
+          test:   key + 'Test',
+          remove: key + 'Remove',
+          settingsKey: p.settingsKey || ('ai.' + key + '_key'),
+          kmName: p.keyName || key,
+        };
+        _wireProviderRow(key);
+      });
+
+      /* Stored keys show masked, and the enable toggles are re-applied now
+         that the checkboxes exist. */
+      _loadKeyStatus();
+      /* Immediately from what we already know, then re-ask in case the list
+         changed. Without the first line these rows flash as "off". */
+      _defaultEnabled = list.filter((p) => p && p.defaultEnabled && p.slug)
+                            .map((p) => p.slug);
+      if (Array.isArray(_enabledCache)) _applyEnabledProviders(_enabledCache);
+      else _applyEnabledProviders(_defaultEnabled);
+      if (typeof _loadEnabledProviders === 'function') _loadEnabledProviders();
+    }
+
+    function _loadProviders() {
+      if (!bridge || typeof bridge.listProviders !== 'function') return;
+      try {
+        bridge.listProviders((raw) => {
+          let list = [];
+          try { list = JSON.parse(raw || '[]'); } catch (e) { list = []; }
+          _renderProviders(list);
+        });
+      } catch (e) {
+        /* An older build without the slot leaves the card empty rather than
+           throwing during page setup. */
+      }
+    }
+
+    /* Draw the rows, then load their key status, once the bridge is actually
+       connected (see whenBridgeReady, a fixed-delay one-shot missed in
+       compiled builds). _renderProviders() calls _loadKeyStatus() itself, so
+       the map is populated before anything reads it. */
+    whenBridgeReady(_loadProviders);
 
     /* ═══════════════════════════════════════════════════════════════
        PROVIDER ACTIVATION TOGGLES
        Which providers show their models in the chat dropdown.
-       Default: MiMo + DeepSeek only. Persisted in ai.enabled_providers.
+       Persisted in ai.enabled_providers; the first-run defaults come
+       from the rows themselves (defaultEnabled, i.e. the server's
+       ProviderMeta table), not from a list restated in this file.
        ═══════════════════════════════════════════════════════════════ */
-    const DEFAULT_ENABLED_PROVIDERS = ['mimo', 'deepseek'];
+    /* The last list the bridge gave us. Rows rendered after that answer
+       arrived must start in the right state without waiting for another
+       round trip, or a dynamic provider draws as off for a moment and can
+       be left that way if nothing re-applies. */
+    let _enabledCache = null;
 
     function _applyEnabledProviders(list) {
+      _enabledCache = list;
       document.querySelectorAll('.provider-enable').forEach((cb) => {
         cb.checked = list.includes(cb.dataset.provider);
       });
@@ -1791,29 +2001,41 @@ Use f-strings instead of .format().</code></pre>
         bridge.getEnabledProviders((raw) => {
           let list;
           try { list = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { list = null; }
-          _applyEnabledProviders(Array.isArray(list) ? list : DEFAULT_ENABLED_PROVIDERS);
+          _applyEnabledProviders(Array.isArray(list) ? list : _defaultEnabled);
         });
       } else {
-        _applyEnabledProviders(DEFAULT_ENABLED_PROVIDERS);
+        _applyEnabledProviders(_defaultEnabled);
       }
     }
 
-    document.querySelectorAll('.provider-enable').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const provider = cb.dataset.provider;
-        if (bridge && typeof bridge.setProviderEnabled === 'function') {
-          bridge.setProviderEnabled(provider, cb.checked, (raw) => {
-            let list;
-            try { list = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { list = null; }
-            if (Array.isArray(list)) _applyEnabledProviders(list);
-            showToast(cb.checked
-              ? `${provider} models shown in chat dropdown`
-              : `${provider} models hidden from chat dropdown`);
-          });
-        } else {
-          showToast('Not connected, provider setting not saved');
-        }
-      });
+    /* DELEGATED, not bound per element.
+       querySelectorAll().forEach(addEventListener) runs ONCE, over the
+       checkboxes that exist at that moment - the hand-written rows. Every
+       server-published and user-added provider is rendered later, so those
+       toggles had NO handler: clicking one flipped the switch on screen and
+       saved nothing, and the next restart showed whatever was on disk. That
+       is the "the toggle turns itself off again" report. A listener on the
+       document catches rows that do not exist yet. */
+    document.addEventListener('change', (e) => {
+      const cb = e.target;
+      if (!cb || !cb.classList || !cb.classList.contains('provider-enable')) return;
+      const provider = cb.dataset.provider;
+      if (!provider) return;
+      if (bridge && typeof bridge.setProviderEnabled === 'function') {
+        bridge.setProviderEnabled(provider, cb.checked, (raw) => {
+          let list;
+          try { list = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e2) { list = null; }
+          if (Array.isArray(list)) {
+            _enabledCache = list;
+            _applyEnabledProviders(list);
+          }
+          showToast(cb.checked
+            ? `${provider} models shown in chat dropdown`
+            : `${provider} models hidden from chat dropdown`);
+        });
+      } else {
+        showToast('Not connected, provider setting not saved');
+      }
     });
 
     whenBridgeReady(_loadEnabledProviders);

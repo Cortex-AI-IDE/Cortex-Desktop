@@ -90,6 +90,9 @@ class SidebarWidget(QWidget):
         self._webview_initialized = False
         self._pending_js_calls = []
         self._pending_is_dark = None  # last requested theme, re-pushed on page load
+        # Project path requested before _init_webview created the bridge.
+        # See set_project() for the bug this exists to fix.
+        self._pending_project_path = None
         self._build_ui()
 
     def _build_ui(self):
@@ -155,6 +158,10 @@ class SidebarWidget(QWidget):
         self._channel = QWebChannel(self._web_view.page())
         self._channel.registerObject("SidebarBridge", self._bridge)
         self._web_view.page().setWebChannel(self._channel)
+
+        # Replay a project path that arrived before this bridge existed.
+        # This is the startup-restore race fix; see set_project().
+        self._apply_pending_project()
 
         html_path = _sidebar_resource_path(os.path.join("src", "ui", "html", "sidebar.html"))
         if os.path.exists(html_path):
@@ -573,7 +580,30 @@ class SidebarWidget(QWidget):
         return False
 
     def set_project(self, path):
-        if self._bridge: self._bridge.setProjectPath(path)
+        """Point the Explorer at `path`.
+
+        Bug history (startup restore showed an empty tree until the user
+        re-opened the folder by hand): `_bridge` is NOT created in __init__.
+        It is created in _init_webview, which showEvent schedules 100ms
+        later, so that the window can appear before Chromium is spun up.
+        During a launch, main_window's deferred session restore fires while
+        that timer is still pending, hit `if self._bridge:` -> None, and the
+        restored project path was dropped on the floor. The sidebar then
+        loaded with an empty project path and displayed nothing.
+
+        The two startup timers race, which is why this only happened on some
+        launches. Remember the path here and replay it in _init_webview when
+        the bridge finally exists, so set_project() cannot lose it.
+        """
+        self._pending_project_path = path
+        if self._bridge:
+            self._bridge.setProjectPath(path)
+
+    def _apply_pending_project(self):
+        """Hand a remembered project path to a bridge that now exists."""
+        path = self._pending_project_path
+        if path and self._bridge:
+            self._bridge.setProjectPath(path)
     def set_opened_files(self, paths):
         if self._bridge: self._bridge._call_js(f'SidebarBridge.setOpenedFiles({json.dumps(paths)})')
     def refresh(self):

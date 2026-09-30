@@ -99,6 +99,8 @@ class KeyManager:
         self._cache: Dict[str, str] = {}
         self._cache_ttl: Dict[str, datetime] = {}
         self._CACHE_DURATION = timedelta(minutes=5)
+        # Parsed keys.enc, memoized. See _load_encrypted_keys().
+        self._vault_cache: Optional[Dict[str, Any]] = None
         
         # Rate limiting
         self._decrypt_attempts: List[float] = []
@@ -568,6 +570,7 @@ class KeyManager:
             
             # Save
             self._keys_file.write_text(json.dumps(keys, indent=2))
+            self._vault_cache = None
             
             # Update HMAC
             data_to_sign = json.dumps(keys, sort_keys=True).encode('utf-8')
@@ -581,14 +584,32 @@ class KeyManager:
             return False
     
     def _load_encrypted_keys(self) -> Dict[str, Any]:
-        """Load encrypted keys from file."""
+        """Load encrypted keys from file, parsing it once per write.
+
+        The Settings panel asks for one key per provider row, and every miss
+        used to read and re-parse this whole file, so the cost of opening the
+        panel grew with the number of providers the server publishes. On
+        Linux it was paid for every row, because _get_os_keyring_key() is a
+        no-op there and every lookup falls through to this file.
+
+        The file is written only by _store_encrypted_file(), delete_key() and
+        import_credentials(), each of which drops this cache, and nothing
+        outside this class reads it, so the memo cannot outlive a change. A
+        copy is handed out so a caller that mutates the mapping before a write
+        cannot leave the memo ahead of the file if that write fails.
+        """
+        if self._vault_cache is not None:
+            return dict(self._vault_cache)
         if not self._keys_file.exists():
+            self._vault_cache = {}
             return {}
         try:
             content = self._keys_file.read_text()
-            return json.loads(content)
+            parsed = json.loads(content)
+            self._vault_cache = parsed if isinstance(parsed, dict) else {}
         except Exception:
-            return {}
+            self._vault_cache = {}
+        return self._vault_cache
     
     def delete_key(self, provider: str) -> bool:
         """Delete a stored API key from all backends."""
@@ -616,6 +637,7 @@ class KeyManager:
                 if provider in keys:
                     del keys[provider]
                     self._keys_file.write_text(json.dumps(keys, indent=2))
+                    self._vault_cache = None
                     deleted = True
                     log.info(f"[KeyManager] Deleted {provider} key from encrypted file")
             except Exception:
@@ -688,6 +710,7 @@ class KeyManager:
                     imported_count += 1
             
             self._keys_file.write_text(json.dumps(existing_keys, indent=2))
+            self._vault_cache = None
             
             data_to_sign = json.dumps(existing_keys, sort_keys=True).encode('utf-8')
             hmac_value = self._compute_hmac(data_to_sign)
@@ -707,6 +730,7 @@ class KeyManager:
         try:
             if self._keys_file.exists():
                 self._keys_file.unlink()
+                self._vault_cache = None
             if self._salt_file.exists():
                 self._salt_file.unlink()
             if self._integrity_file.exists():

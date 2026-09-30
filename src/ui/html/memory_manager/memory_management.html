@@ -541,187 +541,20 @@
           <h3>Provider API Keys</h3>
           <p class="card-desc">Store your API keys locally. Keys are encrypted and never leave your device. Use the
             toggle to show a provider's models in the chat dropdown, MiMo &amp; DeepSeek are on by default.</p>
-          <div class="provider-row" data-provider="mimo">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#f97316;color:white">X</div>
-              <div><label>MiMo</label>
-                <p>V2.5 Pro · 1M ctx</p>
-                <a class="get-key-link" data-url="https://platform.xiaomimimo.com" title="https://platform.xiaomimimo.com">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="mimoKey" placeholder="Paste key..." data-provider="mimo">
-              <span class="key-mask" id="mimoKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="mimoTest" title="Test" data-provider="mimo">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="mimoRemove" title="Remove" data-provider="mimo" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show MiMo models in the chat dropdown"><input type="checkbox" class="provider-enable" id="mimoEnable" data-provider="mimo" checked><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="deepseek">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#a78bfa;color:white">D</div>
-              <div><label>DeepSeek</label>
-                <p>V4 Pro · 1M ctx</p>
-                <a class="get-key-link" data-url="https://platform.deepseek.com/api_keys" title="https://platform.deepseek.com/api_keys">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="deepseekKey" placeholder="Paste key..." data-provider="deepseek">
-              <span class="key-mask" id="deepseekKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="deepseekTest" title="Test" data-provider="deepseek">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="deepseekRemove" title="Remove" data-provider="deepseek" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show DeepSeek models in the chat dropdown"><input type="checkbox" class="provider-enable" id="deepseekEnable" data-provider="deepseek" checked><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="anthropic">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#d77b4a;color:white">A</div>
-              <div><label>Anthropic</label>
-                <p>Claude · native API</p>
-                <a class="get-key-link" data-url="https://console.anthropic.com/settings/keys" title="https://console.anthropic.com/settings/keys">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="anthropicKey" placeholder="Paste key..." data-provider="anthropic">
-              <span class="key-mask" id="anthropicKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="anthropicTest" title="Test" data-provider="anthropic">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="anthropicRemove" title="Remove" data-provider="anthropic" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show Claude models in the chat dropdown"><input type="checkbox" class="provider-enable" id="anthropicEnable" data-provider="anthropic"><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="openai">
-            <div class="provider-info">
-              <div class="provider-logo openai">O</div>
-              <div><label>OpenAI</label>
-                <p>GPT-5.5, 5.4</p>
-                <a class="get-key-link" data-url="https://platform.openai.com/api-keys" title="https://platform.openai.com/api-keys">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="openaiKey" placeholder="Paste key..." data-provider="openai">
-              <span class="key-mask" id="openaiKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="openaiTest" title="Test" data-provider="openai">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="openaiRemove" title="Remove" data-provider="openai" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show OpenAI models in the chat dropdown"><input type="checkbox" class="provider-enable" id="openaiEnable" data-provider="openai"><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="openrouter">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#8b5cf6;color:white">R</div>
-              <div><label>OpenRouter</label>
-                <p>Multi-model</p>
-                <a class="get-key-link" data-url="https://openrouter.ai/keys" title="https://openrouter.ai/keys">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="openrouterKey" placeholder="Paste key..." data-provider="openrouter">
-              <span class="key-mask" id="openrouterKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="openrouterTest" title="Test" data-provider="openrouter">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="openrouterRemove" title="Remove" data-provider="openrouter" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show OpenRouter models in the chat dropdown"><input type="checkbox" class="provider-enable" id="openrouterEnable" data-provider="openrouter"><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="alibaba">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#f59e0b;color:white">Q</div>
-              <div><label>Qwen</label>
-                <p>3.7 Plus</p>
-                <a class="get-key-link" data-url="https://modelstudio.console.alibabacloud.com/ap-southeast-1?tab=dashboard#/api-key" title="https://modelstudio.console.alibabacloud.com/ap-southeast-1?tab=dashboard#/api-key">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="alibabaKey" placeholder="Paste key..." data-provider="alibaba">
-              <span class="key-mask" id="alibabaKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="alibabaTest" title="Test" data-provider="alibaba">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="alibabaRemove" title="Remove" data-provider="alibaba" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show Qwen models in the chat dropdown"><input type="checkbox" class="provider-enable" id="alibabaEnable" data-provider="alibaba"><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="inferencehub">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#7c5cff;color:white">IH</div>
-              <div><label>InferenceHub</label>
-                <p>One key: Claude, GPT, GLM, Kimi</p>
-                <a class="get-key-link" data-url="https://app.inferencehub.tech" title="https://app.inferencehub.tech">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="inferencehubKey" placeholder="Paste key..." data-provider="inferencehub">
-              <span class="key-mask" id="inferencehubKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="inferencehubTest" title="Test" data-provider="inferencehub">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="inferencehubRemove" title="Remove" data-provider="inferencehub" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show InferenceHub models in the chat dropdown"><input type="checkbox" class="provider-enable" id="inferencehubEnable" data-provider="inferencehub"><span class="switch-slider"></span></label>
-          </div>
-          <div class="provider-row" data-provider="google">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#4285f4;color:white">G</div>
-              <div><label>Google Gemini</label>
-                <p>3.6 Flash, 3.5 Flash, Pro</p>
-                <a class="get-key-link" data-url="https://aistudio.google.com/apikey" title="https://aistudio.google.com/apikey">Get API key ↗</a>
-              </div>
-            </div>
-            <div class="provider-key" style="position:relative;">
-              <input type="password" class="setting-input key-input" id="googleKey" placeholder="Paste key..." data-provider="google">
-              <span class="key-mask" id="googleKeyMask" style="display:none;">••••••••••••••••</span>
-              <div class="key-actions">
-                <button class="setting-btn icon-btn test-btn" id="googleTest" title="Test" data-provider="google">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-                <button class="setting-btn icon-btn remove-btn" id="googleRemove" title="Remove" data-provider="google" style="display:none">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-            </div>
-            <label class="switch" title="Show Gemini models in the chat dropdown"><input type="checkbox" class="provider-enable" id="googleEnable" data-provider="google"><span class="switch-slider"></span></label>
-          </div>
+          <!-- Every provider row is built at runtime into this one host, from
+               bridge.listProviders(): the published built-in directory first,
+               then the user's own and server-published providers. They used to
+               be eight hand-written <div>s here plus a separate host for the
+               dynamic ones, so a provider added in the admin panel needed a
+               desktop release before it had a row, and the logo colours,
+               signup URLs and default-on switches were stated three times
+               (here, in the page JS, and in model_registry.py). The server is
+               now the only place any of it is written. -->
+          <div id="providerRows"></div>
         </div>
         <div class="settings-card" style="border:1px dashed rgba(100,100,100,0.4); background:rgba(255,255,255,0.02)">
           <h3 style="color:#888">Available via OpenRouter</h3>
           <p class="card-desc">These providers are accessible using your OpenRouter API key.</p>
-          >
           <div class="provider-row" style="opacity:0.8">
             <div class="provider-info">
               <div class="provider-logo" style="background:#1da1f2;color:white">X</div>

@@ -87,6 +87,20 @@ from src.utils.notifications import show_task_complete_notification, show_toast_
 
 log = get_logger("main_window")
 
+
+def _is_gui_thread() -> bool:
+    """True when the caller runs on the thread that paints the window.
+
+    Module-level on purpose: anything that must never block the GUI asks
+    this, including code reached from test stubs that are not real windows.
+    """
+    try:
+        from PyQt6.QtCore import QThread
+        app = QApplication.instance()
+        return app is not None and QThread.currentThread() == app.thread()
+    except Exception:
+        return False
+
 try:
     from src.ui.syntax_highlighting_config import (
         UniversalCodeColorizer,
@@ -1107,6 +1121,14 @@ class CortexMainWindow(QMainWindow):
             remote_models.refresh_async(VERSION)  # network work on a daemon thread
         except Exception as exc:
             log.debug(f"Model config refresh skipped: {exc}")
+        try:
+            # Server-defined providers (NVIDIA NIM, the user's own servers...).
+            from src.ai import dynamic_providers
+            from src.version import VERSION as _V
+            dynamic_providers.load_cached()
+            dynamic_providers.refresh_async(_V)
+        except Exception as exc:
+            log.debug(f"Dynamic provider refresh skipped: {exc}")
 
     def _deferred_session_restore(self):
         """Deferred session restore, runs AFTER window is visible.
@@ -2009,6 +2031,7 @@ class CortexMainWindow(QMainWindow):
         
         self._add_action(ai_menu, "Permission Settings...", self._show_permission_settings, "")
         self._add_action(ai_menu, "Memory Manager...", self._show_memory_manager, "Ctrl+Shift+M")
+        self._add_action(ai_menu, "Custom Providers...", self._show_custom_providers)
         ai_menu.addSeparator()
         
         self._add_action(ai_menu, "AI Chat Focus", self._focus_ai_chat, "Ctrl+Shift+A")
@@ -4248,6 +4271,23 @@ class CortexMainWindow(QMainWindow):
             if offline is not None:
                 offline.append(file_path)
                 return None
+            # A cache miss must never run git on the GUI thread.
+            #
+            # Project open already defers (the branch above), but a LIVE AI
+            # edit came straight here and waited for `git show` inside
+            # _push_changes_to_sidebar. Measured 2026-09-29 on E:\game with
+            # the machine at 92% RAM: 17 UI-STALL reports in one run, 1.6-8.0s
+            # each, every stack ending in subprocess.communicate -> join.
+            # Process start is what costs, and under memory pressure it costs
+            # seconds - so the panel takes the AI-edit chain for this paint
+            # and a worker fills the cache, which redraws the row.
+            # Only when the redraw can actually be scheduled: without the
+            # signal there is nothing to repaint the row later, so answering
+            # inline is still the right call (this is also how a bare
+            # _git_baseline_content call in a test behaves).
+            if _is_gui_thread() and hasattr(self, "_changes_prefetched"):
+                self._queue_git_baseline(file_path)
+                return None
             result = self._git_baseline_from_git(root, rel, file_path)
             if token and result is not None:
                 if len(cache) > 300:
@@ -4260,6 +4300,45 @@ class CortexMainWindow(QMainWindow):
             except Exception:
                 pass
             return None
+
+    def _queue_git_baseline(self, file_path: str) -> None:
+        """Warm one file's git baseline on a worker, then redraw the panel.
+
+        One worker at a time, draining a queue: a run of AI edits asks for
+        many baselines within a second, and a thread per file would put the
+        same process-start cost back on the machine.
+        """
+        import threading as _thr
+        pending = self.__dict__.setdefault("_git_baseline_pending", [])
+        if file_path in pending:
+            return
+        pending.append(file_path)
+        if getattr(self, "_git_baseline_worker_live", False):
+            return
+        self._git_baseline_worker_live = True
+        gen = getattr(self, "_changes_prefetch_gen", 0)
+        if not getattr(self, "_changes_prefetch_wired", False):
+            self._changes_prefetched.connect(self._push_changes_to_sidebar)
+            self._changes_prefetch_wired = True
+
+        def _work():
+            filled = 0
+            try:
+                while pending:
+                    if getattr(self, "_changes_prefetch_gen", 0) != gen:
+                        return      # another project was opened meanwhile
+                    path = pending.pop(0)
+                    try:
+                        if self._git_baseline_content(path) is not None:
+                            filled += 1
+                    except Exception:
+                        pass
+            finally:
+                self._git_baseline_worker_live = False
+            if filled and getattr(self, "_changes_prefetch_gen", 0) == gen:
+                self._changes_prefetched.emit()
+
+        _thr.Thread(target=_work, daemon=True, name="changes-git-baseline").start()
 
     def _git_baseline_from_git(self, root: str, rel: str, file_path: str):
         """Ask git for HEAD:rel. Same return values as _git_baseline_content."""
@@ -8678,6 +8757,8 @@ class CortexMainWindow(QMainWindow):
 
             if provider:
                 pass  # already resolved
+            elif model_id.lower().startswith("dp/"):
+                provider = "dynamic"  # server-defined provider, see dynamic_providers.py
             elif model_id.startswith("mistral-") or model_id.startswith("codestral-"):
                 provider = "mistral"
             elif "/" in model_id:
@@ -10367,6 +10448,16 @@ class CortexMainWindow(QMainWindow):
         dialog.exec()
         log.info("Permission settings dialog opened")
     
+    def _show_custom_providers(self):
+        """AI > Custom Providers: keys for published providers + the user's own."""
+        try:
+            from src.ui.dialogs.custom_providers_dialog import open_custom_providers_dialog
+            # The model picker rebuilds itself each time it opens, so new keys
+            # and providers show up without any extra refresh here.
+            open_custom_providers_dialog(self)
+        except Exception as exc:
+            log.error(f"Custom providers dialog failed: {exc}")
+
     def _show_memory_manager(self):
         """Open the Memory Manager dialog (AI → Memory Manager...).
         
