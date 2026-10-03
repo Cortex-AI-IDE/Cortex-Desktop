@@ -3264,7 +3264,14 @@ function openFile(filePath, content, language, activate) {
             forceSetContent(filePath);
         }
         if (shouldActivate || !activeFilePath) switchToFile(filePath);
-        else renderTabs();
+        else {
+            renderTabs();
+            // Declined: the user stays on their tab. Python recorded this
+            // file as active when it asked, so tell it the real one, or its
+            // next Save goes to the wrong file (.env.example instead of the
+            // .env being edited, 2026-10-01).
+            _notifyActiveFile();
+        }
         // ACK for already-open file update too
         if (bridge && bridge.onContentDelivered) {
             bridge.onContentDelivered(filePath, (content || '').length);

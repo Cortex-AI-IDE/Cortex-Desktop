@@ -66,6 +66,7 @@ try:
     from src.agent.src.skills.cortex_skill import (
         SkillsManager,
         get_skills_manager,
+        set_skills_project_root,
         reset_skills_manager as _reset_skills_manager,
     )
     _HAS_SKILLS = True
@@ -74,6 +75,7 @@ except ImportError:
         from agent.src.skills.cortex_skill import (
             SkillsManager,
             get_skills_manager,
+            set_skills_project_root,
             reset_skills_manager as _reset_skills_manager,
         )
         _HAS_SKILLS = True
@@ -86,6 +88,7 @@ try:
         RulesManager,
         Rule as _ActualRule,
         get_rules_manager,
+        set_rules_project_root,
         reset_rules_manager as _reset_rules_manager,
     )
     _HAS_RULES = True
@@ -95,6 +98,7 @@ except ImportError:
             RulesManager,
             Rule as _ActualRule,
             get_rules_manager,
+            set_rules_project_root,
             reset_rules_manager as _reset_rules_manager,
         )
         _HAS_RULES = True
@@ -2582,6 +2586,8 @@ PLAN_ALLOWED_TOOLS = frozenset({
     # have. Accept both until the tool itself is renamed.
     'SemanticSearch', 'SementicSearch',
     'AskUserQuestion', 'WebSearch', 'WebFetch',
+    # Loads MCP tool definitions; reads nothing, changes nothing.
+    'MCPToolSearch',
 })
 
 
@@ -2680,6 +2686,275 @@ def _filter_tool_definitions(
         if _tool_name_from_schema(td) in allowed_names:
             out.append(td)
     return out
+
+
+# ============================================================
+# MCP TOOL DEFINITIONS
+# How a connected server's tools reach the model, following what Claude Code
+# (Tool Search) and Cursor (dynamic context discovery) do:
+#
+#   * small enough  -> every MCP definition goes in the function list.
+#   * too big       -> the model gets every tool NAME plus MCPToolSearch, and
+#                      loads a tool's full definition before calling it.
+#
+# Before this, MCP definitions were filtered out on every turn while the
+# system prompt told the model they were "in your function list right now".
+# The model called them blind and guessed parameter names: it asked
+# Playwright for a screenshot with `selector`, the parameter is `target`, the
+# key was silently dropped and every "element" screenshot came back as the
+# full viewport.
+# ============================================================
+
+MCP_SEARCH_TOOL = "MCPToolSearch"
+
+# Send every MCP definition up front while they cost less than this share of
+# the model's context window (Claude Code's default is 10%), and always below
+# the floor, where deferring would save less than it costs in round trips.
+_MCP_EAGER_FRACTION = 0.10
+_MCP_EAGER_FLOOR_TOKENS = 4_000
+
+_MCP_SEARCH_SCHEMA: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": MCP_SEARCH_TOOL,
+        "description": (
+            "Load the full definition (exact parameter names and types) of "
+            "connected MCP tools, so you can call them correctly. MCP tools are "
+            "listed by name in the system prompt but their parameters are not "
+            "loaded until you ask. Call this BEFORE the first use of any MCP "
+            "tool. Loaded tools then appear in your function list for the rest "
+            "of the conversation.\n"
+            "Query forms:\n"
+            "- \"select:mcp__playwright__browser_take_screenshot\" - exact tools, "
+            "comma-separated; bare tool names work too\n"
+            "- \"screenshot element\" - keywords, matched against tool names "
+            "and descriptions"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "\"select:<name>[,<name>...]\" or keywords.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Most tools to return for a keyword query (default 5).",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def _mcp_definitions_tokens(defs: List[Dict[str, Any]]) -> int:
+    """Rough token cost of sending these definitions (4 chars per token)."""
+    try:
+        return len(json.dumps(defs, ensure_ascii=False)) // 4
+    except Exception:
+        return 0
+
+
+def _mcp_should_defer(mcp_defs: List[Dict[str, Any]],
+                      context_window: Optional[int]) -> bool:
+    """True when the MCP definitions are too big to send on every request."""
+    if not mcp_defs:
+        return False
+    window = int(context_window or 128_000)
+    budget = max(_MCP_EAGER_FLOOR_TOKENS, int(window * _MCP_EAGER_FRACTION))
+    return _mcp_definitions_tokens(mcp_defs) > budget
+
+
+def _mcp_search(mcp_defs: List[Dict[str, Any]], query: str,
+                max_results: int = 5) -> List[Dict[str, Any]]:
+    """Find MCP definitions by exact name ("select:a,b") or by keywords."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    if q.lower().startswith("select:"):
+        wanted = [w.strip() for w in q[len("select:"):].split(",") if w.strip()]
+        out: List[Dict[str, Any]] = []
+        for w in wanted:
+            for d in mcp_defs:
+                name = _tool_def_name(d)
+                # Accept the full mcp__server__tool name or the bare tool name.
+                if (name == w or name.split("__", 2)[-1] == w) and d not in out:
+                    out.append(d)
+        return out
+    terms = [t for t in re.split(r"[\s,]+", q.lower()) if t]
+    scored = []
+    for d in mcp_defs:
+        name = _tool_def_name(d).lower()
+        desc = str((d.get("function") or {}).get("description") or "").lower()
+        score = sum(3 for t in terms if t in name) + sum(1 for t in terms if t in desc)
+        if score:
+            scored.append((score, name, d))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    try:
+        limit = max(1, min(int(max_results or 5), 25))
+    except (TypeError, ValueError):
+        limit = 5
+    return [d for _, _, d in scored[:limit]]
+
+
+def _mcp_active_definitions(
+    tool_defs: List[Dict[str, Any]],
+    loaded: Set[str],
+    context_window: Optional[int],
+) -> Tuple[List[Dict[str, Any]], Set[str], bool]:
+    """MCP definitions to send this turn.
+
+    Returns (definitions_to_add, names_offered, deferred). In deferred mode
+    the list is MCPToolSearch plus whatever the model has already loaded.
+    """
+    mcp_defs = [d for d in tool_defs if _tool_def_name(d).startswith("mcp__")]
+    if not mcp_defs:
+        return [], set(), False
+    if not _mcp_should_defer(mcp_defs, context_window):
+        return mcp_defs, {_tool_def_name(d) for d in mcp_defs}, False
+    chosen = [d for d in mcp_defs if _tool_def_name(d) in loaded]
+    return [_MCP_SEARCH_SCHEMA] + chosen, {_tool_def_name(d) for d in chosen}, True
+
+
+def _scratch_rules_section(project_root: str) -> str:
+    """Where the agent's own screenshots and throwaway scripts go.
+
+    Without it they were written next to the user's files: one project root
+    held verify_dashboard_desktop.png, dash_row2_crop.png, verify_deck.py,
+    generate_sketch.py and a dozen more, all the agent's checking work. Claude
+    Code and Cursor handle this the same way, as a standing instruction.
+    """
+    if not project_root:
+        return ""
+    shots = os.path.join(project_root, ".cortex", "shots")
+    exp = os.path.join(project_root, ".cortex", "experiments")
+    return (
+        "## Where your scratch files go\n"
+        f"- Screenshots, crops and renders you make to check your work: save them in {shots}/\n"
+        f"- One-off scripts you write to test, verify, measure or explore (verify_*.py, "
+        f"crop/compare scripts, quick generators): put them in {exp}/ and run them from there.\n"
+        "- Never put these in the project root or the project's own folders. Only create a "
+        "file there when it is part of the work the user asked for (source code, assets, "
+        "docs, or tests the user asked to add to the project's test suite).\n"
+        "- When a tool asks for a file name (e.g. a browser screenshot), give a path inside "
+        f"{shots}/.\n"
+    )
+
+
+_MCP_TOOL_MENTION_RE = re.compile(r"\bmcp__[A-Za-z0-9_-]+__[A-Za-z0-9_.-]+")
+_MCP_SERVER_MENTION_RE = re.compile(r"Use the (.+?) MCP server\(s\)")
+
+
+def _mcp_mentioned_tools(message: str, available: Set[str]) -> Set[str]:
+    """MCP tools the user named in their message, among `available`.
+
+    The "@" menu inserts either a tool ("Use the `mcp__x__y` MCP tool") or a
+    server ("Use the `x` MCP server(s)"); see src/ui/mcp_mentions.py. In
+    deferred mode those definitions were not in the request, so the model's
+    first move on an explicit request was a lookup turn. Naming one is the
+    user asking for it: its definition is loaded up front.
+    """
+    if not message or "mcp" not in message.lower():
+        return set()
+    found = {m.group(0).rstrip(".") for m in _MCP_TOOL_MENTION_RE.finditer(message)}
+    hits = {n for n in found if n in available}
+    for m in _MCP_SERVER_MENTION_RE.finditer(message):
+        for server in re.findall(r"`([A-Za-z0-9_-]+)`", m.group(1)):
+            prefix = f"mcp__{server}__"
+            hits |= {n for n in available if n.startswith(prefix)}
+    return hits
+
+
+def _mcp_pending_block(pending: Optional[List[Dict[str, Any]]]) -> str:
+    """Servers that are configured but cannot be called, with the reason.
+
+    A server added by `npx claude-code-templates --mcp ...` - often by the
+    agent itself through Bash - waits for the user's approval, or fails to
+    start (missing API key, 401). The model saw no trace of it and told the
+    user the tool did not exist, or kept retrying.
+    """
+    lines = []
+    for p in pending or []:
+        status, name = p.get("status"), p.get("name")
+        if status == "needs_approval":
+            why = ("declared in this project's config; it runs only after the "
+                   "user approves it in Settings > MCP Servers")
+        elif status == "error":
+            why = "failed to start: " + (p.get("error") or "unknown error")[:160]
+        elif status == "connecting":
+            why = "still starting; it will be available on a later message"
+        else:
+            continue
+        lines.append(f"  - `{name}`: {why}")
+    if not lines:
+        return ""
+    return ("Configured but NOT usable right now - do not call these. If the "
+            "user's request needs one, tell them what it is waiting for:\n"
+            + "\n".join(lines) + "\n")
+
+
+def _mcp_prompt_section(mcp_names: List[str], deferred: bool,
+                        pending: Optional[List[Dict[str, Any]]] = None,
+                        guides: Optional[List[Dict[str, Any]]] = None) -> str:
+    """System-prompt section naming every connected MCP tool.
+
+    Every name is listed. Truncating at 12 per server ("... +18 more") hid
+    tools such as browser_take_screenshot from the model entirely.
+    """
+    waiting = _mcp_pending_block(pending)
+    if not mcp_names:
+        return ("\n\n## MCP TOOLS (user-connected)\n" + waiting) if waiting else ""
+    by_server: Dict[str, List[str]] = {}
+    for n in mcp_names:
+        parts = n.split("__", 2)
+        by_server.setdefault(parts[1] if len(parts) == 3 else "mcp", []).append(parts[-1])
+    block = "\n".join(f"  - `{srv}` ({len(tools)} tools): {', '.join(tools)}"
+                      for srv, tools in by_server.items())
+    if deferred:
+        how = (
+            "These servers are connected. Their tools are listed by NAME only - "
+            "the parameters are not loaded yet, to keep each request small:\n"
+            f"{block}\n"
+            f"- Before the first call to any of these tools, load its definition "
+            f"with `{MCP_SEARCH_TOOL}`: query `select:mcp__<server>__<tool>` "
+            "(comma-separate several), or keywords such as `screenshot element`. "
+            "The result shows the exact parameter names and types, and the tool "
+            "is then in your function list for the rest of the conversation.\n"
+            "- A call to an MCP tool whose definition you have not loaded is "
+            "refused with an instruction to load it. Load it and call again.\n"
+        )
+    else:
+        how = (
+            "These servers are connected and every tool below is in your "
+            "function list with its full parameters:\n"
+            f"{block}\n"
+            "- Call them directly as `mcp__<server>__<tool>`, the same way as "
+            "Read or Bash.\n"
+        )
+    try:
+        from src.ai.mcp_guidance import render as _render_guides
+        how += _render_guides(guides or [])
+    except Exception:
+        pass
+    return (
+        "\n\n## MCP TOOLS (user-connected)\n" + how + waiting +
+        "- Use the exact parameter names from the definition. Never guess: an "
+        "unknown parameter is rejected, and on many servers it would otherwise "
+        "be silently ignored and the tool would do something different (a "
+        "screenshot of an element comes back as the whole page).\n"
+        "- They require NO subscription and NO API key from you.\n"
+        "- If a built-in web tool is blocked or returns nothing, use an MCP "
+        "search/fetch tool instead.\n"
+        "- Read the SERVER name for the capability it gives you: a "
+        "`chrome-devtools`/`playwright`/`puppeteer` server IS your browser "
+        "(navigate, click, screenshot, read the DOM); a `context7`/`docs` server "
+        "IS your documentation lookup. Never say a capability is unavailable "
+        "when a connected server above provides it.\n"
+        "- A screenshot an MCP tool returns is attached to the conversation for "
+        "you to see; you do not need to open the file.\n"
+    )
 
 
 # ============================================================
@@ -3943,6 +4218,8 @@ Shell: PowerShell (use semicolons ; not &&)
 Today's Date: {_dt.now().strftime('%Y-%m-%d')} (use this date, NOT a date from your training data)
 {_access_rules}
 
+{_scratch_rules_section(project_root)}
+
 ## Project Context
 {project_info}
 
@@ -4277,54 +4554,28 @@ Required behavior:
         # rounds without ever once attempting the MCP tool. The model knew
         # the right name and still wouldn't press the button. The fix is a
         # direct behavioral instruction, not just a naming clarification.
+        # Bug history #3 (2026-10-02): #2's fix told the model to call MCP
+        # tools without looking - but their definitions were never in the
+        # request at all (the per-turn core-tool filter dropped every mcp__
+        # schema). The model was right that they were missing; it was told to
+        # call them anyway, so it guessed parameter names. The section below
+        # is generated from the same rule the turn loop uses, so the prompt
+        # can no longer promise definitions the request does not carry.
         try:
             from src.services.mcp_manager import get_mcp_manager
-            _mcp_names = [d["function"]["name"]
-                          for d in get_mcp_manager().get_tool_definitions()]
-            if _mcp_names:
-                _example = _mcp_names[0]
-                # Group by server before truncating. A flat [:24] slice let one
-                # chatty server crowd every other one out of the prompt
-                # entirely: with chrome-devtools (29 tools) listed first, both
-                # context7 tools fell off the end and that server became
-                # invisible to the model.
-                _by_server: Dict[str, List[str]] = {}
-                for _n in _mcp_names:
-                    _parts = _n.split("__", 2)
-                    _srv = _parts[1] if len(_parts) == 3 else "mcp"
-                    _by_server.setdefault(_srv, []).append(_parts[-1])
-                _lines = []
-                for _srv, _tools in _by_server.items():
-                    _shown = ", ".join(_tools[:12])
-                    if len(_tools) > 12:
-                        _shown += f", … (+{len(_tools) - 12} more)"
-                    _lines.append(f"  - `{_srv}` ({len(_tools)} tools): {_shown}")
-                _server_block = "\n".join(_lines)
-                prompt += (
-                    "\n\n## MCP TOOLS (user-connected, fully available)\n"
-                    "These external servers are connected and their tools are in "
-                    "your function list right now. Call them as "
-                    f"`mcp__<server>__<tool>`:\n{_server_block}\n"
-                    "- These are REAL entries in your function-calling list right now, in "
-                    "this exact request, not a description of something you might have.\n"
-                    f"- To use one, call it directly, e.g. call `{_example}` the same way "
-                    "you would call Read or Bash, do not search for it, do not ask whether "
-                    "it exists, do not reason about whether it's 'really' in your tool list.\n"
-                    "- If you find yourself about to write a sentence like 'I don't have "
-                    "access to X' or 'X isn't in my function list' about anything named "
-                    "above, that sentence is wrong. Stop, and call the tool instead.\n"
-                    "- A failed MCP call just returns an error you can read and react to. "
-                    "Silently avoiding a listed tool and using a worse built-in substitute "
-                    "is the failure mode to avoid, not the tool call itself.\n"
-                    "- They require NO subscription and NO API key from you.\n"
-                    "- If a built-in web tool is blocked or returns nothing, use an MCP "
-                    "search/fetch tool instead.\n"
-                    "- Read the SERVER name for the capability it gives you before "
-                    "concluding you lack something: a `chrome-devtools`/`playwright`/"
-                    "`puppeteer` server IS your browser (navigate, click, screenshot, "
-                    "read the DOM); a `context7`/`docs` server IS your documentation "
-                    "lookup. Never say a capability is unavailable in this session "
-                    "when a connected server above provides it.\n"
+            _mgr = get_mcp_manager()
+            _mcp_defs = _mgr.get_tool_definitions()
+            _pending = [st for st in _mgr.get_status()
+                        if st.get("enabled") and st.get("status") in
+                        ("needs_approval", "error", "connecting")] \
+                if getattr(_mgr, "_subscribed", False) else []
+            if _mcp_defs or _pending:
+                _ctx = getattr(getattr(self, "_model_limits", None), "context_window", None)
+                prompt += _mcp_prompt_section(
+                    [_tool_def_name(d) for d in _mcp_defs],
+                    deferred=_mcp_should_defer(_mcp_defs, _ctx) if _mcp_defs else False,
+                    pending=_pending,
+                    guides=_mgr.get_server_guides() if _mcp_defs else None,
                 )
         except Exception:
             pass  # MCP is optional, prompt works without it
@@ -4370,6 +4621,12 @@ Required behavior:
 
             os.makedirs(memory_dir, exist_ok=True)
             os.makedirs(semantic_dir, exist_ok=True)
+            # Where the agent's own screenshots and throwaway scripts go, so
+            # they stop piling up in the project root (verify_*.png,
+            # *_crop.png, verify_*.py next to the user's real files).
+            # See _scratch_rules_section().
+            os.makedirs(os.path.join(cortex_dir, 'shots'), exist_ok=True)
+            os.makedirs(os.path.join(cortex_dir, 'experiments'), exist_ok=True)
 
             # Create memory.json if missing
             memory_json = os.path.join(cortex_dir, 'memory.json')
@@ -5850,11 +6107,32 @@ Required behavior:
                     "SementicSearch", "Loop", "Skill",
                 }
                 
-                # After AI has made mutations, expand toolset slightly
-                # but DON'T dump all tools, keep task/MCP/team tools excluded
-                # to save ~500+ lines of JSON per turn.
+                # Task/team tools stay out to save ~500+ lines of JSON per turn.
                 active_tool_defs = _filter_tool_definitions(list(tool_defs), core_names)
-                
+
+                # MCP tools: every definition when they are small, otherwise
+                # MCPToolSearch plus whatever the model has loaded. They used
+                # to be dropped here unconditionally, so the model never saw a
+                # single MCP parameter and guessed - see _mcp_active_definitions.
+                _mcp_loaded = self._mcp_loaded_tools_set()
+                _mcp_loaded |= _mcp_mentioned_tools(
+                    message, {_tool_def_name(d) for d in tool_defs
+                              if _tool_def_name(d).startswith("mcp__")})
+                _mcp_add, _mcp_offered, _mcp_deferred = _mcp_active_definitions(
+                    tool_defs, _mcp_loaded,
+                    getattr(getattr(self, "_model_limits", None), "context_window", None))
+                active_tool_defs += _mcp_add
+                self._mcp_offered = _mcp_offered
+                self._mcp_deferred = _mcp_deferred
+                _mcp_state = (len(_mcp_add), _mcp_deferred)
+                if _mcp_add and _mcp_state != getattr(self, "_mcp_last_logged", None):
+                    self._mcp_last_logged = _mcp_state
+                    log.info(
+                        f"[TOOLS] {len(active_tool_defs)} tools: {len(active_tool_defs) - len(_mcp_add)} "
+                        f"core + MCP " + (
+                            f"deferred ({len(_mcp_offered)} loaded, {MCP_SEARCH_TOOL} offered)"
+                            if _mcp_deferred else f"all {len(_mcp_offered)} definitions"))
+
                 if self._session_mutation_count > 5:
                     log.info(
                         f"[TOOLS] Expanded to {len(active_tool_defs)} tools " +
@@ -6756,10 +7034,20 @@ Required behavior:
                             _is_http_400 = 'http 400' in _err_msg.lower() or 'bad request' in _err_msg.lower()
                             
                             if _is_connection_err or _is_http_400:
-                                _user_msg = (
-                                    f"[SYSTEM: Connection to AI provider failed: {_err_msg[:150]}. "
-                                    f"Please try again or switch to a different model.]"
-                                )
+                                # A 400 is the provider refusing THIS request (a model
+                                # the plan lacks, a bad parameter), not a broken
+                                # connection, and retrying the same request will not
+                                # help - say so, with room for the provider's reason.
+                                if _is_http_400 and not _is_connection_err:
+                                    _user_msg = (
+                                        f"[SYSTEM: The AI provider rejected the request: "
+                                        f"{_err_msg[:300]}]"
+                                    )
+                                else:
+                                    _user_msg = (
+                                        f"[SYSTEM: Connection to AI provider failed: {_err_msg[:150]}. "
+                                        f"Please try again or switch to a different model.]"
+                                    )
                                 log.warning(f"[BRIDGE] Provider connection error (handled gracefully): {_err_msg[:200]}")
                                 turn_text = _user_msg
                                 full_response += _user_msg
@@ -9452,6 +9740,8 @@ Required behavior:
                     return ToolResult(tool_id=tool_id, result=None, success=False,
                                       error=str(_resp["error"]))
                 return ToolResult(tool_id=tool_id, result=_resp["result"], success=True)
+            elif tool_name == MCP_SEARCH_TOOL:
+                return self._dispatch_mcp_search(tool_id, args or {})
             elif tool_name.startswith("mcp__"):
                 # External MCP tool (mcp__<server>__<tool>), routed to the
                 # MCP manager, which owns the server connections on its own
@@ -9460,13 +9750,34 @@ Required behavior:
                 # above already applied to this call like any other tool.
                 from src.services.mcp_manager import get_mcp_manager
                 _mgr = get_mcp_manager()
+
+                # Load-first rule (deferred mode only): a tool whose definition
+                # the model has not loaded is refused, not run on guessed
+                # parameters. This is the check that would have turned the
+                # `selector`-instead-of-`target` screenshot into a one-step fix.
+                if (getattr(self, "_mcp_deferred", False)
+                        and tool_name not in getattr(self, "_mcp_offered", set())
+                        and tool_name not in self._mcp_loaded_tools_set()):
+                    return ToolResult(tool_id=tool_id, result=None, success=False, error=(
+                        f"{tool_name}'s definition is not loaded, so its parameter "
+                        f"names would be a guess. Call {MCP_SEARCH_TOOL} with query "
+                        f"\"select:{tool_name}\" first, then call it again with "
+                        f"the exact parameters it shows."))
+
                 # Same affordance as the skill badge: show which server the
                 # agent reached, from the server part of the tool name.
                 _announce_mcp = getattr(self, "_announce_mcp_in_use", None)
                 if _announce_mcp is not None:
                     _announce_mcp(tool_name)
-                _ok, _text = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: _mgr.call_tool(tool_name, args or {}))
+                _ok, _text, _images = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _mgr.call_tool_full(tool_name, args or {}))
+
+                # Images (screenshots) go to the model itself. They used to be
+                # replaced by a sentence saying an image existed, so the agent
+                # went looking for the file - which Read refused, because the
+                # server wrote it outside the project.
+                if _images:
+                    _text = self._attach_mcp_images(tool_name, _images, _text)
                 if _ok:
                     return ToolResult(tool_id=tool_id, result=_text, success=True)
                 return ToolResult(tool_id=tool_id, result=None, success=False, error=_text)
@@ -9578,6 +9889,54 @@ Required behavior:
                     return i  # Snap to start of current function
 
         return target_end  # No boundary found, use raw chunk end
+
+    def _dispatch_mcp_search(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """MCPToolSearch: load MCP tool definitions into this conversation."""
+        try:
+            mcp_defs = [d for d in self._mode_filtered_tools(_get_tool_definitions())
+                        if _tool_def_name(d).startswith("mcp__")]
+        except Exception as e:
+            return ToolResult(tool_id=tool_id, result=None, success=False,
+                              error=f"MCP tools unavailable: {e}")
+        if not mcp_defs:
+            return ToolResult(tool_id=tool_id, result=None, success=False,
+                              error="No MCP server is connected.")
+        query = str(args.get("query") or "")
+        found = _mcp_search(mcp_defs, query, args.get("max_results") or 5)
+        if not found:
+            names = ", ".join(_tool_def_name(d) for d in mcp_defs)
+            return ToolResult(tool_id=tool_id, result=None, success=False, error=(
+                f"No MCP tool matched {query!r}. Connected tools: {names}"))
+        loaded = self._mcp_loaded_tools_set()
+        parts = []
+        for d in found:
+            fn = d.get("function") or {}
+            loaded.add(fn.get("name", ""))
+            parts.append(
+                f"### {fn.get('name')}\n{fn.get('description', '').strip()}\n"
+                f"Parameters (JSON schema):\n"
+                f"{json.dumps(fn.get('parameters') or {}, indent=1, ensure_ascii=False)}")
+        log.info(f"[MCP] {MCP_SEARCH_TOOL} {query!r} -> loaded "
+                 f"{[_tool_def_name(d) for d in found]}")
+        return ToolResult(tool_id=tool_id, success=True, result=(
+            f"Loaded {len(found)} MCP tool definition(s). They are callable now and "
+            f"stay in your function list for the rest of this conversation. Use "
+            f"exactly these parameter names.\n\n" + "\n\n".join(parts)))
+
+    def _attach_mcp_images(self, tool_name: str,
+                           images: List[Tuple[str, str]], text: str) -> str:
+        """Show an MCP tool's images to the model; return the text to report."""
+        if self._current_model_supports_vision():
+            short = tool_name.split("__", 2)[-1]
+            for i, (mime, data) in enumerate(images, 1):
+                ext = (mime.split("/", 1)[-1] if "/" in mime else "png").split("+")[0]
+                self._inject_image_history(f"{short}-{i}.{ext}", data)
+            note = (f"[{len(images)} image(s) from {tool_name} attached to the "
+                    f"conversation - you can see them directly; no need to open a file.]")
+        else:
+            note = (f"[{tool_name} returned {len(images)} image(s), but the current "
+                    f"model cannot view images. Switch to a vision model to see them.]")
+        return f"{text}\n{note}" if text else note
 
     async def _dispatch_read(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Dispatch to real FileReadTool or bridge-native fallback."""
@@ -13549,6 +13908,47 @@ Required behavior:
             log.warning("[VISION] vision-support check failed for %r: %s", model_id, e)
             return False
 
+    def _with_invocation_directive(self, message: str) -> str:
+        """`message` with the instruction for its skills:/mcp: tokens in front."""
+        if not message or ("skills:" not in message and "mcp:" not in message):
+            return message
+        try:
+            from src.core.invocation_tokens import agent_directive
+
+            def _resolve(token: str) -> Optional[str]:
+                if not _HAS_SKILLS:
+                    return None
+                sk = get_skills_manager().get_skill(token)
+                return sk.name if sk else None
+
+            try:
+                from src.services.mcp_manager import get_mcp_manager
+                _mcp_names = [_tool_def_name(d) for d in get_mcp_manager().get_tool_definitions()]
+            except Exception:
+                _mcp_names = []
+            directive = agent_directive(message, _resolve, _mcp_names)
+        except Exception as e:
+            log.warning(f"[SKILL] reading skills:/mcp: tokens failed: {e}")
+            return message
+        if not directive:
+            return message
+        log.info(f"[SKILL] chat-input tokens -> {directive.splitlines()[1:]}")
+        return f"{directive}\n\n{message}"
+
+    def _mcp_loaded_tools_set(self) -> Set[str]:
+        """MCP tools whose definitions the model loaded in this conversation.
+
+        Keyed by conversation id, so a new chat (start_fresh_session) or a
+        switch to another chat starts empty without any reset code, and a
+        tool loaded once stays loaded for the rest of the chat.
+        """
+        store = getattr(self, "_mcp_loaded_by_conv", None)
+        if store is None:
+            store = {}
+            self._mcp_loaded_by_conv = store
+        key = getattr(self, "_current_conversation_id", None) or "_"
+        return store.setdefault(key, set())
+
     def _inject_image_history(self, filename: str, base64_data: str) -> None:
         """Attach an image to conversation history so a NATIVE-vision model sees
         it on the next continuation turn (the Read-tool native path).
@@ -13714,6 +14114,11 @@ Required behavior:
                 log.info(f"[ACCESS] user gave {_glevel} access: {_gp}")
         except Exception as _ae:
             log.warning(f"[ACCESS] could not read paths from the message: {_ae}")
+
+        # skills:<name> / mcp:<server> tokens picked in the chat input: the
+        # chat shows them as written; the model gets an explicit instruction
+        # for each one that names something installed or connected.
+        message = self._with_invocation_directive(message)
 
         # Reset tool safety counters for genuinely new requests (not Continue).
         _is_continue = message.strip().startswith('Continue the task.')
@@ -14459,6 +14864,21 @@ Required behavior:
         # Every project gets its own .cortex/ (next to .git/)
         # so memory always stays inside the working project.
         self._auto_create_cortex_dir(path)
+
+        # ── Skills + rules: read this project's folders ──
+        # Both are process-wide singletons. Nothing told them which project
+        # was open (init_skills_and_rules() was never called), so whichever
+        # code path asked first decided: usually one with no project, and a
+        # skill installed into <project>/.claude/skills by npx was missing
+        # for the whole session. Done inline (a reload is ~40 ms) so the first
+        # message after opening a project cannot see the previous project's.
+        try:
+            if _HAS_SKILLS:
+                set_skills_project_root(path)
+            if _HAS_RULES:
+                set_rules_project_root(path)
+        except Exception as e:
+            log.warning(f"[SKILL] project switch failed: {e}")
 
         # ── MCP servers: (re)start with this project's config overlay ──
         # start() only schedules async connects on the MCP thread, but the
@@ -15881,10 +16301,12 @@ def init_skills_and_rules(project_root: Optional[str] = None) -> None:
     _project_root_cache = project_root
 
     if _HAS_SKILLS:
-        sm = get_skills_manager(project_root=project_root)
+        set_skills_project_root(project_root)
+        sm = get_skills_manager()
         log.info(f"[BRIDGE] SkillsManager initialized: {sm.skill_count()} skills loaded")
     if _HAS_RULES:
-        rm = get_rules_manager(project_root=project_root)
+        set_rules_project_root(project_root)
+        rm = get_rules_manager()
         log.info(f"[BRIDGE] RulesManager initialized: {rm.rule_count()} rules loaded")
     if _HAS_CORTEX_PROJECT_CTX and project_root:
         summary = get_cortex_context_summary(project_root)
@@ -16092,14 +16514,19 @@ def list_skills() -> List[Dict[str, Any]]:
         return []
     try:
         sm = get_skills_manager()
+        active = sm.active_skill_names()
         return [
             {
                 "name": s.name,
+                # What follows "/" in the chat input. Differs from the name
+                # only when the name has spaces ("API Fuzzing for Bug Bounty"
+                # -> its install folder, api-fuzzing-bug-bounty).
+                "token": s.token,
                 "description": s.description,
                 "aliases": s.aliases,
                 "tags": s.tags,
                 "category": s.category,
-                "active": s.name in sm.active_skill_names(),
+                "active": s.name in active,
                 # Body size drives the Skills Browser cost banner: an ON skill
                 # is pasted into EVERY request, so the user needs to see what
                 # each toggle actually costs before leaving it on.

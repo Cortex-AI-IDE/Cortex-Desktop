@@ -1631,10 +1631,16 @@ scope: project
             from src.services.mcp_manager import get_mcp_manager
             env = {}
             for pair in (env_text or "").replace("\n", ",").split(","):
+                # KEY=value; for a URL server's headers "Name: value" works
+                # too, since that is how headers are usually written.
                 if "=" in pair:
                     k, v = pair.split("=", 1)
-                    if k.strip():
-                        env[k.strip()] = v.strip()
+                elif ":" in pair:
+                    k, v = pair.split(":", 1)
+                else:
+                    continue
+                if k.strip():
+                    env[k.strip()] = v.strip()
             get_mcp_manager().add_server(name.strip(), command_line.strip(), env)
             log.info(f"[MemoryManager] MCP server added: {name}")
             return json.dumps({"success": True})
@@ -1652,6 +1658,25 @@ scope: project
         except Exception as e:
             log.warning(f"[MemoryManager] removeMcpServer error: {e}")
             return False
+
+    @pyqtSlot(str, result=str)
+    def mcpRemovalPlan(self, name: str) -> str:
+        """What removing a server completely would touch, for the confirm box."""
+        try:
+            from src.services.mcp_manager import get_mcp_manager
+            return json.dumps(get_mcp_manager().removal_plan(name))
+        except Exception as e:
+            log.warning(f"[MemoryManager] mcpRemovalPlan error: {e}")
+            return json.dumps({"name": name, "error": str(e)})
+
+    @pyqtSlot(str, bool, bool, result=str)
+    def removeMcpServerFully(self, name: str, other_tools: bool, delete_files: bool) -> str:
+        try:
+            from src.services.mcp_manager import get_mcp_manager
+            return json.dumps(get_mcp_manager().remove_fully(name, other_tools, delete_files))
+        except Exception as e:
+            log.warning(f"[MemoryManager] removeMcpServerFully error: {e}")
+            return json.dumps({"failed": [str(e)]})
 
     @pyqtSlot(str, bool, result=bool)
     def toggleMcpServer(self, name: str, enabled: bool) -> bool:

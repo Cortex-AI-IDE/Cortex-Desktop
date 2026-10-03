@@ -888,6 +888,19 @@ def main():
     _profile("window_created")
     # window.show() is now called in __init__
 
+    # ── PRO OFFER CARD, once per launch for signed-in free accounts ──
+    # Deliberately delayed: the IDE paints and settles first, so the card
+    # never races startup or the login gate. maybe_show_offer() is a
+    # no-op for subscribed accounts (the dialog is never constructed) and
+    # always skippable for the rest - see subscription_offer.py.
+    try:
+        from PyQt6.QtCore import QTimer as _OfferTimer
+        from src.ui.dialogs.subscription_offer import (
+            maybe_show_offer as _show_pro_offer_card)
+        _OfferTimer.singleShot(1200, lambda: _show_pro_offer_card(window))
+    except Exception as _offer_err:
+        log.debug(f"[ProOffer] offer scheduling skipped: {_offer_err}")
+
     # ═══════════════════════════════════════════════════════════════
     # SHUTDOWN HARDENING, Emergency save on force-kill / crash
     # ═══════════════════════════════════════════════════════════════

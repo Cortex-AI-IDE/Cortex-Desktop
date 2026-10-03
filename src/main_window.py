@@ -742,6 +742,12 @@ class CortexMainWindow(QMainWindow):
     # updates, never appeared. A signal emit is the idiomatic, thread-safe
     # mechanism: Qt auto-queues it onto the GUI thread.
     _update_check_ready = pyqtSignal(object)
+    # Same thread hop for the Microsoft Store channel, which must never reuse
+    # _update_check_ready: that signal is wired to _show_update_dialog, the
+    # dialog that DOWNLOADS AND RUNS AN INSTALLER. A store build showing it
+    # would be a certification failure, so the store notice travels on its own
+    # signal to its own slot (see _check_for_store_update).
+    _store_update_ready = pyqtSignal(object)
     # CHANGES git baselines warmed on a worker thread (_refresh_changes_background)
     _changes_prefetched = pyqtSignal()
 
@@ -2086,8 +2092,31 @@ class CortexMainWindow(QMainWindow):
         # Every item must actually work: dead entries copied from a menu
         # template (Automations, Local Environments, Worktrees, Start Trace
         # Recording) were removed, they were stubs that only wrote a log line.
+        # Pro offer card entry point: always reachable for free accounts so
+        # skipping the startup card is never a dead end; hidden again by
+        # _refresh_pro_offer_visibility once the server says subscribed.
+        self._pro_offer_action = self._add_action(
+            help_menu, "Upgrade to Cortex Pro…", self._show_pro_offer, "")
+        help_menu.aboutToShow.connect(self._refresh_pro_offer_visibility)
+        help_menu.addSeparator()
         self._add_action(help_menu, "Cortex Documentation", self._open_documentation, "")
         self._add_action(help_menu, "What's New", self._show_whats_new, "")
+        # Channel-aware on purpose: the two channels do genuinely different
+        # things. The exe downloads, verifies and installs; the MSIX may only
+        # hand the user to the Microsoft Store, because a Store app that
+        # installs its own updates fails certification. Naming the Store in
+        # the label is what stops an MSIX user from clicking "Check for
+        # Updates" and waiting for an in-app install that must never happen.
+        try:
+            from src.services.store_update import is_store_build
+            _is_store_channel = is_store_build()
+        except Exception:
+            _is_store_channel = False
+        self._update_action = self._add_action(
+            help_menu,
+            "Update in Microsoft Store\u2026" if _is_store_channel
+            else "Check for Updates\u2026",
+            self._on_help_check_updates, "")
         self._add_action(help_menu, "Skills", self._show_skills_browser, "")
         self._add_action(help_menu, "Model Context Protocol", self._show_mcp_help, "")
         self._add_action(help_menu, "Troubleshooting", self._show_troubleshooting, "")
@@ -2335,6 +2364,18 @@ class CortexMainWindow(QMainWindow):
         if getattr(self, '_status_version_lbl', None):
             self._status_version_lbl.setStyleSheet(
                 f"color: {ver_color}; font-size: 11px;")
+        if getattr(self, '_status_update_btn', None):
+            # Green on both themes, matching the "Latest" version colour in
+            # the update dialogs: an available update is good news, and it
+            # must not read like the red LSP warning two widgets away. The
+            # hover tint is what tells the user this one is clickable.
+            upd_color = "#39d353" if is_dark else "#1a7f37"
+            self._status_update_btn.setStyleSheet(
+                f"QPushButton {{ color: {upd_color}; background: transparent;"
+                f" border: none; font-size: 11px; font-weight: 700;"
+                f" padding: 0 6px; }}"
+                f"QPushButton:hover {{ background: rgba(57,211,83,0.14);"
+                f" border-radius: 4px; }}")
         if getattr(self, '_status_skill_lbl', None):
             # Accent-coloured: it should read as "something is active", not
             # as another grey field like the cursor position.
@@ -2380,6 +2421,18 @@ class CortexMainWindow(QMainWindow):
         # LSPs are disabled (system removed)
         self._status_lsp_lbl = QLabel("  LSPs: disabled  ")
         sb.addWidget(self._status_lsp_lbl)
+
+        # ── Update notice (Microsoft Store channel) ──
+        # A button, not a label: the point is that it stays clickable after
+        # the user dismisses the card, so "Later" is never a dead end. Hidden
+        # until a check actually finds a newer version, which means the exe
+        # channel and an up-to-date Store build see no change at all.
+        self._status_update_btn = QPushButton("")
+        self._status_update_btn.setFlat(True)
+        self._status_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._status_update_btn.setVisible(False)
+        self._status_update_btn.clicked.connect(self._open_store_update_dialog)
+        sb.addPermanentWidget(self._status_update_btn)
 
         # ── Version ──
         _app_version = QApplication.instance().applicationVersion() or "2.8.6"
@@ -6663,7 +6716,15 @@ class CortexMainWindow(QMainWindow):
             editor.centerCursor()
 
     def _save_current(self):
-        fp = self._webview_panel.get_active_file()
+        # The file to save is the tab the editor SHOWS, read from the editor
+        # together with its content. The Python mirror (get_active_file) is
+        # set when Python asks for a file and goes stale when the editor
+        # declines - that sent every Ctrl+S on 2026-10-01 17:12-17:13 to
+        # .env.example while the user was editing .env, until they closed
+        # and reopened the file.
+        self._webview_panel.get_active_file_and_content_async(self._save_file_from_editor)
+
+    def _save_file_from_editor(self, fp: str, editor_content=None):
         log.info(f"[Save] _save_current called, active_file={fp!r}")
         if not fp or fp == "untitled.py":
             log.info(f"[Save] _save_current early return, no active file")
@@ -6757,6 +6818,10 @@ class CortexMainWindow(QMainWindow):
             else:
                 log.error(f"[Save] No Monaco callback AND no Python cache for {fp}, save aborted")
 
+        if editor_content is not None:
+            # Already read from the editor, in the same call as the path.
+            _on_content(editor_content)
+            return
         QTimer.singleShot(900, _cache_fallback)
         self._webview_panel.get_current_content(fp, _on_content)
 
@@ -8316,14 +8381,16 @@ class CortexMainWindow(QMainWindow):
 
     def _close_current_tab(self):
         """Close current tab (Ctrl+W), works for both webview and legacy tabs."""
-        # Close webview tab first if one is active
-        fp = self._webview_panel.get_active_file()
-        if fp:
-            self._webview_panel.close_file(fp)
-            return
-        # Fall back to legacy editor tabs
-        if hasattr(self, '_editor_tabs'):
-            self._editor_tabs.close_current_tab()
+        # The tab the editor shows, not the Python mirror (which can name a
+        # file the editor declined to switch to - see _save_current).
+        def _close(fp):
+            if fp:
+                self._webview_panel.close_file(fp)
+                return
+            # Fall back to legacy editor tabs
+            if hasattr(self, '_editor_tabs'):
+                self._editor_tabs.close_current_tab()
+        self._webview_panel.get_active_file_async(_close)
 
     def _close_all_tabs(self):
         """Close all tabs (Ctrl+Shift+W), works for both webview and legacy tabs."""
@@ -9573,6 +9640,30 @@ class CortexMainWindow(QMainWindow):
                 raise RuntimeError("No project open for indexing")
         return self._codebase_index
 
+    def _show_pro_offer(self):
+        """Reopen the Pro offer card on demand (Help menu, force=True)."""
+        try:
+            from src.ui.dialogs.subscription_offer import maybe_show_offer
+            maybe_show_offer(self, force=True)
+        except Exception as e:
+            log.warning(f"[ProOffer] menu open failed: {e}")
+
+    def _refresh_pro_offer_visibility(self):
+        """Hide 'Upgrade to Cortex Pro…' for accounts that already have it.
+
+        has_subscription() answers from the saved account copy and is
+        offline-tolerant, so merely opening the Help menu never blocks on
+        the network and never locks anyone out.
+        """
+        try:
+            from src.core.cortex_api import get_api_client
+            subscribed = bool(get_api_client().has_subscription())
+        except Exception:
+            subscribed = False
+        action = getattr(self, "_pro_offer_action", None)
+        if action is not None:
+            action.setVisible(not subscribed)
+
     def _show_about(self):
         _app_version = QApplication.instance().applicationVersion() or "2.8.6"
         _body = ("<h2>Cortex AI IDE</h2>"
@@ -9634,10 +9725,30 @@ class CortexMainWindow(QMainWindow):
 
     def _check_for_updates(self):
         """Check for Cortex IDE updates from the server.
-        
-        Runs on startup (deferred 5s). If an update is available,
-        shows the UpdateDialog. Force updates block the IDE.
+
+        Runs on startup (deferred 5s) and from Help -> Check for Updates.
+        The build channel decides what happens with the answer:
+
+            web/exe -> UpdateDialog: downloads, SHA-256 verifies and runs the
+                       installer. Force updates block the IDE.
+            store   -> StoreUpdateDialog: a NOTICE that deep links to this
+                       product's Microsoft Store page. The MSIX must never
+                       reach the download path, a Store app that installs its
+                       own updates is rejected during certification.
+
+        Both channels ask the same endpoint (/api/v1/version/check/), so one
+        release row on the server drives both.
         """
+        try:
+            from src.services.store_update import is_store_build
+            if is_store_build():
+                self._check_for_store_update()
+                return
+        except Exception as e:
+            # Detection failed, fall through to the exe path rather than
+            # silently skipping the check entirely.
+            log.warning("[Update] Store-channel detection failed: %s", e)
+
         try:
             from src.services.update_checker import UpdateChecker
             from src.ui.dialogs.update_dialog import UpdateDialog
@@ -9701,6 +9812,132 @@ class CortexMainWindow(QMainWindow):
 
         dlg.install_requested.connect(_on_install)
         dlg.exec()
+
+    # ------------------------------------------------------------------
+    # Microsoft Store channel: a NOTICE, never a self-update
+    # ------------------------------------------------------------------
+    def _check_for_store_update(self, explicit: bool = False):
+        """Ask the server whether a newer version exists (MSIX channel).
+
+        explicit=True means the user asked (Help menu), so "already up to
+        date" is reported back instead of staying silent; the startup check
+        stays quiet because nobody asked it anything.
+        """
+        try:
+            # One connection, same rule as _update_check_ready: the signal hop
+            # is what puts the dialog on the GUI thread.
+            if not getattr(self, '_store_update_signal_connected', False):
+                self._store_update_ready.connect(self._show_store_update_notice)
+                self._store_update_signal_connected = True
+
+            import threading
+
+            def _bg_check():
+                try:
+                    from src.services.store_update import check_store_update
+                    result = check_store_update()
+                    if result is not None and result.update_available:
+                        self._store_update_ready.emit(result)
+                    elif explicit:
+                        # None travels on the same signal so the "up to date"
+                        # answer is also delivered on the GUI thread.
+                        self._store_update_ready.emit(None)
+                except Exception as e:
+                    log.warning("[StoreUpdate] background check failed: %s", e)
+
+            threading.Thread(target=_bg_check, daemon=True).start()
+        except Exception as e:
+            log.warning("[StoreUpdate] checker setup failed: %s", e)
+
+    def _show_store_update_notice(self, result):
+        """GUI thread: light the status-bar chip and show the card once.
+
+        The chip is the durable half of this feature. The card shows a single
+        time per launch so it never interrupts work, and the chip stays for
+        the rest of the session so "Later" is not the end of the story.
+        """
+        try:
+            if result is None:
+                from src.version import VERSION
+                self.statusBar().showMessage(
+                    f"Cortex AI IDE v{VERSION} is up to date", 5000)
+                log.info("[StoreUpdate] up to date")
+                return
+
+            self._store_update_result = result
+            latest = str(getattr(result, 'latest_version', '') or '').strip()
+            chip = getattr(self, '_status_update_btn', None)
+            if chip is not None and latest:
+                chip.setText(f"\u25b2 v{latest} available")
+                chip.setToolTip(
+                    f"Cortex v{latest} is available from the Microsoft Store.\n"
+                    f"Click to open the Store page (installed: "
+                    f"v{getattr(result, 'current_version', '')}).")
+                chip.setVisible(True)
+                self._restyle_status_bar(self._theme_manager.is_dark)
+                log.info("[StoreUpdate] status-bar chip shows v%s", latest)
+
+            if getattr(self, '_store_notice_shown', False):
+                return
+            self._store_notice_shown = True
+            self._open_store_update_dialog()
+        except Exception as e:
+            log.warning("[StoreUpdate] could not show the notice: %s", e)
+
+    def _open_store_update_dialog(self):
+        """Show the Store update card. Entry points: startup, chip, Help menu."""
+        try:
+            from src.ui.dialogs.store_update_dialog import StoreUpdateDialog
+
+            result = getattr(self, '_store_update_result', None)
+            if result is None:
+                # Asked for directly with nothing cached yet: check now and
+                # report the answer either way, a menu item that can do
+                # nothing is worse than no menu item.
+                self.statusBar().showMessage("Checking for updates\u2026", 4000)
+                self._check_for_store_update(explicit=True)
+                return
+
+            dlg = StoreUpdateDialog(
+                latest_version=getattr(result, 'latest_version', ''),
+                current_version=getattr(result, 'current_version', ''),
+                release_notes=getattr(result, 'release_notes', ''),
+                parent=self,
+            )
+            dlg.store_requested.connect(self._on_store_page_requested)
+            # Non-modal dialogs must be kept alive by the owner: without this
+            # reference Python garbage-collects the widget and it vanishes.
+            self._store_update_dialog = dlg
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+        except Exception as e:
+            log.warning("[StoreUpdate] could not open the notice card: %s", e)
+
+    def _on_store_page_requested(self):
+        """The user went to the Store. Keep the chip: the update is not installed
+        until the Store says so, and this process is still the old version."""
+        try:
+            self.statusBar().showMessage(
+                "Opening the Microsoft Store\u2026 the update installs there", 6000)
+        except Exception:
+            pass
+
+    def _on_help_check_updates(self):
+        """Help menu entry point, channel-aware.
+
+        The label already says which channel this is; this only picks the
+        matching implementation so the menu can never route a Store build
+        into the installer dialog.
+        """
+        try:
+            from src.services.store_update import is_store_build
+            if is_store_build():
+                self._check_for_store_update(explicit=True)
+                return
+        except Exception as e:
+            log.warning("[Update] channel detection failed in Help: %s", e)
+        self._check_for_updates()
 
     def _show_mcp_help(self):
         """Open the MCP section of the online docs."""

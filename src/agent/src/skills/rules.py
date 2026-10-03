@@ -305,13 +305,28 @@ class RulesManager:
 # ---------------------------------------------------------------------------
 
 _rules_manager: Optional[RulesManager] = None
+# The open project, set by the agent bridge when a project is opened. Same
+# bug as the skills singleton: the manager took the project only on first
+# construction, which happened before any project was known, so a project's
+# AGENTS.md and .cortex/rules/ were never read.
+_rules_project_root: Optional[str] = None
+
+
+def set_rules_project_root(project_root: Optional[str]) -> None:
+    """Tell the rules system which project is open (reloads on a change)."""
+    global _rules_project_root
+    _rules_project_root = project_root
+    rm = _rules_manager
+    if rm is not None and rm.project_root != project_root:
+        rm.project_root = project_root
+        rm.reload()
 
 
 def get_rules_manager(project_root: Optional[str] = None) -> RulesManager:
     """Get or create the global RulesManager singleton."""
     global _rules_manager
     if _rules_manager is None:
-        _rules_manager = RulesManager(project_root=project_root)
+        _rules_manager = RulesManager(project_root=_rules_project_root or project_root)
     return _rules_manager
 
 
