@@ -53,14 +53,14 @@ def parse_at_query(text: str, cursor_pos: Optional[int] = None) -> Optional[str]
 
 
 def short_label(qualified: str) -> str:
-    """'mcp__context7__query-docs' -> 'context7 · query-docs'.
+    """'mcp__context7__query-docs' -> 'context7:query-docs'.
 
-    The raw namespaced name is what the model must call, but it is noise in a
-    menu; the user thinks in terms of "which server, which tool".
+    The menu prefixes it with "mcp:", so a row reads exactly as the token
+    picking it inserts ("mcp:context7:query-docs").
     """
     parts = qualified.split("__", 2)
     if len(parts) == 3 and parts[0] == "mcp":
-        return f"{parts[1]} · {parts[2]}"
+        return f"{parts[1]}:{parts[2]}"
     return qualified
 
 
@@ -168,8 +168,20 @@ def filter_mcp_tools(tools: List[Dict], query: str, limit: int = 50) -> List[Dic
 
 
 def build_mcp_token(qualified: str) -> str:
-    """The compact chip inserted into the input for a chosen tool."""
-    return f"@{qualified} "
+    """The chip inserted into the input for a chosen server or tool:
+    "mcp:playwright " / "mcp:playwright:browser_click ". The agent bridge
+    turns it into the instruction to use it (src/core/invocation_tokens.py).
+    """
+    from src.core.invocation_tokens import mcp_token
+    return f"{mcp_token(qualified)} "
+
+
+def normalize_mcp_tokens(text: str, known_names) -> str:
+    """Hand-typed "@mcp__x" / "@mcp__x__y" -> "mcp:x" / "mcp:x:y" when known."""
+    from src.core.invocation_tokens import mcp_token
+    known = set(n for n in (known_names or []) if n)
+    return _TOKEN_RE.sub(lambda m: mcp_token(m.group(1)) if m.group(1) in known else m.group(0),
+                         text)
 
 
 _TOKEN_RE = re.compile(r"(?:(?<=\s)|^)@([A-Za-z0-9_-]+)")

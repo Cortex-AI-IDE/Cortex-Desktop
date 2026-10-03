@@ -33,7 +33,7 @@ from src.utils.logger import get_logger as _get_cortex_logger
 # routing decision was invisible when debugging streaming issues.
 log = _get_cortex_logger(__name__)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QSize, QEvent, QPoint, QRect as _QRect
-from PyQt6.QtGui import QTextOption, QAction, QKeyEvent, QColor, QKeySequence, QIcon, QTextCharFormat, QTextCursor, QTextFormat, QTextBlockFormat, QTextDocument
+from PyQt6.QtGui import QTextOption, QAction, QKeyEvent, QColor, QKeySequence, QIcon, QTextCharFormat, QTextCursor, QTextFormat, QTextBlockFormat, QTextDocument, QBrush, QFont
 from PyQt6.sip import isdeleted as _sip_isdeleted
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -4959,6 +4959,8 @@ class MessageWidget(QWidget):
             joined = " ".join(labels)
             display = joined + "\n" + text if text else joined
         self._user_label.setPlainText(display)
+        if 'skills:' in display or 'mcp:' in display:
+            _paint_invocation_chips(self._user_label.document(), display)
 
     # ----- ordered-block builders (called by the timeline router) -----
     def new_thoughts(self) -> ThoughtsBlock:
@@ -5702,6 +5704,36 @@ class StreamingCursor(QWidget):
 # ============================================================
 # SPELL-CHECK INPUT
 # ============================================================
+# Chip colours for skills:/mcp: tokens: (text, background). The background is
+# translucent so the same pair reads on the dark and the light theme.
+_CHIP_SKILL = ('#5B8CFF', QColor(91, 140, 255, 46))
+_CHIP_MCP = ('#2FB59B', QColor(47, 181, 155, 46))
+
+
+def _paint_invocation_chips(doc, text: str) -> bool:
+    """Paint skills:/mcp: tokens in `doc` as chips. True if any were found.
+
+    mergeCharFormat touches only foreground, background and weight, so it
+    leaves the spell-checker's underline (and any other format) alone; the
+    text itself is unchanged, so toPlainText() - what is saved and sent -
+    still reads "skills:code-reviewer".
+    """
+    from src.core.invocation_tokens import TOKEN_RE
+    found = False
+    for m in TOKEN_RE.finditer(text):
+        found = True
+        fg, bg = _CHIP_MCP if m.group(0).startswith("mcp:") else _CHIP_SKILL
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(fg))
+        fmt.setBackground(bg)
+        fmt.setFontWeight(QFont.Weight.DemiBold)
+        c = QTextCursor(doc)
+        c.setPosition(m.start())
+        c.setPosition(m.end(), c.MoveMode.KeepAnchor)
+        c.mergeCharFormat(fmt)
+    return found
+
+
 class SpellCheckInput(QTextEdit):
     """QTextEdit with real-time spell-check underlines and a dark-mode suggestion menu."""
 
@@ -5735,7 +5767,7 @@ class SpellCheckInput(QTextEdit):
         import re as _re
         text = self.toPlainText()
         _pat = r'(?:^|(?<=\s))/[\w-]+'
-        has_now = bool(_re.search(_pat, text))
+        has_now = bool(_re.search(_pat, text)) or ('skills:' in text or 'mcp:' in text)
         if not has_now and not self._had_skill_tokens:
             return  # nothing to colour and nothing to clear
         self._is_recoloring = True
@@ -5746,6 +5778,8 @@ class SpellCheckInput(QTextEdit):
 
             _normal = QTextCharFormat()
             _normal.setForeground(QColor(T['menu_text']))
+            _normal.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+            _normal.setFontWeight(QFont.Weight.Normal)
             c = QTextCursor(doc)
             c.select(c.SelectionType.Document)
             c.mergeCharFormat(_normal)
@@ -5757,6 +5791,10 @@ class SpellCheckInput(QTextEdit):
                 c2.setPosition(m.start())
                 c2.setPosition(m.end(), c2.MoveMode.KeepAnchor)
                 c2.mergeCharFormat(_blue)
+            # skills:<name> / mcp:<server> picked from the menus: chips.
+            _paint_invocation_chips(doc, text)
+            # Typing on right after a chip must not continue in chip style.
+            self.setCurrentCharFormat(_normal)
 
             cur = QTextCursor(doc)
             cur.setPosition(min(saved_pos, len(text)))
@@ -6080,12 +6118,14 @@ class InputArea(QWidget):
         # InputArea is only ~60px tall and a child widget is CLIPPED to its
         # parent's rect, so parenting here rendered the menu as a 10px sliver.
         # It must live on a tall ancestor (the chat panel) to have room.
-        self._slash_popup = SlashCommandPopup(_slash_colors, parent=self)
+        # Rows read exactly as what picking one inserts: "skills:<name>".
+        self._slash_popup = SlashCommandPopup(_slash_colors, parent=self,
+                                              prefix="skills:")
         self._slash_popup.chosen.connect(self._apply_slash_skill)
         self.input.textChanged.connect(self._update_slash_popup)
         # "@" menu: the same widget pointed at connected MCP tools.
         self._mcp_popup = SlashCommandPopup(_slash_colors, parent=self,
-                                            prefix="@", header="MCP TOOLS")
+                                            prefix="mcp:", header="MCP TOOLS")
         self._mcp_popup.chosen.connect(self._apply_mcp_tool)
         self.input.textChanged.connect(self._update_mcp_popup)
         # Start compact: single-line height + padding
@@ -6957,26 +6997,47 @@ class InputArea(QWidget):
         images = list(self._pasted_images) if self._pasted_images else []
         typed_text = self.input.toPlainText().strip()
 
-        # Expand "/skill" tokens into explicit agent instructions. The tokens
-        # are a compact UI affordance; the agent needs each skill named so it
-        # loads them. Only KNOWN enabled skills expand, so a stray "/foo" is
-        # left as typed. Skipped when there's no "/" at all.
+        # Skills and MCP servers are sent as "skills:<name>" / "mcp:<server>"
+        # tokens - what the "/" and "@" menus insert - and stay that way in
+        # the bubble and history; the agent bridge adds the instruction to use
+        # them (src/core/invocation_tokens.py). The older hand-typed forms
+        # ("/code-reviewer", "@mcp__playwright") are converted to the same
+        # tokens here. Only installed skills / connected tools convert, so a
+        # stray "/foo" or "@someone" is left as typed.
         if '/' in typed_text:
             try:
-                from src.ui.slash_commands import expand_skill_tokens, enabled_skills
+                from src.ui.slash_commands import normalize_skill_tokens, invocable_skill_names
                 from src.ai.agent_bridge import list_skills
-                _known = [s.get('name') for s in enabled_skills(list_skills())]
-                typed_text = expand_skill_tokens(typed_text, _known)
+                typed_text = normalize_skill_tokens(typed_text, invocable_skill_names(list_skills()))
+            except Exception:
+                pass
+        if '@' in typed_text:
+            try:
+                from src.ui.mcp_mentions import normalize_mcp_tokens, list_mcp_tools
+                typed_text = normalize_mcp_tokens(typed_text, [t['name'] for t in list_mcp_tools()])
             except Exception:
                 pass
 
-        # Expand "@mcp__server__tool" tokens the same way. Only CONNECTED
-        # tools expand, so "@someone" in prose is left alone.
-        if '@' in typed_text:
+        # Only tokens and nothing to do with them: keep them and ask for the
+        # request instead of sending. Clicking a menu row and then pressing
+        # Enter (the "done" key) sent "mcp:playwright" on its own - a user
+        # picking three tokens got three empty requests and a fourth message
+        # with the actual text (2026-10-02). With an attachment or pasted
+        # block the tokens apply to that, so it is sent as usual.
+        if typed_text and not images and not self._chip_widgets:
             try:
-                from src.ui.mcp_mentions import expand_mcp_tokens, list_mcp_tools
-                _mcp_known = [t['name'] for t in list_mcp_tools()]
-                typed_text = expand_mcp_tokens(typed_text, _mcp_known)
+                from src.core.invocation_tokens import TOKEN_RE
+                if not TOKEN_RE.sub('', typed_text).strip():
+                    from PyQt6.QtWidgets import QToolTip
+                    QToolTip.showText(
+                        self.input.mapToGlobal(self.input.rect().topLeft()),
+                        "Add what you'd like done, then press Enter",
+                        self.input)
+                    self.input.setFocus()
+                    _end = self.input.textCursor()
+                    _end.movePosition(QTextCursor.MoveOperation.End)
+                    self.input.setTextCursor(_end)
+                    return
             except Exception:
                 pass
 
@@ -7259,7 +7320,7 @@ class InputArea(QWidget):
     # ── Slash-command skill menu ────────────────────────────────────────
     def _update_slash_popup(self):
         """Show/hide/refresh the slash menu as the user types."""
-        from src.ui.slash_commands import parse_slash_query, filter_skills
+        from src.ui.slash_commands import parse_slash_query, menu_skills
         query = parse_slash_query(self.input.toPlainText(),
                                   self.input.textCursor().position())
         if query is None:
@@ -7273,20 +7334,18 @@ class InputArea(QWidget):
         if getattr(self, '_slash_skills_cache', None) is None:
             try:
                 from src.ai.agent_bridge import list_skills
-                # ONLY skills the user enabled in the Skills browser appear
-                # here. The "/" menu is a shortlist the user curates, dumping
-                # all 27 bundled skills made it a wall of choices instead of a
-                # shortcut. Re-read on every new slash session, so toggling a
-                # skill is reflected the next time "/" is pressed.
-                from src.ui.slash_commands import enabled_skills
-                self._slash_skills_cache = enabled_skills(list_skills())
+                # Every installed skill. A bare "/" still shows only the ones
+                # the user enabled (the curated shortlist); typing searches
+                # all of them - see menu_skills. Re-read on every new slash
+                # session, so a toggle or a fresh install shows up the next
+                # time "/" is pressed.
+                self._slash_skills_cache = list_skills()
             except Exception:
                 self._slash_skills_cache = []
-        # No enabled skills -> no menu at all (nothing useful to offer).
         if not self._slash_skills_cache:
             self._slash_popup.hide()
             return
-        results = filter_skills(self._slash_skills_cache, query)
+        results = menu_skills(self._slash_skills_cache, query)
         if not results:
             self._slash_popup.hide()
             return
@@ -8895,11 +8954,24 @@ class ChatPanel(QWidget):
     # burst's last frame is always rendered (nothing strands).
     _RENDER_MAX_GAP_MS = 100
 
+    # Share of the GUI thread live-block rebuilds may take while streaming.
+    # A rebuild re-lays out the whole live block, and a table cannot be
+    # sealed mid-way, so a long table is rebuilt whole on every request:
+    # measured 1.7 ms average, 7.6 ms peak, ~29 a second once table rows
+    # stream cell by cell - 12% of the GUI thread. Spacing requests by the
+    # measured cost holds it near this share on any machine: cheap rebuilds
+    # still run every frame, a slow machine or a huge table gets fewer.
+    _RENDER_GUI_BUDGET = 0.06
+
     def _render_request_due(self) -> bool:
         """Whether this frame's frontier advance is worth a full rebuild."""
         pending = getattr(self, '_stream_pending', '')
         if not pending:
             return True   # last frame of a burst: never strand its text
+        _cost = getattr(self, '_apply_ms_avg', 0.0)
+        if _cost and ((time.perf_counter() - getattr(self, '_render_req_ts', 0.0))
+                      * 1000.0 < _cost / self._RENDER_GUI_BUDGET):
+            return False
         revealed = len(self._prose_buf) - len(pending)
         last_len = getattr(self, '_render_req_len', None)
         if last_len is None:
@@ -8952,11 +9024,22 @@ class ChatPanel(QWidget):
         if not hasattr(block, 'setHtml'):
             return
         buf = self._prose_buf
-        if "```" in chunk or buf.count("```") % 2 == 1:
-            return  # entering or inside a code fence
         last_line = buf.rsplit("\n", 1)[-1].lstrip()
-        if last_line.startswith(("|", "<")):
-            return  # table row or raw HTML
+        if self._RENDERED_REVEAL:
+            # The rendered reveal never puts raw markup on screen (every
+            # frame is rendered markdown of _stabilize_frontier's text), so
+            # code fences and table rows take the paced reveal like any other
+            # text. Skipping them left their text to the debounced render,
+            # which a steady provider keeps restarting: replaying a real
+            # answer measured the screen frozen 1.2 s while a 300-character
+            # table row arrived, then the whole row appearing in one frame.
+            if last_line.startswith("<"):
+                return  # raw HTML: shown by the render once it is whole
+        else:
+            if "```" in chunk or buf.count("```") % 2 == 1:
+                return  # entering or inside a code fence
+            if last_line.startswith(("|", "<")):
+                return  # table row or raw HTML
         self._stream_pending = getattr(self, '_stream_pending', '') + chunk
         self._stream_backlog_max = max(
             getattr(self, '_stream_backlog_max', 0), len(self._stream_pending))
@@ -9220,6 +9303,53 @@ class ChatPanel(QWidget):
     _MD_TABLE_ROW = re.compile(r'^\s*\|')
     _MD_TABLE_SEP = re.compile(r'^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$')
 
+    _MD_CELL_SPLIT = re.compile(r'(?<!\\)\|')
+
+    @classmethod
+    def _close_spans(cls, s: str) -> str:
+        """`s` with its unclosed inline spans closed (innermost first); a
+        marker with nothing after it yet is dropped instead."""
+        opened = []
+        for pos, tok in cls._marker_spans(s):
+            if opened and opened[-1][1] == tok:
+                opened.pop()
+            else:
+                opened.append((pos, tok))
+        if opened and opened[-1][0] + len(opened[-1][1]) >= len(s.rstrip()):
+            p, _tok = opened.pop()
+            s = s[:p]
+        return s + ''.join(tok for _, tok in reversed(opened))
+
+    @classmethod
+    def _complete_table_row(cls, head: str, last: str):
+        """The unfinished table row `last`, padded so it renders as a row.
+
+        Only for a table that is already a table: the rows directly above
+        must include its separator line. The renderer drops a row with fewer
+        cells than the header, and drops the WHOLE table for a row with more,
+        so the row is padded with empty cells to the header's count, and None
+        (hold the row back, as before) is returned when it has more cells or
+        the table is not confirmed yet. Completed cells keep their final look;
+        only the cell being typed grows.
+        """
+        lines = head.split('\n')
+        i = len(lines)
+        while i > 0 and cls._MD_TABLE_ROW.match(lines[i - 1]):
+            i -= 1
+        run = lines[i:]
+        if len(run) < 2 or not cls._MD_TABLE_SEP.match(run[1]):
+            return None
+        ncols = len(cls._MD_CELL_SPLIT.split(run[0].strip().strip('|')))
+        body = last.strip()[1:]                     # drop the leading pipe
+        cells = cls._MD_CELL_SPLIT.split(body)
+        if body.rstrip().endswith('|') and not body.rstrip().endswith('\\|'):
+            cells = cells[:-1]                      # row already closed
+        if not cells or len(cells) > ncols:
+            return None
+        cells[-1] = cls._close_spans(cells[-1])
+        cells += [' '] * (ncols - len(cells))
+        return '|' + '|'.join(c if c.strip() else ' ' for c in cells) + '|'
+
     @classmethod
     def _stabilize_frontier(cls, text: str) -> str:
         """The revealed text, cut so it renders the way it will stay.
@@ -9242,6 +9372,13 @@ class ChatPanel(QWidget):
         in_fence = (head.count('```') % 2) == 1
         if in_fence and re.match(r'^\s*`{1,3}\s*$', last):
             text, last = head + nl, ''  # the closing fence, half typed
+        if not in_fence and last and cls._MD_TABLE_ROW.match(last):
+            # A row of a table whose separator is already on screen: show it
+            # as it fills, cell by cell, instead of holding the whole row
+            # until its line break (1.2 s of a frozen screen for a long row).
+            row = cls._complete_table_row(head, last)
+            if row is not None:
+                return head + nl + row
         if not in_fence:
             if last and (cls._MD_PARTIAL_LINE.match(last) or cls._MD_TABLE_ROW.match(last)):
                 text, last = head + nl, ''
@@ -9739,7 +9876,13 @@ class ChatPanel(QWidget):
             return
         self._prose_applied_seq = seq
         html, display_text, had_mermaid = built
+        _t0 = time.perf_counter()
         self._apply_prose_render(html, display_text, had_mermaid)
+        # Smoothed GUI cost of one live-block rebuild, for the render budget
+        # in _render_request_due.
+        _ms = (time.perf_counter() - _t0) * 1000.0
+        _prev = getattr(self, '_apply_ms_avg', 0.0)
+        self._apply_ms_avg = _ms if not _prev else _prev * 0.8 + _ms * 0.2
 
     @staticmethod
     def _queue_block_repaint(block, strip_px: int = 0):

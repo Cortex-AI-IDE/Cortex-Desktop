@@ -53,6 +53,93 @@ except ImportError:
         log.warning("[CortexAPI] No HTTP client available (install httpx or requests)")
 
 
+# ── Secret-file permissions ────────────────────────────────────────────────
+# ~/.cortex holds live 30-day bearer tokens (auth.json), the encrypted
+# provider-key vault (keys.enc) and cortex.db. auth.json used to be written
+# with Path.write_text(), which creates it 0664 under the common umask 0002,
+# so every other local user on a shared machine could read the token and
+# impersonate the account for its full lifetime. keys.enc already got this
+# right (key_manager._restrict_perms); auth.json was the one secret left out.
+#
+# os.open(mode=0o600) creates the file already owner-only -- chmod *after*
+# write_text() would leave a window where the tokens sit world-readable --
+# and the follow-up chmod heals files an older build left at 0664, because
+# O_CREAT's mode is ignored when the file already exists.
+#
+# On Windows os.chmod only toggles the read-only bit and grants no real ACL
+# protection, but it is harmless: each user's profile directory is already
+# isolated by NTFS ACLs, so the exposure closed here is POSIX-specific.
+_CORTEX_DIR_MODE = 0o700
+_SECRET_FILE_MODE = 0o600
+
+
+def _restrict_existing(path: Path) -> None:
+    """chmod an existing secret file to owner-only, ignoring failures.
+
+    Mirrors key_manager._restrict_perms. A chmod that fails must not abort a
+    sign-in whose tokens were already written, and must not spam the log on
+    every launch, so this stays quiet at debug level.
+    """
+    try:
+        os.chmod(path, _SECRET_FILE_MODE)
+    except OSError as e:
+        log.debug(f"[CortexAPI] Could not restrict {path}: {e}")
+
+
+def _restrict_dir(path: Path) -> None:
+    """chmod an existing directory to owner-only, ignoring failures.
+
+    Best-effort on purpose: the token file itself is still created 0600, so a
+    directory we cannot tighten is a lost defence-in-depth layer, not a leak
+    of the tokens -- and it must never mask the real reason a save failed.
+    """
+    try:
+        os.chmod(path, _CORTEX_DIR_MODE)
+    except OSError as e:
+        log.debug(f"[CortexAPI] Could not restrict {path}: {e}")
+
+
+def _harden_secret_dir(path: Path) -> None:
+    """Best-effort create-and-tighten, for READ paths only.
+
+    Never raises: _load_tokens() runs on every client construction and a
+    permission hiccup there must not log the user out. Write paths must not
+    use this -- they need mkdir failures to propagate so the user is told the
+    true cause (a full disk, not a missing path).
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.debug(f"[CortexAPI] Could not create {path}: {e}")
+        return
+    _restrict_dir(path)
+
+
+def _write_secret_text(path: Path, text: str) -> None:
+    """Write `text` to `path`, creating it owner-only with no world-readable
+    window, then heal a pre-existing loose file.
+
+    Raises OSError when the directory cannot be created or the write fails, so
+    _save_tokens can keep reporting the real cause to the user. Only the chmod
+    calls are best-effort.
+    """
+    # Deliberately NOT wrapped: when this fails the session genuinely cannot
+    # be persisted, and swallowing it would replace "No space left on device"
+    # with a misleading "No such file or directory" from the os.open below.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _restrict_dir(path.parent)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _SECRET_FILE_MODE)
+    try:
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+    except Exception:
+        # fdopen failed, so it never took ownership of the descriptor.
+        os.close(fd)
+        raise
+    with fh:
+        fh.write(text)
+    _restrict_existing(path)
+
+
 class CortexAPIClient:
     """HTTP client for Cortex Django backend.
 
@@ -70,6 +157,20 @@ class CortexAPIClient:
         self.expires_at: Optional[str] = None
         self.user_info: Optional[Dict] = None
         self._lock = threading.Lock()
+        # Serialises every request made on the single shared httpx.Client
+        # created below. Three threads use that client at once: the
+        # semantic-search background indexer (`semantic-bg-ind`), the
+        # `cortex-account-refresh` worker and the agent/main thread. httpx is
+        # nominally thread-safe, but under Python 3.14.4 + OpenSSL 3.5.5 the
+        # concurrent TLS handshakes segfault in native code -- 9 identical
+        # crashes in ~/.cortex/crash.log, every one faulting in
+        # ssl.do_handshake on the `semantic-bg-ind` thread at
+        # siliconflow_embeddings.generate_embedding. A Python-level exception
+        # handler cannot catch this; the only fix is to never let two threads
+        # enter the native handshake at the same time.
+        # RLock, not Lock: _request re-enters the client via _try_refresh on a
+        # 401, and a plain Lock would deadlock the caller there.
+        self._http_lock = threading.RLock()
         self.last_error: Optional[str] = None
         self._token_file = Path.home() / ".cortex" / "auth.json"
         self._load_tokens()
@@ -87,12 +188,26 @@ class CortexAPIClient:
         self._cached_config: Optional[Dict] = None
         self._cached_config_version: str = ""
 
+        # Subscription cache (see get_subscription / _SUBSCRIPTION_TTL)
+        self._subscription_cache: Optional[Dict] = None
+        self._subscription_cache_at: float = 0.0
+
     # ── Token persistence ──────────────────────────────────────────────
 
     def _load_tokens(self):
         """Load tokens from disk."""
         try:
+            # ~/.cortex also holds .env (provider API keys) and cortex.db, and
+            # main.py creates it under the default umask (0775), so tighten it
+            # here instead of only on the next sign-in. Guarded by exists() so
+            # a read never creates directories as a side effect.
+            if self._token_file.parent.exists():
+                _harden_secret_dir(self._token_file.parent)
             if self._token_file.exists():
+                # Heal a token file an older build left world-readable. A user
+                # who is already signed in may not re-save for days, and the
+                # tokens sitting in that file stay valid for 30.
+                _restrict_existing(self._token_file)
                 data = json.loads(self._token_file.read_text(encoding="utf-8"))
                 self.access_token = data.get("access_token")
                 self.refresh_token = data.get("refresh_token")
@@ -105,14 +220,17 @@ class CortexAPIClient:
     def _save_tokens(self) -> bool:
         """Save tokens to disk. False when the session will not survive a restart."""
         try:
-            self._token_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "access_token": self.access_token,
                 "refresh_token": self.refresh_token,
                 "expires_at": self.expires_at,
                 "user": self.user_info,
             }
-            self._token_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            # _write_secret_text() creates ~/.cortex (0700) and auth.json
+            # (0600) in one step. This file holds live bearer tokens, and the
+            # old write_text() left it 0664 -- readable by every other local
+            # user for the token's whole 30-day life.
+            _write_secret_text(self._token_file, json.dumps(data, indent=2))
             return True
         except Exception as e:
             # A sign-in that cannot be written to disk works until the app is
@@ -151,6 +269,28 @@ class CortexAPIClient:
             headers["Authorization"] = f"Bearer {self.access_token}"
         return headers
 
+    def _send(self, method: str, url: str, headers: Dict[str, str],
+              json_data: dict = None, params: dict = None,
+              timeout: float = 15.0):
+        """Issue one HTTP request while holding the shared-client lock.
+
+        Every path that touches `self._http_client` goes through here so that
+        only one thread is ever inside the native OpenSSL handshake. See the
+        `_http_lock` comment in __init__ for the crash this prevents.
+
+        Returns the response, or None when no HTTP backend is available.
+        """
+        with self._http_lock:
+            if self._http_client:
+                return self._http_client.request(
+                    method, url, headers=headers, json=json_data, params=params)
+            if _HTTP_CLIENT == "requests":
+                return requests.request(
+                    method, url, headers=headers, json=json_data,
+                    params=params, timeout=timeout)
+        log.error("[CortexAPI] No HTTP client available")
+        return None
+
     def _request(self, method: str, path: str, json_data: dict = None,
                  params: dict = None, timeout: float = 15.0) -> Optional[Dict]:
         """Make an HTTP request with connection pooling and auto-retry on 401.
@@ -161,22 +301,17 @@ class CortexAPIClient:
         headers = self._get_headers()
 
         try:
-            if self._http_client:
-                resp = self._http_client.request(method, url, headers=headers, json=json_data, params=params)
-            elif _HTTP_CLIENT == "requests":
-                resp = requests.request(method, url, headers=headers, json=json_data, params=params, timeout=timeout)
-            else:
-                log.error("[CortexAPI] No HTTP client available")
+            resp = self._send(method, url, headers, json_data, params, timeout)
+            if resp is None:
                 return None
 
             if resp.status_code == 401:
                 # Try to refresh token
                 if self._try_refresh():
                     headers = self._get_headers()
-                    if self._http_client:
-                        resp = self._http_client.request(method, url, headers=headers, json=json_data, params=params)
-                    else:
-                        resp = requests.request(method, url, headers=headers, json=json_data, params=params, timeout=timeout)
+                    resp = self._send(method, url, headers, json_data, params, timeout)
+                    if resp is None:
+                        return None
                 else:
                     self._clear_tokens()
                     return None
@@ -226,10 +361,13 @@ class CortexAPIClient:
             url = f"{self.base_url}/api/v1/auth/refresh/"
             data = {"refresh_token": self.refresh_token}
 
-            if self._http_client:
-                resp = self._http_client.post(url, json=data, headers={"Content-Type": "application/json"})
-            else:
-                resp = requests.post(url, json=data, headers={"Content-Type": "application/json"}, timeout=10)
+            # Via _send so the refresh never races another thread's handshake.
+            # Reached from inside _request's 401 branch, which already holds
+            # _http_lock -- that is why the lock is an RLock.
+            resp = self._send("POST", url, {"Content-Type": "application/json"},
+                              json_data=data, timeout=10)
+            if resp is None:
+                return False
 
             if resp.status_code == 200:
                 result = resp.json()
@@ -254,11 +392,9 @@ class CortexAPIClient:
         """Check if the Django server is reachable."""
         try:
             url = f"{self.base_url}/ops/health/"
-            if self._http_client:
-                resp = self._http_client.get(url)
-                return resp.status_code == 200
-            elif _HTTP_CLIENT == "requests":
-                resp = requests.get(url, headers={"X-Cortex-Platform": APP_PLATFORM}, timeout=3)
+            resp = self._send("GET", url, {"X-Cortex-Platform": APP_PLATFORM},
+                              timeout=3)
+            if resp is not None:
                 return resp.status_code == 200
         except Exception:
             pass
@@ -380,11 +516,8 @@ class CortexAPIClient:
         if ide_version:
             url = f"{url}?ide_version={ide_version}"
         try:
-            if self._http_client:
-                resp = self._http_client.get(url, headers=headers)
-            elif _HTTP_CLIENT == "requests":
-                resp = requests.get(url, headers=headers, timeout=10)
-            else:
+            resp = self._send("GET", url, headers, timeout=10)
+            if resp is None:
                 return self._cached_config
 
             if resp.status_code == 304:
@@ -402,9 +535,40 @@ class CortexAPIClient:
 
     # ── Billing endpoints ──────────────────────────────────────────────
 
-    def get_subscription(self) -> Optional[Dict]:
-        """Get current subscription from server."""
-        return self._request("GET", "/api/v1/billing/subscription/")
+    # proxy_service() calls get_subscription() once per embedding purely to
+    # read the license_key, so indexing a 1659-file project fired ~1659 extra
+    # TLS requests from the background indexer thread. That request volume is
+    # what made the shared-client race guarded by _http_lock so likely to be
+    # hit. A license key only changes when a plan is bought or renewed, so a
+    # short TTL is safe; `force` bypasses it for the "I just purchased" path.
+    _SUBSCRIPTION_TTL = 60.0
+
+    def get_subscription(self, force: bool = False) -> Optional[Dict]:
+        """Get current subscription from server, cached for _SUBSCRIPTION_TTL.
+
+        Only successful responses are cached, so an offline moment never pins a
+        stale "no subscription" verdict for the whole TTL window.
+        """
+        now = time.time()
+        if not force:
+            cached = getattr(self, "_subscription_cache", None)
+            if cached is not None and \
+                    now - getattr(self, "_subscription_cache_at", 0.0) < self._SUBSCRIPTION_TTL:
+                return cached
+        result = self._request("GET", "/api/v1/billing/subscription/")
+        if result is not None:
+            self._subscription_cache = result
+            self._subscription_cache_at = now
+        return result
+
+    def invalidate_subscription_cache(self) -> None:
+        """Drop the cached subscription so the next read hits the server.
+
+        Called after a purchase or plan change, so someone who just bought Pro
+        is never told "no license key" for up to a minute afterwards.
+        """
+        self._subscription_cache = None
+        self._subscription_cache_at = 0.0
 
     def get_credits(self) -> Optional[Dict]:
         """Get credit balance from server."""
@@ -559,13 +723,21 @@ class CortexAPIClient:
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     def close(self):
-        """Close the HTTP client and release resources."""
-        if self._http_client:
-            try:
-                self._http_client.close()
-            except Exception:
-                pass
-            self._http_client = None
+        """Close the HTTP client and release resources.
+
+        Holds _http_lock so the client is never torn down underneath a thread
+        that is still mid-request: destroying an OpenSSL context another thread
+        is handshaking on is the same class of native fault the lock exists to
+        prevent, and shutdown is exactly when the indexer is most likely to
+        still be running.
+        """
+        with self._http_lock:
+            if self._http_client:
+                try:
+                    self._http_client.close()
+                except Exception:
+                    pass
+                self._http_client = None
 
     # ── Helpers ────────────────────────────────────────────────────────
 

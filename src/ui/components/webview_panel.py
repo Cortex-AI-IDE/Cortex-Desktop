@@ -1324,6 +1324,61 @@ class WebviewPanel(QWidget):
             return
         self._safe_run_js("window.activeFilePath || ''", _done)
 
+    def get_active_file_and_content_async(self, callback, timeout_ms: int = 700):
+        """callback(path, content) for the tab the editor REALLY shows.
+
+        Both come from ONE call into the editor, so the content always
+        belongs to the path. Save used the Python mirror for the path: the
+        mirror is set when Python asks for a file to be shown, and the editor
+        may decline (it keeps the tab the user is working in when a file is
+        opened in the background). On 2026-10-01 that sent four Ctrl+S
+        presses in a row to .env.example while the user was editing .env.
+
+        `content` is None when the editor could not supply it; the caller
+        then fetches it its own way. If the editor does not answer within
+        `timeout_ms` (dropped runJavaScript callbacks are a known QWebEngine
+        failure), the mirror is used, so Save never silently does nothing.
+        """
+        state = {"done": False}
+
+        def _finish(path, content):
+            if state["done"]:
+                return
+            state["done"] = True
+            try:
+                callback(path, content)
+            except Exception as e:
+                log.warning(f"[WebviewPanel] active file+content callback failed: {e}")
+
+        def _from_js(result):
+            path, content = "", None
+            try:
+                data = json.loads(result) if isinstance(result, str) and result else {}
+                path = data.get("path") or ""
+                content = data.get("content")
+            except Exception:
+                pass
+            if not path:
+                _finish(self._active_file_path, None)
+                return
+            if path != self._active_file_path:
+                log.warning(f"[WebviewPanel] active-file mirror was stale: "
+                            f"{self._active_file_path!r}, editor shows {path!r}")
+                self._active_file_path = path
+                self.active_file_changed.emit(path)
+            _finish(path, content)
+
+        if not self._page_loaded:
+            _finish(self._active_file_path, None)
+            return
+        QTimer.singleShot(timeout_ms, lambda: _finish(self._active_file_path, None))
+        self._safe_run_js(
+            "(function(){var p=activeFilePath||'';var c=null;"
+            "try{if(p){c=getEditorContent(p);}}catch(e){}"
+            "if(c===undefined)c=null;"
+            "return JSON.stringify({path:p,content:c});})()",
+            _from_js)
+
     def set_theme(self, is_dark: bool):
         """Apply dark or light theme to the editor.
 

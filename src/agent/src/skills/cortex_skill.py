@@ -20,11 +20,31 @@ import glob
 import json
 import fnmatch
 import logging
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
+# The app's file handler is attached per named logger (src.utils.logger), and
+# the root logger has none, so logging.getLogger(__name__) wrote nowhere: not
+# one "Loaded N skills" line ever reached cortex.log, which is why skill
+# detection problems left no trace. The fallback keeps the module importable
+# on its own.
+try:
+    from src.utils.logger import get_logger as _get_logger
+    logger = _get_logger("skills")
+except Exception:  # pragma: no cover - standalone use
+    logger = logging.getLogger(__name__)
+
+# What a "/name" token can hold. Names outside it (53 of the 913 skills in the
+# claude-code-templates catalog, e.g. "API Fuzzing for Bug Bounty") get their
+# install folder as the token instead - see SkillDefinition.token.
+_TOKEN_RE = re.compile(r"[\w-]+")
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
 
 # ---------------------------------------------------------------------------
 # Data Models
@@ -46,6 +66,23 @@ class SkillDefinition:
     prompt_template: str = ""
     file_path: str = ""
     source: str = "user"  # 'bundled' | 'user' | 'plugin'
+
+    @property
+    def token(self) -> str:
+        """The name as typed after "/" in the chat input.
+
+        The skill's own name when it fits a token. Otherwise the folder it is
+        installed in, which is what the user typed to install it
+        (`npx claude-code-templates --skill security/api-fuzzing-bug-bounty`
+        -> .claude/skills/api-fuzzing-bug-bounty/), and a slug of the name as
+        the last resort.
+        """
+        if _TOKEN_RE.fullmatch(self.name or ""):
+            return self.name
+        folder = os.path.basename(os.path.dirname(self.file_path)) if self.file_path else ""
+        if _TOKEN_RE.fullmatch(folder) and folder.lower() != "skills":
+            return folder
+        return _slug(self.name) or self.name
 
     def matches_keywords(self, text: str) -> float:
         """Score relevance of this skill against user text (0.0 to 1.0)."""
@@ -193,37 +230,86 @@ def parse_skill_file(file_path: str) -> Optional[SkillDefinition]:
             file_path=file_path,
         )
 
-    name = frontmatter.get('name') or os.path.splitext(os.path.basename(file_path))[0]
+    # Same fallback as above when the frontmatter has no usable name.
+    name = _as_text(frontmatter.get('name'))
+    if not name:
+        _stem = os.path.splitext(os.path.basename(file_path))[0]
+        name = (os.path.basename(os.path.dirname(file_path)) or _stem) \
+            if _stem.lower() == "skill" else _stem
     # Strip from the comment-tolerant view, or a leading note would leave
     # the comment + frontmatter inside the injected skill body.
     body = _strip_frontmatter(_stripped)
 
     return SkillDefinition(
         name=name,
-        description=frontmatter.get('description', ''),
-        aliases=frontmatter.get('aliases', []),
-        when_to_use=frontmatter.get('when_to_use', '') or frontmatter.get('whenToUse', ''),
-        tags=frontmatter.get('tags', []),
-        category=frontmatter.get('category', 'general'),
-        agent_type=frontmatter.get('agent_type', None),
-        allowed_tools=frontmatter.get('allowed_tools', []) or frontmatter.get('allowedTools', []),
-        model_hint=frontmatter.get('model', None),
+        description=_as_text(frontmatter.get('description')),
+        aliases=_as_list(frontmatter.get('aliases')),
+        when_to_use=_as_text(frontmatter.get('when_to_use') or frontmatter.get('whenToUse')),
+        tags=_as_list(frontmatter.get('tags')),
+        category=_as_text(frontmatter.get('category')) or 'general',
+        agent_type=_as_text(frontmatter.get('agent_type')) or None,
+        allowed_tools=_as_list(frontmatter.get('allowed_tools') or frontmatter.get('allowedTools')
+                               or frontmatter.get('allowed-tools')),
+        model_hint=_as_text(frontmatter.get('model')) or None,
         prompt_template=body.strip(),
         file_path=file_path,
     )
 
 
-def _extract_frontmatter(content: str) -> Optional[Dict[str, Any]]:
-    """Extract YAML-like frontmatter between --- markers."""
-    if not content.startswith('---'):
-        return None
-    end_idx = content.find('---', 3)
-    if end_idx == -1:
-        return None
-    raw = content[3:end_idx].strip('\n')
+def _as_text(v: Any) -> str:
+    """A frontmatter scalar as text. YAML hands back None, numbers, dates."""
+    if v is None or isinstance(v, (dict, list)):
+        return ""
+    return str(v).strip()
 
+
+def _as_list(v: Any) -> List[str]:
+    """A frontmatter list as strings: `[a, b]`, a YAML list, or "a, b"."""
+    if v is None or isinstance(v, dict):
+        return []
+    if isinstance(v, (list, tuple)):
+        return [str(x).strip() for x in v if x is not None and str(x).strip()]
+    return [p.strip() for p in str(v).split(',') if p.strip()]
+
+
+# The frontmatter block: "---" on the FIRST line, closed by the next line that
+# is only "---". Searching for the next "---" anywhere cut a description such
+# as "x --- y" off at the dashes and pasted the rest into the skill body.
+_FRONTMATTER_RE = re.compile(r'\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)', re.S)
+
+
+def _extract_frontmatter(content: str) -> Optional[Dict[str, Any]]:
+    """Frontmatter between the --- lines, as a dict.
+
+    Read with a real YAML parser first. The hand-written reader below was the
+    only one, and against all 913 skills in the claude-code-templates catalog
+    it disagreed with YAML 201 times: nested `metadata:` keys (author,
+    version, even `name`) flattened into the top level, quoted descriptions
+    spread over several lines cut to the first line with a stray quote, and
+    an indented continuation read as an empty description. It stays as the
+    fallback because hand-written SKILL.md files are often not valid YAML
+    (an unquoted "description: Use when: ..." is a YAML error).
+    """
+    m = _FRONTMATTER_RE.match(content)
+    if not m:
+        return None
+    raw = m.group(1)
+    try:
+        import yaml
+        # libyaml's loader when present (it ships in the build): the pure
+        # Python one made loading ~300 skills 8x slower.
+        data = yaml.load(raw, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+        if isinstance(data, dict) and data:
+            return {str(k): v for k, v in data.items()}
+    except Exception:
+        pass
+    return _extract_frontmatter_lenient(raw)
+
+
+def _extract_frontmatter_lenient(raw: str) -> Optional[Dict[str, Any]]:
+    """Line-based reader for frontmatter that is not valid YAML."""
     result: Dict[str, Any] = {}
-    lines = raw.split('\n')
+    lines = raw.replace('\r\n', '\n').split('\n')
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -231,9 +317,29 @@ def _extract_frontmatter(content: str) -> Optional[Dict[str, Any]]:
         stripped = line.strip()
         if ':' not in stripped or stripped.startswith('#'):
             continue
+        if line[:1].isspace():
+            continue    # belongs to a nested block skipped below, not a key
         key, _, val = stripped.partition(':')
         key = key.strip()
         val = val.strip()
+
+        # Lines indented under this key: a nested mapping, a list, or the
+        # rest of a plain value spread over several lines. Reading them as
+        # keys of their own let a nested `name:` replace the skill's name.
+        if val[:1] not in ('|', '>'):
+            nested: List[str] = []
+            while i < len(lines) and (not lines[i].strip() or lines[i][:1].isspace()
+                                      or (not val and lines[i].lstrip().startswith('- '))):
+                nested.append(lines[i])
+                i += 1
+            content_lines = [n.strip() for n in nested if n.strip()]
+            if content_lines:
+                if not val and all(c.startswith('- ') for c in content_lines):
+                    result[key] = [c[2:].strip().strip("'\"") for c in content_lines]
+                    continue
+                if not val and re.match(r'^[\w-]+\s*:', content_lines[0]):
+                    continue    # nested mapping (metadata:, etc.), not used here
+                val = ' '.join(([val] if val else []) + content_lines)
 
         # YAML block scalars: `description: |-` / `>` / `|+` etc. The value is
         # the indented lines that follow. Skipping them was not merely lossy -
@@ -278,12 +384,10 @@ def _extract_frontmatter(content: str) -> Optional[Dict[str, Any]]:
 
 def _strip_frontmatter(content: str) -> str:
     """Remove frontmatter block from content."""
-    if not content.startswith('---'):
+    m = _FRONTMATTER_RE.match(content)
+    if not m:
         return content
-    end_idx = content.find('---', 3)
-    if end_idx == -1:
-        return content
-    return content[end_idx + 3:].strip()
+    return content[m.end():].strip()
 
 
 # ---------------------------------------------------------------------------
@@ -310,18 +414,30 @@ class SkillsManager:
         self._skills: Dict[str, SkillDefinition] = {}
         self._active_skills: Set[str] = set()
         self._global_dirs: List[str] = []
-        self._load_dirs()
+        self._reload_lock = threading.RLock()
+        self._fingerprint: Optional[Tuple] = None
+        self._checked_at = 0.0
+        self.reload()
         self._restore_active_state()
 
     def _restore_active_state(self) -> None:
         """Re-activate skills the user had toggled ON in a previous session.
-        Names that no longer resolve to a loaded skill are dropped silently."""
+
+        Every saved name is kept, loaded or not. Keeping only the loaded ones
+        lost toggles for good: a project's skill is not loaded until that
+        project is open, and the next toggle of ANY skill saved the shortened
+        set. That is how a code-reviewer installed in the project kept coming
+        back switched off. active_skill_names() reports only loaded ones.
+        """
         try:
             with open(self._STATE_FILE, 'r', encoding='utf-8') as fh:
                 saved = json.load(fh).get('active', [])
-            self._active_skills = {n for n in saved if n in self._skills}
+            self._active_skills = {str(n) for n in saved if n}
+            loaded = self.active_skill_names()
             if self._active_skills:
-                logger.info(f"Restored {len(self._active_skills)} active skill(s)")
+                logger.info(f"Restored {len(loaded)} active skill(s)"
+                            + (f", {len(self._active_skills) - len(loaded)} more "
+                               f"not installed here" if len(loaded) < len(self._active_skills) else ""))
         except FileNotFoundError:
             pass
         except Exception as e:
@@ -347,13 +463,25 @@ class SkillsManager:
 
     def get_skill(self, name: str) -> Optional[SkillDefinition]:
         """Get a skill by name or alias."""
+        skills = self._skills       # one snapshot; reload() swaps the dict
         # Direct name match
-        if name in self._skills:
-            return self._skills[name]
+        if name in skills:
+            return skills[name]
         # Alias match
-        for skill in self._skills.values():
+        for skill in skills.values():
             if name in skill.aliases:
                 return skill
+        # The "/" token (install folder for names with spaces), then the same
+        # name written differently: the model asks for "Code Reviewer" when
+        # the file says code-reviewer.
+        for skill in skills.values():
+            if skill.token == name:
+                return skill
+        want = _slug(name)
+        if want:
+            for skill in skills.values():
+                if _slug(skill.name) == want or _slug(skill.token) == want:
+                    return skill
         return None
 
     def add_skill(self, skill: SkillDefinition) -> None:
@@ -384,7 +512,7 @@ class SkillsManager:
 
     def toggle_skill(self, name: str) -> bool:
         """Toggle a skill on/off. Returns new state (True=active)."""
-        if name in self._active_skills:
+        if name in self.active_skill_names():
             self._active_skills.discard(name)
             self._save_active_state()
             return False
@@ -396,12 +524,14 @@ class SkillsManager:
             return False
 
     def active_skill_names(self) -> Set[str]:
-        """Return names of all currently active skills."""
-        return self._active_skills.copy()
+        """Names of the active skills that are loaded right now."""
+        skills = self._skills
+        return {n for n in self._active_skills if n in skills}
 
     def active_skills(self) -> List[SkillDefinition]:
         """Return SkillDefinition objects for all active skills."""
-        return [self._skills[n] for n in self._active_skills if n in self._skills]
+        skills = self._skills
+        return [skills[n] for n in sorted(self._active_skills) if n in skills]
 
     def auto_detect_skills(self, user_input: str, threshold: float = 0.45) -> List[SkillDefinition]:
         """
@@ -436,31 +566,91 @@ class SkillsManager:
         return "".join(parts)
 
     def reload(self) -> int:
-        """Reload all skills from disk. Returns count loaded."""
-        self._skills.clear()
-        self._load_dirs()
-        return len(self._skills)
+        """Reload all skills from disk. Returns count loaded.
 
-    def load_skill_file(self, file_path: str) -> Optional[SkillDefinition]:
+        The new set is built aside and swapped in with one assignment, so a
+        lookup from another thread (the "/" menu on the GUI thread while the
+        agent runs) never sees a half-loaded or empty list.
+        """
+        with self._reload_lock:
+            skills: Dict[str, SkillDefinition] = {}
+            roots = self._skill_roots()
+            for directory, label in roots:
+                n = self.load_skills_directory(directory, into=skills,
+                                               source='bundled' if label == 'bundled' else None)
+                if n or label in ('bundled', 'project'):
+                    logger.info(f"Loaded {n} {label} skill(s) from {directory}")
+            self._skills = skills
+            self._global_dirs = [d for d, label in roots if label in ('global', 'cortex')]
+            self._fingerprint = self._compute_fingerprint(roots)
+            self._checked_at = time.monotonic()
+            logger.info(f"Loaded {len(skills)} skills from {len(roots)} directories"
+                        f" (project: {self.project_root or 'none'})")
+            return len(skills)
+
+    def set_project_root(self, project_root: Optional[str]) -> None:
+        """Point the manager at the open project and reload if it changed.
+
+        The manager is a process-wide singleton that used to take the project
+        only when first constructed. The first caller was usually something
+        that did not know the project (the Skill tool, the Settings list), so
+        a project's .claude/skills - where `npx claude-code-templates --skill`
+        installs - was never read, or the previous project's stayed loaded.
+        """
+        if _same_path(project_root, self.project_root):
+            return
+        self.project_root = project_root
+        self.reload()
+
+    def refresh_if_changed(self, force: bool = False) -> bool:
+        """Reload when a skill was installed, edited or removed on disk.
+
+        Skills are installed while Cortex runs (npx in the terminal, or the
+        agent's own Bash tool), and nothing ever re-read the folders, so a new
+        skill stayed invisible until a restart. Checked at most every
+        _REFRESH_INTERVAL seconds; an unchanged check costs a directory walk
+        and a stat per SKILL.md. Returns True when it reloaded.
+        """
+        now = time.monotonic()
+        if not force and now - self._checked_at < _REFRESH_INTERVAL:
+            return False
+        self._checked_at = now
+        try:
+            fp = self._compute_fingerprint(self._skill_roots())
+        except Exception as e:
+            logger.debug(f"Skill change check failed: {e}")
+            return False
+        if fp == self._fingerprint:
+            return False
+        before = set(self._skills)
+        self.reload()
+        after = set(self._skills)
+        added, removed = sorted(after - before), sorted(before - after)
+        logger.info(f"Skills changed on disk: +{len(added)} {added[:10]} "
+                    f"-{len(removed)} {removed[:10]}")
+        return True
+
+    def load_skill_file(self, file_path: str,
+                        into: Optional[Dict[str, SkillDefinition]] = None,
+                        source: Optional[str] = None) -> Optional[SkillDefinition]:
         """Load a single SKILL.md file and register it."""
         skill = parse_skill_file(file_path)
         if skill:
-            # Infer source from path
-            norm = os.path.normpath(file_path).lower()
-            if 'bundled' in norm:
-                skill.source = 'bundled'
-            elif 'plugin' in norm:
+            if source:
+                skill.source = source
+            elif 'plugin' in os.path.normpath(file_path).lower():
                 skill.source = 'plugin'
-            self._skills[skill.name] = skill
+            (self._skills if into is None else into)[skill.name] = skill
             return skill
         return None
 
-    def load_skills_directory(self, directory: str) -> int:
+    def load_skills_directory(self, directory: str,
+                              into: Optional[Dict[str, SkillDefinition]] = None,
+                              source: Optional[str] = None) -> int:
         """Load all SKILL.md files from a directory. Returns count loaded."""
         count = 0
-        pattern = os.path.join(directory, '**', 'SKILL.md')
-        for f_path in glob.glob(pattern, recursive=True):
-            if self.load_skill_file(f_path):
+        for f_path in sorted(_skill_files(directory)):
+            if self.load_skill_file(f_path, into=into, source=source):
                 count += 1
         return count
 
@@ -471,21 +661,26 @@ class SkillsManager:
     # Internal
     # -----------------------------------------------------------------------
 
-    def _load_dirs(self) -> None:
-        """Load skills from standard directories.
+    def _skill_roots(self) -> List[Tuple[str, str]]:
+        """Every skills directory, in load order, as (path, label).
 
         ORDER IS PRECEDENCE (skills are keyed by name; later loads replace
         earlier ones): bundled ship-with-Cortex skills load FIRST so that a
         user's ~/.cortex/skills or a project's .cortex/skills can override a
         builtin by simply reusing its name. Bundled must never shadow user
         content, the old order loaded bundled last and did exactly that.
+
+        Re-evaluated on every change check, so a directory that did not exist
+        before (npx creating .claude/ in a fresh project) is found.
         """
+        roots: List[Tuple[str, str]] = []
+
         # 1. Bundled skills shipped with Cortex (agent/src/skills/bundled/)
         bundled_dir = find_bundled_dir()
         if bundled_dir:
-            n = self.load_skills_directory(bundled_dir)
-            logger.info(f"Loaded {n} bundled skill(s) from {bundled_dir}")
-        else:
+            roots.append((bundled_dir, 'bundled'))
+        elif not getattr(self, '_warned_no_bundled', False):
+            self._warned_no_bundled = True
             # Loud on purpose: in a compiled build this means the SKILL.md
             # data files did not make it into the exe, and EVERY builtin skill
             # is silently missing. That must never fail quietly.
@@ -503,12 +698,6 @@ class SkillsManager:
         #    Reading it means a skill installed the normal way is usable in
         #    Cortex without being copied somewhere Cortex-specific first,
         #    which is what users actually expect after installing one.
-        global_shared = os.path.join(home, '.claude', 'skills')
-        if os.path.isdir(global_shared):
-            self._global_dirs.append(global_shared)
-            n = self.load_skills_directory(global_shared)
-            logger.info(f"Loaded {n} shared skill(s) from {global_shared}")
-
         # 2b. Every OTHER agent tool's skills directory, discovered rather
         #     than hardcoded. Skills are a shared format now and each tool
         #     keeps its own ~/.<tool>/skills/: .agents (the tool-neutral
@@ -516,66 +705,132 @@ class SkillsManager:
         #     month. Naming them one by one meant a user's installed skill
         #     was invisible until someone added that vendor to this list, so
         #     any ~/.<something>/skills/ directory is loaded.
-        #
-        #     .claude is handled above and .cortex below (it must win), so
-        #     both are skipped here to avoid loading them twice.
-        import glob as _glob
-        _already = {os.path.join(home, '.claude', 'skills'),
-                    os.path.join(home, '.cortex', 'skills')}
-        for _d in sorted(_glob.glob(os.path.join(home, '.*', 'skills'))):
-            if _d in _already or not os.path.isdir(_d):
-                continue
-            self._global_dirs.append(_d)
-            n = self.load_skills_directory(_d)
-            if n:
-                logger.info(f"Loaded {n} skill(s) from {_d}")
-
         # 3. Global Cortex skills (~/.cortex/skills/), wins over the shared
         #    directory at the same scope, so a Cortex-specific override of
         #    an installed skill is possible by reusing its name.
-        cortex_home = os.path.join(home, '.cortex')
-        global_skills = os.path.join(cortex_home, 'skills')
-        if os.path.isdir(global_skills):
-            self._global_dirs.append(global_skills)
-            self.load_skills_directory(global_skills)
+        roots += [(d, 'global') for d in _vendor_skill_dirs(home)]
+        cortex_global = os.path.join(home, '.cortex', 'skills')
+        if os.path.isdir(cortex_global):
+            roots.append((cortex_global, 'cortex'))
 
         # 4/5. Project skills beat global ones, same shared-then-Cortex
         #      order within the project.
-        if self.project_root:
-            project_shared = os.path.join(self.project_root, '.claude', 'skills')
-            if os.path.isdir(project_shared):
-                n = self.load_skills_directory(project_shared)
-                logger.info(f"Loaded {n} shared skill(s) from {project_shared}")
-            # Same discovery for per-project vendor directories.
-            import glob as _pglob
-            _pskip = {os.path.join(self.project_root, '.claude', 'skills'),
-                      os.path.join(self.project_root, '.cortex', 'skills')}
-            for _pd in sorted(_pglob.glob(
-                    os.path.join(self.project_root, '.*', 'skills'))):
-                if _pd in _pskip or not os.path.isdir(_pd):
-                    continue
-                n = self.load_skills_directory(_pd)
-                if n:
-                    logger.info(f"Loaded {n} skill(s) from {_pd}")
-            project_skills = os.path.join(self.project_root, '.cortex', 'skills')
-            if os.path.isdir(project_skills):
-                self.load_skills_directory(project_skills)
+        if self.project_root and os.path.isdir(self.project_root):
+            roots += [(d, 'project') for d in _vendor_skill_dirs(self.project_root)]
+            project_cortex = os.path.join(self.project_root, '.cortex', 'skills')
+            if os.path.isdir(project_cortex):
+                roots.append((project_cortex, 'project'))
+        return roots
 
-        logger.info(f"Loaded {len(self._skills)} skills from {len(self._global_dirs)} directories")
+    def _compute_fingerprint(self, roots: List[Tuple[str, str]]) -> Tuple:
+        """What is on disk: every skill directory and every SKILL.md in it,
+        with its size and modification time. Bundled skills only change with
+        a new Cortex build, so they are left out."""
+        entries = []
+        for directory, label in roots:
+            if label == 'bundled':
+                continue
+            entries.append((directory, None, None))
+            for f_path in _skill_files(directory):
+                try:
+                    st = os.stat(f_path)
+                except OSError:
+                    continue
+                entries.append((f_path, st.st_mtime_ns, st.st_size))
+        return tuple(sorted(entries, key=lambda e: e[0]))
+
+
+def _vendor_skill_dirs(base: str) -> List[str]:
+    """<base>/.claude/skills first, then every other <base>/.<tool>/skills,
+    except .cortex (loaded last by the caller, so it wins)."""
+    out: List[str] = []
+    claude = os.path.join(base, '.claude', 'skills')
+    if os.path.isdir(claude):
+        out.append(claude)
+    skip = {claude, os.path.join(base, '.cortex', 'skills')}
+    for d in sorted(glob.glob(os.path.join(glob.escape(base), '.*', 'skills'))):
+        if d not in skip and os.path.isdir(d):
+            out.append(d)
+    return out
+
+
+# Folders never searched for SKILL.md: dependencies and caches that a skill's
+# own scripts can bring along. A plain recursive glob walked every one of
+# them on each change check.
+_SKIP_DIRS = {'node_modules', '.git', '__pycache__', '.venv', 'venv', '.cache'}
+
+
+def _skill_files(directory: str) -> List[str]:
+    """Every SKILL.md under `directory` (a category level such as
+    software-development/ is allowed, as before)."""
+    found: List[str] = []
+    seen: Set[str] = set()
+    # Symlinked skill folders are followed (installers link them in), so a
+    # link cycle must not walk forever. Hidden folders are skipped, as the
+    # recursive glob this replaces did.
+    for root, dirs, files in os.walk(directory, followlinks=True):
+        real = os.path.realpath(root)
+        if real in seen:
+            dirs[:] = []
+            continue
+        seen.add(real)
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith('.')]
+        if 'SKILL.md' in files:
+            found.append(os.path.join(root, 'SKILL.md'))
+    return found
+
+
+def _same_path(a: Optional[str], b: Optional[str]) -> bool:
+    if not a or not b:
+        return not a and not b
+    try:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    except OSError:
+        return a == b
 
 
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
+# How often a lookup re-checks the skill folders for installs and edits.
+_REFRESH_INTERVAL = 2.0
+
 _skills_manager: Optional[SkillsManager] = None
+_skills_manager_lock = threading.Lock()
+# The open project, set by whoever owns that fact (the agent bridge, when a
+# project is opened). Callers of get_skills_manager() pass whatever directory
+# they have - for the agent tools that is the process cwd, /opt/cortex-ide in
+# the installed app - so their argument cannot decide which project is open.
+_skills_project_root: Optional[str] = None
+
+
+def set_skills_project_root(project_root: Optional[str]) -> None:
+    """Tell the skills system which project is open (reloads on a change)."""
+    global _skills_project_root
+    # Under the construction lock: a manager being built at this moment on
+    # another thread would otherwise finish with the old project.
+    with _skills_manager_lock:
+        _skills_project_root = project_root
+        sm = _skills_manager
+    if sm is not None:
+        sm.set_project_root(project_root)
 
 
 def get_skills_manager(project_root: Optional[str] = None) -> SkillsManager:
-    """Get or create the global SkillsManager singleton."""
+    """The global SkillsManager, current with what is on disk.
+
+    `project_root` is only used when nothing has said which project is open
+    (standalone use); set_skills_project_root() is what the app calls.
+    """
     global _skills_manager
     if _skills_manager is None:
-        _skills_manager = SkillsManager(project_root=project_root)
+        with _skills_manager_lock:
+            if _skills_manager is None:
+                _skills_manager = SkillsManager(
+                    project_root=_skills_project_root or project_root)
+                return _skills_manager
+    _skills_manager.refresh_if_changed()
     return _skills_manager
 
 

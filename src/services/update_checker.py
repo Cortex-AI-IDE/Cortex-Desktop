@@ -5,6 +5,12 @@ update_checker.py, Desktop IDE version checker
 Checks cortex-ide.app for newer IDE releases on startup.
 If force_update is set on the server, blocks the IDE until installed.
 
+Two channels, one endpoint:
+    web/exe   UpdateChecker()               -> may download and install
+    store     UpdateChecker(store_notice=1) -> may only TELL the user, the
+                                               Microsoft Store installs it
+                                               (src/services/store_update.py)
+
 Usage:
     from src.services.update_checker import UpdateChecker
     checker = UpdateChecker()
@@ -44,7 +50,15 @@ class UpdateChecker:
     until the user installs the new version.
     """
 
-    def __init__(self):
+    def __init__(self, store_notice: bool = False):
+        # store_notice=True is the Microsoft Store channel asking "is there a
+        # newer version?" for the sole purpose of SHOWING A NOTICE. It never
+        # turns into a download: the Store owns updating the MSIX, and an app
+        # that fetches and installs its own updates is rejected during
+        # certification. The flag is named for what it permits (a notice), not
+        # for what it must never permit (an install), and the gate in
+        # is_enabled() stays the single place the channel rule lives.
+        self._store_notice = bool(store_notice)
         self._current_version = ""
         try:
             from PyQt6.QtWidgets import QApplication
@@ -57,6 +71,11 @@ class UpdateChecker:
     def current_version(self) -> str:
         return self._current_version
 
+    @property
+    def store_notice(self) -> bool:
+        """True when this checker may only produce a notice, never an install."""
+        return self._store_notice
+
     def is_enabled(self) -> bool:
         """Check if update checks should run at all.
 
@@ -65,10 +84,18 @@ class UpdateChecker:
         during certification. Gating here covers both callers, the startup
         check in main_window and check() below, so there is exactly one
         place this rule lives.
+
+        A store_notice checker is the one exception, and it is an exception
+        to the SELF-UPDATE ban only: it may ask the server which version is
+        current so the IDE can tell the user "3.0.55 is available, update it
+        in the Microsoft Store". It still returns the same UpdateResult, so
+        callers on that channel must use latest_version/release_notes and
+        ignore download_url/sha256 (see src/services/store_update.py). The
+        user's own check_updates setting still applies to both.
         """
         try:
             from src.version import IS_STORE_BUILD
-            if IS_STORE_BUILD:
+            if IS_STORE_BUILD and not self._store_notice:
                 log.info("[UpdateChecker] Disabled, Store build "
                          "(Microsoft Store delivers updates)")
                 return False
@@ -98,6 +125,17 @@ class UpdateChecker:
             api = get_api_client()
 
             params = {"current": self._current_version}
+            # Tell the server which channel is asking. Today it answers both
+            # from the one web release row; sending the channel now means a
+            # per-channel release (e.g. the Store build lagging the exe by a
+            # few days while it certifies) can be honoured later without
+            # shipping another client. Unknown params are ignored by the
+            # current endpoint, so this is safe on an older backend.
+            try:
+                from src.version import CHANNEL
+                params["channel"] = CHANNEL
+            except Exception:
+                pass
             result = api._request("GET", "/api/v1/version/check/", params=params)
 
             if not result:

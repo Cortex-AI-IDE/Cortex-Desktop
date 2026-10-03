@@ -849,12 +849,34 @@ Use f-strings instead of .format().</code></pre>
        ═══════════════════════════════════════════════════════════════ */
 
     /* ── Token formatting ── */
+    /* Compact count: 950, 1.2k, 860k, 8.1M, 1.3B. One decimal below 100 of a
+       unit, none above, and never a trailing ".0". */
+    function formatCount(n) {
+      n = Number(n) || 0;
+      if (n < 999.5) return String(Math.round(n));
+      var units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
+      for (var i = 0; i < units.length; i++) {
+        // 0.9995: a value that ROUNDS to 1000 of a unit moves up one
+        // (999,999 is "1M", not "1000k").
+        if (n >= units[i][0] * 0.9995) {
+          var v = n / units[i][0];
+          var s = v >= 100 ? Math.round(v).toString() : v.toFixed(1).replace(/\.0$/, '');
+          return s + units[i][1];
+        }
+      }
+      return String(n);
+    }
+
+    /* A counter shown compact, with the exact number on hover. */
+    function setCount(id, n) {
+      var el = $(id);
+      if (!el) return;
+      el.textContent = formatCount(n);
+      el.title = (Number(n) || 0).toLocaleString();
+    }
+
     function formatTokens(n) {
-      if (!n || n === 0) return '0';
-      if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-      return n.toString();
+      return formatCount(n);
     }
 
     function formatDuration(seconds) {
@@ -1026,9 +1048,9 @@ Use f-strings instead of .format().</code></pre>
       const ocrUsed = period.ocr_pages_used || 0;
       const embedUsed = period.embedding_tokens_used || 0;
       const searchUsed = period.web_searches_used || 0;
-      if ($("ocrPages")) $("ocrPages").textContent = ocrUsed;
-      if ($("embeddingsCount")) $("embeddingsCount").textContent = embedUsed;
-      if ($("webSearches")) $("webSearches").textContent = searchUsed;
+      setCount("ocrPages", ocrUsed);
+      setCount("embeddingsCount", embedUsed);
+      setCount("webSearches", searchUsed);
 
       /* Update model usage list, token pills */
       const modelList = $("modelUsageList");
@@ -1185,7 +1207,7 @@ Use f-strings instead of .format().</code></pre>
             if (serverInfo) {
               serverInfo.innerHTML = 
                 'Tokens this month: <strong>' + formatTokens(usage.tokens_this_month) + '</strong><br>' +
-                'Requests this month: <strong>' + (usage.requests_this_month || 0) + '</strong>';
+                'Requests this month: <strong title="' + (usage.requests_this_month || 0).toLocaleString() + '">' + formatCount(usage.requests_this_month || 0) + '</strong>';
             }
           }
         } catch (e) { console.error('[USAGE] parse error:', e); }
@@ -2070,7 +2092,7 @@ Use f-strings instead of .format().</code></pre>
       lock.innerHTML =
         '<div style="font-size:28px;margin-bottom:8px;">🔒</div>' +
         '<h3 style="margin:0 0 6px;">MCP Servers, Subscription Required</h3>' +
-        '<p style="color:#8b949e;max-width:460px;margin:0 auto 12px;">Connect databases, web search, GitHub and hundreds of external tools to the AI agent. Available on the Pro plan ($10/month or $80/year) with a signed-in account.</p>' +
+        '<p style="color:#8b949e;max-width:460px;margin:0 auto 12px;">Connect databases, web search, GitHub and hundreds of external tools to the AI agent. Available on the Pro plan ($5/month or $40/year) with a signed-in account.</p>' +
         '<a href="https://cortex-ide.app/pricing/" onclick="openUpgradePage(); return false;" style="color:#4da3ff;text-decoration:none;font-weight:600;cursor:pointer;">View plans →</a>';
       list.appendChild(lock);
     }
@@ -2094,7 +2116,10 @@ Use f-strings instead of .format().</code></pre>
         // A project-supplied server is listed but held back until the user
         // approves the command, so explain that instead of showing the raw
         // status word.
-        const toolsLabel = srv.status === 'connected'
+        // Connected, but its last answer said the key/login is wrong.
+        const warnLabel = srv.status === 'connected' && srv.warning
+          ? `Server says: ${_esc(srv.warning)}` : '';
+        const toolsLabel = warnLabel ? warnLabel : srv.status === 'connected'
           ? `${srv.tools.length} tool${srv.tools.length === 1 ? '' : 's'}` +
             (srv.tools.length ? `, ${srv.tools.slice(0, 5).join(', ')}${srv.tools.length > 5 ? '…' : ''}` : '')
           : (srv.status === 'error' ? _esc(srv.error)
@@ -2109,7 +2134,7 @@ Use f-strings instead of .format().</code></pre>
           `<div style="flex:1;min-width:0;">` +
             `<div style="font-weight:600;">${_esc(srv.name)} <span style="font-weight:400;color:#6b7280;font-size:11px;">(${_esc(srv.scope)})</span>${srv.source && srv.source !== 'cortex' ? `<span title="Inherited from ${_esc(srv.source)}'s config file - Cortex reads it but never writes to it" style="font-weight:500;font-size:10px;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(88,166,255,0.15);color:#58a6ff;">${_esc(srv.source)}</span>` : ''}</div>` +
             `<div style="color:#8b949e;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_esc(srv.command)}">${_esc(srv.command)}</div>` +
-            `<div style="color:${srv.status === 'error' ? '#f85149' : (srv.needs_approval ? '#d29922' : '#6b7280')};font-size:12px;">${toolsLabel}</div>` +
+            `<div style="color:${srv.status === 'error' ? '#f85149' : ((srv.needs_approval || warnLabel) ? '#d29922' : '#6b7280')};font-size:12px;">${toolsLabel}</div>` +
           `</div>` +
           actionBtn +
           `<button class="setting-btn icon-btn mcp-reconnect" data-name="${_esc(srv.name)}" title="Reconnect">↻</button>` +
@@ -2137,13 +2162,85 @@ Use f-strings instead of .format().</code></pre>
         }
       }));
       list.querySelectorAll('.mcp-remove').forEach(b => b.addEventListener('click', () => {
-        if (bridge && typeof bridge.removeMcpServer === 'function') {
-          bridge.removeMcpServer(b.dataset.name, (ok) => {
-            showToast(ok ? `${b.dataset.name} removed` : 'Remove failed');
-            _loadMcpStatus();
-          });
+        const name = b.dataset.name;
+        // Full removal: Cortex's entry, the other tool's entry and the
+        // downloaded package, each shown and ticked before anything happens.
+        // Older builds without the plan call fall back to the plain remove.
+        if (!bridge || typeof bridge.mcpRemovalPlan !== 'function') {
+          if (bridge && typeof bridge.removeMcpServer === 'function') {
+            bridge.removeMcpServer(name, (ok) => {
+              showToast(ok ? `${name} removed` : 'Remove failed');
+              _loadMcpStatus();
+            });
+          }
+          return;
         }
+        bridge.mcpRemovalPlan(name, (raw) => {
+          let plan = {}; try { plan = JSON.parse(raw); } catch (e) {}
+          _askMcpRemoval(plan).then((choice) => {
+            if (!choice) return;
+            bridge.removeMcpServerFully(name, choice.otherTools, choice.deleteFiles, (raw2) => {
+              let r = {}; try { r = JSON.parse(raw2); } catch (e) {}
+              const freed = r.freed_mb ? `, ${r.freed_mb} MB freed` : '';
+              showToast((r.failed && r.failed.length)
+                ? `${name} removed, but some parts failed - see the log`
+                : `${name} removed${freed}`);
+              _loadMcpStatus();
+            });
+          });
+        });
       }));
+    }
+
+    /* Confirm box for removing an MCP server: lists exactly what goes and
+       lets the user keep the other tool's entry or the download. Resolves
+       {otherTools, deleteFiles} or null when cancelled. */
+    function _askMcpRemoval(plan) {
+      return new Promise(resolve => {
+        const others = plan.other_tool_files || [];
+        const toolNames = { claude: 'Claude Code', cursor: 'Cursor' };
+        const otherRow = others.length
+          ? `<label class="mcp-rm-opt"><input type="checkbox" id="mcpRmOther" checked> ` +
+            `Also remove it from ${others.map(o => _esc(toolNames[o.tool] || o.tool)).join(', ')}'s config ` +
+            `<span class="mcp-rm-path">(${others.map(o => _esc(o.path)).join(', ')})</span><br>` +
+            `<span class="mcp-rm-note">That app will stop using it too. A backup of the file is kept in ~/.cortex/backups.</span></label>`
+          : '';
+        const pkgRow = (plan.package_dirs || []).length
+          ? `<label class="mcp-rm-opt"><input type="checkbox" id="mcpRmFiles" checked> ` +
+            `Delete its downloaded files (${_esc(plan.package)}, ${plan.package_mb} MB)</label>`
+          : (plan.package_shared
+             ? `<p class="mcp-rm-note">Its package ${_esc(plan.package)} is kept: another server uses it.</p>` : '');
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML =
+          `<div class="confirm-card" role="alertdialog" aria-modal="true">` +
+          `<h3>Remove ${_esc(plan.name || '')}?</h3>` +
+          `<p>It will be removed from Cortex.</p>` + otherRow + pkgRow +
+          `<div class="confirm-actions">` +
+          `<button class="confirm-btn" data-act="cancel">Cancel</button>` +
+          `<button class="confirm-btn danger" data-act="ok">Remove</button>` +
+          `</div></div>`;
+        let done = false;
+        const close = (ok) => {
+          if (done) return; done = true;
+          document.removeEventListener('keydown', onKey, true);
+          const result = ok ? {
+            otherTools: !!overlay.querySelector('#mcpRmOther')?.checked,
+            deleteFiles: !!overlay.querySelector('#mcpRmFiles')?.checked,
+          } : null;
+          overlay.remove();
+          resolve(result);
+        };
+        const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
+        overlay.addEventListener('click', (e) => {
+          const act = e.target.closest('[data-act]');
+          if (act) close(act.dataset.act === 'ok');
+          else if (e.target === overlay) close(false);
+        });
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(overlay);
+        overlay.querySelector('[data-act="cancel"]').focus();
+      });
     }
 
     function _setMcpFormEnabled(enabled) {
@@ -2223,7 +2320,7 @@ Use f-strings instead of .format().</code></pre>
       const name = ($('mcpAddName')?.value || '').trim();
       const cmd = ($('mcpAddCommand')?.value || '').trim();
       const env = ($('mcpAddEnv')?.value || '').trim();
-      if (!name || !cmd) { showToast('Name and command are required'); return; }
+      if (!name || !cmd) { showToast('Name and a command or URL are required'); return; }
       if (bridge && typeof bridge.addMcpServer === 'function') {
         bridge.addMcpServer(name, cmd, env, (raw) => {
           let r = {}; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) {}

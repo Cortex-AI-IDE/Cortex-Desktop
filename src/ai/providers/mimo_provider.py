@@ -43,6 +43,24 @@ from src.ai.model_media import video_block
 log = get_logger("mimo_provider")
 
 
+def _token_plan_unsupported(url: str, status: int, body: str, model: str):
+    """The message for a model the MiMo Token Plan does not include, or None.
+
+    A Token Plan key is sent to token-plan-sgp.xiaomimimo.com, which serves
+    only the models in the plan. For one outside it (mimo-v2.6-pro-ultraspeed,
+    seen 2026-10-03) it answers 400 "Not supported model <id>". The model name
+    is right - a pay-as-you-go key runs it - so this must not read as a wrong
+    name or a connection failure, which is what the user saw ("Connection to
+    AI provider failed: MiMo HTTP 400, { "error": {").
+    """
+    if status != 400 or "token-plan" not in (url or ""):
+        return None
+    if "not supported model" not in (body or "").lower():
+        return None
+    return (f"MiMo HTTP 400: your MiMo Token Plan does not support {model}. "
+            f"Pick another MiMo model, or use a pay-as-you-go MiMo key for this one.")
+
+
 class MimoProvider(BaseProvider):
     """Xiaomi MiMo API provider (OpenAI-compatible) with full agentic support."""
 
@@ -559,9 +577,11 @@ class MimoProvider(BaseProvider):
                         )
                     else:
                         log.error(f"Mimo API HTTP 400 (non-retryable): {_resp_body[:300]}")
+                    from src.ai.providers.error_text import readable_api_error
                     return ChatResponse(
                         content="", model=model, provider="mimo",
-                        error=f"HTTP 400: {_resp_body[:200]}",
+                        error=(_token_plan_unsupported(url, status, _resp_body, model)
+                               or f"HTTP 400: {readable_api_error(_resp_body, 200)}"),
                         duration_ms=(time.time() - start_time) * 1000,
                     )
 
@@ -826,6 +846,10 @@ class MimoProvider(BaseProvider):
                 # Log detailed error info for debugging
                 log.error(f"[MiMo] HTTP {status} | URL: {url} | Server: {_resp_headers.get('server', 'unknown')} | Body: {_resp_body[:200]}")
 
+                _plan_msg = _token_plan_unsupported(url, status, _resp_body, model)
+                if _plan_msg:
+                    raise RuntimeError(_plan_msg)
+
                 from src.ai.providers.error_text import unknown_model_message
                 _unknown = unknown_model_message(self, model, status, _resp_body)
                 if _unknown:
@@ -870,7 +894,10 @@ class MimoProvider(BaseProvider):
                                 "Try again or switch to a different model."
                             )
                         log.error(f"Mimo API stream HTTP 400 (non-retryable): {_resp_body[:300]}")
-                        raise RuntimeError(f"MiMo HTTP 400, {_resp_body[:200]}")
+                        # MiMo's own sentence, not its pretty-printed JSON: the
+                        # chat showed only the first line of that, "{".
+                        from src.ai.providers.error_text import readable_api_error
+                        raise RuntimeError(f"MiMo HTTP 400: {readable_api_error(_resp_body, 200)}")
 
                 if status in (429, 502, 503, 504) and attempt < self._max_retries:
                     log.warning(f"Mimo API stream transient HTTP {status} (attempt {attempt + 1})")

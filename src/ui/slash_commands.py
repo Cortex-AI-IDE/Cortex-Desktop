@@ -56,26 +56,70 @@ def build_skill_token(name: str) -> str:
 
     A "/name " chip the user sees and can stack with others; it is expanded
     into an explicit agent instruction at send time (see expand_skill_tokens).
+    `name` is the skill's token (list_skills()["token"]), which only differs
+    from its name when the name has spaces.
+
+    Written as "skills:<name>" so the input, the sent message and history all
+    say plainly what it is; the agent bridge turns it into the instruction to
+    load the skill (src/core/invocation_tokens.py).
     """
-    return f"/{name} "
+    from src.core.invocation_tokens import skill_token
+    return f"{skill_token(name)} "
+
+
+def normalize_skill_tokens(text: str, known) -> str:
+    """Hand-typed "/code-reviewer" -> "skills:code-reviewer" for known skills.
+
+    `known` is {token: name} (invocable_skill_names) or a list of tokens. A
+    "/foo" naming no installed skill is left as typed.
+    """
+    import re as _re
+    keys = set(known)
+    if not keys:
+        return text
+    return _re.sub(r"(?:(?<=\s)|^)/([\w-]+)",
+                   lambda m: f"skills:{m.group(1)}" if m.group(1) in keys else m.group(0),
+                   text)
+
+
+def invocable_skill_names(skills: List[Dict]) -> Dict[str, str]:
+    """{token: skill name} for every INSTALLED skill.
+
+    Typing "/code-reviewer" is an explicit request whether or not the skill is
+    toggled on: the agent loads any installed skill on demand. Only enabled
+    skills used to expand, so a skill installed with npx stayed as the literal
+    text "/code-reviewer" in the message.
+    """
+    out: Dict[str, str] = {}
+    for s in skills or []:
+        name = s.get("name")
+        if not name:
+            continue
+        out.setdefault(s.get("token") or name, name)
+    return out
 
 
 def expand_skill_tokens(text: str, known_names) -> str:
     """Turn "/skill" tokens into an explicit agent instruction at send time.
 
-    Only tokens matching a KNOWN skill name are expanded, so a stray "/foo"
-    the user typed is left alone. Referenced skills are named up front ("Use
-    the X skill.") - the strongest signal for the agent to load them - and the
-    tokens are removed from the inline text. Order preserved, duplicates
-    dropped. Returns the text unchanged when no known skill token is present.
+    Only tokens matching a KNOWN skill are expanded, so a stray "/foo" the
+    user typed is left alone. `known_names` is a list of names or a
+    {token: name} mapping (invocable_skill_names). Referenced skills are named
+    up front ("Use the X skill.") - the strongest signal for the agent to load
+    them - and the tokens are removed from the inline text. Order preserved,
+    duplicates dropped. Returns the text unchanged when no known skill token
+    is present.
     """
     import re as _re
-    known = set(n for n in (known_names or []) if n)
+    if isinstance(known_names, dict):
+        known = {t: n for t, n in known_names.items() if t and n}
+    else:
+        known = {n: n for n in (known_names or []) if n}
     used: List[str] = []
 
     def _repl(m):
-        n = m.group(1)
-        if n in known:
+        n = known.get(m.group(1))
+        if n:
             if n not in used:
                 used.append(n)
             return ""
@@ -142,6 +186,25 @@ def enabled_skills(skills: List[Dict]) -> List[Dict]:
     task matches.
     """
     return [s for s in skills if s.get("active")]
+
+
+def menu_skills(skills: List[Dict], query: str, limit: int = 50) -> List[Dict]:
+    """Rows for the "/" menu.
+
+    A bare "/" shows the skills the user turned ON (the curated shortlist, see
+    enabled_skills). Typing searches EVERY installed skill, the same way "@"
+    opens on servers and typing reaches individual tools. Before, a skill
+    could not be reached from "/" at all until it was toggled on, so one just
+    installed with npx looked undetected.
+
+    Rows carry the token as both value and label, so the menu shows and
+    inserts what can actually be typed.
+    """
+    q = (query or "").strip()
+    pool = enabled_skills(skills) if not q else list(skills or [])
+    rows = filter_skills(pool, q, limit=limit)
+    return [{**s, "name": s.get("token") or s["name"],
+             "label": s.get("token") or s["name"]} for s in rows]
 
 
 def build_skill_invocation(name: str) -> str:

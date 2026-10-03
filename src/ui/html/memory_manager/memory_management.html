@@ -379,7 +379,7 @@
             </div>
             <div style="text-align:center;min-width:80px;">
               <div style="font-size:24px;font-weight:600;color:var(--text);" id="embeddingsCount">0</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:4px;">embeddings</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px;">embedding tokens</div>
             </div>
             <div style="text-align:center;min-width:80px;">
               <div style="font-size:24px;font-weight:600;color:var(--text);" id="webSearches">0</div>
@@ -935,8 +935,8 @@
           <h3 class="card-title">Add server</h3>
           <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:8px;">
             <input type="text" class="setting-input" id="mcpAddName" placeholder="Name, e.g. postgres" style="max-width:none;">
-            <input type="text" class="setting-input" id="mcpAddCommand" placeholder='Command, e.g. npx -y @modelcontextprotocol/server-postgres postgresql://localhost/db' style="max-width:none;">
-            <input type="text" class="setting-input" id="mcpAddEnv" placeholder="Environment (optional), KEY=value, KEY2=value2" style="max-width:none;">
+            <input type="text" class="setting-input" id="mcpAddCommand" placeholder='Command or URL, e.g. npx -y @modelcontextprotocol/server-postgres postgresql://localhost/db  or  https://mcp.context7.com/mcp' style="max-width:none;">
+            <input type="text" class="setting-input" id="mcpAddEnv" placeholder="Optional. Command: environment KEY=value, KEY2=value2. URL: headers, e.g. Authorization: Bearer your-key" style="max-width:none;">
             <div style="display:flex; gap:8px;">
               <button class="setting-btn primary-btn" id="mcpAddBtn">Add server</button>
             </div>

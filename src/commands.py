@@ -122,9 +122,9 @@ def _collect(cwd: Optional[str], active_only: bool) -> List[Command]:
         )
         return []
     try:
-        # The manager is a process-wide singleton: project_root is only honoured
-        # on first construction, so passing cwd here is a hint, not a guarantee.
-        # agent_bridge.init_skills_and_rules() seeds it at startup.
+        # The manager is a process-wide singleton. The open project comes from
+        # set_skills_project_root() (called by the agent bridge when a project
+        # opens); cwd here is only used when nothing has set one.
         sm = get_skills_manager(cwd) if cwd else get_skills_manager()
         active: Set[str] = set(sm.active_skill_names()) if active_only else set()
         skills = sm.active_skills() if active_only else sm.list_skills()
