@@ -1513,6 +1513,15 @@ class BridgeBashTool:
 
         # ── Dangerous-command permission gate ────────────────────────────────
         warning = _get_destructive_warning(command)
+        # Restricted Mode (src/core/workspace_trust.py): in a folder the user
+        # has not trusted, EVERY command waits for approval, not just the
+        # destructive ones, files in that folder may be steering the AI.
+        if not warning:
+            from src.core.workspace_trust import is_restricted
+            if is_restricted(cwd):
+                warning = ("This folder is in Restricted Mode, so every command "
+                           "needs your approval. Trust the folder from the status "
+                           "bar to stop these prompts.")
         if warning and self._bridge.always_allowed:
             log.info(
                 "[BRIDGE] Permission gate bypassed (always_allow=True): %s",
@@ -3462,6 +3471,7 @@ class CortexAgentBridge(QObject):
     response_chunk          = pyqtSignal(str)
     response_complete       = pyqtSignal(str)
     request_error           = pyqtSignal(str)
+    request_started         = pyqtSignal()       # chat() accepted a new request (GUI thread)
     file_generated          = pyqtSignal(str, str)
     file_edited_diff        = pyqtSignal(str, str, str)
     tool_activity           = pyqtSignal(str, str, str)   # name, info, status
@@ -15128,6 +15138,12 @@ Required behavior:
         self.on_answer_question(question_id, answer)
 
     def chat(self, message: str, context: str = ""):
+        # Listeners that paused output for a New Chat resume here. Emitted
+        # directly: _safe_emit() rate-limits, and this one must never drop.
+        try:
+            self.request_started.emit()
+        except RuntimeError:
+            pass
         # Include any pending images from paste
         images = None
         if hasattr(self, '_pending_images') and self._pending_images:
@@ -15614,6 +15630,218 @@ Required behavior:
                     pass  # C++ object destroyed during shutdown
 
         _th.Thread(target=_work, daemon=True, name='SaveSessionMemory').start()
+
+    # ── New Chat: snapshot the chat being left ─────────────────────────
+    # Two halves on purpose. capture_chat_snapshot() runs on the GUI thread
+    # before the panel is cleared and is quick: it reads the chat (short-term
+    # memory) and the project's long-term memory, and writes a structured
+    # outline to .cortex/memory/ at once, so nothing is lost if Cortex closes
+    # right after. summarize_chat_snapshot_async() then has the model merge
+    # both into the final note in the background, replacing the outline,
+    # while the user is already in the new chat. Not a transcript: the chat
+    # itself stays in the history database, this is what is worth knowing.
+
+    _SNAPSHOT_SYSTEM = (
+        "You maintain the memory of a software project worked on in a coding IDE. "
+        "Combine the SHORT-TERM memory (one chat that just ended, plus its todos and "
+        "files) with the project's LONG-TERM memory into ONE structured markdown note "
+        "about this chat.\n\n"
+        "RULES:\n"
+        "1. Facts only: what was learned, decided, built, fixed. No greetings, no "
+        "dialogue replay, no message-by-message recap, no code blocks.\n"
+        "2. Use long-term memory only where this chat relied on it or changed it. "
+        "When the chat contradicts or updates a long-term fact, say so under "
+        "'Updates to Long-Term Memory'.\n"
+        "3. Be specific: file paths, function names, commands, error messages.\n\n"
+        "Sections, in this order, omit any that would be empty:\n"
+        "## Summary   (2-3 sentences)\n"
+        "## What Was Done\n"
+        "## Decisions & Why\n"
+        "## Files Touched   (path - one-line purpose)\n"
+        "## Problems & Root Causes\n"
+        "## Carried-Forward Context   (long-term facts this work depends on)\n"
+        "## Updates to Long-Term Memory   (new preferences, facts that changed)\n"
+        "## Open Items / Next Steps\n\n"
+        "Under 450 words. Start directly with '## Summary'."
+    )
+
+    def _read_long_term_memory(self, limit: int = 9000) -> str:
+        """The project's long-term memory as plain text, newest notes first."""
+        mem_dir = self._get_memory_dir()
+        parts: List[str] = []
+        try:
+            idx = self._get_memory_md_path()
+            if os.path.isfile(idx):
+                with open(idx, encoding='utf-8', errors='replace') as f:
+                    parts.append("### MEMORY.md (index)\n" + f.read()[:3500])
+        except OSError:
+            pass
+        try:
+            mj = os.path.join(os.path.dirname(mem_dir), 'memory.json')
+            if os.path.isfile(mj):
+                with open(mj, encoding='utf-8', errors='replace') as f:
+                    parts.append("### memory.json (decisions, bugs, preferences)\n" + f.read()[:2500])
+        except OSError:
+            pass
+        try:
+            notes = [os.path.join(mem_dir, n) for n in os.listdir(mem_dir)
+                     if n.endswith('.md') and n != 'MEMORY.md']
+            notes.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            for p in notes[:6]:
+                with open(p, encoding='utf-8', errors='replace') as f:
+                    parts.append(f"### {os.path.basename(p)}\n" + f.read()[:1200])
+        except OSError:
+            pass
+        text = "\n\n".join(parts)
+        return text[:limit]
+
+    @staticmethod
+    def _snapshot_title(messages: List[Any]) -> str:
+        for m in messages:
+            if getattr(m, 'role', None) == 'user':
+                t = " ".join((getattr(m, 'content', '') or '').split())
+                if len(t) >= 8 and not t.startswith('['):
+                    return (t[:70] + '…') if len(t) > 70 else t
+        return "Untitled chat"
+
+    @staticmethod
+    def _snapshot_file_text(snap: Dict[str, Any], body: str, status: str) -> str:
+        title = snap['title'].replace('\n', ' ')
+        desc_src = body.split('## Summary', 1)[-1].strip().split('\n', 1)[0].strip() if '## Summary' in body else title
+        desc = (desc_src[:150] or title).replace('\n', ' ')
+        return (
+            "---\n"
+            f"name: Chat - {title}\n"
+            f"description: {desc} ({snap['created']}, {snap['count']} messages)\n"
+            "type: project\n"
+            f"conversation: {snap['conversation_id']}\n"
+            f"summary: {status}\n"
+            "---\n\n"
+            f"# {title}\n\n"
+            f"_{snap['created']} · {snap['count']} messages · conversation "
+            f"`{snap['conversation_id'][:8]}`_\n\n"
+            f"{body.strip()}\n"
+        )
+
+    @staticmethod
+    def _timeline_to_messages(timeline_messages: List[Dict[str, Any]]) -> List[Any]:
+        """The chat as the user saw it: user text, and each reply's prose."""
+        from src.ai.providers import ChatMessage as _PCM
+        out: List[Any] = []
+        for m in timeline_messages or []:
+            if not isinstance(m, dict):
+                continue
+            role = m.get('role')
+            if role == 'user':
+                text = (m.get('content') or '').strip()
+            elif role == 'assistant':
+                parts = [(b.get('md') or b.get('content') or '').strip()
+                         for b in (m.get('blocks') or []) if isinstance(b, dict)
+                         and b.get('type') in ('prose', 'text', 'markdown')]
+                text = "\n\n".join(p for p in parts if p) or (m.get('content') or '').strip()
+            else:
+                continue
+            if text:
+                out.append(_PCM(role=role, content=text))
+        return out
+
+    def capture_chat_snapshot(self, conversation_id: Optional[str],
+                              timeline_messages: Optional[List[Dict[str, Any]]] = None
+                              ) -> Optional[Dict[str, Any]]:
+        """Capture the chat being left and write its outline note. GUI thread, fast.
+
+        `timeline_messages` is the chat as shown (ChatPanel.get_timeline()),
+        the most faithful record; the DB/in-memory history is the fallback.
+        Returns what summarize_chat_snapshot_async() needs, or None when the
+        chat holds nothing worth remembering.
+        """
+        from datetime import datetime as _dt
+        if conversation_id:
+            self._current_conversation_id = conversation_id
+        hist = self._timeline_to_messages(timeline_messages) or self._gather_full_history()
+        real = [m for m in hist if getattr(m, 'role', None) in ('user', 'assistant')
+                and (getattr(m, 'content', '') or '').strip()]
+        if not real:
+            log.info("[NewChat] snapshot skipped: no messages")
+            return None
+        conv = self._current_conversation_id or 'unkeyed'
+        now = _dt.now()
+        mem_dir = self._get_memory_dir()
+        os.makedirs(mem_dir, exist_ok=True)
+        snap: Dict[str, Any] = {
+            'conversation_id': conv,
+            'title': self._snapshot_title(real),
+            'created': now.strftime('%Y-%m-%d %H:%M'),
+            'count': len(real),
+            'transcript': self._build_transcript(real),
+            'facts': self._build_brief_done_summary(real),
+            'long_term': self._read_long_term_memory(),
+            'path': os.path.join(mem_dir, f"chat_{now.strftime('%Y-%m-%d_%H%M')}_{conv[:8]}.md"),
+        }
+        # Outline written NOW: facts plus the requests, one line each.
+        asks = []
+        for m in real:
+            if getattr(m, 'role', None) == 'user':
+                t = " ".join((getattr(m, 'content', '') or '').split())
+                if len(t) >= 8 and not t.startswith('['):
+                    asks.append("- " + ((t[:140] + '…') if len(t) > 140 else t))
+        facts = snap['facts'] if not snap['facts'].startswith('- (no significant') else ''
+        outline = ("_The AI summary of this chat is being written; this outline was "
+                   "captured when it closed._\n\n" + (facts + "\n\n" if facts else "")
+                   + "## What Was Asked\n" + "\n".join(asks[:12]))
+        try:
+            with open(snap['path'], 'w', encoding='utf-8') as f:
+                f.write(self._snapshot_file_text(snap, outline, 'pending'))
+            log.info(f"[NewChat] snapshot captured: {snap['path']} ({snap['count']} messages)")
+        except OSError as e:
+            log.warning(f"[NewChat] snapshot outline not written: {e}")
+        return snap
+
+    def summarize_chat_snapshot_async(self, snap: Dict[str, Any]) -> None:
+        """Have the model merge short- and long-term memory into the note."""
+        import threading as _th
+
+        def _work():
+            body = None
+            try:
+                from src.ai.providers import ChatMessage as _PCM
+                provider, model = self._resolve_summary_provider()
+                if provider:
+                    user = ("LONG-TERM MEMORY (existing project memory):\n"
+                            + (snap['long_term'] or '(none yet)')
+                            + "\n\nSHORT-TERM MEMORY (todos and files from this chat):\n"
+                            + (snap['facts'] or '(none)')
+                            + "\n\nTHIS CHAT:\n" + snap['transcript'][:24000])
+                    resp = provider.chat(
+                        [_PCM(role='system', content=self._SNAPSHOT_SYSTEM),
+                         _PCM(role='user', content=user)],
+                        model=model, temperature=0.2, max_tokens=1400, stream=False)
+                    if resp and not getattr(resp, 'error', None):
+                        txt = (resp.content or '').strip()
+                        if len(txt) > 60:
+                            body = txt
+            except Exception as e:
+                log.warning(f"[NewChat] AI snapshot summary failed: {e}")
+            try:
+                if body:
+                    text = self._snapshot_file_text(snap, body, 'ai')
+                    log.info(f"[NewChat] AI summary written: {snap['path']}")
+                else:
+                    with open(snap['path'], encoding='utf-8') as f:
+                        text = f.read().replace(
+                            "_The AI summary of this chat is being written; this outline was "
+                            "captured when it closed._",
+                            "_No AI summary could be written (model unavailable); this is "
+                            "the outline captured when the chat closed._", 1
+                        ).replace("summary: pending", "summary: outline", 1)
+                    log.info(f"[NewChat] kept outline (no AI summary): {snap['path']}")
+                tmp = snap['path'] + '.tmp'
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    f.write(text)
+                os.replace(tmp, snap['path'])
+            except OSError as e:
+                log.warning(f"[NewChat] snapshot update failed: {e}")
+        _th.Thread(target=_work, daemon=True, name='ChatSnapshotSummary').start()
 
     def save_memory_sync(self) -> None:
         """SYNCHRONOUS MEMORY.md save for shutdown, ZERO LLM cost.

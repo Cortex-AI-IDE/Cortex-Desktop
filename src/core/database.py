@@ -936,24 +936,45 @@ class CortexDatabase:
             return messages
     
     def get_conversations(self, project_path: str = None) -> List[Dict]:
-        """Get all conversations for a project with message counts."""
+        """Get all conversations for a project with message counts.
+
+        Explicit columns and a per-row COUNT on the conversation index. It
+        was `SELECT c.* ... LEFT JOIN chat_messages ... GROUP BY`: c.* carries
+        timeline_json (1.7MB on a real chat) and the join copied it into every
+        message row before grouping, 3.8s for ONE conversation on 2026-10-07
+        (0.4ms now). No caller reads timeline_json from these rows.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
             query = """
-                SELECT c.*, COUNT(m.id) as message_count
+                SELECT c.id, c.conversation_id, c.project_path, c.title,
+                       c.created_at, c.updated_at,
+                       (SELECT COUNT(*) FROM chat_messages m
+                         WHERE m.conversation_id = c.conversation_id) AS message_count
                 FROM conversations c
-                LEFT JOIN chat_messages m ON m.conversation_id = c.conversation_id
             """
-            
             if project_path:
-                query += " WHERE c.project_path = ?"
-                query += " GROUP BY c.conversation_id ORDER BY c.updated_at DESC"
-                cursor.execute(query, (project_path,))
+                cursor.execute(query + " WHERE c.project_path = ? ORDER BY c.updated_at DESC",
+                               (project_path,))
             else:
-                query += " GROUP BY c.conversation_id ORDER BY c.updated_at DESC"
-                cursor.execute(query)
-            
+                cursor.execute(query + " ORDER BY c.updated_at DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_conversation_heads(self, project_path: str, limit: int = 40,
+                               head_chars: int = 4000) -> List[Dict]:
+        """Newest conversations of a project with the START of their timeline.
+
+        For lists that need only each chat's first question (the History
+        menu): reading and parsing whole timelines cost tens of ms per chat.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT conversation_id, title, created_at, updated_at, "
+                "substr(timeline_json, 1, ?) AS head, length(timeline_json) AS timeline_len "
+                "FROM conversations WHERE project_path = ? "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (head_chars, project_path, limit))
             return [dict(row) for row in cursor.fetchall()]
 
     def get_conversation(self, conversation_id: str) -> Dict | None:

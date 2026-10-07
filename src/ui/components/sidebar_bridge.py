@@ -150,6 +150,12 @@ class _GitStatusWorker(QThread):
 
     def run(self):
         try:
+            # Restricted Mode (src/core/workspace_trust.py): git does not run
+            # on its own in a folder the user has not trusted.
+            from src.core.workspace_trust import is_restricted
+            if is_restricted(self._project_path):
+                self.result_ready.emit(json.dumps({'files': [], 'branch': '', 'gitVersion': '', 'unstaged': 0, 'untracked': 0, 'staged': 0, 'restricted': True}))
+                return
             data = git_utils.get_status(self._project_path)
             if not data.get("error"):
                 # Explorer decorations (sidebar.html _setGitDecorations): the
@@ -1018,6 +1024,10 @@ class SidebarBridge(QObject):
         try:
             if not self._project_path:
                 return json.dumps({'files': [], 'branch': '', 'gitVersion': '', 'unstaged': 0, 'untracked': 0, 'staged': 0})
+            # Restricted Mode: no automatic git in an untrusted folder.
+            from src.core.workspace_trust import is_restricted
+            if is_restricted(self._project_path):
+                return json.dumps({'files': [], 'branch': '', 'gitVersion': '', 'unstaged': 0, 'untracked': 0, 'staged': 0, 'restricted': True})
 
             # Get current branch
             branch = ""

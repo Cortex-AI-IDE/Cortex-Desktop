@@ -391,6 +391,141 @@ class _TokenProxy:
 TOKENS = _TokenProxy()
 
 
+# ── Chat panel palette ────────────────────────────────────────────────────
+# The chat panel's own look, layered over the active theme. Only
+# src/ui/chat_panel.py reads it (through CHAT_TOKENS / chat_theme()), so the
+# sidebar, settings, menus and tool cards keep their colours: ~30 of the
+# tokens the chat uses (accent, bg, border, green, orange, ...) are shared
+# with those modules, and changing the shared values would restyle the whole
+# app.
+#
+# One accent - the Cortex brand lime from cortex-ide.app - marks what is live
+# (spinners, running, streaming cursor, links, focus). Everything else is
+# neutral; emphasis comes from weight, not colour: bold, italic, inline code,
+# headings and table headers use the text colour (they were orange, gold,
+# green, white and purple). Tool rows are neutral: the icon says the kind,
+# the state says what is happening. Diff and syntax colours are unchanged -
+# they carry meaning.
+#
+# Dark keeps the editor's own background so the chat sits flush with the
+# code. Light is white with cool greys; the cream + terracotta it replaces
+# measured 3.1:1 (accent) and 3.0:1 (muted) on its own background, under the
+# 4.5:1 WCAG AA minimum. Every text colour below is >= 4.5:1 on its surface.
+CHAT_DARK = {
+    "text": "#e6e8eb", "text_primary": "#e6e8eb",                  # 13.6:1
+    "text_dim": "#a9afb8", "text_secondary": "#a9afb8",             # 7.6:1
+    "muted": "#7f8792", "mono_muted": "#7f8792",                    # 4.6:1
+    "mono_bright": "#e6e8eb",
+    "accent": "#c2f25c", "accent_primary": "#c2f25c",               # 12.8:1
+    "accent_secondary": "#c2f25c", "border_active": "#c2f25c",
+    "accent_fill": "#b7ef38", "accent_ink": "#151c2b", "accent_fill_hover": "#d2fb72",
+    "think": "#7f8792", "think_label": "#7f8792",
+    "user_bubble": "#2a2d33",
+    "red": "#ff7a6e", "error": "#ff7a6e", "error_border": "#ff7a6e",  # 6.6:1
+    "status_error": "#ff7a6e", "stop_btn": "#ff7a6e", "spell_error": "#ff7a6e",
+    "orange": "#f2c14e", "warning": "#f2c14e",                      # 9.9:1
+    "blue": "#c2f25c", "info": "#a9afb8",
+    "streaming_cursor": "#c2f25c",
+    "md_heading": "#e6e8eb", "md_text": "#e6e8eb",
+    "md_link": "#c2f25c", "md_link_text": "#c2f25c",
+    "md_code": "#e6e8eb", "md_code_bg": "#2c2f35",                  # 10.9:1
+    "md_blockquote": "#a9afb8", "md_blockquote_border": "#3a3f47",
+    "md_strong": "#e6e8eb", "md_emph": "#e6e8eb",
+    "md_hr": "#2c3036", "md_list_marker": "#7f8792",
+    "md_table_header_bg": "rgba(255,255,255,0.04)", "md_table_border": "#2c3036",
+    "md_mark_bg": "rgba(194,242,92,0.18)", "md_filename": "#e6e8eb",
+    "tool_read": "#7f8792", "tool_edit": "#7f8792", "tool_write": "#7f8792",
+    "tool_search": "#7f8792", "tool_terminal": "#7f8792", "tool_web": "#7f8792",
+    "tool_task": "#7f8792", "tool_team": "#7f8792", "tool_generic": "#7f8792",
+    "tool_thought": "#c2f25c",
+    "status_running": "#c2f25c", "status_ok": "#7f8792",
+    "ring_cyan": "#c2f25c", "ring_cyan_light": "#d4f78a",
+    "ring_purple": "#c2f25c", "ring_purple_light": "#d4f78a",
+    "context_menu_sel": "#2c3036",
+}
+
+CHAT_LIGHT = {
+    # Surfaces, borders, bubble, menus and buttons are NOT overridden: the
+    # light chat keeps the app's warm paper (#ECE9E0 page, #DDDAD0 bubble).
+    # Only ink and accents change. Contrast is measured on the darkest warm
+    # surface text sits on (#DDDAD0).
+    "text": "#1A1814", "text_primary": "#1A1814",                  # 12.7:1
+    "text_dim": "#4A463E", "text_secondary": "#4A463E",             # 6.7:1
+    "muted": "#5E5A52", "mono_muted": "#5E5A52",                    # 4.9:1
+    "mono_bright": "#1A1814",
+    "border_active": "#3f6a12",
+    "accent": "#3f6a12", "accent_primary": "#3f6a12",               # 4.6:1
+    "accent_secondary": "#3f6a12",
+    "accent_fill": "#b7ef38", "accent_ink": "#151c2b",              # 12.5:1
+    "accent_fill_hover": "#c6f45e",
+    "think": "#5E5A52", "think_label": "#5E5A52",
+    "red": "#a8281a", "error": "#a8281a",                           # 5.0:1
+    "status_error": "#a8281a", "stop_btn": "#a8281a", "spell_error": "#a8281a",
+    "orange": "#7a4f00", "warning": "#7a4f00",                      # 5.1:1
+    "blue": "#3f6a12", "info": "#4A463E",
+    "streaming_cursor": "#3f6a12",
+    "md_heading": "#1A1814", "md_text": "#1A1814",
+    "md_link": "#3f6a12", "md_link_text": "#3f6a12",
+    "md_code": "#1A1814",
+    "md_blockquote": "#4A463E", "md_blockquote_border": "#CCC9C0",
+    "md_strong": "#1A1814", "md_emph": "#1A1814",
+    "md_list_marker": "#5E5A52",
+    "md_strikethrough": "rgba(26,24,20,0.45)", "md_mark_bg": "rgba(183,239,56,0.40)",
+    "md_filename": "#1A1814",
+    "tool_read": "#5E5A52", "tool_edit": "#5E5A52", "tool_write": "#5E5A52",
+    "tool_search": "#5E5A52", "tool_terminal": "#5E5A52", "tool_web": "#5E5A52",
+    "tool_task": "#5E5A52", "tool_team": "#5E5A52", "tool_generic": "#5E5A52",
+    "tool_thought": "#3f6a12",
+    "status_running": "#3f6a12", "status_ok": "#5E5A52",
+    "btn_text": "#4A463E", "btn_text_hover": "#1A1814",
+    "menu_text": "#1A1814",
+    "context_menu_sel": "#DDDAD0",
+    "ring_cyan": "#3f6a12", "ring_cyan_light": "#5c8f22",
+    "ring_purple": "#3f6a12", "ring_purple_light": "#5c8f22",
+    "edited_row_text": "#1A1814",
+    "code_copy_color": "#5E5A52", "code_copy_hover": "#1A1814", "code_lang_color": "#5E5A52",
+}
+
+_chat_cache: dict = {}
+
+
+def chat_theme(mode: str | None = None) -> dict:
+    """The chat panel's full palette for `mode` (default: the active theme):
+    the theme's tokens with the chat overrides on top. Cached per theme."""
+    base = LIGHT if (mode == "light" or (mode is None and _current_theme is LIGHT)) else DARK
+    key = id(base)
+    hit = _chat_cache.get(key)
+    if hit is None:
+        hit = _chat_cache[key] = {**base, **(CHAT_LIGHT if base is LIGHT else CHAT_DARK)}
+    return hit
+
+
+class _ChatTokenProxy(_TokenProxy):
+    """TOKENS for the chat panel: same live switching, chat palette on top."""
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        t = chat_theme()
+        try:
+            return t[key]
+        except KeyError:
+            import logging
+            logging.getLogger("tokens").error(
+                "[TOKENS] Unknown chat token %r, add it to BOTH palettes in tokens.py", key)
+            return t.get("text", "#e6edf3")
+    def get(self, key, default=None): return chat_theme().get(key, default)
+    def __contains__(self, key): return key in chat_theme()
+    def keys(self): return chat_theme().keys()
+    def values(self): return chat_theme().values()
+    def items(self): return chat_theme().items()
+    def copy(self): return dict(chat_theme())
+    def __iter__(self): return iter(chat_theme())
+    def __len__(self): return len(chat_theme())
+
+
+CHAT_TOKENS = _ChatTokenProxy()
+
+
 def get_theme(mode: str = "dark") -> dict:
     """Return the token dict for the given theme mode.
 
@@ -410,6 +545,23 @@ def set_theme(mode: str = "dark"):
 def T() -> dict:
     """Get current theme tokens. Usage: T()['key'], allows runtime switching."""
     return _current_theme
+
+
+def is_dark() -> bool:
+    """True while the dark theme is active (follows a live switch)."""
+    return _current_theme is DARK
+
+
+def family_list(value: str) -> list[str]:
+    """Unwrap a CSS font-family list into individual family names.
+
+    The font_ui / font_mono tokens carry CSS lists, which is what a
+    stylesheet wants. Code that hands Qt a font OBJECT needs real family
+    names: QFont.setFamilies() takes the list and keeps the first family
+    that is installed, so one token works on every platform. Qt-free, so
+    it is safe at module import time.
+    """
+    return [p.strip().strip("'\"") for p in value.split(",") if p.strip()]
 
 
 def build_markdown_css(t: dict | None = None) -> str:
@@ -517,12 +669,10 @@ def build_markdown_css(t: dict | None = None) -> str:
     border-bottom: 1px solid {t['border']};
     background: {t['md_table_header_bg']};
   }}
-  /* Qt setMarkdown() uses <td> for headers \u2014 style first row like th */
-  tr:first-child td {{
-    color: {t['md_heading']} !important; font-weight: 600;
-    border-bottom: 1px solid {t['border']};
-    background: {t['md_table_header_bg']};
-  }}
+  /* No "tr:first-child td" header rule: Qt's rich-text CSS drops the
+     pseudo-class and applied it to EVERY cell, so whole tables rendered
+     bold on the header band. Headers are real <th> cells (see
+     _fix_prose_tables in chat_panel.py). */
   td {{ color: {t['md_text']} !important; }}
   /* Remove outer borders */
   table tr:first-child th, table tr:first-child td {{ border-top: none; }}

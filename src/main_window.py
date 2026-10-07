@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import platform
+import re
 import uuid as _uuid
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -1460,35 +1461,37 @@ class CortexMainWindow(QMainWindow):
             log.warning(f"[DWM] Title bar theme failed: {e}")
 
     def _on_new_chat(self):
-        """Handle new chat request from sidebar, File menu, or keyboard shortcut.
-
-        Routes through summarization so conversation is saved to MEMORY.md
-        before clearing, same path as the header '+ New Chat' button.
-        """
-        if hasattr(self, '_ai_chat') and self._ai_chat:
-            self._on_new_chat_requested()
-        else:
+        """New Chat from the sidebar, File menu or Ctrl+N: the same
+        confirmation as the header '+ New Chat' button, then the same path."""
+        chat = getattr(self, '_ai_chat', None)
+        if not chat:
             log.warning("AI chat not ready, cannot create new chat")
+            return
+        if hasattr(chat, '_on_new_chat_clicked'):
+            chat._on_new_chat_clicked()      # emits new_chat_requested on Yes
+        else:
+            self._on_new_chat_requested()
     
     def _set_theme(self, theme: str):
-        """Switch theme at RUNTIME, no QApplication.setStyleSheet() call.
+        """Switch theme at RUNTIME, fully, with no restart.
 
         Called from the memory manager (Settings → Appearance → Theme picker)
         and from internal theme toggle shortcuts.
 
-        ── WHY THIS DOESN'T CALL QApplication.setStyleSheet() ──
-        That call forces Qt to re-polish every widget in the app, including
-        4 embedded QWebEngineView panels (sidebar, editor/chat, terminal,
-        memory manager). Measured on a RAM-constrained machine: 75+ REAL
-        SECONDS of total IDE freeze, confirmed via [THEME-AUDIT] logs even
-        after cutting live chat widgets from 126 to 37, proving widget count
-        wasn't the dominant cost. Instead, each panel re-themes itself
-        independently and cheaply (JS data-theme pushes, per-widget restyle
-        via findChildren), proven fast in the same logs (sub-millisecond to
-        ~500ms). Trade-off: native Qt chrome (menus, toolbars, splitters)
-        keeps its old-theme colors until the next restart, where
-        _apply_initial_theme() applies the full QSS once, before the window
-        is shown, so it's never mid-work.
+        The panels re-theme themselves first (BATCH 2-4: chat restyle, JS
+        data-theme pushes to the editor, terminal, sidebar and memory
+        manager), so what the user looks at flips within ~100ms. Then:
+
+        BATCH 5 gives the new theme's QSS to everything EXCEPT the chat:
+        dialogs, menus, splitters, the status bar and windows opened later.
+        The app-wide QSS is not re-applied: its cost grows with the chat
+        (5.6-6.0s on the user's 8,873-widget session, enough for "python3 is
+        not responding"), and the chat re-themes itself.
+
+        BATCH 6, once the chat reports theme_settled, fixes widgets that
+        baked old-theme token colours into their own stylesheet (context
+        bar, todo section, slash popup, live-preview bar...).
+        See src/ui/theme_remap.py for both.
 
         ── AUDIT LOGGING ──
         Every batch logs its wall-clock duration and RAM at entry/exit.
@@ -1516,6 +1519,7 @@ class CortexMainWindow(QMainWindow):
             return
 
         is_dark = self._theme_manager.is_dark
+        was_dark = is_dark  # the theme being left, for BATCH 6
         if hasattr(self, '_settings') and self._settings:
             self._settings.theme = theme
 
@@ -1641,10 +1645,74 @@ class CortexMainWindow(QMainWindow):
             )
 
         # Chain the deferred operations with event loop yields between each
+        # ── BATCH 5 (150ms): the new theme's QSS for everything but the chat ──
+        # NOT QApplication.setStyleSheet(): that re-matches the whole theme
+        # against every widget, 5.6-6.0s in one call on the user's 8,873-widget
+        # session (7.6s on a 13,630-widget test chat), and the desktop showed
+        # "python3 is not responding". The chat is ~93% of those widgets and
+        # re-themes itself, so the QSS goes only to the rest; see
+        # src/ui/theme_remap.apply_theme_outside.
+        def _defer_app_qss():
+            t0 = _time.perf_counter()
+            try:
+                from src.ui.theme_remap import apply_theme_outside
+                qss = self._theme_manager.stylesheet_for(theme)
+                n = apply_theme_outside(self._ai_chat, qss) if qss else 0
+                # Splitter handles paint from the live tokens; repaint them.
+                from src.ui.cursor_split_handle import CursorSplitHandle
+                for _h in self.findChildren(CursorSplitHandle):
+                    _h.update()
+            except Exception as e:
+                n = -1
+                log.warning(f"[THEME-AUDIT] BATCH-5 scoped QSS failed: {e}")
+            dt = (_time.perf_counter() - t0) * 1000
+            log.info(f"[THEME-AUDIT] BATCH-5 scoped-qss  DONE  roots={n}  dt={dt:.1f}ms  "
+                     f"{'⚠️ SLOW (>1000ms)' if dt > 1000 else '✓'}  RAM={_ram():.1f}%")
+            _schedule_inline_remap()
+
+        # ── BATCH 6: old-theme colours baked into widget stylesheets ──
+        # After the chat's own batched re-theme has finished (theme_settled),
+        # not alongside it: run together they restyled the same ~1,900 chat
+        # widgets twice (2.9s of extra work in the user's log).
+        _remap_state = {"done": False}
+
+        def _schedule_inline_remap():
+            sig = getattr(self._ai_chat, "theme_settled", None)
+            if sig is not None:
+                try:
+                    sig.connect(_defer_inline_remap)
+                except Exception:
+                    pass
+            # Fallback for a chat that never reports (superseded switch,
+            # no chat panel): the remap is idempotent-safe either way.
+            _QTimer.singleShot(20000, _defer_inline_remap)
+
+        def _defer_inline_remap():
+            if _remap_state["done"]:
+                return
+            _remap_state["done"] = True
+            try:
+                self._ai_chat.theme_settled.disconnect(_defer_inline_remap)
+            except Exception:
+                pass
+            # The theme now in force: a quicker second switch may have
+            # replaced this one, and remap_all() is a no-op when they match.
+            theme_is_dark = self._theme_manager.is_dark
+            from src.ui.theme_remap import remap_all
+            t0 = _time.perf_counter()
+
+            def _done(changed, scanned):
+                dt = (_time.perf_counter() - t0) * 1000
+                log.info(f"[THEME-AUDIT] BATCH-6 inline remap  DONE  "
+                         f"changed={changed}/{scanned}  dt={dt:.1f}ms  "
+                         f"TOTAL_THEME_SWITCH={(_time.perf_counter() - t_total_start) * 1000:.1f}ms")
+            remap_all(was_dark, theme_is_dark, on_done=_done)
+
         _QTimer.singleShot(0, _defer_qss_apply)
         _QTimer.singleShot(30, _defer_panel_updates)
         _QTimer.singleShot(60, _defer_terminal_updates)
         _QTimer.singleShot(90, _defer_memory_manager_sync)
+        _QTimer.singleShot(150, _defer_app_qss)
     
 
     def _build_ui(self):
@@ -2433,6 +2501,20 @@ class CortexMainWindow(QMainWindow):
         self._status_update_btn.setVisible(False)
         self._status_update_btn.clicked.connect(self._open_store_update_dialog)
         sb.addPermanentWidget(self._status_update_btn)
+        # Restricted Mode: shown while the open folder is not trusted; a
+        # click asks again (src/core/workspace_trust.py).
+        self._status_trust_btn = QPushButton("Restricted Mode")
+        self._status_trust_btn.setObjectName("statusRestricted")
+        self._status_trust_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._status_trust_btn.setToolTip(
+            "This folder is not trusted: its venv, MCP servers, git, skills and "
+            "rules are off, and the AI asks before every command and edit. "
+            "Click to review.")
+        self._status_trust_btn.clicked.connect(self._on_restricted_mode_clicked)
+        from src.core.workspace_trust import is_restricted as _is_restricted
+        self._status_trust_btn.setVisible(_is_restricted())
+        sb.insertWidget(0, self._status_trust_btn)
+        self._style_trust_button()
 
         # ── Version ──
         _app_version = QApplication.instance().applicationVersion() or "2.8.6"
@@ -2544,10 +2626,10 @@ class CortexMainWindow(QMainWindow):
     def _restyle_menu_bar(self, is_dark: bool):
         """Scoped stylesheet for the menu bar + its popup menus.
 
-        At startup the global QSS covers this; at RUNTIME theme switches we
-        deliberately never call QApplication.setStyleSheet() (75s freeze),
-        so the menu bar needs its own cheap widget-level restyle. Light
-        background gets near-black text, never light-hash gray.
+        At startup the global QSS covers this. On a live switch this runs
+        first (BATCH 3), so the menu bar flips at once instead of waiting
+        for the app-wide QSS in BATCH 5. Light background gets near-black
+        text, never light-hash gray.
         """
         if is_dark:
             bg, fg, hover, border = "#1e1e1e", "#cccccc", "#2d2d2d", "#3c3c3c"
@@ -2647,11 +2729,11 @@ class CortexMainWindow(QMainWindow):
 
         Chromium raises a real QMenu for these, not page HTML, so no CSS
         in editor.html / sidebar.html / terminal.html /
-        memory_management.html can reach them. They inherited the
-        app-wide QSS, which is only ever applied once at startup (see
-        _apply_initial_theme, measured at 75+s under RAM pressure), so
-        after a live switch to light they kept painting the STARTUP dark
-        card with dark text over a light page.
+        memory_management.html can reach them. They inherit the app-wide
+        QSS, which a live switch used to skip (once measured at 75+s under
+        RAM pressure), so they kept painting the STARTUP dark card with dark
+        text over a light page. _set_theme() now re-applies that QSS too
+        (BATCH 5); this keeps the menus right in the meantime.
 
         Same treatment as the menu bar and status bar above: cheap
         per-widget restyles instead of an app-wide reapply.
@@ -2676,11 +2758,9 @@ class CortexMainWindow(QMainWindow):
         """Apply the saved (or default) theme to all panels at startup."""
         from PyQt6.QtWidgets import QApplication as _App
         saved = self._settings.theme if hasattr(self._settings, 'theme') else "dark"
-        # Support both dark and light themes. This is the ONLY place
-        # QApplication.setStyleSheet() runs now, once at startup, before
-        # the window is shown, so its cost (measured 75+s under RAM
-        # pressure) delays first paint but can never freeze an active
-        # session. Runtime switches use _set_theme() -> set_active_no_qss().
+        # Support both dark and light themes. Applied once here, before the
+        # window is shown; a live switch re-applies it from _set_theme()
+        # (BATCH 5) after the panels have already flipped.
         self._theme_manager.apply(saved, _App.instance(), freeze_widget=self)
         is_dark = self._theme_manager.is_dark
         log.info(f"[MainWindow] Initial theme: {saved} (is_dark={is_dark})")
@@ -2889,7 +2969,7 @@ class CortexMainWindow(QMainWindow):
         self._sidebar.chat_selected.connect(self._on_chat_selected)
         self._sidebar.chat_renamed.connect(self._on_chat_renamed)
         self._sidebar.chat_delete_requested.connect(self._on_chat_delete_requested)
-        self._sidebar.new_chat_requested.connect(self._on_new_chat_requested)
+        self._sidebar.new_chat_requested.connect(self._on_new_chat)
 
         # AI context sync: when user switches chats, restore conversation context for AI
         if not getattr(self, '_is_native_chat', False):
@@ -3048,6 +3128,8 @@ class CortexMainWindow(QMainWindow):
                 self._ai_agent.file_edited_diff.connect(self._on_agent_file_edited)
                 # Wire header "+ New Chat" button → summarize to MEMORY.md + fresh chat
                 self._ai_chat.new_chat_requested.connect(self._on_new_chat_requested)
+                self._ai_chat.conversation_selected.connect(self._switch_to_conversation)
+                self._ai_chat.history_provider = self._chat_history_items
                 # CHANGES panel: fill _diff_data_store on every AI edit so the
                 # sidebar change list populates in native-chat mode too.
                 self._ai_agent.file_edited_diff.connect(self._on_file_edited_diff_for_js)
@@ -3164,13 +3246,6 @@ class CortexMainWindow(QMainWindow):
         if not folder:
             return
 
-        # Captured BEFORE the switch: the restart offer below is only shown
-        # when moving from one project to a DIFFERENT one, never on a cold
-        # start (there is nothing to conflict with) and never on reopening
-        # the same folder.
-        _prev_root = self._project_manager.root
-        _previous = str(_prev_root) if _prev_root else None
-
         log.info(f"[OpenFolder] Switching to project: {folder}")
     
         # ── 1. Close ALL open editor files (both webview AND legacy tabs) ──
@@ -3215,82 +3290,6 @@ class CortexMainWindow(QMainWindow):
                 log.warning(f"[OpenFolder] Chat project info failed: {e}")
     
         log.info(f"[OpenFolder] \u2713 Project reset complete \u2014 ready at: {folder}")
-
-        # \u2500\u2500 7. Offer a restart when this was a real project SWITCH \u2500\u2500
-        # The steps above reset the visible state, but several long-lived
-        # subsystems keep the old project: the agent's loaded context and
-        # chat history, the semantic search index, and the file watcher's
-        # registered directories. A restart is the reliable way to start
-        # them clean. Same offer the theme switch makes in Settings, and
-        # like it, non-blocking \u2014 the user can carry on and ignore it.
-        self._maybe_offer_restart_after_switch(_previous, folder)
-
-    def _maybe_offer_restart_after_switch(self, previous, new_folder):
-        """Queue the restart offer, do NOT show it yet.
-
-        Chat history restores asynchronously in batches after a switch. A
-        card shown now appears over a still-loading panel, gets buried as
-        messages land, and competes with a spinner. It waits for the chat
-        panel to report it has settled, with a timer as the fallback for
-        panels that never emit (native chat off, restore path skipped).
-        """
-        try:
-            from src.ui.restart_prompt import should_prompt_project_switch
-            if not should_prompt_project_switch(previous, new_folder):
-                return
-
-            self._pending_restart_offer = new_folder
-            chat = getattr(self, "_ai_chat", None)
-            sig = getattr(chat, "restore_finished", None)
-            if sig is not None:
-                try:
-                    sig.disconnect(self._show_pending_restart_offer)
-                except (TypeError, RuntimeError):
-                    pass          # not connected yet, first switch
-                sig.connect(self._show_pending_restart_offer)
-                # Fallback: a project with no chat history at all may never
-                # reach the restore path, so never emit.
-                QTimer.singleShot(6000, self._show_pending_restart_offer)
-            else:
-                QTimer.singleShot(2500, self._show_pending_restart_offer)
-            log.info("[OpenFolder] Restart offer queued until chat has settled")
-        except Exception as e:
-            log.warning(f"[OpenFolder] Restart prompt failed: {e}")
-
-    def _show_pending_restart_offer(self):
-        """Show the queued offer, once. Both the signal and the fallback
-        timer call this, so it must be idempotent."""
-        folder = getattr(self, "_pending_restart_offer", None)
-        if not folder:
-            return
-        self._pending_restart_offer = None
-        try:
-            from src.ui.restart_prompt import show_project_switch_prompt
-            from src.ui.tokens import TOKENS as _T
-            colors = {
-                "card": _T["bg_elevated"], "text": _T["text"],
-                "sub": _T["text_dim"], "accent": _T["accent"],
-                "accent_hover": _T.get("accent_hover", _T["accent"]),
-                "border": _T["border"],
-            }
-            # Replace any banner still on screen from an earlier switch,
-            # rather than stacking a second one on top of it.
-            old = getattr(self, "_restart_banner", None)
-            if old is not None:
-                try:
-                    old.deleteLater()
-                except RuntimeError:
-                    pass          # already destroyed by its own dismiss
-            self._restart_banner = show_project_switch_prompt(
-                self, colors, self._restart_ide_for_project_switch)
-            log.info(f"[OpenFolder] Restart offered (switched to {folder})")
-        except Exception as e:
-            # A missing banner must never break opening a project.
-            log.warning(f"[OpenFolder] Restart prompt failed: {e}")
-
-    def _restart_ide_for_project_switch(self):
-        from src.core.app_restart import restart_ide
-        restart_ide("project switch")
 
     def _open_folder_programmatic(self, folder: str):
         """Open a folder as the active project (no dialog, usable from argv/drag-drop)."""
@@ -5790,12 +5789,13 @@ class CortexMainWindow(QMainWindow):
         if self._current_displayed_chat_id == str(conversation_id):
             log.debug(f"[ChatHistory] Chat {conversation_id} already displayed, skipping reload")
             return
-        self._current_displayed_chat_id = str(conversation_id)
         log.info(f"[ChatHistory] Selected chat: {conversation_id}")
 
         if getattr(self, '_is_native_chat', False):
-            # Native backend: rebuild widgets from timeline data
-            self._ai_chat.load_chat(conversation_id)
+            # Same path as the History menu. load_chat() read a ChatStore
+            # nothing writes to, and left the agent and saves pointing at the
+            # chat on screen before, so it could never show the old chat.
+            self._switch_to_conversation(str(conversation_id))
         else:
             # Webview backend: load via JavaScript
             js_code = f"window.loadChat('{conversation_id}');"
@@ -5834,91 +5834,177 @@ class CortexMainWindow(QMainWindow):
             )
 
     def _on_new_chat_requested(self):
-        """User confirmed '+ New Chat' → summarize current chat into MEMORY.md
-        FIRST, then clear the UI and start a fresh session.
+        """The user confirmed New Chat. In order:
 
-        Shows spinner overlay IMMEDIATELY so the user sees feedback, then
-        kicks off the background summarize thread. On completion (or timeout),
-        the spinner hides and the fresh chat appears.
+        1. a reply still running is stopped, and what it already sent is
+           allowed to land in THIS chat;
+        2. this chat is captured: its timeline written to the history DB now,
+           and its memory snapshot outline written to .cortex/memory/ now;
+        3. the switch: output still in flight from the stopped reply is muted
+           (NativeChatBridge.mute), the panel is cleared, a new conversation
+           starts;
+        4. the AI summary of the snapshot (short + long-term memory merged)
+           finishes in the background, while the user is in the new chat.
+
+        Leftover text in the new chat came from step 1 and 3 missing: the
+        reply was never stopped, and its next chunk opened a fresh message
+        in the cleared panel.
         """
-        log.info("[NewChat] Requested, summarizing current chat to MEMORY.md first")
-
         if getattr(self, '_new_chat_saving', False):
-            log.info("[NewChat] Already saving, ignoring duplicate request")
+            log.info("[NewChat] already switching, ignoring duplicate request")
+            return
+        self._new_chat_saving = True
+        self._run_after_reply_stopped(self._capture_and_start_new_chat,
+                                      "Saving this chat\u2026")
+
+    def _run_after_reply_stopped(self, then, message: str):
+        """Stop a running reply, wait until it is done (5s cap), then `then`."""
+        try:
+            self._ai_chat._spinner_overlay.show_overlay(message=message,
+                                                        spinner_key='saving_memory')
+        except Exception:
+            pass
+        agent = getattr(self, '_ai_agent', None)
+        if agent is not None and getattr(agent, '_agentic_turn_active', False):
+            log.info("[NewChat] stopping the running reply first")
+            try:
+                agent.stop()
+            except Exception as e:
+                log.warning(f"[NewChat] stop failed: {e}")
+        started = time.monotonic()
+
+        def _poll():
+            busy = agent is not None and getattr(agent, '_agentic_turn_active', False)
+            if busy and time.monotonic() - started < 5.0:
+                QTimer.singleShot(100, _poll)
+                return
+            if busy:
+                log.warning("[NewChat] reply still running after 5s; its output is muted")
+            # One more pass of the event loop: chunks the agent thread queued
+            # before stopping are delivered to the chat they belong to.
+            QTimer.singleShot(0, then)
+        QTimer.singleShot(50, _poll)
+
+    def _save_open_chat_now(self):
+        """Write the open chat's timeline synchronously.
+
+        Returns (conversation_id, messages as shown)."""
+        chat = self._ai_chat
+        conv = chat.conversation_id()
+        msgs = []
+        try:
+            if conv and not getattr(chat, '_restoring', False):
+                tl = chat.get_timeline()
+                msgs = tl.get("messages") or []
+                if msgs:
+                    from src.core.chat_history import get_chat_history
+                    get_chat_history().save_timeline(conv, tl)
+                    log.info(f"[NewChat] saved {len(msgs)} messages of {conv[:8]}..")
+        except Exception as e:
+            log.warning(f"[NewChat] timeline save failed for {conv}: {e}")
+        return conv, msgs
+
+    def _capture_and_start_new_chat(self):
+        agent = getattr(self, '_ai_agent', None)
+        snap = None
+        try:
+            old_conv, shown = self._save_open_chat_now()
+            if agent is not None and hasattr(agent, 'capture_chat_snapshot'):
+                snap = agent.capture_chat_snapshot(old_conv, shown)
+        except Exception as e:
+            log.warning(f"[NewChat] snapshot capture failed: {e}")
+        nb = getattr(self, '_native_bridge', None)
+        if nb is not None:
+            nb.mute()
+        try:
+            self._finalize_new_chat()
+        finally:
+            self._new_chat_saving = False
+        if snap is not None:
+            try:
+                agent.summarize_chat_snapshot_async(snap)
+            except Exception as e:
+                log.warning(f"[NewChat] background summary failed to start: {e}")
+
+    # ── History: reopen a previous chat ─────────────────────────────────
+    # The first user message, read from the START of a timeline's JSON
+    # (ChatPanel.get_timeline writes {"role": "user", "content": ...} in that
+    # order). The tail may be cut off at the head boundary, hence no closing
+    # quote is required.
+    _FIRST_USER_RE = re.compile(
+        r'"role"\s*:\s*"user"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)')
+
+    @classmethod
+    def _first_user_text(cls, head: str) -> str:
+        m = cls._FIRST_USER_RE.search(head or "")
+        if not m:
+            return ""
+        raw = m.group(1).rstrip("\\")
+        try:
+            text = json.loads('"' + raw + '"')
+        except ValueError:
+            text = raw
+        return " ".join(text.split())
+
+    def _chat_history_items(self) -> list:
+        """(conversation_id, label, when) for this project's chats, newest first.
+
+        Runs while the History menu opens, so it must be cheap: one indexed
+        query that returns only the start of each timeline. It used to list
+        through get_conversations() (3.8s on the user's DB, see there) and
+        then load and parse every chat's full timeline.
+        """
+        from datetime import datetime as _dt
+        from src.core.chat_history import get_chat_history
+        root = getattr(self, '_current_project_path', '') or ''
+        if not root:
+            return []
+        current = self._ai_chat.conversation_id()
+        items = []
+        for c in get_chat_history().get_conversation_heads(os.path.normpath(root), limit=40):
+            cid = c.get('conversation_id')
+            first = self._first_user_text(c.get('head'))
+            if not first and cid != current:
+                continue                     # empty chats are not worth listing
+            label = (first[:48] + '\u2026') if len(first) > 48 else (first or "New chat")
+            ts = c.get('updated_at') or c.get('created_at') or 0
+            when = _dt.fromtimestamp(ts / 1000).strftime('%d %b %H:%M') if ts else ''
+            items.append((cid, label, when))
+            if len(items) >= 20:
+                break
+        return items
+
+    def _switch_to_conversation(self, conv_id: str):
+        """Open an earlier chat of this project, same safety as New Chat."""
+        if not conv_id or getattr(self, '_new_chat_saving', False):
             return
         self._new_chat_saving = True
 
-        # Show spinner IMMEDIATELY so user sees feedback right away
-        if hasattr(self, '_ai_chat') and hasattr(self._ai_chat, '_spinner_overlay'):
-            self._ai_chat._spinner_overlay.show_overlay(
-                message="Summarizing & compacting chat…",
-                spinner_key='saving_memory',
-            )
-
-        if (getattr(self, '_is_native_chat', False)
-                and hasattr(self, '_ai_agent') and self._ai_agent
-                and hasattr(self._ai_agent, 'save_session_to_memory')):
-            from PyQt6.QtCore import QTimer
-
-            # Sync bridge conv_id with chat panel's so DB query finds messages
-            if hasattr(self, '_ai_chat') and self._ai_chat:
-                _panel_conv = self._ai_chat.conversation_id()
-                if _panel_conv and _panel_conv != getattr(self._ai_agent, '_current_conversation_id', None):
-                    self._ai_agent._current_conversation_id = _panel_conv
-                    log.info(f"[NewChat] Synced bridge conv_id to {_panel_conv}")
-
-            _finalized = False
-            _save_started_at = time.monotonic()
-
-            def _do_finalize():
-                self._finalize_new_chat()
-
-            def _finish(success: bool):
-                nonlocal _finalized
-                if _finalized:
-                    return
-                _finalized = True
-                self._new_chat_saving = False
-                try:
-                    self._ai_agent.session_saved_to_memory.disconnect(_finish)
-                except Exception:
-                    pass
-                if success:
-                    log.info("[NewChat] MEMORY.md saved, clearing chat")
-                else:
-                    log.warning("[NewChat] Memory save incomplete, clearing anyway")
-                # Keep spinner visible for at least 800ms so user sees it
-                elapsed_ms = int((time.monotonic() - _save_started_at) * 1000)
-                remaining = max(0, 800 - elapsed_ms)
-                QTimer.singleShot(remaining, _do_finalize)
-
-            def _timeout_fallback():
-                nonlocal _finalized
-                if _finalized:
-                    return
-                _finalized = True
-                self._new_chat_saving = False
-                log.warning("[NewChat] Timeout, session_saved_to_memory did not fire; "
-                            "clearing chat anyway")
-                try:
-                    self._ai_agent.session_saved_to_memory.disconnect(_finish)
-                except Exception:
-                    pass
-                _do_finalize()
-
+        def _go():
             try:
-                self._ai_agent.session_saved_to_memory.connect(_finish)
-                self._ai_agent.save_session_to_memory()
-                # Increased timeout: LLM summarization can take 30+ seconds
-                QTimer.singleShot(45000, _timeout_fallback)
-                return
+                self._save_open_chat_now()
+                nb = getattr(self, '_native_bridge', None)
+                if nb is not None:
+                    nb.mute()
+                agent = getattr(self, '_ai_agent', None)
+                if agent is not None and hasattr(agent, 'start_fresh_session'):
+                    agent.start_fresh_session()      # todos and per-task state
+                self._ai_chat.new_chat()
+                self._set_active_conversation(conv_id)
+                self._current_displayed_chat_id = conv_id
+                self._setup_chat_persistence()       # restores it, rewires saves
+                if not getattr(self._ai_chat, '_restoring', False):
+                    self._ai_chat._spinner_overlay.hide_overlay()   # nothing to restore
+                log.info(f"[History] opened chat {conv_id[:8]}..")
             except Exception as e:
+                log.warning(f"[History] could not open {conv_id}: {e}")
+                try:
+                    self._ai_chat._spinner_overlay.hide_overlay()
+                except Exception:
+                    pass
+            finally:
                 self._new_chat_saving = False
-                log.warning(f"[NewChat] memory-save failed to start, clearing anyway: {e}")
-        else:
-            self._new_chat_saving = False
-
-        self._finalize_new_chat()
+        self._run_after_reply_stopped(_go, "Opening chat\u2026")
 
     def _finalize_new_chat(self):
         """Clear the chat UI and reset to a brand-new conversation that PERSISTS.
@@ -6011,6 +6097,27 @@ class CortexMainWindow(QMainWindow):
         if not msgs:
             return
         self._pending_crash_recovery = None
+        # The queue waits for restore_finished, and a project switch before
+        # then fires that signal for the NEW project's restore: the old
+        # project's recovered messages were rendered into the new project's
+        # chat and saved there. Keep them with the conversation they came from.
+        owner = getattr(self, "_pending_crash_recovery_conv", None)
+        current = self._ai_chat.conversation_id() if getattr(self, "_ai_chat", None) else None
+        if owner and current and owner != current:
+            try:
+                from src.core.chat_history import get_chat_history
+                history = get_chat_history()
+                tl = history.get_timeline(owner)
+                if isinstance(tl, dict):
+                    tl["messages"] = list(tl.get("messages") or []) + list(msgs)
+                else:
+                    tl = {"conversation_id": owner, "messages": list(tl or []) + list(msgs), "version": 1}
+                history.save_timeline(owner, tl)
+                log.info(f"[CrashRecovery] Project changed before recovery ran: "
+                         f"{len(msgs)} messages stored with {owner[:8]}.. instead")
+            except Exception as e:
+                log.warning(f"[CrashRecovery] Could not store recovered messages for {owner}: {e}")
+            return
         sig = getattr(self._ai_chat, "crash_recovery_finished", None)
         if sig is not None:
             try:
@@ -6229,6 +6336,7 @@ class CortexMainWindow(QMainWindow):
                         # and the combined pile-up froze the UI for 79s on a
                         # project switch. Wait until the restore settles.
                         self._pending_crash_recovery = unsaved
+                        self._pending_crash_recovery_conv = conv_id
                         _restore_queued = bool(
                             (isinstance(timeline_data, dict)
                              and timeline_data.get("messages"))
@@ -6314,6 +6422,14 @@ class CortexMainWindow(QMainWindow):
                 if getattr(self._ai_chat, '_restoring', False):
                     log.info(f"[ChatPersist] Save skipped ({reason}), chat restore in progress")
                     return False
+                # The scroll-up loader has taken a batch off the pending list
+                # but not built all of it yet; a snapshot now would miss those
+                # messages and overwrite the stored timeline without them.
+                # Try again once the load has landed (a clear ends it).
+                if getattr(self._ai_chat, '_lazy_loading', False):
+                    log.info(f"[ChatPersist] Save deferred ({reason}), older messages still loading")
+                    QTimer.singleShot(500, lambda: _save_timeline(reason))
+                    return False
                 # Serialize on the main thread (Qt widget access must happen here)
                 _t0 = _time_mod.perf_counter()
                 tl = self._ai_chat.get_timeline()
@@ -6321,7 +6437,12 @@ class CortexMainWindow(QMainWindow):
                 self._last_chat_serialize_ms = _ser_ms
                 _msg_count = len(tl.get("messages", []))
                 _conv = self._ai_chat.conversation_id()
-                if not _conv or (not _msg_count and reason != "turn"):
+                # Never write an EMPTY chat: save_timeline replaces the whole
+                # stored history. An empty panel only happens between a clear
+                # and the next restore (a project switch, a cancelled reply
+                # landing mid-switch), and saving it there erased the
+                # project's history. "turn" saves used to be allowed through.
+                if not _conv or not _msg_count:
                     return False
                 _save_seq["next"] += 1
                 _seq = _save_seq["next"]
@@ -9142,9 +9263,98 @@ class CortexMainWindow(QMainWindow):
 
         self._do_project_switch(folder_path)
 
+    # ── Workspace trust ───────────────────────────────────────────────
+    def _apply_workspace_trust(self, folder: str, ask: bool = True) -> bool:
+        """Look up (or ask about) trust for `folder`. True when restricted."""
+        from src.core import workspace_trust as wt
+        try:
+            if wt.enabled():
+                recent = list(self._settings.get('recent_projects', default=[]) or [])
+                wt.seed_known_projects(recent + [self._settings.get('last_project', default=None)])
+                if ask and wt.decision(folder) is None:
+                    from src.ui.dialogs.workspace_trust_dialog import ask_workspace_trust
+                    trusted, parent = ask_workspace_trust(folder, self)
+                    if trusted is not None:
+                        wt.remember(folder, trusted, include_parent=parent)
+        except Exception as e:
+            # A broken prompt must not open a folder with full trust silently,
+            # nor block opening it: it opens restricted.
+            log.warning(f"[Trust] prompt failed, opening restricted: {e}")
+        restricted = wt.set_active(folder)
+        if restricted and getattr(self, '_ai_agent', None):
+            # Edits ask again (project access) and nothing carries over from
+            # an "Always allow" given in a trusted folder.
+            self._ai_agent.set_always_allowed(False)
+            self._ai_agent._project_access_granted = False
+        btn = getattr(self, '_status_trust_btn', None)
+        if btn is not None:
+            btn.setVisible(restricted)
+        log.info(f"[Trust] {folder}: {'Restricted Mode' if restricted else 'trusted'}")
+        return restricted
+
+    def _style_trust_button(self):
+        btn = getattr(self, '_status_trust_btn', None)
+        if btn is None:
+            return
+        from src.ui.tokens import TOKENS as _T
+        btn.setStyleSheet(
+            f"QPushButton#statusRestricted {{ background: {_T['warning']}; color: {_T['bg']};"
+            f" border: none; border-radius: 3px; padding: 0 8px; margin: 2px 6px 2px 2px;"
+            f" font-size: 11px; font-weight: 600; }}"
+            f"QPushButton#statusRestricted:hover {{ background: {_T['orange']}; }}")
+
+    def _on_restricted_mode_clicked(self):
+        """Ask again; trusting applies at once, no reopen or restart."""
+        folder = getattr(self, '_current_project_path', None)
+        if not folder:
+            return
+        from src.core import workspace_trust as wt
+        from src.ui.dialogs.workspace_trust_dialog import ask_workspace_trust
+        trusted, parent = ask_workspace_trust(folder, self)
+        if trusted is None:
+            return
+        wt.remember(folder, trusted, include_parent=parent)
+        if not self._apply_workspace_trust(folder, ask=False):
+            self._enable_trusted_features(folder)
+
+    def _enable_trusted_features(self, folder: str):
+        """Turn on what Restricted Mode held back, for the open folder."""
+        import threading as _threading
+        try:
+            if hasattr(self, '_git_manager'):
+                self._git_manager.set_repository(folder)
+            if hasattr(self, '_sidebar') and getattr(self._sidebar, '_bridge', None):
+                br = self._sidebar._bridge
+                br._git_status_cache = None
+                if hasattr(br, 'refreshGitStatus'):
+                    br.refreshGitStatus()
+        except Exception as e:
+            log.debug(f"[Trust] git refresh after trust: {e}")
+        self._check_and_activate_venv(folder)
+
+        def _reload():
+            try:
+                from src.agent.src.skills.cortex_skill import get_skills_manager
+                get_skills_manager(folder).refresh_if_changed(force=True)
+            except Exception as e:
+                log.debug(f"[Trust] skills reload after trust: {e}")
+            try:
+                from src.services.mcp_manager import get_mcp_manager
+                mgr = get_mcp_manager()
+                mgr.set_project_root(folder)
+                mgr.start()
+            except Exception as e:
+                log.warning(f"[Trust] MCP restart after trust: {e}")
+        _threading.Thread(target=_reload, daemon=True, name="TrustReload").start()
+        log.info(f"[Trust] trusted features enabled for {folder}")
+
     def _do_project_switch(self, folder_path: str):
         """Actual project switch logic, called after AI turn is cancelled."""
         log.info(f"[PROJECT-SWITCH] Switching to: {folder_path}")
+
+        # Trust first: everything below (agent root, MCP, skills, git, venv)
+        # reads it, see src/core/workspace_trust.py.
+        self._apply_workspace_trust(folder_path)
         
         # Clean up old project state BEFORE loading new one (only if switching)
         self._cleanup_old_project()
@@ -9347,6 +9557,12 @@ class CortexMainWindow(QMainWindow):
     def _check_and_activate_venv(self, project_path: str):
         """Check for and activate Python virtual environment."""
         import os
+        # Activating sources the project's own script in the terminal; not
+        # in Restricted Mode (src/core/workspace_trust.py).
+        from src.core.workspace_trust import is_restricted
+        if is_restricted(project_path):
+            log.info("[Trust] Restricted Mode: venv not activated")
+            return
         
         venv_names = ["venv", ".venv", "env", ".env", "virtualenv"]
         
@@ -9414,6 +9630,11 @@ class CortexMainWindow(QMainWindow):
         if not hasattr(self, '_modified_files'):
             self._modified_files: set = set()
         self._modified_files.add(file_path)
+        # Newest text the editor reported, used by the close check only when
+        # the editor page cannot answer for itself.
+        if not hasattr(self, '_last_editor_content'):
+            self._last_editor_content: dict = {}
+        self._last_editor_content[file_path] = content
         self._sync_window_title()
 
     @staticmethod
@@ -10299,8 +10520,148 @@ class CortexMainWindow(QMainWindow):
 
 
 
+    # ── Unsaved changes on close ───────────────────────────────────────
+    _UNSAVED_JS = (
+        "(function(){try{var out=[];"
+        "for(var p in openFiles){var f=openFiles[p];"
+        "if(!f||!f.modified||f.isImage||f.isSheet)continue;"
+        "var m=(typeof _getOrCreateModel==='function')?_getOrCreateModel(f):null;"
+        "out.push({path:p,content:m?m.getValue():(f.content||'')});}"
+        "return JSON.stringify(out);}catch(e){return 'ERR:'+e;}})()"
+    )
+
+    def _collect_unsaved_files(self, timeout_ms: int = 2500) -> list:
+        """[(path, content)] for every file with unsaved edits.
+
+        Asked of the editor itself: editor.html sets a file's `modified` flag
+        on the keystroke, while Python hears about it only after a 300ms
+        debounce, so closing right after typing was not always seen. When the
+        page cannot answer, the files Python saw change are used, with the
+        newest text the editor reported for them. The old fallback, treating
+        EVERY open file as unsaved, prompted on clean closes.
+        """
+        from PyQt6.QtCore import QEventLoop
+        files: dict = {}
+        panel = getattr(self, '_webview_panel', None)
+        answered = False
+        if panel is not None and getattr(panel, '_page_loaded', False) and getattr(panel, '_view', None):
+            result = {}
+            loop = QEventLoop()
+
+            def _cb(value):
+                result['v'] = value
+                loop.quit()
+            try:
+                panel._view.page().runJavaScript(self._UNSAVED_JS, _cb)
+                QTimer.singleShot(timeout_ms, loop.quit)
+                loop.exec()
+            except Exception as e:
+                log.warning(f"[Close] editor query failed: {e}")
+            raw = result.get('v')
+            if isinstance(raw, str) and not raw.startswith('ERR:'):
+                try:
+                    for item in json.loads(raw):
+                        if item.get('path') and item['path'] != "untitled.py":
+                            files[item['path']] = item.get('content') or ''
+                    answered = True
+                except ValueError:
+                    pass
+            if not answered:
+                log.warning(f"[Close] editor did not report unsaved files ({str(raw)[:80]}), "
+                            "using the files Cortex saw change")
+        if not answered:
+            last = getattr(self, '_last_editor_content', {})
+            for fp in getattr(self, '_modified_files', set()):
+                if fp in last and fp != "untitled.py":
+                    files[fp] = last[fp]
+        # Legacy (non-webview) editor tabs
+        tabs = getattr(self, '_editor_tabs', None)
+        for fp in list(getattr(tabs, '_modified', set()) or []):
+            for i, tfp in getattr(tabs, '_files', {}).items():
+                if tfp == fp:
+                    ed = tabs.widget(i)
+                    if isinstance(ed, CodeEditor):
+                        files[fp] = ed.toPlainText()
+        return list(files.items())
+
+    def _confirm_unsaved_before_close(self) -> bool:
+        """Ask, inside Cortex, whether to save unsaved files. True = go on closing."""
+        unsaved = self._collect_unsaved_files()
+        if not unsaved:
+            return True
+        from PyQt6.QtWidgets import QMessageBox
+        from src.ui.tokens import CHAT_TOKENS as _T
+        names = [os.path.basename(p) for p, _ in unsaved]
+        shown = "\n".join(f"\u2022 {n}" for n in names[:8])
+        if len(names) > 8:
+            shown += f"\n\u2026 and {len(names) - 8} more"
+        box = QMessageBox(self)
+        box.setWindowTitle("Save Unsaved Changes")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"Save changes to {len(names)} file{'s' if len(names) != 1 else ''} "
+                    f"before closing Cortex?")
+        box.setInformativeText(shown)
+        yes = box.addButton("Yes", QMessageBox.ButtonRole.YesRole)
+        no = box.addButton("No", QMessageBox.ButtonRole.NoRole)
+        # Esc or the window's X keeps Cortex open: not answering is not "No".
+        keep = box.addButton(QMessageBox.StandardButton.Cancel)
+        keep.hide()
+        box.setEscapeButton(keep)
+        box.setDefaultButton(yes)
+        box.setWindowModality(Qt.WindowModality.WindowModal)
+        box.setStyleSheet(
+            f"QMessageBox {{ background:{_T['bg_elevated']}; }}"
+            f"QMessageBox QLabel {{ color:{_T['text']}; background:transparent; border:none;"
+            f" font-family:{_T['font_ui']}; font-size:13px; }}"
+            f"QPushButton {{ background:{_T['bg_hover']}; color:{_T['text']}; padding:6px 24px;"
+            f" border-radius:6px; border:1px solid {_T['border']}; font-family:{_T['font_ui']}; }}"
+            f"QPushButton:hover {{ border-color:{_T['accent']}; }}"
+            f"QPushButton:default {{ background:{_T['accent_fill']}; color:{_T['accent_ink']};"
+            f" border:none; }}")
+        self.raise_()
+        self.activateWindow()
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is no:
+            log.info(f"[Close] closing without saving {len(names)} file(s): {names}")
+            return True
+        if clicked is not yes:
+            log.info("[Close] close cancelled from the unsaved-changes prompt")
+            return False
+
+        failed = []
+        for path, content in unsaved:
+            try:
+                self._on_webview_save_requested(path, content)
+                with open(path, encoding='utf-8', newline='') as f:
+                    on_disk = f.read()
+                if self._norm_eol(on_disk) != self._norm_eol(content):
+                    failed.append(path)
+            except Exception as e:
+                log.error(f"[Close] save failed for {path}: {e}")
+                failed.append(path)
+        if failed:
+            QMessageBox.warning(
+                self, "Not Saved",
+                "These files could not be saved, so Cortex stays open:\n\n"
+                + "\n".join(f"\u2022 {os.path.basename(p)}" for p in failed))
+            return False
+        log.info(f"[Close] saved {len(unsaved)} file(s) before closing")
+        return True
+
     def closeEvent(self, event: QCloseEvent):
-        """Save session on close, prompt for unsaved files, and kill terminals."""
+        """Ask about unsaved files, then save session, stop the agent, close.
+
+        The unsaved-changes question comes FIRST, while the window is still on
+        screen. It used to come after self.hide() and after the agent worker
+        had been stopped: the prompt floated alone after Cortex had vanished,
+        and "Cancel" left an invisible Cortex running without its agent.
+        """
+        if not getattr(self, '_close_confirmed', False):
+            if not self._confirm_unsaved_before_close():
+                event.ignore()
+                return
+            self._close_confirmed = True
         # ════════════════════════════════════════════════════════════════
         # INSTANT HIDE, Prevent the "frozen/dark window" glitch during
         # close. The heavy shutdown work (file saves, agent stop, DB flush)
@@ -10363,99 +10724,9 @@ class CortexMainWindow(QMainWindow):
         except Exception as _w_exc:
             log.warning(f"[SHUTDOWN] Agent worker stop error: {_w_exc}")
 
-        # 1. Check for unsaved files, use _modified_files (tracked by
-        #    _on_webview_content_changed) which accurately reflects Monaco
-        #    content changes, plus legacy editor_tabs as fallback.
-        modified_files = getattr(self, '_modified_files', set()).copy()
-        # Fallback: if _modified_files is empty (e.g., tracker not yet initialized),
-        # check _open_files as a safety net for any unsaved changes.
-        if not modified_files and hasattr(self, '_webview_panel'):
-            modified_files = set(
-                fp for fp in self._webview_panel._open_files
-                if fp and fp != "untitled.py"
-            )
-        # Also include legacy editor tab modified files
-        legacy_modified = getattr(self._editor_tabs, '_modified', set())
-        if legacy_modified:
-            modified_files.update(legacy_modified)
+        # 1. Unsaved files were handled before the window was hidden, see
+        #    _confirm_unsaved_before_close().
 
-        if modified_files:
-            from PyQt6.QtWidgets import QMessageBox
-            file_names = [os.path.basename(f) for f in modified_files]
-            files_str = ", ".join(file_names[:3]) + ("..." if len(file_names) > 3 else "")
-
-            reply = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                f"You have unsaved changes in: {files_str}\n\nDo you want to save them before closing?",
-                QMessageBox.StandardButton.SaveAll |
-                QMessageBox.StandardButton.Discard |
-                QMessageBox.StandardButton.Cancel
-            )
-
-            if reply == QMessageBox.StandardButton.Cancel:
-                event.ignore()
-                return
-            elif reply == QMessageBox.StandardButton.SaveAll:
-                # ── Save all modified files using Monaco's fresh content ──
-                # Tell Monaco to save every modified file; Monaco will call
-                # bridge.saveFile() for each, which triggers _on_webview_save_requested
-                # that writes fresh content to disk (no stale cache).
-                from PyQt6.QtCore import QDeadlineTimer, QEventLoop as _QEventLoop
-
-                saved_count = [0]
-                failed = []
-
-                if hasattr(self, '_webview_panel') and self._webview_panel._page_loaded:
-                    for fp in list(modified_files):
-                        try:
-                            safe_path = json.dumps(fp)
-                            # saveFile bridge: Monaco sends fresh model content → Python writes to disk
-                            self._webview_panel._safe_run_js(
-                                f"(function(){{"
-                                f"var models=monaco.editor.getModels();"
-                                f"for(var i=0;i<models.length;i++){{"
-                                f"var u=models[i].uri.toString();"
-                                f"var p=u.replace('file:///','');"
-                                f"if(p.indexOf('/')!==-1)p=p.replace(/\\//g,'\\\\');"
-                                f"if(p===decodeURI({safe_path}).replace(/\\//g,'\\\\')){{"
-                                f"bridge.saveFile({safe_path},models[i].getValue());"
-                                f"break;"
-                                f"}}"
-                                f"}}"
-                                f"}})();"
-                            )
-                            saved_count[0] += 1
-                        except Exception as e:
-                            failed.append((fp, str(e)))
-                            log.error(f"[SHUTDOWN] Failed to trigger save for {fp}: {e}")
-
-                    # Process events to let JS bridge.saveFile() callbacks fire
-                    deadline = QDeadlineTimer(2000)
-                    while not deadline.hasExpired():
-                        QApplication.processEvents(_QEventLoop.ProcessEventsFlag.AllEvents, 50)
-
-                # Also save any legacy editor tab files
-                for fp in legacy_modified:
-                    idx = -1
-                    for i, tfp in self._editor_tabs._files.items():
-                        if tfp == fp:
-                            idx = i
-                            break
-                    if idx >= 0:
-                        editor = self._editor_tabs.widget(idx)
-                        if isinstance(editor, CodeEditor):
-                            try:
-                                with open(fp, 'w', encoding='utf-8') as f:
-                                    f.write(editor.toPlainText())
-                                self._editor_tabs._mark_saved(fp)
-                            except Exception as e:
-                                log.error(f"[SHUTDOWN] Failed to auto-save {fp}: {e}")
-
-                if failed:
-                    log.warning(f"[SHUTDOWN] {len(failed)} file(s) failed to save: {failed}")
-                log.info(f"[SHUTDOWN] Saved {saved_count[0]} modified file(s) on close")
-        
         # 2. Save IDE UI state
         # Only save from the active webview editor, NOT the hidden legacy _editor_tabs
         # which accumulates stale entries from old sessions and never gets cleaned.
