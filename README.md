@@ -88,6 +88,10 @@ The desktop application source: the PyQt6 shell, the agent bridge, the
 provider integrations, the agent runtime with its tools, the UI, the data
 layer and the security modules. See [Project layout](#project-layout).
 
+This is the complete source of the desktop application, so the **Cortex
+desktop app side is fully open source** under the Apache License 2.0. You can
+read it, build on it, modify it and redistribute it as described above.
+
 ### What this repository does not contain
 
 | Not included | Why |
@@ -99,9 +103,9 @@ layer and the security modules. See [Project layout](#project-layout).
 | Release binaries | Download the signed build from [cortex-ide.app](https://cortex-ide.app/) |
 
 The remaining pieces are being prepared for release separately. Until that work
-finishes, treat this as the source release of the desktop application. Please
-do not describe the project as fully open source: the licence covers the code
-in this repository, not the components listed above.
+finishes, treat this as the source release of the desktop application: the app
+source here is complete and open, while the components listed above are not part
+of this repository yet.
 
 ---
 
