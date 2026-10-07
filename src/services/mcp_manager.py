@@ -766,6 +766,11 @@ class MCPManager:
         for path, src in _foreign_global_configs():
             configs.update(self._read_config(path, "global", src))
         configs.update(self._read_config(GLOBAL_CONFIG, "global"))
+        # Restricted Mode (src/core/workspace_trust.py): an untrusted folder's
+        # servers are neither started nor offered for approval.
+        from src.core.workspace_trust import is_restricted
+        if self._project_root and is_restricted(self._project_root):
+            return configs
         if self._project_root:
             for path, src in _foreign_project_configs(self._project_root):
                 configs.update(self._read_config(path, "project", src))

@@ -113,6 +113,10 @@ class ChatHistoryManager:
         """Get all conversations for a project."""
         return self.db.get_conversations(project_path)
     
+    def get_conversation_heads(self, project_path: str, limit: int = 40) -> List[Dict]:
+        """Newest conversations with the start of their timeline (cheap list)."""
+        return self.db.get_conversation_heads(project_path, limit=limit)
+
     def get_conversation(self, conversation_id: str) -> Dict | None:
         """Get a single conversation by ID (fast lookup)."""
         return self.db.get_conversation(conversation_id)

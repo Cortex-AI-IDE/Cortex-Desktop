@@ -143,6 +143,11 @@ def load_all_cortex_context(project_root: Optional[str] = None) -> str:
     """
     if not project_root:
         return ""
+    # Restricted Mode (src/core/workspace_trust.py): files inside an untrusted
+    # folder are not instructions to the AI.
+    from src.core.workspace_trust import is_restricted
+    if is_restricted(project_root):
+        return ""
     cortex_dir = Path(project_root) / ".cortex"
     if not cortex_dir.is_dir():
         return ""

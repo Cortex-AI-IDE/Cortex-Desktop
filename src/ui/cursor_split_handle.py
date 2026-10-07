@@ -6,15 +6,26 @@ visual separation. Ultra-lightweight: no hover events, no repaints.
 """
 
 from PyQt6.QtWidgets import QSplitter, QSplitterHandle
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
+from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, QSize
 
-# --- Colours (module-level, zero allocation during paint) ---
-_BG_COLOR = QColor("#2a2a2a")       # subtle background, visible against #1e1e1e panels
-_LINE_COLOR = QColor("#4a4a4a")     # center groove line, clearly visible
-_LINE_PEN = QPen(_LINE_COLOR, 1)
+from src.ui.tokens import TOKENS as T
 
 _HANDLE_WIDTH = 6
+
+# Colours come from the live theme. They were module constants (#2a2a2a
+# groove, #4a4a4a line) picked for the dark theme, so every divider stayed a
+# thick dark bar in light mode, on startup as well as after a switch. Cached
+# per value, so a paint allocates nothing unless the theme changed.
+_colors: dict = {}
+
+
+def _color(token: str) -> QColor:
+    v = T[token]
+    c = _colors.get(v)
+    if c is None:
+        c = _colors[v] = QColor(v)
+    return c
 
 
 class CursorSplitter(QSplitter):
@@ -50,10 +61,10 @@ class CursorSplitHandle(QSplitterHandle):
             w, h = self.width(), self.height()
 
             # Fill entire handle with subtle background
-            p.fillRect(0, 0, w, h, _BG_COLOR)
+            p.fillRect(0, 0, w, h, _color('bg_secondary'))
 
             # Draw center groove line
-            p.setPen(_LINE_PEN)
+            p.setPen(QPen(_color('border'), 1))
             if self.orientation() == Qt.Orientation.Horizontal:
                 p.drawLine(w // 2, 0, w // 2, h - 1)
             else:

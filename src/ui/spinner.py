@@ -39,6 +39,56 @@ from PyQt6.QtWidgets import QWidget
 from src.ui.tokens import TOKENS as T
 
 
+# ── Theme-aware colour ─────────────────────────────────────────────────────────
+# Spinners take one colour per tool kind (the palette in
+# src/ui/html/ai_chat/spinner_demo.html), picked for a dark background, and
+# they kept the QColor they were built with. On the light theme that left
+# pale shapes on paper: the "Exploring..." GridSpinner in lime at 12-45%
+# opacity, and after a live switch every running spinner stayed in its
+# dark-theme colour. The colour is now adapted to the theme in force at
+# PAINT time: on light, too-pale colours are deepened (same hue, lower
+# lightness) to 4.5:1 against the page; on dark, only colours under the 3:1
+# graphics minimum are lifted (a spinner built on light, then switched), so
+# the demo palette stays exactly as designed there.
+_MIN_CONTRAST_LIGHT = 4.5
+_MIN_CONTRAST_DARK = 3.0
+_adapted: dict = {}
+
+
+def _luminance(c: QColor) -> float:
+    def ch(v: float) -> float:
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF())
+
+
+def _contrast(a: QColor, b: QColor) -> float:
+    la, lb = _luminance(a), _luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def themed_color(color: QColor) -> QColor:
+    """`color` adjusted to read on the current theme's background."""
+    from src.ui.tokens import is_dark
+    dark = is_dark()
+    key = (color.rgb(), dark)
+    hit = _adapted.get(key)
+    if hit is not None:
+        return hit
+    bg = QColor(T['bg'])
+    out = QColor(color)
+    target = _MIN_CONTRAST_DARK if dark else _MIN_CONTRAST_LIGHT
+    if _contrast(out, bg) < target:
+        h, s, l, a = out.getHslF()
+        h = max(h, 0.0)  # achromatic colours report -1
+        step = 0.02 if dark else -0.02
+        while 0.0 < l < 1.0 and _contrast(out, bg) < target:
+            l = min(1.0, max(0.0, l + step))
+            out = QColor.fromHslF(h, s, l, a)
+    _adapted[key] = out
+    return out
+
+
 # ── Shared easing helpers ──────────────────────────────────────────────────────
 def _smoothstep(t: float) -> float:
     """Smooth cubic S-curve: 0→1."""
@@ -113,8 +163,15 @@ class _BaseSpinner(QWidget):
         if not self._alive:
             return QColor(0, 0, 0, 0)
         try:
-            c = QColor(self._color)
-            c.setAlphaF(max(0.0, min(1.0, alpha)))
+            from src.ui.tokens import is_dark
+            c = QColor(themed_color(self._color))
+            alpha = max(0.0, min(1.0, alpha))
+            if not is_dark():
+                # The fades were tuned on a dark page, where 12% of a bright
+                # colour still glows. On paper the faint frames vanish, so
+                # light mode keeps a floor under them.
+                alpha = 0.3 + 0.7 * alpha
+            c.setAlphaF(alpha)
             return c
         except RuntimeError:
             self._alive = False
@@ -806,7 +863,7 @@ class TodoRingSpinner(_BaseSpinner):
 
         # 5. Faint glow around leading dot
         glow_r = dot_r * 2.0
-        glow_color = QColor(self._color)
+        glow_color = QColor(themed_color(self._color))
         glow_color.setAlphaF(0.15)
         p.setBrush(glow_color)
         p.drawEllipse(QPointF(dot_x, dot_y), glow_r, glow_r)
@@ -859,7 +916,7 @@ class MemorySpinner(_BaseSpinner):
 
             # Glow at peak
             if brightness > 0.8:
-                glow_color = QColor(self._color)
+                glow_color = QColor(themed_color(self._color))
                 glow_color.setAlphaF(0.15)
                 p.setBrush(glow_color)
                 p.drawEllipse(QPointF(x + bar_w / 2, cy), bar_h * 1.5, bar_h * 1.5)
@@ -920,7 +977,7 @@ class CompactionSpinner(_BaseSpinner):
         flash = max(0, math.sin(peak_phase * math.pi * 2) ** 8)
         if flash > 0.1:
             dot_r = s * 0.06 + s * 0.04 * flash
-            glow_color = QColor(self._color)
+            glow_color = QColor(themed_color(self._color))
             glow_color.setAlphaF(flash * 0.6)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(glow_color)
@@ -963,8 +1020,12 @@ class MermaidSpinner(QWidget):
         if not self._alive:
             return QColor(0, 0, 0, 0)
         try:
-            c = QColor(self._base_color)
-            c.setAlphaF(max(0.0, min(1.0, alpha)))
+            from src.ui.tokens import is_dark
+            c = QColor(themed_color(self._base_color))
+            alpha = max(0.0, min(1.0, alpha))
+            if not is_dark():
+                alpha = 0.3 + 0.7 * alpha    # same floor as _BaseSpinner._c
+            c.setAlphaF(alpha)
             return c
         except RuntimeError:
             self._alive = False

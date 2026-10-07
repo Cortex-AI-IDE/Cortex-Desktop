@@ -125,9 +125,34 @@ class NativeChatBridge(QObject):
         b.context_budget_update.connect(self._on_context_budget)
         b.agent_status_update.connect(self._on_agent_status)
         b.turn_limit_hit.connect(self._on_turn_limit_hit)
+        if hasattr(b, 'request_started'):
+            b.request_started.connect(self.unmute)
+
+    # ── New Chat: drop what a stopped turn still sends ────────────────
+    # New Chat stops a running reply, but signals the agent's thread already
+    # queued keep arriving afterwards, and ChatPanel._ensure() opens a new
+    # assistant message for any chunk when none is open: the fresh chat
+    # showed half a message from the old one. Muted, nothing that puts
+    # content in the chat gets through; the next request unmutes
+    # (agent_bridge.request_started, emitted by chat()).
+    _muted = False
+
+    def mute(self):
+        self._muted = True
+        self._in_thought = False
+        self._text_emitted = False
+        self._text_buffer = ""
+        self._active_tools.clear()
+        self._seen_tools.clear()
+        self._active_start_key.clear()
+
+    def unmute(self):
+        self._muted = False
 
     def _on_response_chunk(self, chunk: str):
         """Parse thinking tags and route to appropriate signal."""
+        if self._muted:
+            return
         try:
             import logging
             log = logging.getLogger(__name__)
@@ -226,6 +251,8 @@ class NativeChatBridge(QObject):
 
     def _on_response_complete(self, response: str):
         """Turn is done, stop all remaining tools, flush text, emit turn_done."""
+        if self._muted:
+            return
         import logging
         log = logging.getLogger(__name__)
         log.info(f"[TODO-COMPLETE] Response length: {len(response or '')}")
@@ -272,6 +299,8 @@ class NativeChatBridge(QObject):
 
     def _on_tool_activity(self, name: str, info: str, status: str):
         """Map tool activity to tool_start / tool_end."""
+        if self._muted:
+            return
         # GUI-THREAD GUARD: cap the payload before any regex/join/replace work.
         # A single streamed `info` can be multiple megabytes; scanning that on
         # the GUI thread froze the app for ~60s. Keep only the most recent tail
@@ -378,37 +407,53 @@ class NativeChatBridge(QObject):
 
     def _on_file_creating(self, file_path: str):
         """File creation started."""
+        if self._muted:
+            return
         file_id = f"file_{id(file_path)}"
         self.signals.file_creating.emit(file_id, file_path)
 
     def _on_file_diff(self, file_path: str, original: str, new: str):
         """File edit diff, convert to hunk_lines format."""
+        if self._muted:
+            return
         file_id = f"file_{id(file_path)}"
         hunk_lines = self._compute_hunk_lines(original, new)
         self.signals.file_diff.emit(file_id, file_path, hunk_lines)
 
     def _on_file_done(self, card_id: str, file_path: str, content: str, op_type: str):
         """File operation completed."""
+        if self._muted:
+            return
         added = content.count('\n') + 1 if content else 0
         self.signals.file_done.emit(card_id, added, 0)
 
     def _on_error(self, error: str):
         """Error, emit error message to chat AND close the turn."""
+        if self._muted:
+            return
         self.signals.error.emit(error)
         self.signals.turn_done.emit()
 
     # ── Phase 8: secondary UI handlers ──
     def _on_file_edit_permission_requested(self):
+        if self._muted:
+            return
         self.signals.file_edit_permission_req.emit()
 
     def _on_project_access_requested(self):
+        if self._muted:
+            return
         self.signals.project_access_req.emit()
 
     def _on_permission_requested(self, command: str, warning: str, files_json: str):
+        if self._muted:
+            return
         request_id = f"perm_{self._tool_counter}"
         self.signals.permission_req.emit(request_id, command, warning, files_json)
 
     def _on_user_question(self, payload: dict):
+        if self._muted:
+            return
         question_id = payload.get("id", "")
         question = payload.get("question", payload.get("text", ""))
         details = (payload.get("details") or "").strip()
@@ -421,6 +466,8 @@ class NativeChatBridge(QObject):
 
     def _on_todos_updated(self, todos_list: list, main_task: str):
         """Forward todos from agent_bridge to ChatPanel widget."""
+        if self._muted:
+            return
         import logging
         logging.getLogger(__name__).info(f"[TODO-BRIDGE] Received {len(todos_list)} todos from agent_bridge")
         self.signals.todos.emit(todos_list, main_task)
@@ -433,6 +480,8 @@ class NativeChatBridge(QObject):
 
     def _on_turn_limit_hit(self, pending_todos: list, checkpoint: str):
         """Forward turn_limit_hit from agent_bridge to ChatPanel for ResumeTaskCard."""
+        if self._muted:
+            return
         self.signals.turn_limit_hit.emit(pending_todos, checkpoint)
 
     def _clean_tool_info(self, info: str) -> str:

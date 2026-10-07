@@ -715,7 +715,12 @@ class SkillsManager:
 
         # 4/5. Project skills beat global ones, same shared-then-Cortex
         #      order within the project.
-        if self.project_root and os.path.isdir(self.project_root):
+        #      Not in Restricted Mode: a skill is an instruction to the AI,
+        #      and an untrusted folder does not get to give those
+        #      (src/core/workspace_trust.py).
+        from src.core.workspace_trust import is_restricted
+        if (self.project_root and os.path.isdir(self.project_root)
+                and not is_restricted(self.project_root)):
             roots += [(d, 'project') for d in _vendor_skill_dirs(self.project_root)]
             project_cortex = os.path.join(self.project_root, '.cortex', 'skills')
             if os.path.isdir(project_cortex):

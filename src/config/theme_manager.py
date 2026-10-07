@@ -191,6 +191,16 @@ class ThemeManager(QObject):
                 f"sys_detect={dt_sys:.1f}  RAM_final={_ram_pct():.1f}%"
             )
 
+    def stylesheet_for(self, theme_name: str) -> str:
+        """The QSS text for a theme ('system' resolved), "" if missing."""
+        actual = _detect_system_theme() if theme_name == "system" else theme_name
+        qss_file = THEMES_DIR / THEME_FILES.get(actual, THEME_FILES["dark"])
+        try:
+            return qss_file.read_text(encoding="utf-8")
+        except OSError as e:
+            log.error(f"[ThemeManager] cannot read {qss_file}: {e}")
+            return ""
+
     def toggle(self, app: QApplication = None):
         """Toggle between dark and light themes."""
         new_theme = "light" if self._current == "dark" else "dark"
@@ -203,12 +213,11 @@ class ThemeManager(QObject):
         QApplication.setStyleSheet() forces Qt to re-polish every widget in
         the app, including embedded QWebEngineView containers (sidebar,
         editor/chat panel, terminal, memory manager). On a RAM-starved
-        machine that single call measured 75+ real seconds and froze the
-        whole IDE. Runtime theme switches must use this instead: each panel
-        already re-themes itself independently and cheaply (data-theme JS
-        pushes, per-widget QTextBrowser restyle), this just updates which
-        theme is "current" so is_dark/current stay correct, and persists it.
-        The full QSS is still applied once at next startup via apply().
+        machine that single call once measured 75+ real seconds, and 5.6s on
+        a large chat on 2026-10-07. A runtime switch calls this, each panel
+        re-themes itself, and MainWindow._set_theme() gives the QSS to
+        everything outside the chat (src/ui/theme_remap.apply_theme_outside).
+        The full QSS is applied once at the next startup via apply().
         """
         theme_name = theme_name if theme_name in VALID_THEMES else "dark"
         self._current = theme_name

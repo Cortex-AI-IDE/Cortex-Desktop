@@ -97,6 +97,13 @@ class GitManager(QObject):
         """Set the repository path."""
         if not self._available:
             return False
+        # Restricted Mode (src/core/workspace_trust.py): a repository's own
+        # config can name programs git runs, so Cortex does not drive git in
+        # a folder the user has not trusted.
+        from src.core.workspace_trust import is_restricted
+        if is_restricted(path):
+            self._repo_path = None
+            return False
             
         # Check if it's a git repository
         git_dir = Path(path) / ".git"

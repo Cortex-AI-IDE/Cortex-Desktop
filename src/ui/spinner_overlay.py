@@ -21,7 +21,7 @@ from PyQt6.QtGui import QPainter, QColor, QFont
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
 
 from src.ui.spinner import spinner_for, GridSpinner
-from src.ui.tokens import TOKENS as T
+from src.ui.tokens import CHAT_TOKENS as T
 
 log = logging.getLogger(__name__)
 
@@ -345,7 +345,7 @@ class SpinnerOverlay(QFrame):
                 w.deleteLater()
 
         # Create new spinner
-        self._spinner = spinner_for(key, size=36)
+        self._spinner = spinner_for(key, size=36, color=T['status_running'])
         self._spinner_container_layout.addWidget(
             self._spinner, alignment=Qt.AlignmentFlag.AlignCenter
         )

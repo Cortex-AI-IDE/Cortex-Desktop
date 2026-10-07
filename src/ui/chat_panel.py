@@ -42,7 +42,20 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QStackedWidget, QWidgetAction, QDialog,
 )
 
-from src.ui.tokens import TOKENS as T, build_qss, build_markdown_css, build_code_block_css
+# The chat reads its own palette (tokens.CHAT_DARK / CHAT_LIGHT layered over
+# the active theme), so restyling the chat never restyles the sidebar,
+# settings or tool cards that share the base tokens.
+from src.ui.tokens import (CHAT_TOKENS as T, chat_theme, build_qss,
+                           build_markdown_css as _build_markdown_css,
+                           build_code_block_css as _build_code_block_css, family_list)
+
+
+def build_markdown_css(t=None):
+    return _build_markdown_css(t if t is not None else chat_theme())
+
+
+def build_code_block_css(t=None):
+    return _build_code_block_css(t if t is not None else chat_theme())
 from src.ui.spinner import GridSpinner
 from src.ui.spinner_overlay import SpinnerOverlay
 from src.ui.edit_state_manager import EditStateManager
@@ -247,11 +260,11 @@ def _extract_code_fences_for_streaming(text: str) -> tuple[str, dict[str, str]]:
         # Theme-aware pre style, was hardcoded dark (#1e1e1e bg, #d9d9d9
         # text), which clashed with the light page AND with the light
         # highlight palette baked into code_html.
-        lang_label = f'<span style="color:{T["accent"]};font-size:11px;">{_html.escape(lang)}</span><br/>' if lang else ''
-        styled = (f'<pre style="margin:8px 0;padding:10px 14px;background:{T["bg"]};'
-                  f'border:1px solid {T["border_dim"]};border-left:3px solid {T["accent"]};'
-                  f'border-radius:0 6px 6px 0;white-space:pre;overflow-x:auto;'
-                  f'font-family:\'JetBrains Mono\',\'Fira Code\',Consolas,monospace;font-size:12px;'
+        lang_label = f'<span style="color:{T["muted"]};font-size:11px;">{_html.escape(lang)}</span><br/>' if lang else ''
+        styled = (f'<pre style="margin:8px 0;padding:10px 14px;background:{T["bg_card"]};'
+                  f'border:1px solid {T["border"]};'
+                  f'border-radius:6px;white-space:pre;overflow-x:auto;'
+                  f'font-family:{T["font_mono"]};font-size:12px;'
                   f'color:{T["text"]};">'
                   f'{lang_label}{code_html}</pre>')
         key = f'«FENCE{idx}»'
@@ -484,7 +497,7 @@ class MermaidStreamingCard(QFrame):
         h.setSpacing(10)
 
         from src.ui.spinner import MermaidSpinner
-        self._spinner = MermaidSpinner(size=18, color=T['red'])
+        self._spinner = MermaidSpinner(size=18, color=T['accent'])
         self._spinner.start()
         h.addWidget(self._spinner)
 
@@ -496,34 +509,19 @@ class MermaidStreamingCard(QFrame):
     def retheme(self):
         """Theme-aware card style. Bug history: the gradient hardcoded a
         near-black end stop (rgba(13,17,23,...)) and white-based label text
-       , a dark bar with unreadable text floating on the light page."""
+       , a dark bar with unreadable text floating on the light page. Now a
+        plain card from the chat tokens; the spinner carries the colour."""
         try:
-            if T['bg'] == "#1e1e1e":  # dark
-                self.setStyleSheet(
-                    "#mermaidStreamingCard {"
-                    "  margin: 8px 0; border-radius: 8px;"
-                    "  border: 1px solid rgba(255,54,112,0.25);"
-                    "  background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                    "    stop:0 rgba(255,54,112,0.08), stop:1 rgba(13,17,23,0.95));"
-                    "}"
-                )
-                self._lbl.setStyleSheet(
-                    "color: rgba(255,255,255,0.55); font-size: 12px; font-style: italic;"
-                    "border: none; background: transparent;"
-                )
-            else:  # light, warm surface, terracotta accent, dark text
-                self.setStyleSheet(
-                    "#mermaidStreamingCard {"
-                    "  margin: 8px 0; border-radius: 8px;"
-                    "  border: 1px solid rgba(201,106,62,0.35);"
-                    "  background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                    "    stop:0 rgba(201,106,62,0.10), stop:1 rgba(244,241,234,0.95));"
-                    "}"
-                )
-                self._lbl.setStyleSheet(
-                    "color: rgba(26,24,20,0.60); font-size: 12px; font-style: italic;"
-                    "border: none; background: transparent;"
-                )
+            self.setStyleSheet(
+                "#mermaidStreamingCard {"
+                "  margin: 8px 0; border-radius: 8px;"
+                f"  border: 1px solid {T['border']}; background: {T['bg_card']};"
+                "}"
+            )
+            self._lbl.setStyleSheet(
+                f"color: {T['text_dim']}; font-size: 12px; font-style: italic;"
+                "border: none; background: transparent;"
+            )
         except RuntimeError:
             pass
 
@@ -607,9 +605,9 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
             header += f', <i>{html.escape(str(query))}</i>'
 
         parts = [f'<div style="margin:4px 0;font-size:13px;">']
-        parts.append(f'<div style="color:#a0a0a0;margin-bottom:6px;">{header}</div>')
+        parts.append(f'<div style="color:{T["text_dim"]};margin-bottom:6px;">{header}</div>')
         if count:
-            parts.append(f'<div style="color:#4ec9b0;font-size:11px;margin-bottom:8px;">'
+            parts.append(f'<div style="color:{T["muted"]};font-size:11px;margin-bottom:8px;">'
                          f'✅ {count} result{"s" if count != 1 else ""}{elapsed_str}</div>')
             for i, r in enumerate(results[:8], 1):
                 if isinstance(r, dict):
@@ -621,20 +619,20 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
                 else:
                     continue
                 parts.append(f'<div style="margin:3px 0;">')
-                parts.append(f'<span style="color:#7c5cff;font-weight:600;">{i}.</span> '
-                             f'<span style="color:#e0e0e0;">{html.escape(str(title)[:120])}</span>')
+                parts.append(f'<span style="color:{T["md_list_marker"]};">{i}.</span> '
+                             f'<span style="color:{T["text"]};font-weight:600;">{html.escape(str(title)[:120])}</span>')
                 if url:
                     u = html.escape(str(url))
                     display_url = u[:80] + '...' if len(u) > 80 else u
-                    parts.append(f'<br><span style="color:#6a9955;font-size:11px;">{display_url}</span>')
+                    parts.append(f'<br><span style="color:{T["md_link"]};font-size:11px;">{display_url}</span>')
                 if snippet:
-                    parts.append(f'<br><span style="color:#808080;font-size:11px;">'
+                    parts.append(f'<br><span style="color:{T["text_secondary"]};font-size:11px;">'
                                  f'{html.escape(str(snippet)[:200])}</span>')
                 parts.append('</div>')
             if count > 8:
-                parts.append(f'<div style="color:#808080;font-size:11px;">… and {count - 8} more results</div>')
+                parts.append(f'<div style="color:{T["muted"]};font-size:11px;">… and {count - 8} more results</div>')
         else:
-            parts.append('<div style="color:#808080;">No results found.</div>')
+            parts.append(f'<div style="color:{T["muted"]};">No results found.</div>')
         parts.append('</div>')
         return '\n'.join(parts)
 
@@ -651,7 +649,7 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
             header += f', {html.escape(str(title)[:80])}'
 
         parts = [f'<div style="margin:4px 0;font-size:13px;">']
-        parts.append(f'<div style="color:#a0a0a0;margin-bottom:6px;">{header}</div>')
+        parts.append(f'<div style="color:{T["text_dim"]};margin-bottom:6px;">{header}</div>')
         status_icon = '✅' if str(status).startswith('2') or not status else '⚠️'
         meta_parts = []
         if status:
@@ -665,12 +663,12 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
         if elapsed_str:
             meta_parts.append(elapsed_str.lstrip(' · '))
         if meta_parts:
-            parts.append(f'<div style="color:#4ec9b0;font-size:11px;margin-bottom:6px;">'
+            parts.append(f'<div style="color:{T["muted"]};font-size:11px;margin-bottom:6px;">'
                          f'{status_icon} {" · ".join(meta_parts)}</div>')
         if url:
             u = html.escape(str(url))
             display_url = u[:100] + '...' if len(u) > 100 else u
-            parts.append(f'<div style="color:#6a9955;font-size:11px;">{display_url}</div>')
+            parts.append(f'<div style="color:{T["md_link"]};font-size:11px;">{display_url}</div>')
         parts.append('</div>')
         return '\n'.join(parts)
 
@@ -685,7 +683,7 @@ def _show_toast(parent, message: str, duration_ms: int = 3000):
     from PyQt6.QtCore import QTimer as _QTimer
     toast = QLabel(message, parent)
     toast.setStyleSheet(
-        "background:#333; color:#fff; padding:8px 16px; border-radius:6px;"
+        f"background:{T['text']}; color:{T['bg']}; padding:8px 16px; border-radius:6px;"
         "font-size:12px; font-weight:500;"
     )
     toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -889,37 +887,50 @@ def _prose_table_colors() -> dict:
     palette (all existing token values, so the live-switch remap in
     _adapt_restored_html_to_theme handles them automatically).
     """
-    from src.ui.tokens import DARK
-    if T['bg'] == DARK['bg']:
-        return {
-            'tbl_border': '#393939',
-            'col_border': '#353535',
-            'row_border': '#353535',
-            'hdr_color':  '#9d7cd8',
-            'hdr_border': '#6a568e',
-            'cell_color': '#d9d9d9',
-        }
+    # Chat palette, both themes: header in the text colour on a faint band
+    # (it was purple #9d7cd8 in dark, terracotta-underlined in light), cells
+    # in the secondary text colour, hairline borders.
     return {
-        'tbl_border': '#CCC9C0',                 # = LIGHT border
-        'col_border': '#CCC9C0',
-        'row_border': '#CCC9C0',
-        'hdr_color':  '#1A1814',                 # = LIGHT md_heading (dark font)
-        'hdr_border': '#C96A3E',                 # = LIGHT accent (terracotta)
-        'cell_color': 'rgba(26,24,20,0.92)',     # = LIGHT text (dark font)
+        'tbl_border': T['md_table_border'],
+        'col_border': T['md_table_border'],
+        'row_border': T['md_table_border'],
+        'hdr_color':  T['text'],
+        'hdr_bg':     T['bg_card'],
+        'hdr_border': T['border'],
+        'cell_color': T['text_secondary'],
     }
 
 
-# Legacy hardcoded dark-table inline colors → warm-light equivalents.
-# Messages rendered under dark mode carry these NON-TOKEN colors baked into
-# their table inline styles; the token-based remap passes can't recognize
-# them, so a live dark→light switch left old tables purple/washed-out.
-_LEGACY_TABLE_COLOR_MAP = {
-    '#9d7cd8': '#1A1814',              # purple header text → dark warm font
-    '#6a568e': '#C96A3E',              # purple header underline → terracotta
-    '#d9d9d9': 'rgba(26,24,20,0.92)',  # light-gray cell text → dark warm font
-    '#353535': '#CCC9C0',              # dark row/col borders → warm light border
-    '#393939': '#CCC9C0',              # dark outer table border → warm light border
+# Table colours earlier versions baked into saved messages' inline styles,
+# by role. Old conversations would otherwise keep purple (dark) or
+# terracotta-on-cream (light) tables after the redesign; on restore and on a
+# theme switch these are mapped to today's colours for the active theme.
+_LEGACY_TABLE_ROLES = {
+    'hdr_color':  ('#9d7cd8', '#1a1814'),
+    'hdr_border': ('#6a568e', '#c96a3e'),
+    'cell_color': ('#d9d9d9', 'rgba(26,24,20,0.92)'),
+    'row_border': ('#353535', '#393939', '#ccc9c0'),
 }
+_TABLE_TAG_STYLE_RE = re.compile(r'<(?:table|th|td)\b[^>]*?style="[^"]*"', re.I)
+
+
+def _remap_legacy_table_colors(html: str) -> str:
+    """Old baked table colours -> today's, inside table/th/td styles only
+    (the same hex values elsewhere in a message are left alone)."""
+    if '<t' not in html:
+        return html
+    c = _prose_table_colors()
+    pairs = [(old, c[role]) for role, olds in _LEGACY_TABLE_ROLES.items() for old in olds]
+
+    def _fix(m):
+        tag = m.group(0)
+        low = tag.lower()
+        for old, new in pairs:
+            if old in low:
+                tag = re.sub(re.escape(old), new, tag, flags=re.I)
+                low = tag.lower()
+        return tag
+    return _TABLE_TAG_STYLE_RE.sub(_fix, html)
 
 
 def _fix_prose_tables(html: str, doc_width: int = 760) -> str:
@@ -954,8 +965,9 @@ def _fix_prose_tables(html: str, doc_width: int = 760) -> str:
         col_w = f'{100.0 / n_cols:.1f}%'
         header_style = (
             f'color:{c["hdr_color"]};font-weight:600;padding:8px 10px;'
+            f'background-color:{c["hdr_bg"]};'
             f'text-align:left;vertical-align:top;'
-            f'border-bottom:2px solid {c["hdr_border"]};'
+            f'border-bottom:1px solid {c["hdr_border"]};'
             f'border-right:1px solid {c["col_border"]};'
             f'width:{col_w};'
             f'word-wrap:break-word;'
@@ -989,27 +1001,23 @@ def _fix_prose_code_blocks(html: str) -> str:
     if '<pre' not in html and '<code' not in html:
         return html
 
-    bg = T['bg']
-    border_dim = T['border_dim']
     radius_md = T['radius_md']
     font_mono = T['font_mono']
     font_xxs = T['font_size_xxs']
     md_code = T['md_code']
     md_code_bg = T['md_code_bg']
     text_color = T['text']
-    accent = T.get('accent', '#7c5cff')
     line_h = T.get('line_height_code', '1.55')
 
-    # Style <pre> blocks (fenced code blocks), designed code container with an
-    # accent left-border so commands/code read as an intentional block, not a
-    # raw dark row. Matches the CodeBlockWidget card aesthetic.
+    # Style <pre> blocks (fenced code blocks), a bordered card on the card
+    # surface so commands/code read as an intentional block, not a raw row. Matches the CodeBlockWidget card aesthetic.
     def _style_pre(m):
         tag = m.group(0)
         # If the <pre> already has a style attribute, replace it; otherwise add one
         pre_style = (f'style="max-width:100%;box-sizing:border-box;'
-                     f'margin:10px 0;padding:10px 14px 12px 14px;background:{bg};'
-                     f'border:1px solid {border_dim};border-left:3px solid {accent};'
-                     f'border-radius:0 {radius_md} {radius_md} 0;'
+                     f'margin:10px 0;padding:10px 14px 12px 14px;background:{T["bg_card"]};'
+                     f'border:1px solid {T["border"]};'
+                     f'border-radius:{radius_md};'
                      f'white-space:pre;overflow-x:auto;'
                      f'font-family:{font_mono};font-size:{font_xxs};"')
         if 'style=' in tag:
@@ -1190,7 +1198,7 @@ def _adapt_restored_html_to_theme(html: str) -> str:
        mid-range syntax-highlight accent hues (green/blue/purple/etc.,
        never that dark or that light) are never touched.
     """
-    from src.ui.tokens import DARK, LIGHT
+    DARK, LIGHT = chat_theme("dark"), chat_theme("light")
     if T["bg"] == DARK["bg"]:
         src_pal, dst_pal = LIGHT, DARK   # restoring under dark → remap light colors
     else:
@@ -1235,10 +1243,7 @@ def _adapt_restored_html_to_theme(html: str) -> str:
     # token passes can't recognize. Map them explicitly when switching to
     # light. (The light-side table colors ARE token values, so pass 1
     # already handles the light→dark direction.)
-    if not is_now_dark:
-        for legacy_dark, light_val in _LEGACY_TABLE_COLOR_MAP.items():
-            if legacy_dark in html:
-                html = html.replace(legacy_dark, light_val)
+    html = _remap_legacy_table_colors(html)
 
     # Pass 3: luminance fallback for orphaned colors from an earlier
     # palette generation that match nothing in passes 1-2.
@@ -1314,16 +1319,17 @@ def _user_bubble_qss() -> str:
     deliberately a visibly darker warm surface for exactly this contrast.
     """
     return (
+        # A soft right-aligned bubble in the body font. It had an orange
+        # stripe on its right edge, square corners and the CODE font.
         f"QTextBrowser#userBubble {{"
         f"  background: {T['user_bubble']};"
         f"  border: none;"
-        f"  border-right: 3px solid {T['orange']};"
-        f"  border-radius: 0px;"
-        f"  padding: 4px 12px;"
+        f"  border-radius: 12px;"
+        f"  padding: 6px 12px;"
         f"  font-size: {T['font_size']};"
-        f"  line-height: 1.2;"
+        f"  line-height: 1.4;"
         f"  color: {T['text']};"
-        f"  font-family: {T['font_mono']};"
+        f"  font-family: {T['font_ui']};"
         f"}}"
     )
 
@@ -1613,11 +1619,11 @@ class ThoughtsBlock(CollapsibleCard):
         # lazily creates it on first access (expand, retheme, or freeze).
         self._spinner = None
         # Get theme color for accent line (lightweight dict lookup, not heavy)
-        from src.ui.tokens import T as _Tcls; _tok = _Tcls()
+        _Tcls = chat_theme; _tok = _Tcls()
         # Phase 4: Word/char count label in header (right side, subtle)
         self._count_label = QLabel("")
         self._count_label.setStyleSheet(
-            "color:rgba(255,255,255,0.35); font-size:11px; font-weight:400; padding-right:4px;"
+            f"color:{_tok['muted']}; font-size:11px; font-weight:400; padding-right:4px;"
         )
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._count_label.hide()
@@ -1629,12 +1635,13 @@ class ThoughtsBlock(CollapsibleCard):
         # Header, zero margins to eliminate gap between Thinking card and prose
         self.header.layout().setContentsMargins(4, 4, 4, 4)
         self.body_layout.setSpacing(4)
-        # Left accent border, gives the card a visual identity
+        # Thin neutral rule on the left edge; the lime accent is kept for
+        # things that are live (spinners, running state, focus).
         self._accent_line = QFrame(self)
         self._accent_line.setObjectName("thoughtAccent")
-        self._accent_line.setFixedWidth(3)
+        self._accent_line.setFixedWidth(2)
         self._accent_line.setStyleSheet(
-            f"background:{_tok.get('tool_thought', '#7c6ce7')}; border:none; border-radius:1px;"
+            f"background:{_tok.get('border', '#2c3036')}; border:none; border-radius:1px;"
         )
         # Position accent line on the left edge of the body
         self._accent_line.setParent(self.body)
@@ -1693,7 +1700,7 @@ class ThoughtsBlock(CollapsibleCard):
         constructed in quick succession.
         """
         if self._spinner is None:
-            from src.ui.tokens import T as _Tcls
+            _Tcls = chat_theme
             self._spinner = GridSpinner(14, _Tcls().get("tool_thought", "#7c6ce7"))
             self.add_header_widget(self._spinner)
         return self._spinner
@@ -1858,13 +1865,15 @@ class ThoughtsBlock(CollapsibleCard):
     # ── Theming ──────────────────────────────────────────────────
     def _apply_theme_styles(self):
         """Re-apply all styles from current theme tokens, called on init and on theme switch."""
-        from src.ui.tokens import T; _get_theme = T
+        _get_theme = chat_theme
         t = _get_theme()
         think_color = t['think']
         # A thin left stripe instead of a full violet box (2026-09-11
         # redesign): a thought is context for the work, not the headline.
+        # The stripe is a hairline in the border colour; the label and
+        # chevron keep the muted think colour.
         self.setStyleSheet(
-            f"QFrame#cardFrame {{ border:none; border-left:2px solid {think_color};"
+            f"QFrame#cardFrame {{ border:none; border-left:2px solid {t['border']};"
             f" border-radius:0px; background:transparent; }}"
         )
         self.chev.setStyleSheet(f"color:{think_color}; font-size:11px;")
@@ -1897,7 +1906,7 @@ class ThoughtsBlock(CollapsibleCard):
             self._body_style_pending = True
             return
         self._body_style_pending = False
-        from src.ui.tokens import T; _get_theme = T
+        _get_theme = chat_theme
         t = _get_theme()
         self._lbl.setStyleSheet(
             f"background:transparent; color:{t['mono_muted']};"
@@ -2003,7 +2012,7 @@ class ThoughtsBlock(CollapsibleCard):
             except Exception:
                 pass
         # Dim the label to signal it's no longer active (use current theme)
-        from src.ui.tokens import T; _t = T()
+        _t = chat_theme()
         self.label.setStyleSheet(
             f"color:{_t['mono_muted']}; font-family:{_t['font_ui']}; font-size:13px;"
             f" font-weight:400; letter-spacing:0.2px;"
@@ -2153,8 +2162,8 @@ class ToolRow(QWidget):
 
     def mark_done(self, ok=True):
         self.gutter.mark_done(ok)
-        # Phase 2C: Brief green/red flash on tool completion, visual feedback
-        color = T.get('green', '#22c55e') if ok else T.get('red', '#ef4444')
+        # Brief flash on completion: lime when it worked, red when it failed
+        color = T['accent'] if ok else T['red']
         self.setStyleSheet(
             f"border-left:3px solid {color};"
             f"background:transparent;"
@@ -2584,7 +2593,7 @@ class ToolGroup(CollapsibleCard):
             """Convert markdown links [text](url) to HTML <a> tags."""
             return _re.sub(
                 r'\[([^\]]+)\]\(([^)]+)\)',
-                r"<a href='\2' style='color:#5B8CFF;text-decoration:none;'>\1</a>",
+                r"<a href='\2' style='color:" + T['md_link'] + r";text-decoration:none;'>\1</a>",
                 text
             )
         
@@ -2652,11 +2661,11 @@ class ToolGroup(CollapsibleCard):
                 url = r.get('url', '')
                 snippet = r.get('snippet', '')[:150]
                 if title and url:
-                    lines.append(f"• <a href='{url}' style='color:#5B8CFF;text-decoration:none;font-weight:bold;'>{title}</a>")
+                    lines.append(f"• <a href='{url}' style='color:{T['md_link']};text-decoration:none;font-weight:bold;'>{title}</a>")
                 elif title:
                     lines.append(f"• {title}")
                 if snippet:
-                    lines.append(f"  <span style='color:#888;'>{snippet}</span>")
+                    lines.append(f"  <span style='color:{T['text_secondary']};'>{snippet}</span>")
             return f"{len(data['items'])} results:<br>" + "<br>".join(lines)
         if 'results' in data and data['results']:
             lines = []
@@ -2664,7 +2673,7 @@ class ToolGroup(CollapsibleCard):
                 title = r.get('title', '')
                 url = r.get('url', '')
                 if title and url:
-                    lines.append(f"• <a href='{url}' style='color:#5B8CFF;text-decoration:none;font-weight:bold;'>{title}</a>")
+                    lines.append(f"• <a href='{url}' style='color:{T['md_link']};text-decoration:none;font-weight:bold;'>{title}</a>")
                 elif title:
                     lines.append(f"• {title}")
             return f"{len(data['results'])} results:<br>" + "<br>".join(lines)
@@ -2833,8 +2842,9 @@ class ToolGroup(CollapsibleCard):
         return get_tool_icon(self._kind)[1]
 
     def _stripe_qss(self) -> str:
-        color = T.get(self._color_token(), T['tool_generic'])
-        return (f"QFrame#cardFrame {{ border:none; border-left:2px solid {color};"
+        # Neutral hairline: the gutter icon says which tool, the status
+        # mark says running/done/failed, so the stripe carries no colour.
+        return (f"QFrame#cardFrame {{ border:none; border-left:2px solid {T['border']};"
                 f" border-radius:0px; background:{T['card_bg_subtle']}; }}")
 
     def _note_tool(self, arg, kind):
@@ -2865,7 +2875,7 @@ class ToolGroup(CollapsibleCard):
         elif self._rows and self._done >= len(self._rows):
             mark, token = "✓", 'status_ok'
         else:
-            mark, token = "●", 'mono_muted'
+            mark, token = "●", 'status_running'
         if mark != self._status_mark:
             self._status_mark = mark
             self._status.setText(mark)
@@ -2957,11 +2967,11 @@ LANG_ICON = {  # extension -> emoji icon (v2 design)
 
 def _badge(filename: str) -> QLabel:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    label, color = LANG_BADGE.get(ext, (ext or "txt", "#5b5b5b"))
+    label, _color = LANG_BADGE.get(ext, (ext or "txt", None))
     b = QLabel(label)
     b.setStyleSheet(
-        f"background:{color};color:#fff;font-size:10px;font-weight:600;"
-        f"padding:1px 6px;border-radius:0px;font-family:{T['font_mono']};")
+        f"background:{T['bg_hover']};color:{T['text_secondary']};font-size:10px;font-weight:600;"
+        f"padding:1px 6px;border-radius:4px;font-family:{T['font_mono']};")
     return b
 
 def _counts_label(added: int, removed: int) -> QLabel:
@@ -3486,7 +3496,7 @@ class EditedFilesSection(QFrame):
         # Count badge
         self._count = QLabel("0")
         self._count.setStyleSheet(
-            f"background:rgba(124,108,231,0.15);color:{T['think_label']};"
+            f"background:{T['bg_hover']};color:{T['text_secondary']};"
             f"font-size:11px;font-weight:500;padding:1px 7px;border-radius:9px;"
         )
 
@@ -3681,14 +3691,18 @@ class TableWidget(QFrame):
         self._apply_table_theme()
 
         # Fill data, strip ** and render bold cells with bold font
+        # A bare QFont() has no family and fell back to a monospace face, so
+        # table cells read like code next to the prose around them.
         bold_font = _QFont()
+        bold_font.setFamilies(family_list(T['font_ui']))
         bold_font.setPointSize(11)
         bold_font.setWeight(_QFont.Weight.DemiBold)
         normal_font = _QFont()
+        normal_font.setFamilies(family_list(T['font_ui']))
         normal_font.setPointSize(11)
 
         self._bold_cells = []
-        _bold_color = _QColor("#ebebeb" if T['bg'] == "#1e1e1e" else "#1A1814")
+        _bold_color = _QColor(T['text'])
         for r, row_data in enumerate(rows):
             # Pad row to match column count
             padded = list(row_data) + [''] * max(0, n_cols - len(row_data))
@@ -3799,12 +3813,14 @@ class TableWidget(QFrame):
     def _apply_table_theme(self):
         """(Re)apply LIVE theme colors, shares _prose_table_colors() with
         the streaming-pass HTML table so both render passes look identical."""
-        from src.ui.tokens import DARK
         c = _prose_table_colors()
-        # Selection tint, light on dark and dark on light, kept translucent
-        # so the cell's own text colour still reads through it.
-        _sel_bg = ("rgba(255,255,255,0.16)" if T['bg'] == DARK['bg']
-                   else "rgba(0,0,0,0.10)")
+        # Selection: an OPAQUE surface tone with the full text colour. It was
+        # a translucent tint over the muted cell colour, and Qt paints the
+        # palette's Highlight (system blue) under a translucent ::item
+        # background, so a clicked cell showed grey text on bright blue,
+        # unreadable in both themes. Set as QSS and as the palette, so no
+        # style path falls back to the system colours.
+        _sel_bg, _sel_fg = T['bg_hover'], T['text']
         # EXPLICIT background from live tokens, NOT transparent. On a live
         # theme switch main_window deliberately skips the app-wide QSS
         # reapply (75s WebEngine re-polish freeze), so the global
@@ -3824,6 +3840,8 @@ class TableWidget(QFrame):
             f"  font-size: {T['font_size_xs']};"
             f"  outline: none;"
             f"  gridline-color: {c['row_border']};"
+            f"  selection-background-color: {_sel_bg};"
+            f"  selection-color: {_sel_fg};"
             f"}}"
             f"QTableWidget::item {{"
             f"  font-family: {T['font_mono']};"
@@ -3837,32 +3855,39 @@ class TableWidget(QFrame):
             # Selected cells need a visible highlight. This was transparent
             # back when the table was NoSelection, so with selection enabled
             # a drag would have selected text with nothing to show for it.
-            f"QTableWidget::item:selected {{"
+            f"QTableWidget::item:selected, QTableWidget::item:selected:active,"
+            f" QTableWidget::item:selected:!active {{"
             f"  background: {_sel_bg};"
-            f"  color: {c['cell_color']};"
+            f"  color: {_sel_fg};"
             f"}}"
             f"QHeaderView {{"
             f"  background: transparent;"
             f"}}"
             f"QHeaderView::section {{"
-            f"  background: transparent;"
+            f"  background: {c['hdr_bg']};"
             f"  color: {c['hdr_color']};"
             f"  font-weight: 600;"
-            f"  font-family: {T['font_mono']};"
+            f"  font-family: {T['font_ui']};"
             f"  font-size: {T['font_size_xs']};"
             f"  padding: 8px 12px;"
             f"  border: none;"
-            f"  border-bottom: 2px solid {c['hdr_border']};"
+            f"  border-bottom: 1px solid {c['hdr_border']};"
             f"  border-right: 1px solid {c['col_border']};"
             f"}}"
         )
+        from PyQt6.QtGui import QPalette, QColor
+        pal = self._table.palette()
+        for grp in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+            pal.setColor(grp, QPalette.ColorRole.Highlight, QColor(_sel_bg))
+            pal.setColor(grp, QPalette.ColorRole.HighlightedText, QColor(_sel_fg))
+        self._table.setPalette(pal)
 
     def retheme(self):
         """Live theme switch, re-apply table QSS + bold-cell foregrounds."""
         from PyQt6.QtGui import QColor as _QColor
         try:
             self._apply_table_theme()
-            _bold_color = _QColor("#ebebeb" if T['bg'] == "#1e1e1e" else "#1A1814")
+            _bold_color = _QColor(T['text'])
             for r, col in getattr(self, '_bold_cells', []):
                 item = self._table.item(r, col)
                 if item is not None:
@@ -3942,8 +3967,8 @@ class CodeBlockWidget(QFrame):
         self._lang = lang  # Store language for serialization
         self._code_text = ""  # Raw code (set via set_raw_code)
         self.setStyleSheet(
-            f"QFrame {{ margin:5px 0; border-radius:0 {T['radius_md']} {T['radius_md']} 0;"
-            f"border:1px solid {T['border_dim']}; border-left:3px solid {T['accent']}; }}"
+            f"QFrame {{ margin:5px 0; border-radius:{T['radius_md']};"
+            f"border:1px solid {T['border']}; }}"
         )
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -3963,7 +3988,7 @@ class CodeBlockWidget(QFrame):
         if lang:
             self._lang_lbl = lang_lbl = QLabel(lang.upper())
             lang_lbl.setStyleSheet(
-                f"color:{T['accent']}; font-family:{T['font_mono']};"
+                f"color:{T['muted']}; font-family:{T['font_mono']};"
                 f"font-size:10px; letter-spacing:0.5px; font-weight:600; border:none; background:transparent;"
             )
             h.addWidget(lang_lbl)
@@ -4124,8 +4149,8 @@ class CodeBlockWidget(QFrame):
         """
         try:
             self.setStyleSheet(
-                f"QFrame {{ margin:5px 0; border-radius:0 {T['radius_md']} {T['radius_md']} 0;"
-                f"border:1px solid {T['border_dim']}; border-left:3px solid {T['accent']}; }}"
+                f"QFrame {{ margin:5px 0; border-radius:{T['radius_md']};"
+                f"border:1px solid {T['border']}; }}"
             )
             self._header.setStyleSheet(
                 f"background:{T['bg_raised']};"
@@ -4133,7 +4158,7 @@ class CodeBlockWidget(QFrame):
             )
             if self._lang_lbl is not None:
                 self._lang_lbl.setStyleSheet(
-                    f"color:{T['accent']}; font-family:{T['font_mono']};"
+                    f"color:{T['muted']}; font-family:{T['font_mono']};"
                     f"font-size:10px; letter-spacing:0.5px; font-weight:600; border:none; background:transparent;"
                 )
             self._collapse_chev.setStyleSheet(
@@ -4276,86 +4301,37 @@ class MermaidDiagramCard(QFrame):
         """Theme-aware card style. Bug history: the gradient hardcoded a
         near-black end stop (rgba(13,17,23,...)), white Expand text and
         white-tint Copy borders, a dark gradient bar with unreadable
-        buttons floating on the light page. Dark keeps the original pink
-        design; light uses the warm terracotta accent on a light surface."""
+        buttons floating on the light page. Now one card from the chat
+        tokens: neutral surface, Expand as the lime primary, Copy outlined."""
         try:
-            is_dark = T['bg'] == "#1e1e1e"
-            if is_dark:
-                self.setStyleSheet(
-                    "#mermaidCard {"
-                    "  margin: 10px 0; border-radius: 10px;"
-                    "  border: 1px solid rgba(255,54,112,0.35);"
-                    "  background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                    "    stop:0 rgba(255,54,112,0.10), stop:1 rgba(13,17,23,0.97));"
-                    "}"
-                )
-                self._badge_lbl.setStyleSheet(
-                    "color: rgba(255,54,112,0.70); font-size: 10px; font-weight: 500;"
-                    "border: none; background: transparent; letter-spacing: 0.3px;"
-                )
-                self._expand_btn.setStyleSheet(
-                    "QPushButton {"
-                    "  color: #fff; font-size: 12px; font-weight: 600;"
-                    "  padding: 0 14px; border-radius: 6px;"
-                    "  border: 1px solid rgba(255,54,112,0.50);"
-                    "  background: rgba(255,54,112,0.18);"
-                    "}"
-                    "QPushButton:hover {"
-                    "  background: rgba(255,54,112,0.32);"
-                    "  border-color: rgba(255,54,112,0.75);"
-                    "}"
-                )
-                self._copy_btn.setStyleSheet(
-                    f"QPushButton {{"
-                    f"  color: {T['text_dim']}; font-size: 11px; font-weight: 500;"
-                    f"  padding: 0 12px; border-radius: 6px;"
-                    f"  border: 1px solid rgba(255,255,255,0.12);"
-                    f"  background: rgba(255,255,255,0.05);"
-                    f"}}"
-                    f"QPushButton:hover {{"
-                    f"  background: rgba(255,255,255,0.10);"
-                    f"  border-color: rgba(255,255,255,0.22);"
-                    f"}}"
-                )
-            else:
-                self.setStyleSheet(
-                    "#mermaidCard {"
-                    "  margin: 10px 0; border-radius: 10px;"
-                    "  border: 1px solid rgba(201,106,62,0.40);"
-                    "  background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                    "    stop:0 rgba(201,106,62,0.10), stop:1 rgba(244,241,234,0.97));"
-                    "}"
-                )
-                self._badge_lbl.setStyleSheet(
-                    "color: rgba(201,106,62,0.90); font-size: 10px; font-weight: 500;"
-                    "border: none; background: transparent; letter-spacing: 0.3px;"
-                )
-                self._expand_btn.setStyleSheet(
-                    "QPushButton {"
-                    "  color: #ffffff; font-size: 12px; font-weight: 600;"
-                    "  padding: 0 14px; border-radius: 6px;"
-                    "  border: 1px solid rgba(201,106,62,0.70);"
-                    "  background: rgba(201,106,62,0.90);"
-                    "}"
-                    "QPushButton:hover {"
-                    "  background: #B85A32;"
-                    "  border-color: #B85A32;"
-                    "}"
-                )
-                self._copy_btn.setStyleSheet(
-                    f"QPushButton {{"
-                    f"  color: {T['text_dim']}; font-size: 11px; font-weight: 500;"
-                    f"  padding: 0 12px; border-radius: 6px;"
-                    f"  border: 1px solid rgba(26,24,20,0.18);"
-                    f"  background: rgba(26,24,20,0.05);"
-                    f"}}"
-                    f"QPushButton:hover {{"
-                    f"  background: rgba(26,24,20,0.10);"
-                    f"  border-color: rgba(26,24,20,0.30);"
-                    f"}}"
-                )
+            self.setStyleSheet(
+                "#mermaidCard {"
+                "  margin: 10px 0; border-radius: 10px;"
+                f"  border: 1px solid {T['border']}; background: {T['bg_card']};"
+                "}"
+            )
+            self._badge_lbl.setStyleSheet(
+                f"color: {T['muted']}; font-size: 10px; font-weight: 500;"
+                "border: none; background: transparent; letter-spacing: 0.3px;"
+            )
+            self._expand_btn.setStyleSheet(
+                "QPushButton {"
+                f"  color: {T['accent_ink']}; font-size: 12px; font-weight: 600;"
+                "  padding: 0 14px; border-radius: 6px; border: none;"
+                f"  background: {T['accent_fill']};"
+                "}"
+                f"QPushButton:hover {{ background: {T['accent_fill_hover']}; }}"
+            )
+            self._copy_btn.setStyleSheet(
+                f"QPushButton {{"
+                f"  color: {T['text_dim']}; font-size: 11px; font-weight: 500;"
+                f"  padding: 0 12px; border-radius: 6px;"
+                f"  border: 1px solid {T['border']}; background: transparent;"
+                f"}}"
+                f"QPushButton:hover {{ background: {T['bg_hover']}; color: {T['text']}; }}"
+            )
             self._icon_lbl.setStyleSheet(
-                f"color: {T['red']}; font-size: 18px; border: none; background: transparent;"
+                f"color: {T['muted']}; font-size: 18px; border: none; background: transparent;"
             )
             self._name_lbl.setStyleSheet(
                 f"color: {T['text']}; font-size: 13px; font-weight: 700;"
@@ -4589,8 +4565,8 @@ class _ChatBrowser(QTextBrowser):
         menu = self.createStandardContextMenu(e.pos())
         # Tint action icons to match the theme, hardcoded white made them
         # invisible on the light context_menu_bg in light mode.
-        from src.ui.tokens import DARK
-        _icon_color = "#ffffff" if T['bg'] == DARK['bg'] else "#1A1814"
+        DARK = chat_theme('dark')
+        _icon_color = T['text']
         for action in menu.actions():
             ic = action.icon()
             if not ic.isNull():
@@ -4659,13 +4635,28 @@ def make_body(streaming: bool = False) -> QTextBrowser:
     # Margin of 0 caused left-side text clipping (first letters of words
     # cut off at the container edge). 8px provides safe breathing room.
     tb.document().setDocumentMargin(8)
+    # The answer font, set on the document: Qt rich text ignores the CSS
+    # font-family LIST in the markdown stylesheet, so answers asked for
+    # Ubuntu and were drawn in the application default, Noto Sans (measured
+    # on the widget). Code spans keep the mono font from the stylesheet.
+    _af = tb.document().defaultFont()
+    _af.setFamilies(family_list(T['font_ui']))
+    tb.document().setDefaultFont(_af)
     # Eliminate QAbstractScrollArea default viewport margins (~4-8px invisible padding)
     tb.setViewportMargins(0, 0, 0, 0)
+    # font-family here too, not only on the document: the app QSS gives
+    # every QTextEdit the editor's mono font, and each re-polish (a live
+    # theme switch re-applies that QSS) copies the widget font into the
+    # document, so answers written after a switch came out in Ubuntu Mono
+    # at the editor's 12px. The widget's own sheet outranks the app sheet
+    # on every polish.
     tb.setStyleSheet(
         f"QTextBrowser {{"
         f"  padding: 0px 10px;"
         f"  background: transparent;"
         f"  border: none;"
+        f"  font-family: {T['font_ui']};"
+        f"  font-size: {T['font_size']};"
         f"}}"
     )
 
@@ -4863,8 +4854,8 @@ class MessageWidget(QWidget):
             bub.setFrameShape(QFrame.Shape.NoFrame)  # kill frame, it steals ~4px vertical from viewport
             bub.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             bub.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            # Expanding fills full width, orange bar on RIGHT side
-            bub.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            # Sized to its text (see _fit_bubble), right-aligned in the row.
+            bub.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
             bub.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
             # Keyboard selection too, so Ctrl+A / Ctrl+C work on your own
             # message exactly as they already do on the assistant's.
@@ -4873,6 +4864,12 @@ class MessageWidget(QWidget):
                 | Qt.TextInteractionFlag.TextSelectableByKeyboard
             )
             bub.document().setDocumentMargin(0)
+            # Qt rich text ignores a CSS font-family LIST, so the font is set
+            # on the document itself (the bubble was drawn in Ubuntu Mono).
+            _bf = bub.document().defaultFont()
+            _bf.setFamilies(family_list(T['font_ui']))
+            bub.document().setDefaultFont(_bf)
+            bub.viewport().setAutoFillBackground(False)
             bub.setStyleSheet(_user_bubble_qss())
             _fit_running = False
             # Start bubble at height 0 to prevent flash, _fit_bubble
@@ -4885,21 +4882,29 @@ class MessageWidget(QWidget):
                 _fit_running = True
                 try:
                     import math
-                    vp_w = bub.viewport().width()
-                    if vp_w <= 0:
-                        vp_w = bub.width() or 600
-                    if vp_w <= 10:
+                    avail = self.width()
+                    if avail <= 40:
                         QTimer.singleShot(100, _fit_bubble)
                         return
+                    # Width: the message's natural width, at most 85% of
+                    # the row; height: the wrapped text. PAD = 12px each
+                    # side in _user_bubble_qss, plus a pixel for rounding.
+                    PAD = 26
+                    max_w = max(120, int(avail * 0.85))
+                    doc = bub.document()
                     # temporarily block contentsChanged so setTextWidth
                     # does not trigger another fit cycle
-                    bub.document().blockSignals(True)
+                    doc.blockSignals(True)
                     try:
-                        bub.document().setTextWidth(vp_w)
+                        doc.setTextWidth(-1)
+                        w = min(math.ceil(doc.idealWidth()) + PAD, max_w)
+                        w = max(w, 48)
+                        doc.setTextWidth(w - PAD)
                     finally:
-                        bub.document().blockSignals(False)
-                    doc_h = bub.document().size().height()
-                    total = max(math.ceil(doc_h) + 6, 26)
+                        doc.blockSignals(False)
+                    bub.setFixedWidth(int(w))
+                    doc_h = doc.size().height()
+                    total = max(math.ceil(doc_h) + 14, 30)
                     bub.setFixedHeight(int(total))
                     bub.updateGeometry()
                 finally:
@@ -4919,9 +4924,15 @@ class MessageWidget(QWidget):
             # the bubble from scrolling internally when content slightly
             # exceeds the fitted height.
             install_scroll_passthrough(bub)
-            # FULL WIDTH: no stretch, bubble fills entire row
+            # Right-aligned: the stretch takes the space the bubble leaves.
+            row.addStretch(1)
             row.addWidget(bub)
             self.v.addLayout(row)
+            # The bubble's width follows the panel's, so refit on resize.
+            def _on_self_resize(e, _orig=self.resizeEvent):
+                _orig(e)
+                _fit_timer.start()
+            self.resizeEvent = _on_self_resize
         else:
             # AI response card
             self._card = QFrame()
@@ -5706,8 +5717,13 @@ class StreamingCursor(QWidget):
 # ============================================================
 # Chip colours for skills:/mcp: tokens: (text, background). The background is
 # translucent so the same pair reads on the dark and the light theme.
-_CHIP_SKILL = ('#5B8CFF', QColor(91, 140, 255, 46))
-_CHIP_MCP = ('#2FB59B', QColor(47, 181, 155, 46))
+def _chip_colors(kind: str):
+    """(text, background) for a skills:/mcp: chip, read from the live theme."""
+    if kind == "skill":
+        bg = QColor(T['accent_fill']); bg.setAlpha(56)
+        return T['accent'], bg
+    bg = QColor(T['muted']); bg.setAlpha(46)
+    return T['text'], bg
 
 
 def _paint_invocation_chips(doc, text: str) -> bool:
@@ -5722,7 +5738,7 @@ def _paint_invocation_chips(doc, text: str) -> bool:
     found = False
     for m in TOKEN_RE.finditer(text):
         found = True
-        fg, bg = _CHIP_MCP if m.group(0).startswith("mcp:") else _CHIP_SKILL
+        fg, bg = _chip_colors("mcp" if m.group(0).startswith("mcp:") else "skill")
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(fg))
         fmt.setBackground(bg)
@@ -5785,7 +5801,7 @@ class SpellCheckInput(QTextEdit):
             c.mergeCharFormat(_normal)
 
             _blue = QTextCharFormat()
-            _blue.setForeground(QColor('#5B8CFF'))
+            _blue.setForeground(QColor(T['accent']))
             for m in _re.finditer(_pat, text):
                 c2 = QTextCursor(doc)
                 c2.setPosition(m.start())
@@ -7122,8 +7138,8 @@ class InputArea(QWidget):
         chip = QWidget()
         chip.setObjectName("queuedChip")
         chip.setStyleSheet(
-            f"QWidget#queuedChip {{ background: rgba(6,182,212,0.10);"
-            f" border: 1px solid {T['accent']}; border-radius: 0px; }}"
+            f"QWidget#queuedChip {{ background: {T['bg_card']};"
+            f" border: 1px solid {T['border']}; border-radius: 8px; }}"
         )
         ch = QHBoxLayout(chip)
         ch.setContentsMargins(8, 6, 8, 6)
@@ -7922,7 +7938,7 @@ class BrandLogo(QWidget):
             text_gradient = QLinearGradient(0, 0, w_main, 0)
             text_gradient.setColorAt(0.0, QColor(T['ring_cyan']))
             text_gradient.setColorAt(0.5, QColor(T['ring_cyan_light']))
-            text_gradient.setColorAt(1.0, QColor("#3b82f6"))   # blue
+            text_gradient.setColorAt(1.0, QColor(T['ring_cyan']))
             p.setPen(QPen(text_gradient, 1))
             p.drawText(
                 QRectF(0, 0, w_main, h),
@@ -8034,16 +8050,16 @@ class ResumeTaskCard(QFrame):
         self._resume_btn = QPushButton("\u25b6 Resume Task")
         self._resume_btn.setStyleSheet(f"""
             QPushButton {{
-                background: {T['accent']};
-                color: #fff;
+                background: {T['accent_fill']};
+                color: {T['accent_ink']};
                 border: none;
                 border-radius: 6px;
                 padding: 8px 18px;
                 font-size: 12px;
                 font-weight: 600;
             }}
-            QPushButton:hover {{ background: {T.get('blue', '#06b6d4')}; }}
-            QPushButton:pressed {{ background: {T['accent']}; }}
+            QPushButton:hover {{ background: {T['accent_fill_hover']}; }}
+            QPushButton:pressed {{ background: {T['accent_fill']}; }}
         """)
         self._resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._resume_btn.clicked.connect(self._on_resume)
@@ -8092,6 +8108,7 @@ class ChatPanel(QWidget):
     edit_accepted = pyqtSignal(str)  # file_path
     # Signal emitted when user clicks "New Chat" and confirms
     new_chat_requested = pyqtSignal()  # triggers summarization + clear
+    conversation_selected = pyqtSignal(str)  # History menu: reopen a previous chat
     # Signal emitted when user requests a build plan
     build_plan_requested = pyqtSignal(str)  # plan content
     # Emitted once the async chat restore has finished and the panel is
@@ -8100,6 +8117,10 @@ class ChatPanel(QWidget):
     # is still streaming in gets buried under the messages landing on top of
     # it, or is dismissed by a click aimed at something else.
     restore_finished = pyqtSignal()
+    # set_theme() re-themes in batches across several event-loop turns; this
+    # fires once the last batch is done, so work that should come AFTER it
+    # (MainWindow's stale-colour pass) does not race it.
+    theme_settled = pyqtSignal()
     # Signals for file open/line navigation
     open_file_requested = pyqtSignal(str)  # file_path
     open_file_at_line_requested = pyqtSignal(str, int)  # file_path, line
@@ -8148,21 +8169,34 @@ class ChatPanel(QWidget):
 
         # Project name (centered)
         self._project_label = QLabel("")
-        self._project_label.setStyleSheet("color:#5B8CFF; font-family:Consolas,Monaco,monospace; font-size:13px;")
+        self._project_label.setStyleSheet(f"color:{T['text_secondary']}; font-family:{T['font_mono']}; font-size:13px;")
         self._project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hbar.addWidget(self._project_label)
 
         hbar.addStretch()
 
+        # History: this project's earlier chats. The list comes from
+        # history_provider (set by MainWindow), read when the menu opens.
+        self.history_provider = None
+        self._history_btn = QPushButton("History")
+        self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._history_btn.setToolTip("Open a previous chat in this project")
+        self._history_btn.setStyleSheet(self._header_btn_qss(history=True))
+        self._history_menu = QMenu(self._history_btn)
+        # The menu is styled here and in set_theme(), completely, so it is
+        # right the moment it opens; the live-theme window filter
+        # (theme_remap) leaves windows with this property alone instead of
+        # restyling them while they are being shown.
+        self._history_menu.setProperty("cortexOwnTheme", True)
+        self._history_menu.setStyleSheet(self._history_menu_qss())
+        self._history_menu.aboutToShow.connect(self._fill_history_menu)
+        self._history_btn.setMenu(self._history_menu)
+        hbar.addWidget(self._history_btn)
+
         # New Chat button (right side)
         self._new_chat_btn = QPushButton("+ New Chat")
         self._new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_chat_btn.setStyleSheet(
-            f"QPushButton {{ color:{T['btn_text']}; font-size:12px; font-weight:500;"
-            f"padding:5px 14px; border-radius:6px; border:1px solid {T['border']};"
-            f"background:{T['btn_bg']}; font-family:'Segoe UI',sans-serif; }}"
-            f"QPushButton:hover {{ background:{T['btn_hover']}; color:{T['accent']}; border-color:{T['accent']}; }}"
-        )
+        self._new_chat_btn.setStyleSheet(self._header_btn_qss())
         self._new_chat_btn.clicked.connect(self._on_new_chat_clicked)
         hbar.addWidget(self._new_chat_btn)
         root.addWidget(self._header)
@@ -8217,9 +8251,9 @@ class ChatPanel(QWidget):
         self._new_msg_pill.setFixedHeight(32)
         self._new_msg_pill.setCursor(Qt.CursorShape.PointingHandCursor)
         self._new_msg_pill.setStyleSheet(
-            "QPushButton { background:#2563eb; color:white; border:none; border-radius:16px;"
-            " padding:0 18px; font-size:12px; font-weight:600; }"
-            "QPushButton:hover { background:#3b82f6; }"
+            f"QPushButton {{ background:{T['accent_fill']}; color:{T['accent_ink']}; border:none; border-radius:16px;"
+            f" padding:0 18px; font-size:12px; font-weight:600; }}"
+            f"QPushButton:hover {{ background:{T['accent_fill_hover']}; }}"
         )
         self._new_msg_pill.clicked.connect(self._on_new_msg_pill_click)
         self._new_msg_pill.setVisible(False)
@@ -8548,7 +8582,7 @@ class ChatPanel(QWidget):
             # Step back over trailing whitespace and empty paragraphs, so
             # the wave follows the last word rather than a blank line.
             lo = max(0, pos - 64)
-            while pos > lo and doc.characterAt(pos - 1) in (' ', '\t', '\n', ' ', ' ', '﻿'):
+            while pos > lo and doc.characterAt(pos - 1) in (' ', '\t', '\n', ' ', ' ', ''):
                 pos -= 1
             if pos <= 0:
                 cur.hide()
@@ -10625,7 +10659,7 @@ class ChatPanel(QWidget):
         if self._open_block is not None:
             short = error[:500] if len(error) > 500 else error
             self._open_block.setHtml(
-                f'<div style="color:#ff6b6b; font-family: monospace; padding:8px;">'
+                f'<div style="color:{T["red"]}; font-family: monospace; padding:8px;">'
                 f'⚠ {short}</div>'
             )
         self.on_turn_done()
@@ -11450,7 +11484,7 @@ class ChatPanel(QWidget):
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {T['muted']}; font-size: 12px; border: none;")
         v.addWidget(note)
-        primary = (f"QPushButton {{ background: {T.get('accent', '#7c6ce7')}; color: #ffffff; "
+        primary = (f"QPushButton {{ background: {T['accent_fill']}; color: {T['accent_ink']}; "
                    f"border: none; border-radius: 4px; padding: 5px 12px; font-size: 12px; }}")
         plain = (f"QPushButton {{ background: transparent; color: {T['text']}; border: 1px solid "
                  f"{T['border_dim']}; border-radius: 4px; padding: 5px 12px; font-size: 12px; }}")
@@ -11546,7 +11580,7 @@ class ChatPanel(QWidget):
         btn = QPushButton("Open terminal")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(
-            f"QPushButton {{ background: {T.get('accent', '#7c6ce7')}; color: #ffffff; border: none;"
+            f"QPushButton {{ background: {T['accent_fill']}; color: {T['accent_ink']}; border: none;"
             f" border-radius: 4px; padding: 5px 12px; font-size: 12px; }}")
         btn.clicked.connect(self.open_ai_terminal_requested.emit)
         if kind == "gcm":
@@ -12147,17 +12181,17 @@ class ChatPanel(QWidget):
         """
         try:
             html = (
-                f"<div style='color:#e0b341;font-weight:600;margin-bottom:6px;'>"
+                f"<div style='color:{T['text']};font-weight:600;margin-bottom:6px;'>"
                 f"&#128274; {feature}, Subscription Required</div>"
-                f"<div style='color:#c9c9c9;line-height:1.5;'>{desc}</div>"
-                f"<div style='color:#e0b341;font-weight:600;margin:10px 0 4px;'>"
+                f"<div style='color:{T['text_secondary']};line-height:1.5;'>{desc}</div>"
+                f"<div style='color:{T['text']};font-weight:600;margin:10px 0 4px;'>"
                 f"To enable this feature:</div>"
-                f"<div style='color:#c9c9c9;line-height:1.7;'>"
+                f"<div style='color:{T['text_secondary']};line-height:1.7;'>"
                 f"1. Visit <a href='https://cortex-ide.app/pricing/' "
-                f"style='color:#5B8CFF;text-decoration:none;'>cortex-ide.app/pricing</a><br>"
+                f"style='color:{T['md_link']};text-decoration:none;'>cortex-ide.app/pricing</a><br>"
                 f"2. Choose a plan and activate your subscription<br>"
                 f"3. Sign in via Settings, Account</div>"
-                f"<div style='color:#8a8a8a;margin-top:8px;'>"
+                f"<div style='color:{T['muted']};margin-top:8px;'>"
                 f"Once subscribed, {feature.lower()} works immediately.</div>"
             )
             m = MessageWidget(role="assistant", parent=self)
@@ -13207,10 +13241,10 @@ class ChatPanel(QWidget):
         btn = QPushButton(f"↑ Load older messages ({self._loaded_offset} turns)")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(
-            "QPushButton { color:#5B8CFF; font-size:12px; padding:8px 16px;"
-            "border:1px solid #2A3A4A; border-radius:6px; background:#151D2B;"
-            "font-family:'Segoe UI',sans-serif; margin:8px 12px; }"
-            "QPushButton:hover { background:#1E2D3D; border-color:#5B8CFF; }"
+            f"QPushButton {{ color:{T['text_secondary']}; font-size:12px; padding:8px 16px;"
+            f"border:1px solid {T['border']}; border-radius:6px; background:{T['bg_card']};"
+            f"font-family:{T['font_ui']}; margin:8px 12px; }}"
+            f"QPushButton:hover {{ background:{T['bg_hover']}; color:{T['text']}; border-color:{T['accent']}; }}"
         )
         btn.clicked.connect(self._load_older_messages)
         self._load_older_btn = btn
@@ -13439,6 +13473,34 @@ class ChatPanel(QWidget):
         # #2-#11 plus a deleted-widget error, and the next save stored them
         # under the new project's conversation.
         self._restore_epoch = getattr(self, "_restore_epoch", 0) + 1
+        # The older messages waiting for the scroll-up loader belong to the
+        # chat being cleared as well. They used to survive a project switch:
+        # scrolling up in the next project inserted the previous project's
+        # history, and get_timeline() prepends this list to every save, so
+        # the next save wrote it into the new project's conversation (the
+        # "half old project, half new" chat that a restart made permanent).
+        self._pending_messages = []
+        self._all_messages = []
+        self._lazy_loaded = True
+        self._lazy_loading = False
+        self._lazy_load_armed = False
+        # And so does a turn that was mid-stream: the paced reveal's queue and
+        # timer, and the open message/block. begin_assistant_turn() does not
+        # reset _stream_pending, so text still queued from the old chat was
+        # painted at the top of the first answer in the next one.
+        _ft = getattr(self, '_stream_frame_timer', None)
+        if _ft is not None:
+            try:
+                _ft.stop()
+            except RuntimeError:
+                pass
+        self._stream_pending = ''
+        self._prose_buf = ""
+        self._think_buf = ""
+        self._cur_msg = None
+        self._open_kind = None
+        self._open_block = None
+        self._turn_active = False
         self._stop_cursor()
         # Block serialization during clear, prevents zombie widgets from being
         # captured by get_timeline() if a save callback fires mid-cleanup.
@@ -13827,8 +13889,14 @@ class ChatPanel(QWidget):
         _lazy_t0 = time.time()
         _n = len(to_load)
         LAZY_BATCH = 2
+        _epoch = getattr(self, "_restore_epoch", 0)
 
         def _lazy_batch(start: int):
+            # Same guard as the other batched restores: a project switch or
+            # New Chat mid-load must not receive the rest of these messages.
+            if getattr(self, "_restore_epoch", 0) != _epoch:
+                log.info("[ChatRestore] Lazy load stopped: the chat was cleared")
+                return
             end = min(start + LAZY_BATCH, _n)
             self._freeze_viewport()
             try:
@@ -13929,9 +13997,11 @@ class ChatPanel(QWidget):
             # lost, they lazy-load via _pending_messages on scroll-up.
             INITIAL_LOAD = 12  # Load last 12 messages initially (~6 turns)
 
-            # Store full list for lazy loading on scroll-up
-            self._all_messages = valid_msgs
-            self._lazy_loaded = False  # True when all messages are loaded
+            # Full list for lazy loading on scroll-up. Kept in locals and
+            # assigned after clear_messages() below, which resets this state
+            # for the chat it removes.
+            _all = valid_msgs
+            _lazy_done = False  # True when all messages are loaded
 
             # Determine what to load: last N messages as COMPLETE conversation turns.
             # A "turn" = consecutive user messages + consecutive AI responses.
@@ -13960,7 +14030,7 @@ class ChatPanel(QWidget):
                 else:
                     split_idx = total - INITIAL_LOAD
                 initial_msgs = valid_msgs[split_idx:]
-                self._pending_messages = valid_msgs[:split_idx]
+                _pending = valid_msgs[:split_idx]
 
                 # FIX: Trim leading orphaned user messages from initial_msgs.
                 # These are user prompts whose AI responses are in _pending_messages
@@ -13971,12 +14041,12 @@ class ChatPanel(QWidget):
                     if len(initial_msgs) > 1 and initial_msgs[1].get("role") == "assistant":
                         break
                     # Orphaned user, move it back to pending
-                    self._pending_messages.append(initial_msgs.pop(0))
-                log.info(f"[ChatRestore] Lazy load: {len(loaded)} msgs of {total} (split at #{split_idx}), {len(self._pending_messages)} pending")
+                    _pending.append(initial_msgs.pop(0))
+                log.info(f"[ChatRestore] Lazy load: {len(loaded)} msgs of {total} (split at #{split_idx}), {len(_pending)} pending")
             else:
                 initial_msgs = valid_msgs
-                self._pending_messages = []
-                self._lazy_loaded = True
+                _pending = []
+                _lazy_done = True
 
             load_count = len(initial_msgs)
             self._spinner_overlay.show_overlay(
@@ -13992,6 +14062,9 @@ class ChatPanel(QWidget):
 
             # Clear existing content and hide empty state
             self.clear_messages()
+            self._all_messages = _all
+            self._pending_messages = _pending
+            self._lazy_loaded = _lazy_done
             if self._empty_state is not None:
                 try:
                     self.col.removeWidget(self._empty_state)
@@ -14166,31 +14239,131 @@ class ChatPanel(QWidget):
     def clear_chat(self):
         self.clear_messages()
 
+    @staticmethod
+    def _header_btn_qss(history: bool = False) -> str:
+        """The header's two buttons ("History", "+ New Chat"), current theme."""
+        pad = "5px 12px" if history else "5px 14px"
+        extra = " margin-right:6px;" if history else ""
+        qss = (
+            f"QPushButton {{ color:{T['btn_text']}; font-size:12px; font-weight:500;"
+            f"padding:{pad}; border-radius:6px; border:1px solid {T['border']};"
+            f"background:{T['btn_bg']}; font-family:{T['font_ui']};{extra} }}"
+            f"QPushButton:hover, QPushButton:pressed, QPushButton:open {{ background:{T['btn_hover']};"
+            f" color:{T['accent']}; border-color:{T['accent']}; }}"
+        )
+        if history:
+            qss += "QPushButton::menu-indicator { width:0; image:none; }"
+        return qss
+
+    @staticmethod
+    def _history_menu_qss() -> str:
+        """Every part of the History menu, so nothing falls through to the
+        app-wide sheet, which after a live switch is still the startup theme."""
+        return (
+            f"QMenu {{ background:{T['bg_elevated']}; color:{T['text']}; border:1px solid {T['border']};"
+            f" border-radius:8px; padding:4px; font-family:{T['font_ui']}; font-size:12px; }}"
+            f"QMenu::item {{ background:transparent; color:{T['text']}; padding:6px 14px 6px 8px;"
+            f" border-radius:4px; }}"
+            f"QMenu::item:selected {{ background:{T['bg_hover']}; color:{T['text']}; }}"
+            f"QMenu::item:checked {{ color:{T['text']}; font-weight:600; }}"
+            f"QMenu::item:disabled {{ color:{T['muted']}; background:transparent; }}"
+            f"QMenu::indicator {{ width:14px; height:14px; margin-left:4px; }}"
+            f"QMenu::indicator:checked {{ background:{T['accent_fill']}; border-radius:3px; }}"
+            f"QMenu::indicator:unchecked {{ background:transparent; }}"
+            f"QMenu::separator {{ height:1px; background:{T['border']}; margin:4px 6px; }}"
+        )
+
+    def _fill_history_menu(self):
+        """List the project's chats, newest first; the open one is checked."""
+        m = self._history_menu
+        m.clear()
+        try:
+            items = self.history_provider() if self.history_provider else []
+        except Exception as e:
+            log.warning(f"[History] could not list chats: {e}")
+            items = []
+        if not items:
+            a = m.addAction("No earlier chats in this project")
+            a.setEnabled(False)
+            return
+        for conv_id, label, when in items:
+            a = m.addAction(f"{label}    {when}")
+            a.setCheckable(True)
+            a.setChecked(conv_id == self._conversation_id)
+            a.triggered.connect(lambda _=False, cid=conv_id: self._on_history_pick(cid))
+
+    def _on_history_pick(self, conv_id: str):
+        if conv_id and conv_id != self._conversation_id:
+            self.conversation_selected.emit(conv_id)
+
     def _on_new_chat_clicked(self):
-        """Show confirmation popup before starting new chat."""
+        """Ask first; on Yes, MainWindow saves this chat and opens a new one."""
         from PyQt6.QtWidgets import QMessageBox
         msg = QMessageBox(self)
         msg.setWindowTitle("New Chat")
-        msg.setText("Start a new chat?\n\nThe current conversation will be summarized and saved to memory before clearing.")
+        msg.setText("Are you sure you want to switch to a new chat?")
+        msg.setInformativeText(
+            "This chat is saved and summarized into the project memory first. "
+            "Its history stays available from History.")
+        msg.setIcon(QMessageBox.Icon.Question)
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg.setDefaultButton(QMessageBox.StandardButton.No)
+        msg.setEscapeButton(QMessageBox.StandardButton.No)
         msg.setStyleSheet(
-            f"QMessageBox {{ background:{T['bg']}; color:{T['text']}; border:1px solid {T.get('border_color', '#343434')}; border-radius:12px; }}"
-            f"QMessageBox QLabel {{ color:{T['text']}; border:none; }}"
-            f"QPushButton {{ background:{T.get('bg_secondary', '#2A2A4A')}; color:{T['text']}; padding:6px 20px; border-radius:6px; border:1px solid {T.get('border_color', '#343434')}; }}"
-            f"QPushButton:hover {{ background:{T.get('bg_hover', '#3A3A5A')}; }}"
+            f"QMessageBox {{ background:{T['bg_elevated']}; }}"
+            f"QMessageBox QLabel {{ color:{T['text']}; border:none; background:transparent;"
+            f" font-family:{T['font_ui']}; font-size:13px; }}"
+            f"QPushButton {{ background:{T['bg_hover']}; color:{T['text']}; padding:6px 22px;"
+            f" border-radius:6px; border:1px solid {T['border']}; font-family:{T['font_ui']}; }}"
+            f"QPushButton:hover {{ border-color:{T['accent']}; }}"
+            f"QPushButton:default {{ background:{T['accent_fill']}; color:{T['accent_ink']};"
+            f" border:none; }}"
         )
-        result = msg.exec()
-        if result == QMessageBox.StandardButton.Yes:
+        if msg.exec() == QMessageBox.StandardButton.Yes:
             self.new_chat_requested.emit()
 
     def new_chat(self):
-        """Start a fresh chat, clear all messages and reset state."""
+        """Start a fresh chat: nothing of the previous one stays on screen.
+
+        The previous chat itself is not touched here; MainWindow saved its
+        timeline and memory snapshot before calling this.
+        """
+        ia = self.input_area
+        # A prompt queued while the old reply ran goes back into the input
+        # box, unsent: set_generating(False) would otherwise send it into
+        # the new chat on its own.
+        queued = getattr(ia, '_queued_prompt', None)
+        queued_images = list(getattr(ia, '_queued_images', None) or [])
+        if queued:
+            ia._cancel_queued()
+        if getattr(self, "_worker", None):
+            self._worker.cancel()
         self.clear_messages()
-        self._cur_msg = None
-        self._open_kind = None
-        self._open_block = None
-        self.input_area.set_generating(False)
+        ia.set_generating(False)
+        if queued:
+            try:
+                ia._restore_prompt(queued, queued_images)
+            except Exception as e:
+                log.warning(f"[NewChat] could not restore queued prompt: {e}")
+        try:
+            ia._clear_queued_chip()
+        except Exception:
+            pass
+        # The old chat's task list and context meter.
+        try:
+            self.todo_section.update_todos([])
+            self.todo_section.setVisible(False)
+        except Exception:
+            pass
+        try:
+            self.context_bar.update_budget(0, 1)
+        except Exception:
+            pass
+        try:
+            self._spinner_overlay.hide_overlay()
+        except Exception:
+            pass
+        self._reset_scroll_intent()
 
     def set_theme(self, is_dark: bool):
         """Update theme tokens and retheme all existing thought blocks.
@@ -14239,12 +14412,12 @@ class ChatPanel(QWidget):
                 f"background: transparent; border-bottom: 1px solid {T['border']};")
             self._footer.setStyleSheet(
                 f"QWidget {{ background:transparent; border-top:1px solid {T['border']}; }}")
-            self._new_chat_btn.setStyleSheet(
-                f"QPushButton {{ color:{T['btn_text']}; font-size:12px; font-weight:500;"
-                f"padding:5px 14px; border-radius:6px; border:1px solid {T['border']};"
-                f"background:{T['btn_bg']}; font-family:'Segoe UI',sans-serif; }}"
-                f"QPushButton:hover {{ background:{T['btn_hover']}; color:{T['accent']}; border-color:{T['accent']}; }}"
-            )
+            # Both header buttons and the History menu, in the first pass of
+            # the switch: History was left to the late stale-colour pass,
+            # so it showed the previous theme for seconds on a long chat.
+            self._new_chat_btn.setStyleSheet(self._header_btn_qss())
+            self._history_btn.setStyleSheet(self._header_btn_qss(history=True))
+            self._history_menu.setStyleSheet(self._history_menu_qss())
             # Input bar (mode selector / text input / Send), token-styled at
             # construction; without retheme() the input row keeps the OLD
             # theme after a live switch (light pill floating in dark mode).
@@ -14352,6 +14525,7 @@ class ChatPanel(QWidget):
                 QTimer.singleShot(0, lambda: _retheme_cards(end))
             else:
                 log.info(f"[THEME-AUDIT] chat_panel  cards-retheme DONE  n={len(_cards)}")
+                self.theme_settled.emit()
 
         # ── Visible-first ordering ──────────────────────────────────────
         # The work below is unavoidable (every widget carries construction-time
@@ -14458,6 +14632,8 @@ class ChatPanel(QWidget):
             elif _cards:
                 # Phase 3: tool cards after browsers
                 QTimer.singleShot(0, lambda: _retheme_cards(0))
+            else:
+                self.theme_settled.emit()
 
         if not blocks:
             dt_total = (_time.perf_counter() - t_total) * 1000
@@ -14469,6 +14645,8 @@ class ChatPanel(QWidget):
                 QTimer.singleShot(0, lambda: _readapt_browsers(0))
             elif _cards:
                 QTimer.singleShot(0, lambda: _retheme_cards(0))
+            else:
+                self.theme_settled.emit()
             return
 
         def _retheme_batch(start: int):
@@ -14541,7 +14719,7 @@ class ChatPanel(QWidget):
         if hasattr(self, '_semantic_index_label') and _sip_isdeleted(self._semantic_index_label):
             del self._semantic_index_label
         if not hasattr(self, '_semantic_index_label'):
-            from src.ui.tokens import TOKENS as _T
+            _T = T
             self._semantic_index_label = QLabel("  🔍 Indexing codebase for semantic search...")
             self._semantic_index_label.setStyleSheet(
                 f"color:{_T['mono_muted']};font-size:11px;padding:2px 8px;"

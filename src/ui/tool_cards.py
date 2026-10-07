@@ -19,7 +19,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QSizePolicy, QPlainTextEdit, QStackedLayout, QTextBrowser,
 )
 
-from src.ui.tokens import TOKENS as T, build_markdown_css, build_code_block_css
+# Tool cards live only in the chat panel, so they read the chat palette.
+from src.ui.tokens import CHAT_TOKENS as T, chat_theme, build_markdown_css, build_code_block_css
 from src.ui.spinner import spinner_for
 from src.ui.icons import tinted_pixmap, get_tool_icon
 
@@ -71,15 +72,15 @@ class CodeView(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)  # allow shrinking below content width
         self.setStyleSheet(
-            f"#codeView {{ background:#1e1e1e; border:1px solid {T['border']};"
-            f" border-radius:0px; overflow:hidden; }}")
+            f"#codeView {{ background:{T['md_code_bg']}; border:1px solid {T['border']};"
+            f" border-radius:6px; overflow:hidden; }}")
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         self.edit = QPlainTextEdit()
         self.edit.setReadOnly(True)
         self.edit.setFrameStyle(QFrame.Shape.NoFrame)
         self.edit.setStyleSheet(
-            f"background:transparent;color:#e6edf3;border:none;"
+            f"background:transparent;color:{T['text']};border:none;"
             f"font-family:{T['font_mono']};font-size:12.5px;")
         # horizontal scroll inside the card; vertical grows then caps
         self.edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -151,7 +152,8 @@ class ToolGutter(QWidget):
         self._stack = QStackedLayout(self)
         self._stack.setContentsMargins(0, 0, 0, 0)
         # Auto-pick spinner style per tool type, larger for visibility
-        self.spinner = spinner_for(tool_type, size=20)
+        # The spinner shape still says which tool; the colour says "running".
+        self.spinner = spinner_for(tool_type, size=20, color=T["status_running"])
         self._icon_lbl = QLabel()
         self._icon_lbl.setPixmap(tinted_pixmap(self._icon_name, self._color, 20))
         self._icon_lbl.setFixedSize(20, 20)
@@ -381,7 +383,7 @@ class ReadCard(ToolCardBase):
                 lbl = QLabel(display_text[:3000])
                 lbl.setStyleSheet(
                     f"font-family:{T['font_mono']};font-size:{T['font_size_xs']};"
-                    f"color:{T['text']};background:rgba(124,108,231,0.05);"
+                    f"color:{T['text']};background:{T['bg_card']};"
                     f"padding:8px;border:1px solid {T['border_dim']};"
                 )
             else:
@@ -551,12 +553,9 @@ class ListDirCard(ToolCardBase):
                 name = entry.get("name", "")
                 etype = entry.get("type", "file")
                 if etype == "dir":
-                    row = QLabel(f"<span style='color:{T['tool_read']};'>\u25A6 {name}/</span>")
+                    row = QLabel(f"<span style='color:{T['text']};'>\u25A6 {name}/</span>")
                 else:
-                    ext = name.rsplit('.', 1)[-1] if '.' in name else ''
-                    col = {"py": T['tool_edit'], "js": "#e3b341", "ts": "#58a6ff",
-                           "md": T['muted'], "json": T['muted'], "css": "#bc8cff"}.get(ext, T['text_dim'])
-                    row = QLabel(f"<span style='color:{col};'>\u25A3 {name}</span>")
+                    row = QLabel(f"<span style='color:{T['text_dim']};'>\u25A3 {name}</span>")
                 row.setTextFormat(Qt.TextFormat.RichText)
                 _contain_label(row)
                 row.setStyleSheet(f"font-size:{T['font_size_xxs']};")
@@ -607,8 +606,8 @@ class TerminalCard(ToolCardBase):
                 import html as _html
                 highlighted = (f"<span style='color:{T['mono_muted']};'>$ {_html.escape(cmd)}</span><br>"
                                + highlighted)
-            css_md = build_markdown_css().replace('<style>', '').replace('</style>', '').strip()
-            css_cb = build_code_block_css().replace('<style>', '').replace('</style>', '').strip()
+            css_md = build_markdown_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
+            css_cb = build_code_block_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
             out.document().setDefaultStyleSheet(f'{css_md}\n{css_cb}')
             html = f'<html><body><pre style="margin:0;padding:0;"><code>{highlighted}</code></pre></body></html>'
             out.setHtml(html)
@@ -752,7 +751,7 @@ class WebFetchCard(ToolCardBase):
             # Show fetched content in scrollable text browser
             if preview:
                 from src.ui.syntax_highlight import highlight_code
-                from src.ui.tokens import build_markdown_css, build_code_block_css
+                from src.ui.tokens import chat_theme, build_markdown_css, build_code_block_css
                 display = preview[:8000]
                 out = QTextBrowser()
                 out.setOpenExternalLinks(True)
@@ -761,8 +760,8 @@ class WebFetchCard(ToolCardBase):
                 out.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
                 out.setMinimumWidth(0)
                 # Try to render as markdown if it looks like markdown
-                css_md = build_markdown_css().replace('<style>', '').replace('</style>', '').strip()
-                css_cb = build_code_block_css().replace('<style>', '').replace('</style>', '').strip()
+                css_md = build_markdown_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
+                css_cb = build_code_block_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
                 out.document().setDefaultStyleSheet(f'{css_md}\n{css_cb}')
                 # Escape HTML but preserve markdown-like structure
                 escaped = display.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
