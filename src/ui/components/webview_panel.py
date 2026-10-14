@@ -22,6 +22,10 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from src.utils.logger import get_logger
 log = get_logger("webview_panel")
 
+# Live design tokens (the placeholder, view and loading overlay read the
+# active theme's background). tokens.py imports nothing, so this is cycle-free.
+from src.ui.tokens import TOKENS as T
+
 # Above this many characters a file is handed to the webview as a file:// URI
 # instead of being embedded in a runJavaScript string. Qt's IPC channel and
 # V8's main thread both stall on multi-megabyte inline payloads.
@@ -263,7 +267,7 @@ class WebviewPanel(QWidget):
         layout.setSpacing(0)
         self._placeholder = QLabel("Editor loading...")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setStyleSheet("background: #1e1e1e; color: #888; font-size: 13px;")
+        self._placeholder.setStyleSheet(f"background: {T['bg']}; color: {T['muted']}; font-size: 13px;")
         layout.addWidget(self._placeholder)
 
     def showEvent(self, event):
@@ -317,7 +321,9 @@ class WebviewPanel(QWidget):
         from PyQt6.QtGui import QColor
         from PyQt6.QtCore import Qt as _Qt
         self._page.setBackgroundColor(QColor(_Qt.GlobalColor.transparent))
-        self._view.setStyleSheet("background: #1e1e1e; border: none;")
+        # Theme surface, not a fixed #1e1e1e: the page is transparent, so this
+        # is what shows while it loads or resizes (a dark flash in light mode).
+        self._view.setStyleSheet(f"background: {T['bg']}; border: none;")
 
         # Chromium's own menu (Back, Forward, Reload, Save page, Save image,
         # Copy image address) was reachable by right-clicking the welcome
@@ -416,7 +422,7 @@ class WebviewPanel(QWidget):
 
         # Loading overlay to prevent white flash while editor.html loads
         self._loading_overlay = QWidget(self)
-        self._loading_overlay.setStyleSheet("background: #1e1e1e;")
+        self._loading_overlay.setStyleSheet(f"background: {T['bg']};")
         ov_layout = QVBoxLayout(self._loading_overlay)
         ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ov_layout.setSpacing(24)

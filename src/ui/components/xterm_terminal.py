@@ -319,11 +319,34 @@ class XTermWidget(QWidget):
         from .terminal_bridge import set_terminal_widget_ref
         set_terminal_widget_ref(self)
         
-        # Debug logging to file for troubleshooting (define first!)
+        # Debug logging to file for troubleshooting (define first!).
+        # A debug log must never be able to break the terminal. If ~ is not
+        # writable (a locked profile, or a low-integrity sandbox token that may
+        # read the user profile but not write it) the append raises, and
+        # unguarded that escaped _build_ui() so XTermWidget never finished
+        # constructing and the whole panel came up blank. Fall back to the temp
+        # dir, then stay silent. Mirrors _tdebug's guard further down this file.
         debug_log_path = os.path.join(os.path.expanduser("~"), "cortex_terminal_debug.log")
+
+        def _debug_log_temp_path():
+            import tempfile
+            try:
+                return os.path.join(tempfile.gettempdir(), "cortex_terminal_debug.log")
+            except Exception:
+                return None
+
         def debug_log(msg):
-            with open(debug_log_path, 'a', encoding='utf-8') as f:
-                f.write(f"[{__import__('datetime').datetime.now()}] {msg}\n")
+            import datetime
+            line = f"[{datetime.datetime.now()}] {msg}\n"
+            for _path in (debug_log_path, _debug_log_temp_path()):
+                if not _path:
+                    continue
+                try:
+                    with open(_path, 'a', encoding='utf-8') as f:
+                        f.write(line)
+                    return
+                except Exception:
+                    continue
         
         self._channel = QWebChannel(self)
         self._channel.registerObject("pyTerminal", self._bridge)
@@ -777,12 +800,22 @@ class XTermWidget(QWidget):
     #   * The C# in -MemberDefinition needs "kernel32.dll" in double
     #     quotes, which cannot be nested on this command line, so the
     #     definition is assembled at runtime with [char]34.
+    #   * Add-Type COMPILES C#, which writes a .tmp into %TEMP%. When that
+    #     write is refused - antivirus, a locked-down temp, or Cortex itself
+    #     started from a sandboxed shell - PowerShell printed the failure and
+    #     a follow-up "Unable to find type [CortexNative.K32]" into the user's
+    #     terminal on every start and restart. The session is perfectly
+    #     usable without it (only Ctrl+C goes back to being ignored), so the
+    #     bootstrap stays silent: try/catch, like the copy in
+    #     core/terminal_session.py already had.
     _PS_ENABLE_CTRL_C = (
         "-NoExit -Command "
         "$md='[DllImport('+[char]34+'kernel32.dll'+[char]34+')] public static "
         "extern bool SetConsoleCtrlHandler(IntPtr h, bool add);';"
-        " $null=Add-Type -Namespace CortexNative -Name K32 -PassThru -MemberDefinition $md;"
+        " try{"
+        " $null=Add-Type -Namespace CortexNative -Name K32 -PassThru -MemberDefinition $md -ErrorAction Stop;"
         " $null=[CortexNative.K32]::SetConsoleCtrlHandler([IntPtr]::Zero,$false)"
+        " }catch{}"
     )
 
     def _get_shell_command(self) -> str:

@@ -940,8 +940,15 @@
                 }
             });
             document.getElementById('btn-clear').addEventListener('click', function() {
+                // clear() alone: it scrolls the buffer away and makes the
+                // CURRENT PROMPT the new first line. The old code followed it
+                // with ESC[2J ESC[H, which erased that prompt as well and put
+                // the cursor at the top - so the button left a blank screen
+                // with a blinking caret and no prompt, while the shell still
+                // believed its prompt was on screen. The right-click Clear
+                // never did the second step, which is why only the button
+                // showed it.
                 term.clear();
-                term.write('\x1b[2J\x1b[H'); // ANSI clear + cursor home
             });
             document.getElementById('btn-restart').addEventListener('click', function() {
                 if (window.pyTerminal) {

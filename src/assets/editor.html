@@ -653,6 +653,18 @@
         body.light-theme #sheet-tabs { background: #ddd9d0; border-top-color: rgba(26,24,20,0.2); }
         body.light-theme #sheet-tabs button { color: #6B6860; }
         body.light-theme #sheet-tabs button.sp-tab-active { color: #1A1814; background: #fbfaf7; }
+        body.light-theme #sheet-tabs button:hover { color: #1A1814; background: rgba(26, 24, 20, 0.06); }
+        body.light-theme #sheet-copy-tsv:hover { color: #1A1814; border-color: #A8A59E; }
+        /* Viewer colours that only had a dark-theme value (found by checking
+           every rule for light text or a dark background with no override). */
+        body.light-theme #image-preview { background: #E4E1D8; }
+        body.light-theme #sheet-preview-dims { color: #6B6860; }
+        body.light-theme #sheet-copy-tsv { color: #4A463E; border-color: rgba(26, 24, 20, 0.25); }
+        body.light-theme #sheet-preview-body td.sp-fx,
+        body.light-theme #sheet-preview-body .sp-trunc { color: #6B6860; }
+        body.light-theme #sheet-preview-body thead th.sp-corner { color: #6B6860; background: #ddd9d0; }
+        body.light-theme #sheet-preview-body .sp-error { color: #B83232; }
+        body.light-theme .too-large-icon { color: #8A5C00; }
 
         /* File Path Breadcrumb Bar */
         #file-path-bar {
@@ -776,6 +788,13 @@
         body.light-theme #file-path-bar .path-part { color: #6B6860; }
         body.light-theme #file-path-bar .path-part:hover { color: #1A1814; background: rgba(26, 24, 20, 0.05); }
         body.light-theme #file-path-bar .path-part:last-child { color: #1A1814; }
+        /* Copy Path: the dark-theme colours (#5a6370, hover #c8cdd3 on a white
+           tint) left the label nearly invisible on the light bar on hover. */
+        body.light-theme #file-path-bar .copy-path-btn { color: #4A463E; }
+        body.light-theme #file-path-bar .copy-path-btn:hover {
+            color: #1A1814; background: rgba(26, 24, 20, 0.07); border-color: #A8A59E;
+        }
+        body.light-theme #file-path-bar .copy-path-btn.copied { color: #3B7A4A; }
         /* Empty-state welcome text, was hardcoded #cccccc/#555555 (calibrated
            for the dark background), reading as washed-out light gray on the
            light warm-beige page. */

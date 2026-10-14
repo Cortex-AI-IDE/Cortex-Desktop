@@ -4830,6 +4830,24 @@ def make_body(streaming: bool = False) -> QTextBrowser:
     return tb
 
 
+_PANEL_CHROME_TEXTS = (
+    "↑ Scroll up to load older messages",
+    "🔍 Indexing codebase for semantic search...",
+)
+
+
+def _is_panel_chrome_text(text) -> bool:
+    """True for texts the panel shows itself (hints, status), never chat."""
+    t = (text or "").strip()
+    return any(t == c.strip() for c in _PANEL_CHROME_TEXTS)
+
+
+# Placeholder shown where a long reply's earlier steps were left out on
+# restore; serialize() recognises it and saves the real steps instead.
+_RESTORE_HIDDEN_NOTE = "… %d earlier step(s) hidden on restore"
+_RESTORE_HIDDEN_RE = re.compile(r"^… \d+ earlier step\(s\) hidden on restore$")
+
+
 class MessageWidget(QWidget):
     def __init__(self, role="assistant", parent=None):
         super().__init__(parent)
@@ -5129,6 +5147,14 @@ class MessageWidget(QWidget):
                 except RuntimeError:
                     log.debug(f"[serialize] Widget {type(w).__name__} already deleted, skipping")
                     continue
+        hidden = getattr(self, "_restore_hidden_blocks", None)
+        if hidden:
+            # Restored with its head hidden: save the head too, minus the
+            # "earlier steps hidden" placeholder that stood in for it.
+            if (blocks and blocks[0].get("type") == "thoughts"
+                    and _RESTORE_HIDDEN_RE.match(blocks[0].get("content") or "")):
+                blocks = blocks[1:]
+            blocks = list(hidden) + blocks
         if not blocks:
             return None
         return {"role": "assistant", "blocks": blocks, "ts": self.created_ts}
@@ -5196,7 +5222,11 @@ class MessageWidget(QWidget):
         # prose. Prose AFTER the last tool is the actual answer and is left
         # untouched. A length cap keeps a genuinely long mid-turn explanation
         # as prose; real step-narration is always a short single line.
-        _blocks = data.get("blocks", [])
+        # Copies: the display tweaks below (narration shown as a thought) must
+        # not rewrite the stored data, which the scroll-up queue and the
+        # next save still hold.
+        _blocks = [dict(b) if isinstance(b, dict) else b for b in data.get("blocks", [])]
+        _hidden_blocks = None
 
         # Cap the WIDGETS one message may rebuild. Every block becomes its own
         # widget here, and a prose block builds a QTextBrowser through
@@ -5217,8 +5247,14 @@ class MessageWidget(QWidget):
             log.info("[ChatRestore] message has %d blocks, keeping the last %d "
                      "(%d trimmed, full text remains in the database)",
                      len(_blocks), _MAX_BLOCKS_ON_RESTORE, _dropped)
+            # Kept on the widget and put back by serialize(): the next save
+            # writes the chat as shown, and without this it overwrote the
+            # full reply with the last 40 steps (2026-10-11: 476 of 516 and
+            # 598 of 638 steps lost from two long runs).
+            _hidden_blocks = [dict(b) if isinstance(b, dict) else b
+                              for b in data.get("blocks", [])[:_dropped]]
             _blocks = ([{"type": "thoughts",
-                         "content": "… %d earlier step(s) hidden on restore" % _dropped}]
+                         "content": _RESTORE_HIDDEN_NOTE % _dropped}]
                        + _blocks[-_MAX_BLOCKS_ON_RESTORE:])
 
         _last_act = max((i for i, b in enumerate(_blocks)
@@ -5231,6 +5267,7 @@ class MessageWidget(QWidget):
                         _b["type"] = "thoughts"
                         _b["content"] = _md
 
+        msg._restore_hidden_blocks = _hidden_blocks
         # assistant: rebuild blocks
         for bd in _blocks:
             bt = bd.get("type")
@@ -6227,6 +6264,61 @@ class InputArea(QWidget):
         self._apply_mic_style()
         self.mic_btn.clicked.connect(self._toggle_voice)
 
+        # Voice language: what the mic listens for. The list comes from the
+        # account (cortex-ide.app -> Account -> Voice input), sent with the
+        # account details as voice_languages, so the dropdown holds English
+        # plus the user's own languages, never all 60. English alone, or no
+        # plan: no dropdown, and the mic works in English as before. The
+        # last choice is remembered in ui.voice_language.
+        try:
+            from src.config.settings import get_settings
+            self._voice_language = str(
+                get_settings().get("ui", "voice_language", default="en") or "en")
+        except Exception:
+            self._voice_language = "en"
+        self._voice_langs = []            # [(code, native, name)] from the account
+        self._voice_langs_sig = None
+        self._voice_lang_actions = {}
+        self.voice_lang_btn = QToolButton()
+        self.voice_lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.voice_lang_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.voice_lang_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.voice_lang_btn.setStyleSheet(self.mode_btn.styleSheet() + self._VOICE_CHIP_GAP)
+        _lang_menu = QMenu(self.voice_lang_btn)
+        _lang_menu.setStyleSheet(self.mode_btn.menu().styleSheet())
+        _lang_menu.aboutToShow.connect(self._refresh_voice_languages)
+        _lang_menu.aboutToShow.connect(self._sync_voice_autosend)
+        self.voice_lang_btn.setMenu(_lang_menu)
+        # "Send automatically": whether a transcription goes to the AI as
+        # soon as it lands in the box (ui.voice_auto_send, on by default) or
+        # waits there to be read and corrected. At the bottom of the language
+        # menu, and on the mic's right-click, because a user with English
+        # alone has no language chip to open.
+        self._voice_autosend_act = QAction("Send automatically", self)
+        self._voice_autosend_act.setCheckable(True)
+        self._voice_autosend_act.setToolTip(
+            "On: what you say is sent to the AI right away. "
+            "Off: it waits in the box so you can check it, then you press Send.")
+        self._voice_autosend_act.toggled.connect(self._set_voice_autosend)
+        self._sync_voice_autosend()
+        self.mic_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.mic_btn.customContextMenuRequested.connect(self._show_mic_menu)
+        # The first _refresh_voice_languages() runs further down, AFTER the
+        # chip is in the layout (see "bar.addWidget(self.voice_lang_btn)").
+        # It calls setVisible(True) on the chip, and a widget shown while it
+        # has no parent becomes its own top-level window: a 133x66 frame with
+        # the Cortex icon and minimize/maximize/close flashed on the desktop at
+        # every start (caught 2026-10-13 with a window-show hook, 2.9 s in,
+        # before the main window appeared).
+        # The account is re-read in the background after start-up and then
+        # at most every 30 minutes; look at the cached copy now and then so
+        # a list changed on the website appears without opening anything.
+        self._voice_lang_timer = QTimer(self)
+        self._voice_lang_timer.setInterval(60_000)
+        self._voice_lang_timer.timeout.connect(self._refresh_voice_languages)
+        self._voice_lang_timer.start()
+        QTimer.singleShot(8000, self._refresh_voice_languages)
+
         # The bar is setSpacing(0) so every control is flush. The mic and
         # Send read as one glued lump without a gap, so add breathing room
         # on each side of the mic specifically, leaving the rest untouched.
@@ -6236,14 +6328,114 @@ class InputArea(QWidget):
         # model would sit glued to the send button in the middle of the row.
         bar.addStretch(1)
         bar.addSpacing(8)
+        bar.addWidget(self.voice_lang_btn)
         bar.addWidget(self.mic_btn)
         bar.addSpacing(8)
         bar.addWidget(self.send_btn)
         bar.addWidget(self.stop_btn)
+        # Now the chip has a parent, so showing it cannot open a window.
+        self._refresh_voice_languages()
 
         outer.addWidget(self.panel)
 
     # ── Voice input ────────────────────────────────────────────────────
+    _VOICE_AUTO = "auto"
+    # The gap to the mic lives in the chip's own margin, so a hidden chip
+    # (English only) leaves no stray spacing behind.
+    _VOICE_CHIP_GAP = "QToolButton { margin-right: 4px; }"
+
+    def _refresh_voice_languages(self):
+        """Rebuild the language chip from the account's list, if it changed."""
+        try:
+            from src.core.cortex_api import get_api_client
+            langs = get_api_client().voice_languages()
+        except Exception as exc:
+            log.debug("[Voice] could not read account languages: %s", exc)
+            langs = []
+        sig = tuple((l["code"], l["native"]) for l in langs)
+        if sig == self._voice_langs_sig:
+            return
+        self._voice_langs_sig = sig
+        self._voice_langs = [(l["code"], l["native"], l["name"]) for l in langs]
+        menu = self.voice_lang_btn.menu()
+        menu.clear()
+        self._voice_lang_actions = {}
+        show = len(self._voice_langs) > 1
+        if show:
+            for code, native, name in [(self._VOICE_AUTO, "Auto-detect", "")] + self._voice_langs:
+                label = native if not name or name == native else f"{native}  \u00b7  {name}"
+                act = QAction(label, self)
+                act.setCheckable(True)
+                act.triggered.connect(lambda _=False, c=code: self._set_voice_language(c))
+                menu.addAction(act)
+                self._voice_lang_actions[code] = act
+                if code == self._VOICE_AUTO:
+                    menu.addSeparator()
+            menu.addSeparator()
+            menu.addAction(self._voice_autosend_act)
+        self.voice_lang_btn.setVisible(show)
+        codes = {c for c, _n, _e in self._voice_langs}
+        if not show or (self._voice_language not in codes
+                        and self._voice_language != self._VOICE_AUTO):
+            self._voice_language = "en"     # removed on the website, or no list
+        self._set_voice_language(self._voice_language, save=False)
+        log.info("[Voice] account languages: %s", [c for c, _n, _e in self._voice_langs] or "none")
+
+    @staticmethod
+    def _voice_autosend_on() -> bool:
+        try:
+            from src.config.settings import get_settings
+            return bool(get_settings().get("ui", "voice_auto_send", default=True))
+        except Exception:
+            return True
+
+    def _sync_voice_autosend(self):
+        """Show the saved setting on the checkbox (no save, no log)."""
+        act = self._voice_autosend_act
+        act.blockSignals(True)
+        act.setChecked(self._voice_autosend_on())
+        act.blockSignals(False)
+
+    def _set_voice_autosend(self, on: bool):
+        try:
+            from src.config.settings import get_settings
+            get_settings().set("ui", "voice_auto_send", bool(on))
+        except Exception as exc:
+            log.warning("[Voice] could not save auto-send: %s", exc)
+        log.info("[Voice] send automatically: %s", "on" if on else "off")
+
+    def _show_mic_menu(self, pos):
+        """Right-click on the mic: the auto-send switch, for every user."""
+        self._sync_voice_autosend()
+        m = QMenu(self.mic_btn)
+        m.setStyleSheet(self.mode_btn.menu().styleSheet())
+        m.addAction(self._voice_autosend_act)
+        m.exec(self.mic_btn.mapToGlobal(pos))
+
+    def _set_voice_language(self, code: str, save: bool = True):
+        """Pick the language the mic transcribes, and remember it."""
+        known = {c: native for c, native, _e in self._voice_langs}
+        if code == self._VOICE_AUTO:
+            short, native = "AUTO", "Auto-detect"
+        elif code in known:
+            short, native = code.upper(), known[code]
+        elif code == "en":
+            short, native = "EN", "English"
+        else:
+            return
+        self._voice_language = code
+        self.voice_lang_btn.setText(short + self._CHEVRON)
+        self.voice_lang_btn.setToolTip(f"Voice language: {native}")
+        for c, act in self._voice_lang_actions.items():
+            act.setChecked(c == code)
+        if save:
+            try:
+                from src.config.settings import get_settings
+                get_settings().set("ui", "voice_language", code)
+            except Exception as exc:
+                log.warning("[Voice] could not save voice language: %s", exc)
+            log.info("[Voice] language set to %s", code)
+
     # Drawn icons, not emoji. An emoji glyph is rendered by whichever font
     # the system picks, so it arrives at a different size, weight and colour
     # than the rest of the toolbar and cannot be tinted to the theme. These
@@ -6485,10 +6677,11 @@ class InputArea(QWidget):
     def _transcribe_voice(self):
         """Send the recording to the server and put the text in the input.
 
-        The transcription is NOT sent as a prompt. Speech recognition
-        mishears names and code terms, and auto-sending a wrong prompt
-        spends a whole agent turn before anyone can read it. It goes into
-        the box so it can be corrected first.
+        The text always lands in the input box first (added after anything
+        already typed). Whether it is then sent as the prompt is the user's
+        "Send automatically" switch (ui.voice_auto_send, on by default):
+        off leaves it in the box to be read and corrected, since a misheard
+        word in a sent prompt costs a whole agent turn.
         """
         import os as _os
         path = getattr(self, "_voice_file", "")
@@ -6590,7 +6783,8 @@ class InputArea(QWidget):
                     self._emit_send()
 
             from src.core.voice_input import transcribe_async
-            transcribe_async(path, self._voice_keyterms(), _done)
+            transcribe_async(path, self._voice_keyterms(), _done,
+                             language=self._voice_language)
         except Exception as exc:
             log.warning("[Voice] transcription failed: %s", exc)
             self._set_mic_state("idle")
@@ -6906,6 +7100,13 @@ class InputArea(QWidget):
             )
             if self.mode_btn.menu():
                 self.mode_btn.menu().setStyleSheet(_menu_qss)
+            self.voice_lang_btn.setStyleSheet(_tool_btn_qss + self._VOICE_CHIP_GAP)
+            if self.voice_lang_btn.menu():
+                self.voice_lang_btn.menu().setStyleSheet(_menu_qss)
+            # The mic glyph is a pixmap drawn in the theme colour, so it has
+            # to be redrawn: left alone it kept the old theme's light grey,
+            # a faded mic on the light bar after a dark -> light switch.
+            self._apply_mic_style()
             if self.model_btn.menu():
                 self.model_btn.menu().setStyleSheet(_menu_qss)
             self.input.setStyleSheet(
@@ -6981,6 +7182,61 @@ class InputArea(QWidget):
         self._set_model_btn_text(name)
         self.model_btn.menu().close()
         self.model_changed.emit(value)
+
+    @staticmethod
+    def _label_for_model(model_id: str) -> str:
+        """Catalog display name for `model_id`, or "" when it is not listed.
+
+        The saved `ai.model_label` can outlive the model it names (and in the
+        wild it has named a different model entirely), so the catalog is the
+        only trustworthy source. Callers fall back to the raw id.
+        """
+        try:
+            for _group, items, _tier, _provider in get_model_groups():
+                for value, name, _sub, _color in items:
+                    if value == model_id:
+                        return str(name)
+        except Exception as e:
+            log.warning(f"[MODEL] Label lookup failed for '{model_id}': {e}")
+        return ""
+
+    def set_model_display(self, model_id: str, label: str = "") -> None:
+        """Show `model_id` on the button without emitting `model_changed`.
+
+        For callers that are reporting state rather than changing it: the
+        startup restore (the agent already read the setting) and the Settings
+        sync (the change originated there). Emitting would re-run
+        `_on_model_changed`, which re-writes settings and re-issues the
+        deprecation notice for a model nothing has actually switched to.
+        """
+        name = self._label_for_model(model_id) or label or model_id
+        self.model = model_id
+        self.model_label = name
+        self._set_model_btn_text(name)
+
+    def apply_saved_model(self) -> None:
+        """Restore the persisted model onto the button at startup.
+
+        `agent_bridge` already boots with `ai.model_id`, but this panel always
+        started on "Auto" and never read the setting back, so the UI showed
+        the default mode while the agent ran the user's chosen provider, and
+        it looked like Cortex had silently switched back after a restart.
+        """
+        try:
+            from src.config.settings import get_settings
+            _ai = get_settings().get("ai") or {}
+            if not isinstance(_ai, dict):
+                return
+            model_id = _ai.get("model_id") or _ai.get("model")
+        except Exception as e:
+            log.warning(f"[MODEL] Could not read saved model: {e}")
+            return
+        if not isinstance(model_id, str) or not model_id:
+            return
+        if model_id.strip().lower() == "auto":
+            return  # "Auto" is already the correct initial state
+        self.set_model_display(model_id)
+        log.info(f"[MODEL] Restored saved model at startup: {model_id}")
 
     def set_generating(self, on: bool):
         self._generating = on
@@ -8014,7 +8270,7 @@ class ResumeTaskCard(QFrame):
         layout.setSpacing(10)
 
         # Header
-        header = QLabel(title or "\u26a0\ufe0f Context Window Exhausted")
+        header = QLabel(title or "\u23f8\ufe0f Task paused, work remains")
         header.setStyleSheet(f"color: {T['warning']}; font-size: 13px; font-weight: 600; border: none;")
         layout.addWidget(header)
 
@@ -8034,9 +8290,11 @@ class ResumeTaskCard(QFrame):
                 layout.addWidget(item)
 
         # Info text
+        # Not a context-window message: this card comes from the agent's own
+        # run limit (auto-continue cycles), with most of the window unused.
         info = QLabel(info_text or (
-            "The AI has reached the context window limit. You can resume from the last "
-            "checkpoint or save progress and stop."
+            "The AI used its rounds for this request and paused with work left. "
+            "Resume carries on from the checkpoint, or save progress and stop."
         ))
         info.setWordWrap(True)
         info.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px; border: none; margin-top: 4px;")
@@ -8095,6 +8353,356 @@ class ResumeTaskCard(QFrame):
     def _on_save_stop(self):
         self.save_stop_clicked.emit(self._checkpoint)
         self._dismiss()
+
+
+from PyQt6.QtCore import QRect, QRectF, QPointF
+from PyQt6.QtGui import QPainter, QPainterPath, QPen, QRegion
+from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QListWidget,
+                             QListWidgetItem, QStyle, QStyledItemDelegate, QVBoxLayout)
+
+
+class _HistoryRowDelegate(QStyledItemDelegate):
+    """Paints the History list: date-section headers and one-line chat rows
+    (first prompt, elided to fit, with its time on the right; a lime dot
+    marks the chat that is open)."""
+
+    ROW_H = 34
+    SECTION_H = 28
+
+    def sizeHint(self, option, index):
+        d = index.data(Qt.ItemDataRole.UserRole) or {}
+        return QSize(option.rect.width(), self.SECTION_H if d.get("section") else self.ROW_H)
+
+    def paint(self, p, option, index):
+        d = index.data(Qt.ItemDataRole.UserRole) or {}
+        r = option.rect
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        base = QFont()
+        base.setFamilies(family_list(T['font_ui']))
+        if d.get("section"):
+            f = QFont(base)
+            f.setPixelSize(11)
+            f.setWeight(QFont.Weight.DemiBold)
+            f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
+            p.setFont(f)
+            p.setPen(QColor(T['muted']))
+            p.drawText(r.adjusted(14, 0, -12, -4),
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
+                       d["section"].upper())
+            p.restore()
+            return
+        box = QRectF(r.adjusted(4, 1, -4, -1))
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        if selected or hovered:
+            path = QPainterPath()
+            path.addRoundedRect(box, 6, 6)
+            p.fillPath(path, QColor(T['bg_hover']))
+        current = d.get("current")
+        if current:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(T['accent_fill']))
+            p.drawEllipse(QPointF(box.left() + 12, box.center().y()), 3.5, 3.5)
+        tf = QFont(base)
+        tf.setPixelSize(11)
+        p.setFont(tf)
+        when = d.get("when", "")
+        when_w = p.fontMetrics().horizontalAdvance(when)
+        p.setPen(QColor(T['muted']))
+        p.drawText(box.adjusted(0, 0, -10, 0).toRect(),
+                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, when)
+        f = QFont(base)
+        f.setPixelSize(13)
+        if current:
+            f.setWeight(QFont.Weight.DemiBold)
+        p.setFont(f)
+        left = int(box.left()) + 24
+        avail = int(box.right()) - 10 - when_w - 12 - left
+        title = p.fontMetrics().elidedText(d.get("title", ""), Qt.TextElideMode.ElideRight, max(avail, 20))
+        p.setPen(QColor(T['text']))
+        p.drawText(QRect(left, r.top(), max(avail, 20), r.height()),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
+        p.restore()
+
+
+class ChatHistoryPopup(QFrame):
+    """The History dropdown: this project's chats under the History button.
+
+    Replaces a QMenu, which grew one row per chat until it ran off the
+    window and widened to the longest first prompt, spilling over the
+    editor. This one has a fixed width that stays inside the chat panel, a
+    capped height that scrolls, every chat of the project grouped by date,
+    and a search box; arrow keys move, Enter opens, Esc closes.
+    """
+    picked = pyqtSignal(str)
+
+    MAX_H = 440
+    WIDTH = 380
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        # A click on the History button while open only closes the popup
+        # (the press is not replayed into the button, which would reopen it).
+        self.setAttribute(Qt.WidgetAttribute.WA_NoMouseReplay)
+        self.setProperty("cortexOwnTheme", True)
+        self.setObjectName("chatHistoryPopup")
+        self._items: list = []
+        self._current = None
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(6, 8, 6, 6)
+        v.setSpacing(6)
+        top = QHBoxLayout()
+        top.setContentsMargins(4, 0, 4, 0)
+        top.setSpacing(8)
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search chats")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._rebuild)
+        self._search.installEventFilter(self)
+        top.addWidget(self._search, 1)
+        self._count = QLabel()
+        top.addWidget(self._count)
+        v.addLayout(top)
+
+        self._list = QListWidget()
+        self._list.setItemDelegate(_HistoryRowDelegate(self._list))
+        self._list.setMouseTracking(True)
+        self._list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setFrameShape(QFrame.Shape.NoFrame)
+        self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._list.itemClicked.connect(self._activate)
+        v.addWidget(self._list, 1)
+
+        self._empty = QLabel()
+        self._empty.setWordWrap(True)
+        self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty.hide()
+        v.addWidget(self._empty, 1)
+        self.apply_theme()
+
+    # ---- look ----
+    def apply_theme(self):
+        self.setStyleSheet(
+            f"QFrame#chatHistoryPopup {{ background:{T['bg_elevated']}; }}"
+            f"QLineEdit {{ background:{T['bg_input']}; color:{T['text']}; border:1px solid {T['border']};"
+            f" border-radius:6px; padding:5px 8px; font-family:{T['font_ui']}; font-size:12px;"
+            f" selection-background-color:{T['bg_hover']}; selection-color:{T['text']}; }}"
+            f"QLineEdit:focus {{ border-color:{T['accent']}; }}"
+            f"QLabel {{ color:{T['muted']}; background:transparent; border:none; font-family:{T['font_ui']};"
+            f" font-size:11px; }}"
+            f"QListWidget {{ background:transparent; border:none; outline:none; }}"
+            f"QListWidget::item {{ background:transparent; border:none; }}"
+        )
+        # The scrollbar gets its own complete sheet: through the parent's,
+        # the platform style still drew its arrow ends and a lighter groove.
+        sb = self._list.verticalScrollBar()
+        sb.setStyleSheet(
+            f"QScrollBar:vertical {{ background:{T['bg_elevated']}; width:8px; margin:0;"
+            f" border:none; }}"
+            f"QScrollBar::handle:vertical {{ background:{T['border']}; border-radius:3px;"
+            f" min-height:28px; margin:0 1px; }}"
+            f"QScrollBar::handle:vertical:hover {{ background:{T['muted']}; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; width:0;"
+            f" border:none; background:none; subcontrol-origin:margin; }}"
+            f"QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {{ width:0; height:0;"
+            f" border:none; background:none; image:none; }}"
+            f"QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background:none; }}"
+        )
+        # Qt wraps the scrollbar in a container widget that picked up the
+        # app sheet's rounded, bordered box: a stray line under the bar.
+        box = self._list.findChild(QWidget, "qt_scrollarea_vcontainer")
+        if box is not None:
+            box.setStyleSheet(f"QWidget#qt_scrollarea_vcontainer {{ background:{T['bg_elevated']};"
+                              f" border:none; border-radius:0; }}")
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
+        p.fillPath(path, QColor(T['bg_elevated']))
+        p.setPen(QPen(QColor(T['border']), 1))
+        p.drawPath(path)
+        p.end()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 8, 8)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    # ---- content ----
+    def set_items(self, items, current):
+        """items: (conversation_id, title, updated_ms) newest first."""
+        self._items = list(items or [])
+        self._current = current
+        self._count.setText("")
+        self._search.blockSignals(True)
+        self._search.clear()
+        self._search.blockSignals(False)
+        self._search.setVisible(len(self._items) > 1)
+        self._rebuild()
+
+    @staticmethod
+    def _section_and_when(ts_ms):
+        from datetime import datetime, timedelta
+        if not ts_ms:
+            return "Earlier", ""
+        dt = datetime.fromtimestamp(ts_ms / 1000)
+        today = datetime.now().date()
+        d = dt.date()
+        if d == today:
+            return "Today", dt.strftime("%H:%M")
+        if d == today - timedelta(days=1):
+            return "Yesterday", dt.strftime("%H:%M")
+        if d > today - timedelta(days=7):
+            return "This week", dt.strftime("%a %H:%M")
+        if dt.year == today.year:
+            return "Earlier", dt.strftime("%d %b")
+        return "Earlier", dt.strftime("%d %b %Y")
+
+    def _rebuild(self):
+        q = " ".join(self._search.text().lower().split())
+        self._list.clear()
+        last_section = None
+        first_row = None
+        shown = 0
+        for cid, title, ts in self._items:
+            section, when = self._section_and_when(ts)
+            if q and q not in (title or "").lower():
+                continue
+            if section != last_section:
+                head = QListWidgetItem()
+                head.setData(Qt.ItemDataRole.UserRole, {"section": section})
+                head.setFlags(Qt.ItemFlag.NoItemFlags)
+                self._list.addItem(head)
+                last_section = section
+            it = QListWidgetItem()
+            it.setData(Qt.ItemDataRole.UserRole, {
+                "cid": cid, "title": title or "New chat", "when": when,
+                "current": cid == self._current})
+            if title and len(title) > 40:
+                it.setToolTip(title)
+            self._list.addItem(it)
+            shown += 1
+            if first_row is None:
+                first_row = it
+        if not self._items:
+            self._empty.setText("No earlier chats in this project yet.\n"
+                                "Chats you start with + New Chat appear here.")
+        elif not shown:
+            self._empty.setText(f"No chats match “{self._search.text().strip()}”.")
+        n = len(self._items)
+        if n:
+            self._count.setText(f"{shown} of {n}" if q else f"{n} chat{'s' if n != 1 else ''}")
+        self._empty.setVisible(shown == 0)
+        self._list.setVisible(shown > 0)
+        if first_row is not None and q:
+            self._list.setCurrentItem(first_row)
+        self._fit_height()
+
+    def _content_height(self) -> int:
+        h = 0
+        for i in range(self._list.count()):
+            d = self._list.item(i).data(Qt.ItemDataRole.UserRole) or {}
+            h += _HistoryRowDelegate.SECTION_H if d.get("section") else _HistoryRowDelegate.ROW_H
+        return h
+
+    def _fit_height(self):
+        # isHidden, not isVisible: before the first show every child counts
+        # as invisible, which sized the dropdown for an empty list.
+        chrome = 8 + 6 + (self._search.sizeHint().height() + 6
+                          if not self._search.isHidden() or self._count.text() else 0)
+        body = self._content_height() + 4 if not self._list.isHidden() else 64
+        self.resize(self.width(), min(chrome + body, self._max_h))
+
+    # ---- open / pick ----
+    def open_under(self, button, panel):
+        """Show under `button`, right-aligned inside `panel`, on screen."""
+        avail = panel.width() - 16
+        w = max(min(self.WIDTH, avail), min(280, avail))
+        btn_bl = button.mapToGlobal(QPoint(0, button.height()))
+        pan_tl = panel.mapToGlobal(QPoint(0, 0))
+        screen = (button.screen() or QApplication.primaryScreen()).availableGeometry()
+        right = min(pan_tl.x() + panel.width() - 8, screen.right() - 4)
+        x = max(right - w, pan_tl.x() + 8, screen.left() + 4)
+        y = btn_bl.y() + 6
+        bottom = min(pan_tl.y() + panel.height(), screen.bottom()) - 8
+        self._max_h = max(160, min(self.MAX_H, bottom - y))
+        self.setFixedWidth(w)
+        self._fit_height()
+        self.move(x, y)
+        self.show()
+        if not self._search.isHidden():
+            self._search.setFocus()
+        else:
+            self.setFocus()
+        cur = next((i for i in range(self._list.count())
+                    if (self._list.item(i).data(Qt.ItemDataRole.UserRole) or {}).get("current")), None)
+        if cur is not None:
+            self._list.scrollToItem(self._list.item(cur), QListWidget.ScrollHint.EnsureVisible)
+
+    _max_h = MAX_H
+
+    def _activate(self, item):
+        d = (item.data(Qt.ItemDataRole.UserRole) or {}) if item else {}
+        cid = d.get("cid")
+        if not cid:
+            return
+        self.close()
+        if cid != self._current:
+            self.picked.emit(cid)
+
+    def _step(self, delta: int):
+        n = self._list.count()
+        if not n:
+            return
+        i = self._list.currentRow()
+        i = (-1 if delta > 0 else n) if i < 0 else i
+        while True:
+            i += delta
+            if i < 0 or i >= n:
+                return
+            if (self._list.item(i).data(Qt.ItemDataRole.UserRole) or {}).get("cid"):
+                self._list.setCurrentRow(i)
+                self._list.scrollToItem(self._list.item(i))
+                return
+
+    def eventFilter(self, obj, ev):
+        if obj is self._search and ev.type() == QEvent.Type.KeyPress:
+            if self._handle_key(ev):
+                return True
+        return super().eventFilter(obj, ev)
+
+    def keyPressEvent(self, ev):
+        if not self._handle_key(ev):
+            super().keyPressEvent(ev)
+
+    def _handle_key(self, ev) -> bool:
+        k = ev.key()
+        if k == Qt.Key.Key_Down:
+            self._step(1)
+        elif k == Qt.Key.Key_Up:
+            self._step(-1)
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._activate(self._list.currentItem())
+        elif k == Qt.Key.Key_Escape:
+            self.close()
+        else:
+            return False
+        return True
+
+    def hideEvent(self, ev):
+        super().hideEvent(ev)
+        btn = self.parent()
+        if isinstance(btn, QPushButton):
+            btn.setProperty("open", False)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
 
 class ChatPanel(QWidget):
@@ -8178,19 +8786,15 @@ class ChatPanel(QWidget):
         # History: this project's earlier chats. The list comes from
         # history_provider (set by MainWindow), read when the menu opens.
         self.history_provider = None
-        self._history_btn = QPushButton("History")
+        self._history_btn = QPushButton("History \u25be")
         self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._history_btn.setToolTip("Open a previous chat in this project")
         self._history_btn.setStyleSheet(self._header_btn_qss(history=True))
-        self._history_menu = QMenu(self._history_btn)
-        # The menu is styled here and in set_theme(), completely, so it is
-        # right the moment it opens; the live-theme window filter
-        # (theme_remap) leaves windows with this property alone instead of
-        # restyling them while they are being shown.
-        self._history_menu.setProperty("cortexOwnTheme", True)
-        self._history_menu.setStyleSheet(self._history_menu_qss())
-        self._history_menu.aboutToShow.connect(self._fill_history_menu)
-        self._history_btn.setMenu(self._history_menu)
+        # The dropdown (ChatHistoryPopup) is built on first open and styled
+        # completely by itself, here and in set_theme(); the live-theme
+        # window filter (theme_remap) leaves it alone (cortexOwnTheme).
+        self._history_popup = None
+        self._history_btn.clicked.connect(self._open_history)
         hbar.addWidget(self._history_btn)
 
         # New Chat button (right side)
@@ -12095,7 +12699,9 @@ class ChatPanel(QWidget):
         # retrying / failover, just log, no overlay needed
 
     def on_turn_limit_hit(self, pending_todos: list, checkpoint: str):
-        """Show Resume Task card when context window is exhausted.
+        """Show the Resume Task card when the agent's run limit stops a task
+        with todos left (auto-continue cycles used up or no progress). It
+        is not a context-window limit; the window is usually far from full.
 
         Renders a card with pending todos summary and Resume / Save & Stop buttons.
         """
@@ -12118,8 +12724,12 @@ class ChatPanel(QWidget):
             "Do NOT re-read files you already have context for, "
             "start writing/editing immediately based on the checkpoint."
         )
-        self.input_area.input.setPlainText(continuation)
-        self._on_send(continuation)
+        # Through the input's send signal, like a typed message: MainWindow
+        # hands it to the agent and _on_send draws it. Calling _on_send()
+        # directly only drew the bubble and the spinner, the agent never got
+        # the request, so Resume "did nothing" (2026-10-11 00:38) while
+        # pasting the same text worked.
+        self.input_area.send_requested.emit(continuation)
 
     def _on_save_stop_clicked(self, checkpoint: str):
         """Handle Save & Stop, trigger memory save then stop generating."""
@@ -13465,8 +14075,65 @@ class ChatPanel(QWidget):
             self._emit_restore_finished()
         return True
 
+    @property
+    def panel_shows_welcome(self) -> bool:
+        """True while the welcome EmptyState is what the user sees.
+
+        Used by the startup self-heal: a panel that still shows the welcome
+        screen although the project has chat history in the DB is the exact
+        reported bug (Store 3.0.58 opened on it after a logged-success
+        restore), and it is checkable without touching the widgets.
+        """
+        return getattr(self, "_empty_state", None) is not None
+
+    def begin_restore(self) -> None:
+        """Swap the welcome EmptyState for the restore spinner, now.
+
+        Startup queued the restore but the batched render takes seconds;
+        during that window (and the scheduling delay before it) the panel
+        showed "Start a new conversation", which reads as "my history is
+        gone". The spinner is the truth: history exists and is loading.
+        Idempotent; a restore that finds no messages re-shows the welcome
+        via clear_messages()/load_timeline_async's empty branch.
+        """
+        if getattr(self, "_empty_state", None) is None:
+            return
+        try:
+            self.col.removeWidget(self._empty_state)
+            self._empty_state.hide()
+            self._empty_state.deleteLater()
+        except RuntimeError:
+            pass
+        self._empty_state = None
+        self._remove_stretch()
+        try:
+            self._spinner_overlay.show_overlay(
+                "Restoring your chat conversation…",
+                spinner_key="thought",
+                title="Chat Restore",
+                detail="Loading your messages…",
+            )
+        except Exception as e:
+            log.warning(f"[ChatRestore] begin_restore spinner failed: {e}")
+        log.info("[ChatRestore] begin_restore: welcome swapped for spinner")
+
     def clear_messages(self):
         """Remove all messages from the chat panel, show empty state (ring logo)."""
+        # 2026-10-13 instrumentation: the Store 3.0.58 build repeatedly opened
+        # on the welcome EmptyState although the startup restore logged
+        # "Restore complete", and nothing in the logs named the code that put
+        # the EmptyState back. A clear is the ONLY way an EmptyState appears
+        # after __init__, so log every caller (two frames is enough to name
+        # the path: project switch, New Chat, History pick, theme rebuild...).
+        try:
+            import traceback as _tb
+            _stk = _tb.extract_stack()[-4:-1]
+            _who = " <- ".join(f"{f.name}:{f.lineno}" for f in _stk)
+        except Exception:
+            _who = "?"
+        log.info(f"[ChatClear] clear_messages called by {_who} "
+                 f"(col={self.col.count()}, restoring="
+                 f"{getattr(self, '_restoring', False)})")
         # Any batched restore still running belongs to the chat being cleared:
         # its remaining batches must not land in the next one. 2026-09-13: a
         # project switch 13 s into startup got the old project's messages
@@ -13583,6 +14250,13 @@ class ChatPanel(QWidget):
                 elif isinstance(w, (ThoughtsBlock, MermaidDiagramCard, MermaidStreamingCard)):
                     continue  # skip non-message widgets (thinking, diagrams)
                 elif isinstance(w, QLabel):
+                    # Panel chrome is not conversation: the scroll-up hint and
+                    # the indexing status were saved as "system" messages,
+                    # one more hint per session (9 in one chat by 2026-10-11).
+                    if (w is getattr(self, '_load_more_label', None)
+                            or w is getattr(self, '_semantic_index_label', None)
+                            or _is_panel_chrome_text(w.text())):
+                        continue
                     text = w.text()
                     if text.strip():
                         messages.append({"role": "system", "content": text})
@@ -13720,6 +14394,24 @@ class ChatPanel(QWidget):
             self._show_load_more_indicator()
         self._lazy_load_armed = True
         log.info("[ChatRestore] View pinned to newest message; scroll-up loader armed")
+        # 2026-10-13 instrumentation: the Store build opened on the welcome
+        # EmptyState although the restore logged success. Record what the
+        # panel actually holds and shows once the scroll settle finishes, so
+        # the next report names the layer that disagrees (model, layout or
+        # visibility) instead of guessing from the restore log alone.
+        try:
+            _vp = self.scroll.viewport()
+            log.info(
+                f"[ChatRestore] post-restore state: col={self.col.count()}, "
+                f"empty_state={'YES' if self._empty_state is not None else 'no'}, "
+                f"scroll={self.scroll.verticalScrollBar().value()}/"
+                f"{self.scroll.verticalScrollBar().maximum()}, "
+                f"viewport={_vp.width()}x{_vp.height()}, "
+                f"panel_visible={self.isVisible()}, "
+                f"visible_region={self.visibleRegion().boundingRect()}"
+            )
+        except Exception as e:
+            log.warning(f"[ChatRestore] post-restore state log failed: {e}")
 
     def _restore_scroll_position(self):
         """Restore saved scroll position for the active conversation."""
@@ -13975,7 +14667,11 @@ class ChatPanel(QWidget):
             self._restore_finished_sent = False
             self._conversation_id = data.get("conversation_id")
             msgs = data.get("messages", [])
-            valid_msgs = [m for m in msgs if m.get("content") or m.get("blocks")]
+            # Hints saved by older versions are dropped here, so the next
+            # save writes the chat without them.
+            valid_msgs = [m for m in msgs if (m.get("content") or m.get("blocks"))
+                          and not (m.get("role") == "system"
+                                   and _is_panel_chrome_text(m.get("content")))]
 
             if not valid_msgs:
                 # New project has no history: the OLD project's widgets must
@@ -14036,7 +14732,10 @@ class ChatPanel(QWidget):
                 # These are user prompts whose AI responses are in _pending_messages
                 # (older session). Without this, they stack at the top of the chat
                 # as a wall of "hi hi hi hi" with no AI responses, the "floating" bug.
-                while initial_msgs and initial_msgs[0].get("role") == "user":
+                # ...but never down to a handful: a chat whose newest prompts
+                # have no reply showed only 4 messages on reopen (2026-10-11).
+                while (initial_msgs and initial_msgs[0].get("role") == "user"
+                       and len(initial_msgs) > 6):
                     # Only keep this user msg if the NEXT msg is assistant (its response)
                     if len(initial_msgs) > 1 and initial_msgs[1].get("role") == "assistant":
                         break
@@ -14248,49 +14947,30 @@ class ChatPanel(QWidget):
             f"QPushButton {{ color:{T['btn_text']}; font-size:12px; font-weight:500;"
             f"padding:{pad}; border-radius:6px; border:1px solid {T['border']};"
             f"background:{T['btn_bg']}; font-family:{T['font_ui']};{extra} }}"
-            f"QPushButton:hover, QPushButton:pressed, QPushButton:open {{ background:{T['btn_hover']};"
+            f"QPushButton:hover, QPushButton:pressed, QPushButton[open=\"true\"] {{ background:{T['btn_hover']};"
             f" color:{T['accent']}; border-color:{T['accent']}; }}"
         )
         if history:
             qss += "QPushButton::menu-indicator { width:0; image:none; }"
         return qss
 
-    @staticmethod
-    def _history_menu_qss() -> str:
-        """Every part of the History menu, so nothing falls through to the
-        app-wide sheet, which after a live switch is still the startup theme."""
-        return (
-            f"QMenu {{ background:{T['bg_elevated']}; color:{T['text']}; border:1px solid {T['border']};"
-            f" border-radius:8px; padding:4px; font-family:{T['font_ui']}; font-size:12px; }}"
-            f"QMenu::item {{ background:transparent; color:{T['text']}; padding:6px 14px 6px 8px;"
-            f" border-radius:4px; }}"
-            f"QMenu::item:selected {{ background:{T['bg_hover']}; color:{T['text']}; }}"
-            f"QMenu::item:checked {{ color:{T['text']}; font-weight:600; }}"
-            f"QMenu::item:disabled {{ color:{T['muted']}; background:transparent; }}"
-            f"QMenu::indicator {{ width:14px; height:14px; margin-left:4px; }}"
-            f"QMenu::indicator:checked {{ background:{T['accent_fill']}; border-radius:3px; }}"
-            f"QMenu::indicator:unchecked {{ background:transparent; }}"
-            f"QMenu::separator {{ height:1px; background:{T['border']}; margin:4px 6px; }}"
-        )
-
-    def _fill_history_menu(self):
-        """List the project's chats, newest first; the open one is checked."""
-        m = self._history_menu
-        m.clear()
+    def _open_history(self):
+        """Open the History dropdown under its button with this project's chats."""
         try:
             items = self.history_provider() if self.history_provider else []
         except Exception as e:
             log.warning(f"[History] could not list chats: {e}")
             items = []
-        if not items:
-            a = m.addAction("No earlier chats in this project")
-            a.setEnabled(False)
-            return
-        for conv_id, label, when in items:
-            a = m.addAction(f"{label}    {when}")
-            a.setCheckable(True)
-            a.setChecked(conv_id == self._conversation_id)
-            a.triggered.connect(lambda _=False, cid=conv_id: self._on_history_pick(cid))
+        if self._history_popup is None:
+            self._history_popup = ChatHistoryPopup(self._history_btn)
+            self._history_popup.picked.connect(self._on_history_pick)
+        pop = self._history_popup
+        pop.apply_theme()
+        pop.set_items(items, self._conversation_id)
+        self._history_btn.setProperty("open", True)
+        self._history_btn.style().unpolish(self._history_btn)
+        self._history_btn.style().polish(self._history_btn)
+        pop.open_under(self._history_btn, self)
 
     def _on_history_pick(self, conv_id: str):
         if conv_id and conv_id != self._conversation_id:
@@ -14365,6 +15045,14 @@ class ChatPanel(QWidget):
             pass
         self._reset_scroll_intent()
 
+    def _emit_theme_settled(self):
+        """Mark this switch's re-theme as done, then tell listeners. The mark
+        lets a listener that subscribes late (MainWindow on a small chat,
+        where this finishes before it connects) see that it already
+        happened instead of waiting for its 20s fallback."""
+        self._theme_settled_gen = getattr(self, '_theme_gen', 0)
+        self.theme_settled.emit()
+
     def set_theme(self, is_dark: bool):
         """Update theme tokens and retheme all existing thought blocks.
 
@@ -14412,12 +15100,13 @@ class ChatPanel(QWidget):
                 f"background: transparent; border-bottom: 1px solid {T['border']};")
             self._footer.setStyleSheet(
                 f"QWidget {{ background:transparent; border-top:1px solid {T['border']}; }}")
-            # Both header buttons and the History menu, in the first pass of
+            # Both header buttons and the History dropdown, in the first pass of
             # the switch: History was left to the late stale-colour pass,
             # so it showed the previous theme for seconds on a long chat.
             self._new_chat_btn.setStyleSheet(self._header_btn_qss())
             self._history_btn.setStyleSheet(self._header_btn_qss(history=True))
-            self._history_menu.setStyleSheet(self._history_menu_qss())
+            if self._history_popup is not None:
+                self._history_popup.apply_theme()
             # Input bar (mode selector / text input / Send), token-styled at
             # construction; without retheme() the input row keeps the OLD
             # theme after a live switch (light pill floating in dark mode).
@@ -14525,7 +15214,7 @@ class ChatPanel(QWidget):
                 QTimer.singleShot(0, lambda: _retheme_cards(end))
             else:
                 log.info(f"[THEME-AUDIT] chat_panel  cards-retheme DONE  n={len(_cards)}")
-                self.theme_settled.emit()
+                self._emit_theme_settled()
 
         # ── Visible-first ordering ──────────────────────────────────────
         # The work below is unavoidable (every widget carries construction-time
@@ -14633,7 +15322,7 @@ class ChatPanel(QWidget):
                 # Phase 3: tool cards after browsers
                 QTimer.singleShot(0, lambda: _retheme_cards(0))
             else:
-                self.theme_settled.emit()
+                self._emit_theme_settled()
 
         if not blocks:
             dt_total = (_time.perf_counter() - t_total) * 1000
@@ -14646,7 +15335,7 @@ class ChatPanel(QWidget):
             elif _cards:
                 QTimer.singleShot(0, lambda: _retheme_cards(0))
             else:
-                self.theme_settled.emit()
+                self._emit_theme_settled()
             return
 
         def _retheme_batch(start: int):

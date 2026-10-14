@@ -276,3 +276,84 @@ def apply_theme_outside(heavy: QWidget, qss: str) -> int:
     for top in QApplication.topLevelWidgets():
         top.setProperty("cortexThemeGen", _window_filter.gen)
     return len(roots)
+
+
+# ── Tooltips ───────────────────────────────────────────────────────────
+# Qt styles a tooltip with the stylesheets of the widget under the mouse and
+# that widget's parents: QToolTip::showText() sets the tip's
+# "_q_stylesheet_parent" to it and resets the tip's own sheet to "/* */".
+# Plain declarations on any parent ("background: transparent;" on the chat's
+# card headers, "background: #1e1e1e;" around the editor web view) act as
+# "* { ... }" and reach the tip, which then painted see-through or #1e1e1e:
+# dark tooltips in light mode over the chat's run-command rows and the
+# editor's "Copy Path" breadcrumb, whatever theme Cortex started in.
+#
+# So every tip is re-parented, for styling only, to a hidden host widget
+# whose sheet is just the current theme's QToolTip rule. The widget's own
+# styling no longer reaches the tip.
+
+def tooltip_qss() -> str:
+    from src.ui.tokens import TOKENS as T
+    return (f"QToolTip {{ background-color: {T['bg_elevated']}; color: {T['text']};"
+            f" border: 1px solid {T['border']}; border-radius: 4px; padding: 4px 8px;"
+            f" font-family: {T['font_ui']}; font-size: 12px; }}")
+
+
+def apply_tooltip_palette() -> None:
+    """QToolTip's own palette (used where no rule applies) and the host sheet."""
+    from PyQt6.QtGui import QColor, QPalette
+    from PyQt6.QtWidgets import QToolTip
+    from src.ui.tokens import TOKENS as T
+    pal = QToolTip.palette()
+    pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(T['bg_elevated']))
+    pal.setColor(QPalette.ColorRole.ToolTipText, QColor(T['text']))
+    pal.setColor(QPalette.ColorRole.Window, QColor(T['bg_elevated']))
+    pal.setColor(QPalette.ColorRole.WindowText, QColor(T['text']))
+    QToolTip.setPalette(pal)
+    _tooltip_host()
+
+
+_tip_host: Optional[QWidget] = None
+_TIP_HOST_NAME = "cortexTooltipHost"
+
+
+def _tooltip_host() -> QWidget:
+    global _tip_host
+    if _tip_host is None:
+        _tip_host = QWidget()
+        _tip_host.setObjectName(_TIP_HOST_NAME)
+    qss = tooltip_qss()
+    if _tip_host.styleSheet() != qss:
+        _tip_host.setStyleSheet(qss)
+    return _tip_host
+
+
+class _TooltipTheme(QObject):
+    _EVENTS = (QEvent.Type.Polish, QEvent.Type.Show, QEvent.Type.StyleChange)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() in self._EVENTS:
+            try:
+                if (isinstance(obj, QWidget)
+                        and obj.metaObject().className() == "QTipLabel"):
+                    cur = obj.property("_q_stylesheet_parent")
+                    if getattr(cur, "objectName", lambda: "")() != _TIP_HOST_NAME:
+                        obj.setProperty("_q_stylesheet_parent", _tooltip_host())
+                        obj.setProperty("cortexOwnTheme", True)
+                        obj.setStyleSheet("/* cortex tooltip */")   # re-resolve rules
+                        obj.adjustSize()
+            except RuntimeError:
+                pass
+        return False
+
+
+_tooltip_filter: Optional[_TooltipTheme] = None
+
+
+def install_tooltip_theme() -> None:
+    """Once at startup; tips then follow every theme, live switches included."""
+    global _tooltip_filter
+    apply_tooltip_palette()
+    if _tooltip_filter is None:
+        _tooltip_filter = _TooltipTheme()
+        QApplication.instance().installEventFilter(_tooltip_filter)

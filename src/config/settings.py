@@ -3,11 +3,32 @@ Settings Manager for Cortex AI IDE
 Handles loading and saving user preferences to ~/.cortex/settings.json
 """
 
+import atexit
 import json
 import logging
+import os
+import time
 from pathlib import Path
 
 log = logging.getLogger("settings")
+
+# A second running Cortex (the Store build next to a dev run) or an AV scan
+# can hold settings.json open for its own whole-file rewrite at the exact
+# moment we save; on Windows that surfaces as a sharing violation (errno 13).
+# Dropping the write silently left the new value in memory only, so the
+# change reverted at the next start: the "provider toggles are not respected
+# after restart" report. Retry briefly, then stay dirty and retry again on
+# the next set() and once more at exit.
+_SAVE_RETRIES = 5
+_SAVE_RETRY_DELAY = 0.08
+
+# Reads get the same patience as writes, for the same reason: a sibling
+# rewriting the file (or a scanner holding it) turns a read into errno 13
+# for a few milliseconds, and a read that returns "nothing" is treated as
+# "this user has never chosen a provider", which redraws the panel with the
+# server defaults. Fewer attempts than a write because this runs on the
+# GUI thread while the user is clicking.
+_READ_RETRIES = 3
 
 
 DEFAULT_SETTINGS = {
@@ -134,23 +155,45 @@ class Settings:
         self._config_dir = Path.home() / ".cortex"
         self._config_file = self._config_dir / "settings.json"
         self._data = {}
+        self._save_dirty = False
+        # The last copy of the file we actually managed to read. A save whose
+        # live read is refused merges over this instead of over nothing, so a
+        # moment of contention can never delete keys it did not get to see.
+        self._last_disk: dict | None = None
+        # Dot-paths this instance changed since it loaded the file. _save()
+        # writes these from memory and everything else from a fresh disk
+        # read, so a second Cortex saving its stale whole-file copy cannot
+        # revert keys it never touched. See _merged_with_disk().
+        self._touched: set = set()
+        atexit.register(self.flush)
         self._load()
 
     def _load(self):
         """Load settings from disk, merging with defaults."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
         if self._config_file.exists():
-            try:
-                with open(self._config_file, "r", encoding="utf-8") as f:
-                    stored = json.load(f)
+            stored = self._read_file()
+            if stored is None:
+                # The file is there and could not be read even after the
+                # retries: a sibling Cortex is mid-rewrite, or a scanner has
+                # it. Falling back to the defaults in memory is survivable -
+                # get_fresh() re-reads, and _merged_with_disk() refuses to
+                # overwrite a file this instance has never seen. What is NOT
+                # survivable is treating it as "no file", because the
+                # provider panel then draws the server defaults (MiMo +
+                # DeepSeek) as the user's own choice and the next click
+                # persists them.
+                log.warning("[Settings] %s could not be read at startup; "
+                            "using defaults in memory and re-reading on "
+                            "demand", self._config_file)
+                self._data = json.loads(json.dumps(DEFAULT_SETTINGS))
+            else:
                 self._data = self._merge(DEFAULT_SETTINGS, stored)
                 # Lift any cleartext key off disk before anything else can
                 # read this file. _save() would otherwise write them straight
                 # back out, which is how they survived for months.
                 if self._migrate_plaintext_keys():
                     self._save()
-            except (json.JSONDecodeError, OSError):
-                self._data = dict(DEFAULT_SETTINGS)
         else:
             self._data = json.loads(json.dumps(DEFAULT_SETTINGS))
             self._save()
@@ -232,6 +275,10 @@ class Settings:
                 if not km.get_key(provider):
                     km.store_key(provider, value)
                 self._data["ai"][field] = self._KEY_PLACEHOLDER
+                # Marked touched so the rewrite that follows puts the
+                # placeholder on disk; an untouched leaf is copied from the
+                # file, and here the file still holds the cleartext key.
+                self._touched.add(("ai", field))
                 moved += 1
             except Exception as exc:
                 log.warning("[Settings] could not migrate %s: %s", field, exc)
@@ -242,13 +289,245 @@ class Settings:
                         moved)
         return moved
 
+    def _read_file(self) -> dict | None:
+        """Parse settings.json, retrying a transient refusal.
+
+        Returns the stored dict (possibly empty) or None when the file could
+        not be read at all. None and {} are deliberately different answers:
+        {} is a readable but empty file - a fresh install - while None means
+        "the file is there and we were refused". Only the caller that
+        decides whether to OVERWRITE needs the distinction, and conflating
+        the two is what made a moment of contention look like a first run.
+
+        A file that is valid JSON but not an object is treated as empty; a
+        file that is not JSON at all is not retried, because no amount of
+        patience repairs it.
+        """
+        last_error: OSError | None = None
+        for attempt in range(_READ_RETRIES):
+            try:
+                with open(self._config_file, "r", encoding="utf-8") as f:
+                    stored = json.load(f)
+                return stored if isinstance(stored, dict) else {}
+            except json.JSONDecodeError as e:
+                log.warning("[Settings] %s is not valid JSON (%s); falling "
+                            "back to defaults", self._config_file, e)
+                return {}
+            except OSError as e:
+                last_error = e
+                if attempt + 1 < _READ_RETRIES:
+                    time.sleep(_SAVE_RETRY_DELAY)
+        log.warning("[Settings] could not read %s after %d attempts (%s)",
+                    self._config_file, _READ_RETRIES, last_error)
+        return None
+
+    def _read_disk(self) -> dict | None:
+        """The file as it is right now, not as this instance loaded it.
+
+        None when it could not be read; the good copy is remembered so a save
+        during a refusal still has something complete to merge over.
+        """
+        disk = self._read_file()
+        if disk is None:
+            return None
+        self._last_disk = disk
+        return disk
+
+    def _leaf_paths(self, node, prefix=()):
+        """Every (dot-path, value) pair in a tree; lists count as leaves."""
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from self._leaf_paths(v, prefix + (k,))
+        else:
+            yield prefix, node
+
+    @staticmethod
+    def _put_path(node: dict, path, value):
+        for k in path[:-1]:
+            nxt = node.get(k)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                node[k] = nxt
+            node = nxt
+        node[path[-1]] = value
+
+    def _merged_with_disk(self) -> dict | None:
+        """What a save writes: this instance's touched leaves, over the file
+        as it is now. None when a save must not happen at all.
+
+        A save used to dump the whole in-memory tree, and every instance
+        carries the tree it loaded at startup. Two Cortexes at once (a dev
+        run next to the installed build, both on ~/.cortex) then play
+        last-writer-wins with whole files: whichever saves last reverts
+        every key the other changed since it started. That is how provider
+        toggles came back as the server defaults after a restart even
+        though every click had saved correctly - the click was fine, a
+        stale sibling overwrote it afterwards.
+
+        Leaves this instance never touched are therefore copied from the
+        current file; only leaves it did touch come from memory. Keys only
+        one side knows (new defaults, foreign keys from another version)
+        survive from whichever side has them.
+
+        When the live read is refused the merge falls back to the last copy
+        this instance read, so a refusal costs freshness at worst. If there
+        is no earlier copy AND a file is sitting there, None says "do not
+        write": dumping memory would delete the provider activation list,
+        the recents and the window geometry, none of which this instance has
+        ever seen. Returning None is deliberate - the caller turns it into
+        "stay dirty and retry", not into a failed save.
+        """
+        base = json.loads(json.dumps(self._data))
+        disk = self._read_disk()
+        if disk is None:
+            disk = self._last_disk
+            if disk is None:
+                if not self._config_file.exists():
+                    return base          # a first run, nothing to merge over
+                log.warning("[Settings] %s exists but has never been readable "
+                            "by this instance; skipping the write instead of "
+                            "replacing settings it cannot see",
+                            self._config_file)
+                return None
+            log.info("[Settings] %s could not be read just now; merging over "
+                     "the last copy this instance read", self._config_file)
+        if not disk:
+            return base
+        for path, value in self._leaf_paths(disk):
+            if path not in self._touched:
+                self._put_path(base, path, value)
+        return base
+
+    def get_fresh(self, *keys, default=None):
+        """Read a value from the file as it is now, not from startup memory.
+
+        A second Cortex instance's save lands between our load and our
+        read; for a value the user changes in one window and reads in
+        another (the provider toggles) the stale in-memory answer looks
+        exactly like "my choice was ignored". Leaves this instance changed
+        itself still come from memory, so an unsaved retry is not masked.
+        """
+        if tuple(keys) in self._touched:
+            return self.get(*keys, default=default)
+        disk = self._read_disk()
+        if not disk:
+            return self.get(*keys, default=default)
+        node = self._merge(DEFAULT_SETTINGS, disk)
+        for k in keys:
+            if isinstance(node, dict) and k in node:
+                node = node[k]
+            else:
+                return self.get(*keys, default=default)
+        return node
+
     def _save(self):
-        """Persist settings to disk, never including a credential."""
+        """Persist settings to disk, never including a credential.
+
+        Retries briefly before giving up: on Windows a concurrent writer
+        (a second Cortex instance, an AV scan) turns open() into a sharing
+        violation, and a silently dropped write means the user's change
+        lives only in memory and reverts at the next start.
+        """
+        merged = self._merged_with_disk()
+        if merged is None:
+            # There is a file on disk that this instance has never managed to
+            # read. Writing now would replace it with the keys we happen to
+            # know, so keep the change in memory and retry later instead.
+            self._save_dirty = True
+            log.warning("[Settings] not writing settings.json: it cannot be "
+                        "read, so the change is kept in memory for now")
+            return
+        payload = json.dumps(self._redacted(merged), indent=2)
+        tmp = f"{self._config_file}.tmp{os.getpid()}"
+        for attempt in range(_SAVE_RETRIES):
+            error = self._write_payload(payload, tmp)
+            if error is None:
+                self._save_dirty = False
+                return
+            if attempt + 1 >= _SAVE_RETRIES:
+                self._save_dirty = True   # a later flush() tries again
+                # Say which of the two it is. They need different answers:
+                # a lock clears by itself, a denial never does.
+                _win = getattr(error, "winerror", None)
+                if _win in (32, 33):
+                    _why = ("another program is holding the file - most "
+                            "often a second Cortex (the installed build "
+                            "and this one share ~/.cortex)")
+                elif _win == 5 or getattr(error, "errno", None) == 13:
+                    _why = ("the file system refused the write - check "
+                            "that the file is not read-only and that "
+                            "Cortex was not started from a sandboxed shell")
+                else:
+                    _why = "unexpected error"
+                log.error(f"[Settings] Could not save settings after "
+                          f"{_SAVE_RETRIES} attempts: {_why} ({error}). "
+                          f"Your change is kept in memory and will be "
+                          f"written on the next successful save.")
+            else:
+                time.sleep(_SAVE_RETRY_DELAY)
+
+    def _write_payload(self, payload: str, tmp: str) -> OSError | None:
+        """Put payload on disk. None on success, else the error that stopped it.
+
+        Two ways to write, and the second is tried inside the SAME attempt
+        because they are refused for different reasons:
+
+        * a sibling temp file renamed over settings.json. Crash safe, and it
+          never leaves half a file, so it is the first choice. But it has to
+          CREATE a file and then MOVE it, and on this machine the create is
+          the fragile half: the user's own console on 2026-10-13 shows the
+          create being refused, over and over, on every save -
+
+              [Settings] Could not save settings after 5 attempts: [Errno 13]
+              Permission denied: '...\\.cortex\\settings.json.tmp6728'
+
+          Note the name in that message: the TEMP, not settings.json. The
+          rename itself also needs FILE_SHARE_DELETE on the destination,
+          which a plain Python reader in the other Cortex does not grant.
+
+        * a plain truncating write to settings.json. Needs neither a new file
+          nor a rename, and was measured to succeed on the same machine at
+          the moment the atomic path was refused.
+
+        The fallback used to hang off the rename alone, so a refused temp
+        ended the save before the fallback was ever reached - and the change
+        was lost even though the direct write would have worked. That is the
+        bug behind "my provider toggles come back as MiMo + DeepSeek".
+        """
+        atomic_error = None
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.replace(tmp, self._config_file)
+                return None
+            except OSError as e:
+                atomic_error = e
+        except OSError as e:
+            atomic_error = e
+        # Whatever happened above, do not leave a stray temp behind.
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
         try:
             with open(self._config_file, "w", encoding="utf-8") as f:
-                json.dump(self._redacted(self._data), f, indent=2)
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            log.info("[Settings] wrote settings.json in place: the atomic "
+                     "save was refused (%s)", atomic_error)
+            return None
         except OSError as e:
-            log.error(f"[Settings] Could not save settings: {e}")
+            return e
+
+    def flush(self):
+        """Retry a save that failed earlier. Safe to call at any time."""
+        if self._save_dirty:
+            self._save()
 
     def get(self, *keys, default=None):
         """Get a value by dot-path keys, e.g. get('editor', 'font_size')."""
@@ -267,6 +546,7 @@ class Settings:
         for k in keys[:-1]:
             node = node.setdefault(k, {})
         node[keys[-1]] = value
+        self._touched.add(tuple(keys))
         self._save()
 
     def add_recent_project(self, path: str):
@@ -276,6 +556,7 @@ class Settings:
             recents.remove(path)
         recents.insert(0, path)
         self._data["recent_projects"] = recents[:10]
+        self._touched.add(("recent_projects",))
         self._save()
 
     def get_recent_projects(self) -> list:

@@ -736,10 +736,34 @@ class CortexDatabase:
     # =========================================================================
     
     def create_conversation(self, conversation_id: str, project_path: str, title: str = None) -> str:
-        """Create a new conversation."""
+        """Create a new conversation, or refresh an existing row's title.
+
+        Refuses to INSERT a row with an empty project_path. Every lookup
+        (get_latest_conversation, get_conversation_heads, the History list)
+        matches on project_path, so such a row is unreachable the moment it is
+        written: the chat it belongs to "vanishes" from the UI while its
+        messages sit in the DB under no project. The live database carried 221
+        of them, written by the agent's immediate-save path when it ran before
+        `set_project_root`:
+            create_conversation(project_path=getattr(self, "_project_root", "") or "", ...)
+        On the next start the restore found nothing for the project, created a
+        fresh empty conversation, and the panel opened blank.
+
+        An EXISTING row still keeps its project_path: the INSERT is OR IGNORE
+        and the UPDATE is scoped to the same project_path, so a late save that
+        does not know the project cannot re-stamp the row it failed to find.
+        """
         now = int(datetime.now().timestamp() * 1000)
         title = title or f"Chat {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        
+
+        if not project_path:
+            # Caller does not know the project yet (e.g. a save that ran before
+            # set_project_root). Leave the row to be created by the code that
+            # does know it, rather than writing an unreachable one.
+            log.debug(f"[DB] Skipped creating conversation {conversation_id} "
+                      "with an empty project_path (unreachable by lookup)")
+            return conversation_id
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             # INSERT OR IGNORE preserves the existing project_path on conflict.
@@ -988,15 +1012,29 @@ class CortexDatabase:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_latest_conversation(self, project_path: str) -> Dict | None:
-        """Get only the most recent conversation for a project (fast query)."""
+    def get_latest_conversation(self, project_path: str,
+                                require_timeline: bool = False) -> Dict | None:
+        """Get only the most recent conversation for a project (fast query).
+
+        `require_timeline` skips rows that hold no chat history. A chat cleared
+        by "+ New Chat" is a fresh row with a NULL timeline and the newest
+        updated_at, so on a restart whose `chat_active` pointer is missing it
+        won the plain "newest" query and the panel opened EMPTY while the real
+        history was still here. With this flag the restore falls back to a
+        conversation that actually has something to show.
+        """
+        # rowid breaks the tie. updated_at is milliseconds, and two rows written
+        # in the same millisecond - "+ New Chat" straight after a save, or any
+        # test - left the winner up to SQLite, so the restore picked an
+        # arbitrary one of the two. rowid grows with insertion, so the newer
+        # row wins whenever the timestamps are equal.
+        sql = ("SELECT * FROM conversations WHERE project_path = ? "
+               + ("AND timeline_json IS NOT NULL AND length(timeline_json) > 2 "
+                  if require_timeline else "")
+               + "ORDER BY updated_at DESC, rowid DESC LIMIT 1")
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM conversations WHERE project_path = ? "
-                "ORDER BY updated_at DESC LIMIT 1",
-                (project_path,)
-            )
+            cursor.execute(sql, (project_path,))
             row = cursor.fetchone()
             return dict(row) if row else None
 

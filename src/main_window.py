@@ -870,6 +870,12 @@ class CortexMainWindow(QMainWindow):
         self._theme_manager.set_active_no_qss(_saved_theme)
         from src.ui import tokens as _tokens
         _tokens.set_theme("dark" if self._theme_manager.is_dark else "light")
+        # Every tooltip gets the current theme (see theme_remap).
+        try:
+            from src.ui.theme_remap import install_tooltip_theme
+            install_tooltip_theme()
+        except Exception as _tt_err:
+            log.warning(f"[THEME] tooltip theming not installed: {_tt_err}")
         self._project_manager = ProjectManager()
         self._file_manager = FileManager()
         self._session_manager = SessionManager()
@@ -1645,6 +1651,14 @@ class CortexMainWindow(QMainWindow):
             )
 
         # Chain the deferred operations with event loop yields between each
+        # Tooltips' fallback palette follows the theme (their stylesheet is
+        # applied per tip, see theme_remap.install_tooltip_theme).
+        try:
+            from src.ui.theme_remap import apply_tooltip_palette
+            _QTimer.singleShot(0, apply_tooltip_palette)
+        except Exception:
+            pass
+
         # ── BATCH 5 (150ms): the new theme's QSS for everything but the chat ──
         # NOT QApplication.setStyleSheet(): that re-matches the whole theme
         # against every widget, 5.6-6.0s in one call on the user's 8,873-widget
@@ -1677,6 +1691,14 @@ class CortexMainWindow(QMainWindow):
         _remap_state = {"done": False}
 
         def _schedule_inline_remap():
+            chat = self._ai_chat
+            # A small chat finishes its re-theme before this point; then the
+            # signal has already gone and only the 20s fallback would run the
+            # remap, leaving those widgets in the old theme for 20 seconds.
+            if (getattr(chat, "_theme_settled_gen", None) is not None
+                    and getattr(chat, "_theme_settled_gen", None) == getattr(chat, "_theme_gen", None)):
+                _QTimer.singleShot(0, _defer_inline_remap)
+                return
             sig = getattr(self._ai_chat, "theme_settled", None)
             if sig is not None:
                 try:
@@ -1813,10 +1835,11 @@ class CortexMainWindow(QMainWindow):
         # Hide the PyQt6 tab bar completely, terminal.html provides
         # the header with terminal name, + New, Kill, Clear, Restart buttons.
         self._terminal_tabs.tabBar().setVisible(False)
+        from src.ui.tokens import TOKENS as _T   # pane colour follows the theme
         self._terminal_tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: 0px;
-                background: #1e1e1e;
+                background: __TERM_BG__;
                 top: 0px;
             }
             QTabWidget::tab-bar {
@@ -1824,7 +1847,7 @@ class CortexMainWindow(QMainWindow):
                 max-height: 0px;
                 spacing: 0px;
             }
-        """)
+        """.replace("__TERM_BG__", _T["bg"]))
         
         self._editor_terminal_splitter.addWidget(self._terminal_tabs)
         self._editor_terminal_splitter.setSizes([500, 0])  # Terminal hidden on startup
@@ -1904,7 +1927,8 @@ class CortexMainWindow(QMainWindow):
         # #1e1e1e = the exact flat background editor.html/sidebar.html paint
         # while boot-hidden, so the whole window reads as ONE uniform surface
         # during boot (a different shade showed a seam next to the panels).
-        self._startup_overlay.setStyleSheet("background: #1e1e1e; border: none;")
+        from src.ui.tokens import TOKENS as _T
+        self._startup_overlay.setStyleSheet(f"background: {_T['bg']}; border: none;")
         _ov_layout = QVBoxLayout(self._startup_overlay)
         _ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _ov_layout.setSpacing(20)
@@ -1977,7 +2001,10 @@ class CortexMainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        bg_color = "#1e1e1e"
+        # From the chat palette: this was "#1e1e1e" in every theme, a dark
+        # container behind the chat even when Cortex started in light mode.
+        from src.ui.tokens import CHAT_TOKENS as _CT
+        bg_color = _CT['bg']
 
         panel.setStyleSheet(f"""
             QWidget#chatPanel {{
@@ -3075,6 +3102,17 @@ class CortexMainWindow(QMainWindow):
         # The slot handles both via default parameters for perf/cost.
         self._ai_chat.model_changed.connect(self._on_model_changed)
 
+        # Show the model the agent is actually booting with. The bridge reads
+        # "ai.model_id" during its own init, but the native chat panel started
+        # on "Auto" and never read it back, so every restart displayed the
+        # default mode while a different provider was in use.
+        try:
+            _ia = getattr(self._ai_chat, 'input_area', None)
+            if _ia is not None and hasattr(_ia, 'apply_saved_model'):
+                _ia.apply_saved_model()
+        except Exception as e:
+            log.warning(f"[MAIN] Could not restore saved model: {e}")
+
         # Mode selection (Agent/Ask/Plan), controls tool access
         if hasattr(self._ai_chat, 'input_area') and hasattr(self._ai_chat.input_area, 'mode_changed'):
             self._ai_chat.input_area.mode_changed.connect(self._on_mode_changed)
@@ -3272,7 +3310,8 @@ class CortexMainWindow(QMainWindow):
             try:
                 from PyQt6.QtWebEngineWidgets import QWebEngineView
                 for child in self._review_panel.findChildren(QWebEngineView):
-                    child.setHtml("<html><body style='background:#1e1e1e'></body></html>")
+                    from src.ui.tokens import TOKENS as _T
+                    child.setHtml(f"<html><body style='background:{_T['bg']}'></body></html>")
                 log.info("[OpenFolder] Review panel cleared")
             except Exception as e:
                 log.debug(f"[OpenFolder] Review clear failed: {e}")
@@ -5947,31 +5986,27 @@ class CortexMainWindow(QMainWindow):
         return " ".join(text.split())
 
     def _chat_history_items(self) -> list:
-        """(conversation_id, label, when) for this project's chats, newest first.
+        """(conversation_id, title, updated_ms) for this project's chats,
+        newest first: every chat, the History dropdown scrolls and searches.
 
-        Runs while the History menu opens, so it must be cheap: one indexed
+        Runs while the dropdown opens, so it must be cheap: one indexed
         query that returns only the start of each timeline. It used to list
         through get_conversations() (3.8s on the user's DB, see there) and
         then load and parse every chat's full timeline.
         """
-        from datetime import datetime as _dt
         from src.core.chat_history import get_chat_history
         root = getattr(self, '_current_project_path', '') or ''
         if not root:
             return []
         current = self._ai_chat.conversation_id()
         items = []
-        for c in get_chat_history().get_conversation_heads(os.path.normpath(root), limit=40):
+        for c in get_chat_history().get_conversation_heads(os.path.normpath(root), limit=1000):
             cid = c.get('conversation_id')
             first = self._first_user_text(c.get('head'))
             if not first and cid != current:
                 continue                     # empty chats are not worth listing
-            label = (first[:48] + '\u2026') if len(first) > 48 else (first or "New chat")
-            ts = c.get('updated_at') or c.get('created_at') or 0
-            when = _dt.fromtimestamp(ts / 1000).strftime('%d %b %H:%M') if ts else ''
-            items.append((cid, label, when))
-            if len(items) >= 20:
-                break
+            title = (first[:300] + '\u2026') if len(first) > 300 else (first or "New chat")
+            items.append((cid, title, c.get('updated_at') or c.get('created_at') or 0))
         return items
 
     def _switch_to_conversation(self, conv_id: str):
@@ -6216,6 +6251,48 @@ class CortexMainWindow(QMainWindow):
                 discard()
             log.info("[Resume] User dismissed the interrupted run")
 
+    def _chat_heal_check(self, project_path: str) -> None:
+        """One-shot startup guard: welcome on screen + history in DB = reload.
+
+        Runs 12 s after chat persistence is wired. If the panel still shows
+        the welcome EmptyState (no restore rendered, or something cleared it
+        after rendering) while the project has a conversation with a real
+        timeline, load it once. Never fights the user: a running restore, an
+        active turn, or a genuinely empty project all return early.
+        """
+        try:
+            chat = getattr(self, "_ai_chat", None)
+            if chat is None or not getattr(chat, "panel_shows_welcome", False):
+                return
+            if getattr(chat, "_restoring", False):
+                return
+            if getattr(chat, "_turn_active", False):
+                return  # the user started a fresh chat; respect it
+            from src.core.chat_history import get_chat_history
+            history = get_chat_history()
+            row = history.db.get_latest_conversation(project_path,
+                                                     require_timeline=True)
+            conv_id = (row or {}).get("conversation_id") or ""
+            if not conv_id:
+                return
+            timeline = history.get_timeline(conv_id)
+            msgs = timeline.get("messages") if isinstance(timeline, dict) else timeline
+            if not msgs:
+                return
+            log.info(f"[ChatHeal] panel showed welcome at startup although "
+                     f"{len(msgs)} messages exist for {conv_id[:8]}: reloading once")
+            chat.set_conversation_id(conv_id)
+            if hasattr(self, "_ai_agent") and self._ai_agent:
+                self._ai_agent._current_conversation_id = conv_id
+            if isinstance(timeline, dict):
+                payload = timeline
+            else:
+                payload = {"conversation_id": conv_id, "messages": timeline}
+            chat.begin_restore()
+            chat.load_timeline_async(payload)
+        except Exception as e:
+            log.warning(f"[ChatHeal] check failed: {e}")
+
     def _setup_chat_persistence(self):
         """Wire ChatPanel save/restore to SQLite chat_history."""
         try:
@@ -6254,6 +6331,10 @@ class CortexMainWindow(QMainWindow):
                     # Suppress sidebar refreshes during restore to prevent WebEngine flashing
                     self._sidebar.set_suppress_refresh(True)
                     log.info(f"[ChatPersist] Calling load_timeline_async with {len(timeline_data.get('messages', []))} messages")
+                    # Swap the welcome screen for the restore spinner NOW:
+                    # the batched render takes seconds and the welcome
+                    # tagline in that window reads as "history is gone".
+                    self._ai_chat.begin_restore()
                     self._ai_chat.load_timeline_async(timeline_data)
                     log.info(f"[ChatPersist] Queued async restore of {len(timeline_data.get('messages', []))} messages for {conv_id} (project={project_path})")
                     # Re-enable sidebar refreshes after restore completes (safety: 35s)
@@ -6262,6 +6343,7 @@ class CortexMainWindow(QMainWindow):
                     # Legacy format: timeline is a list of message dicts
                     self._sidebar.set_suppress_refresh(True)
                     log.info(f"[ChatPersist] Calling load_timeline_async (legacy) with {len(timeline_data)} messages")
+                    self._ai_chat.begin_restore()
                     self._ai_chat.load_timeline_async({"conversation_id": conv_id, "messages": timeline_data})
                     log.info(f"[ChatPersist] Queued async restore of {len(timeline_data)} messages (legacy list) for {conv_id}")
                     QTimer.singleShot(35000, lambda: self._sidebar.set_suppress_refresh(False))
@@ -6275,6 +6357,15 @@ class CortexMainWindow(QMainWindow):
                 # Ensure DB flush is re-enabled even on error
                 if hasattr(history, 'db') and history.db:
                     history.db._restoring = False
+
+            # Startup self-heal (2026-10-13): the reported bug is a panel
+            # sitting on the welcome screen after a restart although the
+            # project has history (Store 3.0.58 did it after a restore that
+            # even logged success). Whatever stray clear or lost batch
+            # causes it, one delayed re-check that compares the panel with
+            # the DB and reloads once turns "history is gone" back into the
+            # chat, and logs [ChatHeal] so the next report is not guesswork.
+            QTimer.singleShot(12000, lambda: self._chat_heal_check(project_path))
 
             # ── CRASH RECOVERY: Check if previous session crashed mid-turn ──
             try:
@@ -6324,6 +6415,33 @@ class CortexMainWindow(QMainWindow):
                             return False
 
                         unsaved = [m for m in unsaved if not _already_shown(m)]
+
+                        # Only what is NEWER than the saved chat can be missing
+                        # from it. The text match above misses rewritten forms
+                        # (a reply saved as several blocks, a prompt with its
+                        # skills prefix), and on 2026-10-11 it let through 31
+                        # turns from 19:45-23:32 into a chat saved up to 01:24,
+                        # appended at the end, out of order, as duplicates.
+                        def _ts_seconds(v):
+                            try:
+                                v = float(v or 0)
+                            except (TypeError, ValueError):
+                                return 0.0
+                            return v / 1000.0 if v > 1e11 else v
+                        _newest = 0.0
+                        try:
+                            if timeline_data and isinstance(timeline_data, dict):
+                                for _m in timeline_data.get("messages", []):
+                                    _newest = max(_newest, _ts_seconds(_m.get("ts")))
+                        except Exception:
+                            _newest = 0.0
+                        if _newest:
+                            _before = len(unsaved)
+                            unsaved = [m for m in unsaved
+                                       if _ts_seconds(m.get("timestamp") or m.get("ts")) > _newest + 1]
+                            if _before != len(unsaved):
+                                log.info(f"[CrashRecovery] {_before - len(unsaved)} crash-log message(s) "
+                                         f"are older than the saved chat, not re-added")
                     if unsaved:
                         log.warning(
                             f"[CrashRecovery] IDE crashed last session, "
@@ -6444,6 +6562,11 @@ class CortexMainWindow(QMainWindow):
                 # project's history. "turn" saves used to be allowed through.
                 if not _conv or not _msg_count:
                     return False
+                tl = self._guard_against_lost_replies(_conv, tl)
+                _msg_count = len(tl.get("messages", []))
+                if not hasattr(self, '_last_saved_messages'):
+                    self._last_saved_messages = {}
+                self._last_saved_messages[_conv] = tl.get("messages", [])
                 _save_seq["next"] += 1
                 _seq = _save_seq["next"]
 
@@ -6512,6 +6635,58 @@ class CortexMainWindow(QMainWindow):
             # Still set a fallback callback so saves work even if setup partially failed
             if not hasattr(self, '_chat_save_callback') or not self._chat_save_callback:
                 self._chat_save_callback = lambda *a, **kw: None
+
+    def _guard_against_lost_replies(self, conv: str, tl: dict) -> dict:
+        """Never let a save drop assistant replies the previous save had.
+
+        Nothing in Cortex removes a reply on purpose (New Chat and project
+        switches change the conversation id), yet on 2026-10-11 01:26:12 one
+        save of this chat lost all five replies of a night's work, 196 -> 192
+        messages, and the cause could not be reproduced. So every save is
+        checked: replies missing from the snapshot are put back where they
+        were, and the panel's state is logged so the cause shows up.
+        """
+        last = getattr(self, '_last_saved_messages', {}).get(conv)
+        msgs = tl.get("messages") or []
+        if not last:
+            return tl
+
+        def _key(m):
+            return (m.get("role"), m.get("ts"))
+        have = {_key(m) for m in msgs if m.get("role") == "assistant"}
+        missing = [(i, m) for i, m in enumerate(last)
+                   if m.get("role") == "assistant" and m.get("ts") and _key(m) not in have]
+        if not missing:
+            return tl
+
+        # What the panel looked like, for the log.
+        census = ""
+        try:
+            from src.ui.chat_panel import MessageWidget
+            col = self._ai_chat.col
+            ws = [col.itemAt(i).widget() for i in range(col.count())]
+            replies = [w for w in ws if isinstance(w, MessageWidget) and w.role == "assistant"]
+            empty = sum(1 for w in replies if w.serialize() is None)
+            census = (f"panel: {len(ws)} items, {len(replies)} reply widgets "
+                      f"({empty} serialize to nothing), "
+                      f"{len(getattr(self._ai_chat, '_pending_messages', []) or [])} queued older, "
+                      f"restoring={getattr(self._ai_chat, '_restoring', False)}")
+        except Exception as e:
+            census = f"panel census failed: {e}"
+        log.warning(f"[ChatPersist] Save would drop {len(missing)} reply(ies) of {conv[:8]}.. "
+                    f"(ts {[m.get('ts') for _, m in missing][:6]}); putting them back. {census}")
+
+        merged = list(msgs)
+        for i, m in missing:
+            pos = {_key(x): j for j, x in enumerate(merged) if x.get("ts")}
+            anchor = None
+            for k in range(i - 1, -1, -1):
+                kk = _key(last[k])
+                if kk[1] and kk in pos:
+                    anchor = pos[kk]
+                    break
+            merged.insert(anchor + 1 if anchor is not None else 0, m)
+        return dict(tl, messages=merged)
 
     def _on_accept_all_files(self):
         """Accept all pending AI edits, files already on disk, just clean up state."""
@@ -9006,9 +9181,15 @@ class CortexMainWindow(QMainWindow):
             if hasattr(self, '_ai_chat') and self._ai_chat:
                 input_area = getattr(self._ai_chat, 'input_area', None)
                 if input_area:
-                    input_area.model = model_id
-                    input_area.model_label = model_label
-                    input_area.model_btn.setText(model_label)
+                    # set_model_display resolves the catalog name and re-applies
+                    # the chevron/elide; the old raw setText dropped both, so
+                    # the button lost its dropdown arrow after a Settings pick.
+                    if hasattr(input_area, 'set_model_display'):
+                        input_area.set_model_display(model_id, model_label)
+                    else:
+                        input_area.model = model_id
+                        input_area.model_label = model_label
+                        input_area.model_btn.setText(model_label)
                     log.info(f"[MainWindow] Settings synced model button to: {model_label}")
         except Exception as e:
             log.warning(f"[MainWindow] _on_settings_model_changed failed: {e}")
@@ -10181,6 +10362,7 @@ class CortexMainWindow(QMainWindow):
     def _show_keyboard_shortcuts(self):
         """Show keyboard shortcuts reference dialog (F1)."""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
+        from src.ui.tokens import TOKENS as T
         
         dialog = QDialog(self)
         dialog.setWindowTitle("Keyboard Shortcuts Reference")
@@ -10194,98 +10376,14 @@ class CortexMainWindow(QMainWindow):
         shortcuts_text.setFontFamily("Consolas")
         shortcuts_text.setFontPointSize(10)
         
-        # Build shortcuts HTML - Simple dark theme
+        # Build shortcuts HTML; colours come from the active theme (the page was
+        # hard-coded dark, a black dialog in light mode)
         html_content = """
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
-            <style>
-                body { 
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                    background-color: #1e1e1e;
-                    color: #ffffff;
-                    padding: 30px;
-                    margin: 0;
-                }
-                h1 {
-                    color: #4CAF50;
-                    text-align: center;
-                    font-size: 32px;
-                    margin-bottom: 10px;
-                }
-                .subtitle {
-                    text-align: center;
-                    color: #9cdcfe;
-                    margin-bottom: 30px;
-                    font-size: 16px;
-                }
-                .section {
-                    background-color: #252526;
-                    border-left: 4px solid #4CAF50;
-                    padding: 20px;
-                    margin-bottom: 25px;
-                    border-radius: 5px;
-                }
-                .section h2 {
-                    color: #4CAF50;
-                    margin: 0 0 15px 0;
-                    font-size: 20px;
-                }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    background-color: #2d2d30;
-                }
-                th {
-                    background-color: #3e3e42;
-                    color: #ffffff;
-                    padding: 12px;
-                    text-align: left;
-                    font-weight: 600;
-                    border: 1px solid #555;
-                }
-                td {
-                    padding: 10px 12px;
-                    border: 1px solid #555;
-                    color: #cccccc;
-                }
-                tr:nth-child(even) {
-                    background-color: #333337;
-                }
-                tr:hover {
-                    background-color: #3e3e42;
-                }
-                .shortcut {
-                    font-family: 'Consolas', monospace;
-                    background-color: #1e1e1e;
-                    padding: 5px 10px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                    color: #9cdcfe;
-                    display: inline-block;
-                    min-width: 110px;
-                    text-align: center;
-                }
-                .status {
-                    color: #4CAF50;
-                    font-weight: bold;
-                }
-                .tip {
-                    background-color: #264f78;
-                    padding: 15px;
-                    border-radius: 5px;
-                    margin-top: 25px;
-                    border-left: 4px solid #007acc;
-                }
-                .tip strong {
-                    color: #9cdcfe;
-                }
-                .tip p {
-                    margin: 8px 0 0 0;
-                    color: #cccccc;
-                }
-            </style>
+            <style>__SHORTCUT_CSS__</style>
         </head>
         <body>
             <h1>⌨️ Keyboard Shortcuts Reference</h1>
@@ -10393,7 +10491,29 @@ class CortexMainWindow(QMainWindow):
         </body>
         </html>
         """
-        
+
+        _css = f"""
+                body {{ font-family: {T['font_ui']}; background-color: {T['bg']}; color: {T['text']};
+                        padding: 30px; margin: 0; }}
+                h1 {{ color: {T['accent']}; text-align: center; font-size: 30px; margin-bottom: 10px; }}
+                .subtitle {{ text-align: center; color: {T['text_dim']}; margin-bottom: 30px; font-size: 15px; }}
+                .section {{ background-color: {T['bg_card']}; border-left: 4px solid {T['accent']};
+                            padding: 20px; margin-bottom: 25px; border-radius: 5px; }}
+                .section h2 {{ color: {T['text']}; margin: 0 0 15px 0; font-size: 19px; }}
+                table {{ width: 100%; border-collapse: collapse; background-color: {T['bg_card']}; }}
+                th {{ background-color: {T['bg_hover']}; color: {T['text']}; padding: 12px; text-align: left;
+                      font-weight: 600; border: 1px solid {T['border']}; }}
+                td {{ padding: 10px 12px; border: 1px solid {T['border']}; color: {T['text_dim']}; }}
+                .shortcut {{ font-family: {T['font_mono']}; background-color: {T['bg']}; padding: 5px 10px;
+                             border-radius: 4px; font-weight: bold; color: {T['text']};
+                             border: 1px solid {T['border']}; }}
+                .status {{ color: {T['accent']}; font-weight: bold; }}
+                .tip {{ background-color: {T['bg_hover']}; padding: 15px; border-radius: 5px; margin-top: 25px;
+                        border-left: 4px solid {T['accent']}; }}
+                .tip strong {{ color: {T['text']}; }}
+                .tip p {{ margin: 8px 0 0 0; color: {T['text_dim']}; }}
+        """
+        html_content = html_content.replace("__SHORTCUT_CSS__", _css)
         shortcuts_text.setHtml(html_content)
         layout.addWidget(shortcuts_text)
         

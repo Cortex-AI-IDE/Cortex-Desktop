@@ -49,13 +49,7 @@ class SpinnerOverlay(QFrame):
         self._visible = False
 
         # Full-size overlay, fills parent
-        self.setStyleSheet("""
-            QFrame#spinnerOverlay {
-                background: rgba(10, 10, 10, 180);
-                border: none;
-                border-radius: 0px;
-            }
-        """)
+        self._apply_scrim()
 
         # Outer layout: vertical stretch-based centering (reliable in Qt6)
         self._layout = QVBoxLayout(self)
@@ -175,6 +169,15 @@ class SpinnerOverlay(QFrame):
         # Start hidden
         self.hide()
 
+    def _apply_scrim(self):
+        """The backdrop over the chat: the page colour, mostly opaque. It was
+        rgba(10,10,10,180) in every theme, a dark sheet over the light page."""
+        from PyQt6.QtGui import QColor
+        c = QColor(T['bg'])
+        self.setStyleSheet(
+            f"QFrame#spinnerOverlay {{ background: rgba({c.red()}, {c.green()}, {c.blue()}, 0.82);"
+            f" border: none; border-radius: 0px; }}")
+
     def retheme(self):
         """Re-apply LIVE theme tokens to the card and its labels.
 
@@ -187,6 +190,7 @@ class SpinnerOverlay(QFrame):
         on the now-light card). Called from ChatPanel.set_theme().
         """
         try:
+            self._apply_scrim()
             self._card.setStyleSheet(f"""
                 QFrame#overlayCard {{
                     background: {T['bg_secondary']};

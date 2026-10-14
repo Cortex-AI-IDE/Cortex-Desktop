@@ -148,8 +148,29 @@ def save_snapshot(bridge) -> None:
     }
 
     try:
-        with open(storage_path, "w", encoding="utf-8") as f:
+        # Temp file + atomic rename, for the same two reasons as the settings
+        # save: a reader (the other Cortex instance sharing ~/.cortex) makes a
+        # truncating write fail outright, and a crash DURING the write - the
+        # exact moment this file matters most - left a half-written JSON that
+        # load_snapshot could only discard, taking the interrupted run's
+        # Resume offer with it.
+        # Rename first, write in place if the rename is refused: on Windows a
+        # reader (the other Cortex instance) blocks os.replace but not a
+        # truncating write - measured 2026-10-13.
+        _tmp = storage_path.with_suffix(storage_path.suffix + f".tmp{os.getpid()}")
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(snapshot, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.replace(_tmp, storage_path)
+        except OSError:
+            with open(storage_path, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f, indent=2, ensure_ascii=False)
+            try:
+                os.unlink(_tmp)
+            except OSError:
+                pass
         log.info(f"[SESSION] Saved snapshot to {storage_path} "
                  f"({len(snapshot['session_tasks'])} tasks, "
                  f"{snapshot['session_mutation_count']} mutations)")

@@ -1658,6 +1658,13 @@ class BridgeBashTool:
                         # its own platform.
                         env=_child_env(),
                         creationflags=_sp.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                        # Own process group, so the timeout kill below stops
+                        # this command's tree and nothing else. Without it the
+                        # child sat in Cortex's group, which (Cortex started
+                        # from the dock) is GNOME Shell's: a silent command
+                        # hitting the timeout SIGKILLed GNOME Shell and logged
+                        # the user out (7 times on 2026-10-12).
+                        start_new_session=(sys.platform != 'win32'),
                     )
                     # The clock measures SILENCE, not total runtime.
                     #
@@ -1723,6 +1730,14 @@ class BridgeBashTool:
                                         creationflags=_sp.CREATE_NO_WINDOW)
                             except Exception:
                                 pass
+                        else:
+                            # POSIX: the child runs in its own session
+                            # (start_new_session above), so the group kill takes
+                            # its whole tree down; kill_process_group never
+                            # signals Cortex's own group (on Linux that group
+                            # is GNOME Shell's when Cortex starts from the dock).
+                            from src.utils.proc_kill import kill_process_group
+                            kill_process_group(p.pid)
                         p.kill()
 
                     _t_out.join(timeout=3)
@@ -5222,6 +5237,35 @@ Required behavior:
                 total_chars += len(cast(List[Any], tool_calls)) * 400
         return total_chars // 4
 
+    @staticmethod
+    def _msg_role(m: Any) -> Optional[str]:
+        """Role of a message whether it is a ChatMessage-like object or a dict."""
+        if isinstance(m, dict):
+            return m.get('role')
+        return getattr(m, 'role', None)
+
+    def _context_pressure(self, messages: List[Any]) -> Tuple[int, int]:
+        """(tokens in use, compaction threshold) for the auto-continue decision.
+
+        In use: what the provider reported for the last request, else an
+        estimate from the messages (4 chars a token). Threshold: 60% of the
+        model's window, capped at 300K tokens, past which requests get slow
+        and costly whatever the window.
+        """
+        used = int(getattr(self, '_last_prompt_tokens', 0) or 0)
+        if not used:
+            chars = 0
+            for m in messages:
+                c = m.get('content') if isinstance(m, dict) else getattr(m, 'content', '')
+                if isinstance(c, str):
+                    chars += len(c)
+                elif isinstance(c, list):
+                    chars += sum(len(str(p)) for p in c)
+            used = chars // 4
+        limits = getattr(self._tool_ctx, '_model_limits', None)
+        window = getattr(limits, 'context_window', 0) or 128_000
+        return used, min(int(window * 0.6), 300_000)
+
     def _compact_messages(self, messages: List[Any], PCM: Type[Any]) -> List[Any]:
         """Compaction wrapper whose ONLY job is turning the spinner off.
 
@@ -5291,15 +5335,17 @@ Required behavior:
         if len(rest) <= keep_tail:
             return messages
 
-        tail: List[Any] = rest[-keep_tail:]
+        # The tail must not START with a tool result (it must follow the
+        # assistant turn that called the tool). Move the boundary BACKWARDS
+        # to that assistant turn. It used to move forwards to the first
+        # user/assistant message, which in an agentic run could be at the
+        # very end: "Context compacted: 173 → 5" kept 3 of the 50 messages it
+        # meant to keep, and the model lost everything it had just done.
+        _start = len(rest) - keep_tail
+        while _start > 0 and self._msg_role(rest[_start]) == 'tool':
+            _start -= 1
+        tail: List[Any] = rest[_start:]
         dropped_count = len(rest) - len(tail)
-
-        # Advance `tail` to the first safe role boundary so we never start
-        # mid tool-result block (tool results must follow their assistant turn).
-        for i, msg in enumerate(tail):
-            if getattr(msg, 'role', None) in ('user', 'assistant'):
-                tail = tail[i:]
-                break
 
         # Create checkpoint with rich context + persist to MEMORY.md
         # Emit saving_to_memory_md status so the spinner overlay shows disk write
@@ -6846,6 +6892,9 @@ Required behavior:
                                         cached_tokens=int(_tc.get("cached") or 0),
                                     )
                                     self._real_usage_recorded = True
+                                    # What the last request really cost in context;
+                                    # the auto-continue compaction decision reads it.
+                                    self._last_prompt_tokens = int(_tc.get("input") or 0)
                                     log.info(f"[USAGE] Provider-reported: in={_tc.get('input')}, "
                                              f"out={_tc.get('output')}, cached={_tc.get('cached')}")
                         except Exception as _u_exc:
@@ -7854,22 +7903,31 @@ Required behavior:
                                 + f'{len(_pending_todos)} todo(s) remaining, {_mutations_this_cycle} mutations this cycle '
                                 + f'(session total: {_current_session_mutations})'
                             )
+                            # Compact only under REAL context pressure. It used to
+                            # compact whenever the run had more than 45 messages, which
+                            # is every cycle of an agentic task: on 2026-10-10/11 Qwen
+                            # and DeepSeek (1M windows) were cut to 4-6 messages every
+                            # ~10 minutes at ~200K tokens used, re-read their files each
+                            # cycle, and left the same todos open until the run stopped.
+                            _used, _limit = self._context_pressure(messages)
+                            _compact_now = _used >= _limit
                             self._safe_emit(
                                 self.agent_status_update,
                                 'auto-continue',
-                                f'Auto-compacting conversation, continuing task (cycle {self._auto_continue_cycle}/{self._MAX_AUTO_CONTINUE_CYCLES})...'
+                                (f'Compacting conversation, continuing task (cycle {self._auto_continue_cycle}/{self._MAX_AUTO_CONTINUE_CYCLES})...'
+                                 if _compact_now else
+                                 f'Continuing task (cycle {self._auto_continue_cycle}/{self._MAX_AUTO_CONTINUE_CYCLES})...')
                             )
-                            # Only compact if we have enough messages to justify it.
-                            # _compact_messages keeps the last 25-50 messages (scaled by model).
-                            # If fewer than 45 messages, skip compaction to avoid unnecessary
-                            # context rewriting; compaction
-                            # only fires under real context pressure.
-                            if len(messages) > 45:
+                            if _compact_now:
+                                log.info(
+                                    f'[BRIDGE] Compacting on cycle {self._auto_continue_cycle}: '
+                                    f'~{_used:,} tokens used, threshold {_limit:,}'
+                                )
                                 messages = self._compact_messages(messages, PCM)
                             else:
                                 log.info(
                                     f'[BRIDGE] Skipping compaction on cycle {self._auto_continue_cycle}: '
-                                    f'only {len(messages)} messages (< 45) - plenty of context remaining'
+                                    f'~{_used:,} tokens used of {_limit:,} allowed - keeping full context'
                                 )
                                 # CRITICAL: Hide spinner overlay when compaction is skipped.
                                 # The overlay was shown at line 5913 but _compact_messages()
@@ -14890,6 +14948,33 @@ Required behavior:
         except Exception as e:
             log.warning(f"[SKILL] project switch failed: {e}")
 
+        # Build the skills index NOW, in the background.
+        #
+        # set_skills_project_root only records the path; the manager itself is
+        # built on first use - which is the user's FIRST PROMPT, on the agent
+        # thread, before the request is sent. Measured in the user's own log
+        # (2026-10-13): "Loaded 257 skills from 10 directories" took 12 s at
+        # 08:04, 14 s at 14:55 and 41 s at 07:35, and every one of those
+        # seconds sat between pressing send and the model being called. The
+        # second prompt was fast because the index was already there. It
+        # scans 10 directories (bundled skills inside WindowsApps, ~/.claude,
+        # ~/.agents, ~/.cursor, ~/.qoder, the project), so it is disk-bound
+        # and belongs anywhere except the send path.
+        def _warm_skills():
+            try:
+                import time as _t
+                _t0 = _t.perf_counter()
+                from src.agent.src.skills.cortex_skill import get_skills_manager
+                get_skills_manager()
+                log.info("[SKILL] index warmed in %.0f ms (off the send path)",
+                         (_t.perf_counter() - _t0) * 1000)
+            except Exception as _e:
+                log.debug(f"[SKILL] warm-up skipped: {_e}")
+
+        if _HAS_SKILLS:
+            threading.Thread(target=_warm_skills, daemon=True,
+                             name="skills-warm").start()
+
         # ── MCP servers: (re)start with this project's config overlay ──
         # start() only schedules async connects on the MCP thread, but the
         # config file reads happen inline, keep the whole thing off the
@@ -14926,8 +15011,11 @@ Required behavior:
         try:
             from src.core.chat_history import get_chat_history
             _history_mgr = get_chat_history()
-            # Use optimized query - fetch only latest conversation instead of all
-            _latest = _history_mgr.db.get_latest_conversation(project_path)
+            # Use optimized query - fetch only latest conversation instead of
+            # all. require_timeline: an empty (cleared / race-created) row is
+            # worthless as AI context and would mask the real latest chat.
+            _latest = _history_mgr.db.get_latest_conversation(
+                project_path, require_timeline=True)
             if _latest:
                 _conv_id = _latest.get('conversation_id', '')
                 log.info(f"[SESSION] _restore_latest_conversation: latest conv_id={_conv_id}")
@@ -16223,6 +16311,7 @@ Required behavior:
         with self._history_lock:
             self._conversation_history = []
         self._current_conversation_id = None
+        self._last_prompt_tokens = 0
         self._ensure_conversation_id()
         try:
             self._current_todos.clear()

@@ -356,8 +356,9 @@ class ShellCommandImpl(ShellCommand):
                 # Windows
                 os.system(f'taskkill /F /T /PID {pid}')
             else:
-                # Unix
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                # Unix: the group, never Cortex's own (see src/utils/proc_kill)
+                from src.utils.proc_kill import kill_process_group
+                kill_process_group(pid, signal.SIGKILL)
         except Exception:
             pass
 
