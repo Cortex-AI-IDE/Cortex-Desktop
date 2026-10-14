@@ -180,7 +180,11 @@ class BashTool:
                     except Exception:
                         process.kill()
                 else:
-                    process.kill()
+                    # POSIX: the command's process group, never Cortex's own
+                    # (see src/utils/proc_kill.py); a child that shares
+                    # Cortex's group is killed on its own, as before.
+                    from src.utils.proc_kill import kill_process_group
+                    kill_process_group(process.pid, 9)
                 stdout_b, stderr_b = await process.communicate()
                 code = 124
                 interrupted = True

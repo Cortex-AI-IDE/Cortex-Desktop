@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 from datetime import datetime
 from logging.handlers import BaseRotatingHandler
 from pathlib import Path
@@ -327,16 +328,43 @@ def _get_shared_handlers():
         # Always log to ~/.cortex/logs/ (shared across all projects)
         # Project-specific context is in .cortex/memory/ (MEMORY.md, checkpoints)
         log_dir = Path.home() / ".cortex" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Hourly rotating file handler with 10MB size limit
-        # Uses copy+truncate instead of rename (Windows-safe)
-        file_handler = _HourlyRotatingFileHandler(
-            os.path.join(str(log_dir), "cortex.log"),
-            backupCount=168,    # Keep 7 days of hourly logs (24 x 7)
-            maxBytes=10*1024*1024,  # 10MB max per hourly log
-            encoding='utf-8'
-        )
+        def _make_file_handler(directory, name="cortex.log"):
+            directory.mkdir(parents=True, exist_ok=True)
+            return _HourlyRotatingFileHandler(
+                os.path.join(str(directory), name),
+                backupCount=168,    # Keep 7 days of hourly logs (24 x 7)
+                maxBytes=10*1024*1024,  # 10MB max per hourly log
+                encoding='utf-8'
+            )
+
+        try:
+            file_handler = _make_file_handler(log_dir)
+        except OSError as primary_error:
+            # Opening cortex.log can fail for a moment - a second Cortex
+            # (the installed build shares ~/.cortex), an antivirus scan of
+            # the file just rotated. Take a per-process name in the SAME
+            # directory rather than leaving the user's log behind.
+            #
+            # The old fallback used tempfile.gettempdir()/Cortex/logs, and
+            # when TEMP pointed somewhere unexpected that wrote a Cortex\logs
+            # folder into whatever directory the app was started from (seen
+            # 2026-10-13 inside the project tree). Logs then went missing
+            # from ~/.cortex/logs, where every diagnosis looks for them.
+            fallback_dir = log_dir
+            fallback_name = f"cortex-{os.getpid()}.log"
+            try:
+                file_handler = _make_file_handler(fallback_dir, fallback_name)
+                sys.stderr.write(
+                    f"[Logger] cortex.log is busy ({primary_error}); "
+                    f"this instance logs to {fallback_dir / fallback_name}\n"
+                )
+            except OSError as fallback_error:
+                file_handler = logging.NullHandler()
+                sys.stderr.write(
+                    f"[Logger] File logging unavailable ({primary_error}; "
+                    f"fallback failed: {fallback_error}); continuing with console logging.\n"
+                )
         file_handler.setLevel(logging.INFO)  # INFO and above, needed for semantic search debug
         file_handler.setFormatter(
             logging.Formatter(

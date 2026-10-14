@@ -613,7 +613,7 @@ class CortexAPIClient:
             payload["tools"] = tools
         return self._request("POST", "/api/v1/proxy/chat/", json_data=payload, timeout=120)
 
-    def proxy_service(self, service: str, **kwargs) -> Optional[Dict]:
+    def proxy_service(self, service: str, timeout: float = 60, **kwargs) -> Optional[Dict]:
         """Proxy subscription service request through server.
 
         Used for services that require server-side API keys:
@@ -641,7 +641,7 @@ class CortexAPIClient:
             "service": service,
             **kwargs,
         }
-        return self._request("POST", "/api/v1/proxy/chat/", json_data=payload, timeout=60)
+        return self._request("POST", "/api/v1/proxy/chat/", json_data=payload, timeout=timeout)
 
     # Re-read account info from /auth/me at most this often. user_info is the
     # copy saved at sign-in (auth.json) and was never refreshed, so a plan that
@@ -685,6 +685,31 @@ class CortexAPIClient:
                 self._user_info_refreshing = False
 
         threading.Thread(target=_run, daemon=True, name="cortex-account-refresh").start()
+
+    def voice_languages(self) -> list:
+        """The voice input languages the user turned on at cortex-ide.app.
+
+        [{"code", "name", "native"}], English first, sent by the server in
+        the account details (Account -> Voice input on the website). Empty
+        without an active plan or from a server older than this feature, in
+        which case the desktop shows no language picker. Read from the saved
+        account copy, so it also works offline.
+        """
+        try:
+            if not self.has_subscription():
+                return []
+            out = []
+            for item in (self.user_info or {}).get("voice_languages") or []:
+                code = item.get("code") if isinstance(item, dict) else None
+                if not isinstance(code, str) or not code.strip():
+                    continue
+                code = code.strip().lower()[:8]
+                name = str(item.get("name") or code)[:40]
+                out.append({"code": code, "name": name,
+                            "native": str(item.get("native") or name)[:40]})
+            return out[:8]
+        except Exception:
+            return []
 
     def has_subscription(self) -> bool:
         """True only while the subscription is CURRENTLY entitled.

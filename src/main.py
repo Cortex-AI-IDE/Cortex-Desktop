@@ -13,6 +13,60 @@ import os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 # ═══════════════════════════════════════════════════════════════════════════
+# A usable temp directory, before anything asks for one.
+#
+# 2026-10-13: Cortex died at startup with a Python traceback in a message box:
+#     [Errno 2] No usable temporary directory found in
+#     ['...\\cortex-setup-tmp', 'C:\\Users\\...\\AppData\\Local\\Temp', ...]
+# It had been launched by the installer, which had been given a temp folder
+# that was deleted when the installer exited - so TEMP and TMP pointed at
+# nothing. Python raises on the FIRST use of tempfile anywhere in the import
+# graph, which is why it surfaced as an unhandled exception rather than a
+# message anyone could act on.
+#
+# TEMP is inherited from whoever started us and can be stale, deleted, or
+# unwritable (a sandboxed parent). None of that is the user's doing and all of
+# it is recoverable: drop a bad value, let Python use its own search list, and
+# fall back to a folder of our own if even that fails.
+# ═══════════════════════════════════════════════════════════════════════════
+def _ensure_tempdir() -> None:
+    import tempfile as _tf
+
+    def _ok(d) -> bool:
+        try:
+            with _tf.TemporaryFile(dir=d):
+                return True
+        except Exception:
+            return False
+
+    for _var in ("TMPDIR", "TEMP", "TMP"):
+        _v = _os.environ.get(_var)
+        if _v and not _ok(_v):
+            _os.environ.pop(_var, None)      # stale: let Python look elsewhere
+    _tf.tempdir = None                        # drop any cached answer
+    try:
+        if _ok(_tf.gettempdir()):
+            return
+    except Exception:
+        pass
+    # Nothing Python knows about works. Make our own, next to the user's data.
+    for _cand in (_os.path.join(_os.environ.get("LOCALAPPDATA", ""), "Cortex", "tmp"),
+                  _os.path.join(_os.path.expanduser("~"), ".cortex", "tmp")):
+        try:
+            if not _cand.strip():
+                continue
+            _os.makedirs(_cand, exist_ok=True)
+            if _ok(_cand):
+                _os.environ["TEMP"] = _os.environ["TMP"] = _cand
+                _tf.tempdir = _cand
+                return
+        except Exception:
+            continue
+
+
+_ensure_tempdir()
+
+# ═══════════════════════════════════════════════════════════════════════════
 # CRITICAL: Force SelectorEventLoop on Windows BEFORE any asyncio import.
 # Python 3.14 ProactorEventLoop (IOCP) crashes with access violation on
 # Windows when the event loop is destroyed while IOCP ops are pending.

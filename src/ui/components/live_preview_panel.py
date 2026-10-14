@@ -115,7 +115,8 @@ class LivePreviewPanel(QWidget):
         from PyQt6.QtGui import QColor as _QColor
         from PyQt6.QtCore import Qt as _Qt
         self._page.setBackgroundColor(_QColor(_Qt.GlobalColor.transparent))
-        self._view.setStyleSheet("background:#1e1e1e;")
+        from src.ui.tokens import TOKENS as _T
+        self._view.setStyleSheet(f"background:{_T['bg']};")
         self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         v.addWidget(self._view, 1)
 
@@ -224,9 +225,10 @@ class LivePreviewPanel(QWidget):
             self._watcher.removePaths(paths)
 
     def _show_message(self, text: str) -> None:
+        from src.ui.tokens import TOKENS as _T
         safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         html = (
-            "<html><body style='background:#1e1e1e;color:#888;"
+            f"<html><body style='background:{_T['bg']};color:{_T['muted']};"
             "font-family:sans-serif;display:flex;align-items:center;"
             "justify-content:center;height:100vh;margin:0;'>"
             f"<pre style='white-space:pre-wrap;'>{safe}</pre></body></html>"

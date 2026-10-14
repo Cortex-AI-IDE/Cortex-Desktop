@@ -121,9 +121,16 @@ class ChatHistoryManager:
         """Get a single conversation by ID (fast lookup)."""
         return self.db.get_conversation(conversation_id)
     
-    def get_latest_conversation(self, project_path: str) -> Dict | None:
-        """Get only the most recent conversation for a project (fast query)."""
-        return self.db.get_latest_conversation(project_path)
+    def get_latest_conversation(self, project_path: str,
+                                require_timeline: bool = False) -> Dict | None:
+        """Get only the most recent conversation for a project (fast query).
+
+        `require_timeline=True` skips rows with no chat history (a cleared
+        chat / a row created by a save that raced startup), so restore-style
+        callers never land on a conversation that has nothing to show.
+        """
+        return self.db.get_latest_conversation(project_path,
+                                               require_timeline=require_timeline)
     
     def delete_conversation(self, conversation_id: str):
         """Delete a conversation and all its messages."""
@@ -166,14 +173,30 @@ class ChatHistoryManager:
                 pass
             return conversation_id
 
-        # No specific ID requested, find conversation for this project
-        # Use optimized query to get only latest conversation
-        _latest = self.db.get_latest_conversation(project_path)
+        # No specific ID requested, find conversation for this project.
+        # require_timeline: a "+ New Chat" row (NULL timeline, newest
+        # updated_at) must not become THE conversation of the project for a
+        # caller that just wants "the chat that was here", otherwise the
+        # panel restores to an empty welcome screen while the real history
+        # sits one row below.
+        _latest = self.db.get_latest_conversation(project_path,
+                                                  require_timeline=True)
+        if not _latest:
+            # Nothing with a timeline yet. That is NOT "no chat here": a
+            # conversation whose timeline has not been written (a chat opened
+            # but never saved, or one whose save was refused) still belongs to
+            # this project. Creating a new row instead left the panel empty and
+            # orphaned the previous chat - reported on 3.0.59 as "chat history
+            # is not showing". Reuse the newest row before making another one.
+            _latest = self.db.get_latest_conversation(project_path)
+            if _latest:
+                log.info("[ChatPersist] No timeline yet; reusing the newest "
+                         "conversation for this project")
         if _latest:
             conv_id = _latest.get('conversation_id', '')
             log.info(f"[ChatPersist] Found latest conversation: {conv_id}")
             return conv_id
-        
+
         # No conversations found for this project
         conv_id = self.create_conversation(project_path)
         log.info(f"[ChatPersist] Created new conversation {conv_id} for project={project_path}")

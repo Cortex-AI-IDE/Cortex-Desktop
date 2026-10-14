@@ -26,8 +26,13 @@ _MAX_BYTES = 10 * 1024 * 1024
 
 def transcribe_async(audio_path: str,
                      keyterms: List[str],
-                     done: Callable[[str, str], None]) -> None:
+                     done: Callable[[str, str], None],
+                     language: str = "en") -> None:
     """Transcribe `audio_path`, then call done(text, error) on the GUI thread.
+
+    `language` is the voice language picked next to the mic ("en", "ml",
+    "hi", "ar"). The server routes on it: Deepgram has no Malayalam, so
+    "ml" is transcribed by another model there (MAI-Transcribe 2).
 
     Exactly one of text/error is meaningful. `done` is marshalled back with
     a queued invocation, because touching a widget from the worker thread
@@ -72,6 +77,11 @@ def transcribe_async(audio_path: str,
                 audio_b64=audio_b64,
                 mimetype="audio/wav",
                 keyterms=keyterms or [],
+                language=language or "en",
+                # The server gives the transcription service up to 90 s;
+                # wait longer than that here, or a slow (but successful)
+                # reply shows up as an error. Tamil took 19-57 s in testing.
+                timeout=100,
             )
             if not resp:
                 # proxy_service returns None when there is no licence key,
@@ -87,8 +97,8 @@ def transcribe_async(audio_path: str,
             # Log the actual result, not just its length. A count of 6 tells
             # us nothing; the text and the seconds Deepgram measured tell us
             # whether it heard a fragment, the wrong words, or nothing.
-            log.info("[Voice] result: %d audio bytes, deepgram heard %ss, "
-                     "transcript=%r", size, data.get("seconds"), text)
+            log.info("[Voice] result: %d audio bytes, language=%s, heard %ss, "
+                     "transcript=%r", size, language, data.get("seconds"), text)
             _emit(text, "")
         except Exception as exc:
             log.warning("[Voice] transcription failed: %s", exc)

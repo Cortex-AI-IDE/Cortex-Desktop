@@ -101,7 +101,8 @@ class SidebarWidget(QWidget):
         layout.setSpacing(0)
         self._placeholder = QLabel("Loading sidebar...")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setStyleSheet("background:#1e1e1e;color:#888;font-size:13px;")
+        from src.ui.tokens import TOKENS as _T
+        self._placeholder.setStyleSheet(f"background:{_T['bg']};color:{_T['muted']};font-size:13px;")
         layout.addWidget(self._placeholder)
 
     def showEvent(self, event):
@@ -151,7 +152,8 @@ class SidebarWidget(QWidget):
         # Transparent, not dark, kills Chromium's gray-placeholder/white
         # first-composite flash at boot (see webview_panel.py note).
         self._web_view.page().setBackgroundColor(QColor(_Qt.GlobalColor.transparent))
-        self._web_view.setStyleSheet("background:#1e1e1e;")
+        from src.ui.tokens import TOKENS as _T
+        self._web_view.setStyleSheet(f"background:{_T['bg']};")   # shows while the page loads
 
         self._bridge = SidebarBridge(self._file_manager, self._git_manager, self)
         self._bridge._web_view = self._web_view

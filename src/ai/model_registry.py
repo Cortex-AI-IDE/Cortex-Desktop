@@ -21,6 +21,10 @@ Regenerate the offline snapshot after changing the server catalog:
 
 from __future__ import annotations
 
+from src.utils.logger import get_logger
+
+log = get_logger("model_registry")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Provider directory
@@ -84,6 +88,31 @@ def default_enabled_providers() -> list:
 # Activation state (persisted in settings)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _sanitise(raw) -> list | None:
+    """The saved provider list, cleaned. None when nothing usable was stored.
+
+    Duplicates, blanks and case are normalised, and the length is capped -
+    a cap, not a whitelist, so a slug this build has never heard of (a
+    provider the server published later, or one the user added) is kept
+    rather than deleted.
+    """
+    if isinstance(raw, str) and raw.strip():
+        import json
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    if not isinstance(raw, (list, tuple)):
+        return None
+    seen, cleaned = set(), []
+    for p in raw:
+        slug = str(p).strip().lower()
+        if slug and slug not in seen and len(slug) <= 64:
+            seen.add(slug)
+            cleaned.append(slug)
+    return cleaned[:200]
+
+
 def get_enabled_providers() -> list:
     """Read the enabled-provider list from settings ('ai.enabled_providers').
 
@@ -100,24 +129,34 @@ def get_enabled_providers() -> list:
     A slug that no longer exists is harmless: it simply matches no group in
     the dropdown. Being wrong in that direction costs nothing; being wrong in
     the other direction destroys the user's settings.
+
+    The read is deliberately the FRESH one: a second Cortex saves whole files,
+    so the copy this instance loaded at startup can lag what the user just
+    switched in another window. That read already falls back to the in-memory
+    value when the file cannot be read, so a moment of contention returns the
+    saved choice rather than the server defaults - which matter, because the
+    panel draws those defaults as the user's own switches and one click then
+    persists them (2026-10-13).
     """
     try:
         from src.config.settings import get_settings
-        raw = get_settings().get("ai", "enabled_providers", default=None)
-        if isinstance(raw, str) and raw.strip():
-            import json
-            raw = json.loads(raw)
-        if isinstance(raw, (list, tuple)):
-            seen, cleaned = set(), []
-            for p in raw:
-                slug = str(p).strip().lower()
-                if slug and slug not in seen and len(slug) <= 64:
-                    seen.add(slug)
-                    cleaned.append(slug)
-            return cleaned[:200]        # a cap, not a whitelist
+        _st = get_settings()
+        # get_fresh is the fresh read; a settings double without it (tests,
+        # or an older wrapper) still works through plain get().
+        _read = getattr(_st, "get_fresh", None) or _st.get
+        saved = _sanitise(_read("ai", "enabled_providers", default=None))
+        if saved is not None:
+            return saved
     except Exception:
         pass
-    return default_enabled_providers()
+    # Nothing saved (or unreadable): the server defaults apply. Logged
+    # because on screen it is indistinguishable from "your choice was
+    # ignored" - which is exactly how a failed settings write presented
+    # itself on 2026-10-13 (the toggles came back as MiMo/DeepSeek/Google).
+    _defaults = default_enabled_providers()
+    log.info("[Providers] no saved choice in settings; using server "
+             "defaults: %s", _defaults)
+    return _defaults
 
 
 def set_provider_enabled(provider: str, enabled: bool) -> list:
@@ -138,9 +177,22 @@ def set_provider_enabled(provider: str, enabled: bool) -> list:
         current.remove(provider)
     try:
         from src.config.settings import get_settings
-        get_settings().set("ai", "enabled_providers", current)
-    except Exception:
-        pass
+        _s = get_settings()
+        _s.set("ai", "enabled_providers", current)
+        # Did it reach the disk? set() keeps the value in memory and marks
+        # the file dirty when the write failed, so this distinguishes "saved"
+        # from "will be retried" in the log instead of leaving the user to
+        # discover it at the next restart.
+        if getattr(_s, "_save_dirty", False):
+            log.warning("[Providers] %s -> %s kept in memory only; "
+                        "settings.json could not be written yet (see the "
+                        "[Settings] error above)", provider, enabled)
+        else:
+            log.info("[Providers] %s -> %s saved; enabled now: %s",
+                     provider, enabled, current)
+    except Exception as e:
+        log.error("[Providers] could not persist %s -> %s: %s",
+                  provider, enabled, e)
     return current
 
 
