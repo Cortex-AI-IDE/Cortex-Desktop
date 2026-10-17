@@ -58,7 +58,7 @@
         body {
             height: 100%;
             overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
         }
 
         #app {
@@ -402,7 +402,7 @@
             gap: 10px;
             color: #969696;
             font-size: 12px;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             padding: 6px 12px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             flex: 0 0 auto;
@@ -444,7 +444,7 @@
         #sheet-preview-body {
             flex: 1 1 auto;
             overflow: auto;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             font-size: 12px;
             color: #ddd;
             background: #1e1e1e;
@@ -534,7 +534,7 @@
             border-bottom: 2px solid transparent;
             color: #969696;
             font-size: 12px;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             padding: 6px 14px;
             cursor: pointer;
             white-space: nowrap;
@@ -678,7 +678,7 @@
             flex-shrink: 0;
             gap: 0;
             height: 32px;
-            font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, -apple-system, 'Segoe UI', system-ui, sans-serif);
             letter-spacing: 0.01em;
         }
 
@@ -865,7 +865,7 @@
             font-size: 13px;
             font-weight: 600;
             color: #e8e8e8;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -873,7 +873,7 @@
         .diff-toolbar .diff-dirname {
             font-size: 12px;
             color: #8b949e;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -882,7 +882,7 @@
         }
         .diff-toolbar .diff-counts {
             font-size: 12px;
-            font-family: 'Consolas', 'Monaco', monospace;
+            font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
             font-weight: 600;
             flex-shrink: 0;
         }
@@ -953,7 +953,7 @@
            lines are revealed by a horizontal scrollbar, not broken onto a
            second line. */
         .diff-body {
-            font-family: 'Consolas', 'Monaco', monospace;
+            font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
             font-size: 13px;
             line-height: 20px;
             padding: 4px 0 12px;
@@ -1016,7 +1016,7 @@
             border-bottom: 1px solid #2d2d2d;
             cursor: pointer;
             font-size: 12px;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             user-select: none;
         }
         .dskip:hover { background: #2a2b2c; color: #c9d1d9; }
@@ -1042,7 +1042,7 @@
             border: 1px solid #3c3c3c;
             border-radius: 6px;
             box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             font-size: 12px;
             user-select: none;
         }
@@ -1133,7 +1133,7 @@
             <div id="diff-container"></div>
         </div>
         <div id="image-preview" class="hidden" role="img" aria-label="Image preview">
-            <div id="image-preview-info" style="color:#888;font-size:12px;font-family:system-ui;"></div>
+            <div id="image-preview-info" style="color:#888;font-size:12px;font-family:var(--font-ui, system-ui);"></div>
             <img id="image-preview-img" alt="Preview image" style="max-width:95%;max-height:85%;object-fit:contain;
             border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,0.5);" />
         </div>
@@ -1422,6 +1422,7 @@ if (typeof require !== 'undefined') {
             'editorGutter.background': '#ECE9E0'
         }
     });
+    _cxDefineEditorThemes();
 
     editor = monaco.editor.create(document.getElementById('editor-container'), {
         value: '',
@@ -1429,12 +1430,17 @@ if (typeof require !== 'undefined') {
         // Honor a theme pushed BEFORE Monaco finished loading: setTheme()
         // sets body.light-theme immediately, but can only call
         // monaco.editor.setTheme once `editor` exists, so read the body
-        // class here instead of hardcoding dark.
-        theme: document.body.classList.contains('light-theme') ? 'cortex-light' : 'cortex-dark',
+        // class here instead of hardcoding dark. A theme picked in
+        // Settings -> Editor -> Theme wins over both (_cxThemeName).
+        theme: _cxThemeName(),
         automaticLayout: true,
         minimap: { enabled: false },
-        fontSize: 14,
-        fontFamily: '"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace',
+        fontSize: (window.__cortexEditorFont && window.__cortexEditorFont.size) || 14,
+        // Bundled JetBrains Mono (src/ui/fonts.py). Settings -> Editor ->
+        // Font family / Font size reach this editor through
+        // window.__cortexSetEditorFont, called by the editor panel.
+        fontFamily: (window.__cortexEditorFont && window.__cortexEditorFont.stack)
+            || "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
         fontLigatures: false,
         tabSize: 4,
         insertSpaces: true,
@@ -1468,6 +1474,25 @@ if (typeof require !== 'undefined') {
     // Redundant post-creation disable, belt-and-suspenders against Monaco
     // occasionally ignoring the lightbulb option at create() time.
     editor.updateOptions({ lightbulb: { enabled: false } });
+
+    // Settings -> Editor -> Font family / Font size, pushed by the editor
+    // panel (src/ui/fonts.py). Remembered in window.__cortexEditorFont so an
+    // editor that is recreated later starts with the same choice. Monaco
+    // measures character widths once; when the chosen font finishes loading
+    // after that, remeasureFonts() is what stops the cursor and selection
+    // drifting from the text.
+    window.__cortexSetEditorFont = function (stack, size, family) {
+        try {
+            window.__cortexEditorFont = { stack: stack, size: size, family: family };
+            var eds = (monaco.editor.getEditors && monaco.editor.getEditors()) || (editor ? [editor] : []);
+            eds.forEach(function (ed) { ed.updateOptions({ fontFamily: stack, fontSize: size }); });
+            if (document.fonts && document.fonts.load && family) {
+                document.fonts.load(size + "px '" + family + "'").then(function () {
+                    try { monaco.editor.remeasureFonts(); } catch (e) {}
+                }).catch(function () {});
+            }
+        } catch (e) { console.warn('[Editor] font not applied:', e); }
+    };
 
     // ── NUCLEAR OPTION: Disable ALL Monaco built-in diagnostics permanently ──
     // Monaco's TypeScript/JavaScript language service runs in a web worker and
@@ -2616,9 +2641,11 @@ function switchToFile(filePath) {
                 editor = monaco.editor.create(container, {
                     value: openFiles[filePath] ? openFiles[filePath].content || '' : '',
                     language: openFiles[filePath] ? monacoLang(openFiles[filePath].language) : 'plaintext',
-                    theme: document.body.classList.contains('light-theme') ? 'cortex-light' : 'cortex-dark',
+                    theme: _cxThemeName(),
                     automaticLayout: true,
-                    fontSize: 14,
+                    fontSize: (window.__cortexEditorFont && window.__cortexEditorFont.size) || 14,
+                    fontFamily: (window.__cortexEditorFont && window.__cortexEditorFont.stack)
+                        || "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
                     minimap: { enabled: true },
                     wordWrap: 'on',
                     lightbulb: { enabled: false },
@@ -3634,15 +3661,90 @@ function getContent(filePath) {
     return '';
 }
 
+// ── Settings -> Editor -> Theme ─────────────────────────────────────────
+// "auto" (the default) is Cortex's own cortex-dark / cortex-light, which
+// follow the app theme. Dark+ and Light+ are Monaco's built-in vs-dark / vs;
+// the rest are defined below from each theme's published palette.
+// Python (src/ui/editor_theme.py) calls __cortexSetEditorTheme(id).
+var _CX_EDITOR_THEMES = {
+    //  id                 base       bg        fg        keyword   string    function  comment   number    lineHl    select    lineNum   cursor
+    'one-dark-pro':     ['vs-dark', '282C34', 'ABB2BF', 'C678DD', '98C379', '61AFEF', '5C6370', 'D19A66', '2C313C', '3E4451', '495162', '528BFF'],
+    'dracula':          ['vs-dark', '282A36', 'F8F8F2', 'FF79C6', 'F1FA8C', '50FA7B', '6272A4', 'BD93F9', '44475A', '44475A', '6272A4', 'F8F8F0'],
+    'monokai':          ['vs-dark', '272822', 'F8F8F2', 'F92672', 'E6DB74', 'A6E22E', '75715E', 'AE81FF', '3E3D32', '49483E', '90908A', 'F8F8F0'],
+    'github-dark':      ['vs-dark', '0D1117', 'E6EDF3', 'FF7B72', 'A5D6FF', 'D2A8FF', '8B949E', '79C0FF', '161B22', '264F78', '6E7681', 'E6EDF3'],
+    'github-light':     ['vs',      'FFFFFF', '1F2328', 'CF222E', '0A3069', '8250DF', '6E7781', '0550AE', 'F6F8FA', 'B6E3FF', '8C959F', '1F2328'],
+    'night-owl':        ['vs-dark', '011627', 'D6DEEB', 'C792EA', 'ECC48D', '82AAFF', '637777', 'F78C6C', '0B2942', '1D3B53', '4B6479', '80A4C2'],
+    'tokyo-night':      ['vs-dark', '1A1B26', 'A9B1D6', 'BB9AF7', '9ECE6A', '7AA2F7', '565F89', 'FF9E64', '1E202E', '283457', '363B54', 'C0CAF5'],
+    'catppuccin-mocha': ['vs-dark', '1E1E2E', 'CDD6F4', 'CBA6F7', 'A6E3A1', '89B4FA', '6C7086', 'FAB387', '2A2B3C', '45475A', '6C7086', 'F5E0DC'],
+    'nord':             ['vs-dark', '2E3440', 'D8DEE9', '81A1C1', 'A3BE8C', '88C0D0', '616E88', 'B48EAD', '3B4252', '434C5E', '4C566A', 'D8DEE9'],
+    'solarized-light':  ['vs',      'FDF6E3', '657B83', '859900', '2AA198', '268BD2', '93A1A1', 'D33682', 'EEE8D5', 'EEE8D5', '93A1A1', '657B83']
+};
+var _CX_BUILTIN_THEMES = { 'dark-plus': 'vs-dark', 'light-plus': 'vs' };
+window.__cortexEditorTheme = window.__cortexEditorTheme || 'auto';
+
+function _cxDefineEditorThemes() {
+    Object.keys(_CX_EDITOR_THEMES).forEach(function (id) {
+        var t = _CX_EDITOR_THEMES[id];
+        var fg = t[2], kw = t[3], st = t[4], fn = t[5], cm = t[6], nu = t[7];
+        monaco.editor.defineTheme('cx-' + id, {
+            base: t[0],
+            inherit: true,
+            rules: [
+                { token: '', foreground: fg },
+                { token: 'comment', foreground: cm, fontStyle: 'italic' },
+                { token: 'keyword', foreground: kw },
+                { token: 'string', foreground: st },
+                { token: 'string.escape', foreground: nu },
+                { token: 'regexp', foreground: st },
+                { token: 'number', foreground: nu },
+                { token: 'constant', foreground: nu },
+                { token: 'type', foreground: fn },
+                { token: 'type.identifier', foreground: fn },
+                { token: 'predefined', foreground: fn },
+                { token: 'tag', foreground: kw },
+                { token: 'attribute.name', foreground: fn },
+                { token: 'attribute.value', foreground: st },
+                { token: 'delimiter', foreground: fg },
+                { token: 'identifier', foreground: fg }
+            ],
+            colors: {
+                'editor.background': '#' + t[1],
+                'editor.foreground': '#' + fg,
+                'editorGutter.background': '#' + t[1],
+                'editor.lineHighlightBackground': '#' + t[8],
+                'editor.selectionBackground': '#' + t[9],
+                'editorLineNumber.foreground': '#' + t[10],
+                'editorLineNumber.activeForeground': '#' + fg,
+                'editorCursor.foreground': '#' + t[11]
+            }
+        });
+    });
+}
+
+function _cxThemeName() {
+    var id = window.__cortexEditorTheme;
+    if (_CX_BUILTIN_THEMES[id]) return _CX_BUILTIN_THEMES[id];
+    if (_CX_EDITOR_THEMES[id]) return 'cx-' + id;
+    return document.body.classList.contains('light-theme') ? 'cortex-light' : 'cortex-dark';
+}
+
+window.__cortexSetEditorTheme = function (id) {
+    window.__cortexEditorTheme = id || 'auto';
+    if (typeof monaco !== 'undefined' && monaco.editor) {
+        try { monaco.editor.setTheme(_cxThemeName()); } catch (e) { /* keep current */ }
+    }
+};
+
 // Called by Python: setTheme(isDarkFlag).
 // Bug history: this ignored the flag and always set 'cortex-dark' with a
 // "dark mode only" comment, the code editor could never render light mode
 // no matter what the rest of the IDE did.
 function setTheme(dark) {
-    if (editor && typeof monaco !== 'undefined') {
-        monaco.editor.setTheme(dark ? 'cortex-dark' : 'cortex-light');
-    }
     document.body.className = dark ? '' : 'light-theme';
+    if (editor && typeof monaco !== 'undefined') {
+        // A theme picked in Settings stays; "auto" follows Cortex.
+        monaco.editor.setTheme(_cxThemeName());
+    }
     // Sheet cell colours are resolved against the live theme (_spCellColors),
     // so the cached table HTML is now stale — drop the caches and repaint the
     // visible grid so a theme flip re-legibilises every cell.

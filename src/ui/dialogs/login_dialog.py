@@ -91,7 +91,10 @@ def _ui_font(size: int, weight: int, tracking: float = 0.0) -> QFont:
     # macOS, so without Segoe UI / SF Pro in this list every Windows user got
     # the bare QFont() default, which is not the brand face and is not what
     # the screen was designed against.
-    for name in ("Geist", "Inter",
+    # "Inter Variable" is the name Qt registers the BUNDLED Inter under
+    # (src/ui/fonts.py); plain "Inter" is never in families(), so without it
+    # the login screen skipped the bundled face and landed on Segoe UI.
+    for name in ("Geist", "Inter", "Inter Variable",
                  "Segoe UI Variable Display", "Segoe UI",   # Windows
                  "SF Pro Display", "Helvetica Neue",        # macOS
                  "Ubuntu", "DejaVu Sans"):                  # Linux
@@ -341,10 +344,11 @@ class LoginDialog(QDialog):
         h.addWidget(self._dot)
 
         self._status = QLabel("")
-        mono = QFont("Geist Mono")
-        if "Geist Mono" not in QFontDatabase.families():
-            mono = QFont("Ubuntu Mono" if "Ubuntu Mono" in QFontDatabase.families()
-                         else "monospace")
+        # The bundled code font (src/ui/fonts.py). This asked for Geist Mono,
+        # then Ubuntu Mono - neither ships on Windows, so it fell to a
+        # generic "monospace" (Courier New).
+        from src.ui.fonts import mono_font
+        mono = mono_font(9)
         mono.setPixelSize(12)
         self._status.setFont(mono)
         h.addWidget(self._status)

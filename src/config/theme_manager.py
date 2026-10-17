@@ -29,6 +29,17 @@ VALID_THEMES = ("dark", "light", "system")
 THEME_FILES = {"dark": "dark.qss", "light": "light.qss"}
 
 
+def _recolour(qss: str, mode: str) -> str:
+    """The QSS recoloured for a named colour theme (src/ui/color_themes.py);
+    unchanged for Cortex's own theme."""
+    try:
+        from src.ui.color_themes import remap_qss
+        return remap_qss(qss, mode)
+    except Exception as e:
+        log.debug(f"[ThemeManager] colour theme not applied to QSS: {e}")
+        return qss
+
+
 def _detect_system_theme() -> str:
     """Detect OS dark mode preference. Returns 'dark' or 'light'."""
     import sys
@@ -124,7 +135,7 @@ class ThemeManager(QObject):
         # ── AUDIT: QSS file read ──
         t_read_start = time.perf_counter()
         with open(qss_file, "r", encoding="utf-8") as f:
-            stylesheet = f.read()
+            stylesheet = _recolour(f.read(), actual_theme)
         dt_read = (time.perf_counter() - t_read_start) * 1000
         qss_kb = len(stylesheet) / 1024
         log.info(
@@ -196,7 +207,7 @@ class ThemeManager(QObject):
         actual = _detect_system_theme() if theme_name == "system" else theme_name
         qss_file = THEMES_DIR / THEME_FILES.get(actual, THEME_FILES["dark"])
         try:
-            return qss_file.read_text(encoding="utf-8")
+            return _recolour(qss_file.read_text(encoding="utf-8"), actual)
         except OSError as e:
             log.error(f"[ThemeManager] cannot read {qss_file}: {e}")
             return ""

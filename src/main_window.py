@@ -89,6 +89,68 @@ from src.utils.notifications import show_task_complete_notification, show_toast_
 log = get_logger("main_window")
 
 
+class _BootProgress(QWidget):
+    """Boot-screen progress: a 2 px track with a soft light gliding along it.
+
+    Indeterminate on purpose - startup has no honest percentage. Time-based
+    (not frame-counted), so a GUI thread busy with startup work makes the
+    light skip ahead rather than slow down and stutter.
+    """
+
+    # 1.1 s per left-to-right sweep. Was 1.6 s out and 1.6 s back (3.2 s a
+    # loop), which read as slow.
+    WIDTH, HEIGHT, PERIOD = 168, 2, 1.1     # px, px, seconds per sweep
+
+    def __init__(self, track: str, accent: str, parent=None):
+        super().__init__(parent)
+        from PyQt6.QtGui import QColor
+        self.setFixedSize(self.WIDTH, self.HEIGHT)
+        self._track = QColor(track)
+        self._accent = QColor(accent)
+        self._t0 = time.monotonic()
+
+    def step(self):
+        self.update()
+
+    def paintEvent(self, _e):
+        from PyQt6.QtGui import QPainter, QLinearGradient, QColor
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        r = self.HEIGHT / 2
+        track = QColor(self._track)
+        track.setAlphaF(0.55)
+        p.setBrush(track)
+        p.drawRoundedRect(0, 0, self.WIDTH, self.HEIGHT, r, r)
+        # One direction, repeating: enters at the left, leaves at the right.
+        # Light ease-in-out (half smoothstep, half linear) so it never crawls.
+        t = ((time.monotonic() - self._t0) / self.PERIOD) % 1.0
+        t = 0.5 * t + 0.5 * (t * t * (3 - 2 * t))
+        seg = self.WIDTH * 0.38
+        x = -seg + (self.WIDTH + seg) * t
+        g = QLinearGradient(x, 0, x + seg, 0)
+        clear = QColor(self._accent)
+        clear.setAlphaF(0.0)
+        g.setColorAt(0.0, clear)
+        g.setColorAt(0.5, self._accent)
+        g.setColorAt(1.0, clear)
+        p.setBrush(g)
+        p.drawRoundedRect(int(x), 0, int(seg), self.HEIGHT, r, r)
+        p.end()
+
+
+def _colour_theme_ui():
+    """Base colours of the colour theme the native UI shows (Settings ->
+    Appearance -> Color theme), or None for Cortex's own theme. For chrome
+    that picks fixed dark / light colours instead of reading tokens."""
+    try:
+        from src.ui.color_themes import THEMES, active_at_start
+        t = THEMES.get(active_at_start())
+        return t["ui"] if t else None
+    except Exception:
+        return None
+
+
 def _is_gui_thread() -> bool:
     """True when the caller runs on the thread that paints the window.
 
@@ -436,9 +498,8 @@ class EditorTabWidget(QTabWidget):
         browser = QTextBrowser()
         browser.setReadOnly(True)
         browser.setOpenExternalLinks(False)
-        font = QFont('Cascadia Code', 10)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        browser.setFont(font)
+        from src.ui.fonts import mono_font
+        browser.setFont(mono_font(10))
         browser.setStyleSheet(f'background:{bg};border:none;')
         browser.setHtml(''.join(parts))
 
@@ -1162,6 +1223,53 @@ class CortexMainWindow(QMainWindow):
         # Check for Cortex IDE updates (deferred 5s after startup to avoid blocking UI)
         QTimer.singleShot(5000, self._check_for_updates)
 
+    def _build_boot_logo(self) -> QWidget:
+        """The boot screen's logo: mark | Cortex / AI IDE, for this mode.
+
+        It replaced a spaced-out "C O R T E X" in a fixed blue. Colours come
+        from the active theme (tokens), so a colour theme and light mode get
+        a matching boot screen too.
+        """
+        from PyQt6.QtGui import QPixmap
+        from src.ui.tokens import TOKENS as T, is_dark
+        from src.ui.fonts import ui_font
+
+        box = QWidget()
+        box.setStyleSheet("background: transparent;")
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(14)
+
+        mark = QLabel()
+        mark.setStyleSheet("background: transparent;")
+        name = "brand_mark_dark.png" if is_dark() else "brand_mark_light.png"
+        pix = QPixmap(os.path.join(_resource_path(os.path.join("src", "assets", "logo")), name))
+        if not pix.isNull():
+            ratio = self.devicePixelRatioF() or 1.0
+            pix = pix.scaled(int(52 * ratio), int(52 * ratio),
+                             Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+            pix.setDevicePixelRatio(ratio)
+            mark.setPixmap(pix)
+        row.addWidget(mark, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        words = QVBoxLayout()
+        words.setContentsMargins(0, 0, 0, 0)
+        words.setSpacing(0)
+        title = QLabel("Cortex")
+        f = ui_font(22, QFont.Weight.Bold)
+        title.setFont(f)
+        title.setStyleSheet(f"color: {T['text']}; background: transparent;")
+        sub = QLabel("AI IDE")
+        fs = ui_font(8.5, QFont.Weight.DemiBold)
+        fs.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.5)
+        sub.setFont(fs)
+        sub.setStyleSheet(f"color: {T['muted']}; background: transparent;")
+        words.addWidget(title)
+        words.addWidget(sub)
+        row.addLayout(words)
+        return box
+
     def _hide_startup_overlay(self, force: bool = False):
         """Hide the full-window startup overlay.
 
@@ -1478,7 +1586,36 @@ class CortexMainWindow(QMainWindow):
         else:
             self._on_new_chat_requested()
     
-    def _set_theme(self, theme: str):
+    def _apply_color_theme_live(self, tid: str):
+        """Settings -> Appearance -> Color theme, applied to the native UI now.
+
+        The token palettes take the theme (color_themes.apply_native), then
+        the normal live-switch pipeline runs - the chat's batched re-theme,
+        the scoped QSS, the inline remap - with the palettes that were on
+        screen as the colour source. A named theme also sets dark / light.
+        """
+        from src.ui import color_themes as ct, tokens
+        was_dark = self._theme_manager.is_dark
+        mode = "dark" if was_dark else "light"
+        previous = (dict(tokens.DARK if was_dark else tokens.LIGHT),
+                    dict(tokens.chat_theme(mode)))
+        ct.apply_native(tid)
+        base = ct.theme_base(tid)
+        target = base or (getattr(self._settings, "theme", None) or mode)
+        log.info(f"[ColorTheme] live switch -> {tid} (mode {target})")
+        self._set_theme(target, previous=previous)
+        try:
+            from PyQt6.QtGui import QPalette, QColor
+            colours = ct.qpalette_colors(tid)
+            if colours:
+                pal = QApplication.instance().palette()
+                for role, hexcol in colours.items():
+                    pal.setColor(getattr(QPalette.ColorRole, role), QColor(hexcol))
+                QApplication.instance().setPalette(pal)
+        except Exception as e:
+            log.debug(f"[ColorTheme] palette not updated: {e}")
+
+    def _set_theme(self, theme: str, previous=None):
         """Switch theme at RUNTIME, fully, with no restart.
 
         Called from the memory manager (Settings → Appearance → Theme picker)
@@ -1520,9 +1657,24 @@ class CortexMainWindow(QMainWindow):
         theme = theme if theme in ("dark", "light", "system") else "dark"
 
         # ── GUARD: Skip if theme didn't actually change ──
-        if self._theme_manager.current == theme:
+        # A colour-theme switch (previous=...) recolours within one mode.
+        if self._theme_manager.current == theme and previous is None:
             log.debug(f"[MainWindow] Theme already {theme}, skipping redundant apply")
             return
+
+        # The old colours the remap passes look for: the palettes that were
+        # on screen (colour-theme switch) or the other mode's (dark/light).
+        try:
+            from src.ui import chat_panel as _cp
+            from src.ui.theme_remap import set_previous_palettes
+            if previous is not None:
+                set_previous_palettes(previous[0], previous[1])
+                _cp._ADAPT_SOURCE = previous[1]
+            else:
+                set_previous_palettes(None, None)
+                _cp._ADAPT_SOURCE = None
+        except Exception as e:
+            log.debug(f"[THEME-AUDIT] previous palettes not set: {e}")
 
         is_dark = self._theme_manager.is_dark
         was_dark = is_dark  # the theme being left, for BATCH 6
@@ -1927,39 +2079,39 @@ class CortexMainWindow(QMainWindow):
         # #1e1e1e = the exact flat background editor.html/sidebar.html paint
         # while boot-hidden, so the whole window reads as ONE uniform surface
         # during boot (a different shade showed a seam next to the panels).
-        from src.ui.tokens import TOKENS as _T
+        from src.ui.tokens import TOKENS as _T, family_list
         self._startup_overlay.setStyleSheet(f"background: {_T['bg']}; border: none;")
         _ov_layout = QVBoxLayout(self._startup_overlay)
         _ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _ov_layout.setSpacing(20)
 
-        # Brand wordmark
-        _ov_brand = QLabel("C O R T E X")
-        _ov_brand.setStyleSheet(
-            "color: #5B8CFF; font-size: 22px; font-weight: 700;"
-            "font-family: 'Segoe UI', sans-serif; letter-spacing: 8px;"
-            "background: transparent;"
-        )
-        _ov_brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _ov_layout.addWidget(_ov_brand)
+        # Brand lockup: the Cortex mark, "Cortex", and "AI IDE" under it -
+        # the same logo the app uses elsewhere, in the mark that suits the
+        # mode (brand_mark_DARK is the white mark, for dark backgrounds).
+        _ov_layout.addWidget(self._build_boot_logo(), 0, Qt.AlignmentFlag.AlignCenter)
 
-        # Loading status label
-        self._startup_status = QLabel("Starting...")
-        self._startup_status.setStyleSheet(
-            "color: #555; font-size: 13px; font-family: 'Segoe UI', sans-serif;"
-            "background: transparent;"
-        )
+        # Progress: a thin track with a soft accent light gliding along it,
+        # then a steady "Starting" label. Replaced "Starting." / ".." / "..."
+        # text dots, which made the label jump in width every half second.
+        self._startup_progress = _BootProgress(_T['border'], _T['accent'])
+        _ov_layout.addWidget(self._startup_progress, 0, Qt.AlignmentFlag.AlignCenter)
+
+        self._startup_status = QLabel("Starting")
+        _st_font = QFont()
+        _st_font.setFamilies(family_list(_T['font_ui']))
+        _st_font.setPointSizeF(8.5)
+        _st_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
+        self._startup_status.setFont(_st_font)
+        self._startup_status.setStyleSheet(f"color: {_T['muted']}; background: transparent;")
         self._startup_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _ov_layout.addWidget(self._startup_status)
+        _ov_layout.setSpacing(14)
 
-        # Animated dots (zero CPU, text-only)
+        # Drives the progress light; _hide_startup_overlay stops it.
         self._startup_dot_timer = QTimer(self)
-        self._startup_dot_count = 0
-        def _animate_startup_dots():
-            self._startup_dot_count = (self._startup_dot_count + 1) % 4
-            self._startup_status.setText(f"Starting{'.' * self._startup_dot_count}")
-        self._startup_dot_timer.timeout.connect(_animate_startup_dots)
-        self._startup_dot_timer.start(500)
+        self._startup_dot_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._startup_dot_timer.timeout.connect(self._startup_progress.step)
+        self._startup_dot_timer.start(16)
 
         # Cover the (not-yet-shown) main window; resizeEvent keeps it sized.
         self._startup_overlay.setGeometry(self.rect())
@@ -2441,6 +2593,10 @@ class CortexMainWindow(QMainWindow):
             # different app bolted onto the rest of the light theme.
             bg, fg, border = "#E4E1D8", "#1A1814", "#CCC9C0"
             lsp_color, ver_color = "#B83232", "#6B6860"
+        c = _colour_theme_ui()
+        if c:   # Settings -> Appearance -> Color theme
+            bg, fg, border = c["bg_alt"], c["fg_dim"], c["border"]
+            lsp_color, ver_color = c["red"], c["muted"]
         sb.setStyleSheet(f"""
             QStatusBar {{
                 background-color: {bg};
@@ -2664,6 +2820,10 @@ class CortexMainWindow(QMainWindow):
         else:
             bg, fg, hover, border = "#e8e8e8", "#1f2328", "#d8d8d8", "#d0d0d0"
             popup_bg, sel_bg, disabled = "#ffffff", "#cce4ff", "#9a9a9a"
+        c = _colour_theme_ui()
+        if c:   # Settings -> Appearance -> Color theme
+            bg, fg, hover, border = c["bg_alt"], c["fg"], c["hover"], c["border"]
+            popup_bg, sel_bg, disabled = c["surface"], c["selection"], c["muted"]
         qss = f"""
             QMenuBar {{
                 background-color: {bg};
@@ -8935,6 +9095,20 @@ class CortexMainWindow(QMainWindow):
                     log.warning(f"[Video] Failed to inject attached video: {_v_e}")
             if _input_area is not None:
                 _input_area._pending_send_videos = []
+        # Videos the selected model could not take. Tell the AI in the
+        # message itself: on 2026-10-17 it received only "what you saw on this
+        # video ?", with no video and no explanation, and spent its turn
+        # searching the disk for .mp4 files.
+        _refused = list(getattr(_input_area, '_pending_send_refused_videos', None) or []) \
+            if _input_area is not None else []
+        if _refused:
+            _names = ", ".join(f'"{v.get("name", "video")}"' for v in _refused)
+            message = (f"{message}\n\n[Attachment note: the user attached {_names}, "
+                       f"but it was NOT delivered - {_refused[0].get('why', 'the selected model does not read video')}. "
+                       f"You cannot see it. Tell the user that, and suggest switching to a "
+                       f"model that reads video. Do not search the disk for it.]")
+            _input_area._pending_send_refused_videos = []
+            log.info("[Video] %d refused video(s) announced to the AI", len(_refused))
         if _imgs:
             for img in _imgs:
                 try:

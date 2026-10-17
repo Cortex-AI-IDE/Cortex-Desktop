@@ -15,7 +15,7 @@
             height: 100%;
             background-color: #0c0c0c; /* Default dark mode background */
             overflow: hidden;
-            font-family: 'Cascadia Code', 'Consolas', monospace;
+            font-family: var(--font-mono, 'Cascadia Code', 'Consolas', monospace);
             display: flex;
             flex-direction: column;
         }
@@ -83,7 +83,7 @@
             border-radius: 8px;
             padding: 4px;
             box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-            font-family: 'Segoe UI', sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', sans-serif);
             font-size: 13px;
             user-select: none;
         }
@@ -170,7 +170,7 @@
             color: #cccccc;
             font-size: 12px;
             font-weight: 600;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', sans-serif);
             border: 1px solid #3e3e42;
             border-radius: 4px;
             padding: 3px 24px 3px 8px;
@@ -233,7 +233,7 @@
             padding: 5px 12px;
             color: #cccccc;
             font-size: 12px;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', sans-serif);
             cursor: pointer;
             white-space: nowrap;
             overflow: hidden;
@@ -258,7 +258,7 @@
             border-radius: 4px;
             padding: 3px 10px;
             font-size: 11px;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: var(--font-ui, 'Segoe UI', sans-serif);
             cursor: pointer;
             white-space: nowrap;
             line-height: 1.4;
@@ -445,7 +445,7 @@
         let term;
         try {
             term = new Terminal({
-                fontFamily: "'Cascadia Code', 'Consolas', monospace",
+                fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
             fontSize: 13,
             cursorBlink: true,
             // PERFORMANCE: Limit scrollback to prevent memory bloat
@@ -499,6 +499,50 @@
         }
         window.__cxRefit = _safeFit;
         _safeFit();
+        // JetBrains Mono comes from Cortex's own files (src/ui/fonts.py) and
+        // may finish loading just after the terminal opened. xterm measures
+        // the cell size once, on a canvas, so it would keep the FALLBACK
+        // font's width. Re-assigning the family makes it re-measure; then
+        // refit so the column count matches the real cell width.
+        if (document.fonts && document.fonts.load) {
+            document.fonts.load("13px 'JetBrains Mono'").then(function () {
+                try {
+                    var fam = term.options.fontFamily;
+                    term.options.fontFamily = "monospace";
+                    term.options.fontFamily = fam;
+                    _safeFit();
+                } catch (e) { /* keep the fallback font */ }
+            }).catch(function () {});
+        }
+        // Settings -> Appearance -> Color theme (src/ui/color_themes.py
+        // terminal_theme_js): the theme's 16 colours, or null for Cortex's
+        // own dark / light palette (Python re-sends update_theme for that).
+        window.__cortexTermTheme = null;
+        window.__cortexSetTerminalTheme = function (theme) {
+            window.__cortexTermTheme = theme || null;
+            if (!theme) return;
+            try {
+                term.options.theme = theme;
+                document.body.style.backgroundColor = theme.background;
+            } catch (e) { /* keep the current colours */ }
+        };
+        // Settings -> Terminal -> Font family / Font size (src/ui/fonts.py
+        // terminal_font_js). Same re-measure trick once the face has loaded.
+        window.__cortexSetTerminalFont = function (stack, size, family) {
+            try {
+                var px = Math.max(8, Math.min(40, parseInt(size, 10) || 13));
+                term.options.fontSize = px;
+                term.options.fontFamily = stack;
+                _safeFit();
+                if (document.fonts && document.fonts.load && family) {
+                    document.fonts.load(px + "px '" + family + "'").then(function () {
+                        term.options.fontFamily = "monospace";
+                        term.options.fontFamily = stack;
+                        _safeFit();
+                    }).catch(function () {});
+                }
+            } catch (e) { /* keep the current font */ }
+        };
         // Re-fit when the container itself changes size (hidden -> shown).
         if (window.ResizeObserver) {
             let _roTimer = null;
@@ -926,6 +970,8 @@
                         brightWhite: '#1f2328'
                     };
                 }
+                // A colour theme from Settings stays on top of the mode.
+                if (window.__cortexTermTheme) window.__cortexSetTerminalTheme(window.__cortexTermTheme);
             });
             
             // ═══ Terminal Header Button Handlers ═══

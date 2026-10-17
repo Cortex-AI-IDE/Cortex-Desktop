@@ -712,6 +712,29 @@ def main():
     app.setApplicationVersion(_APP_VERSION)
     app.setOrganizationName("Cortex")
 
+    # Bundled typefaces (Inter for the interface, JetBrains Mono for code),
+    # before any widget or web page exists, so nothing first paints in a
+    # fallback font. See src/ui/fonts.py.
+    try:
+        from src.ui.fonts import (register_qt_fonts, install_web_fonts,
+                                  apply_code_font_at_startup)
+        register_qt_fonts()
+        # Settings -> Editor -> Font family is Cortex's code font everywhere.
+        apply_code_font_at_startup()
+        install_web_fonts()
+    except Exception as _font_exc:
+        log.warning(f"[Fonts] bundled fonts not applied: {_font_exc}")
+
+    # Settings -> Appearance -> Color theme. The native palettes are rewritten
+    # here, before any widget exists; web pages get the theme's colours from
+    # the shared profile. See src/ui/color_themes.py.
+    try:
+        from src.ui.color_themes import apply_at_startup, install_web_theme
+        apply_at_startup()
+        install_web_theme()
+    except Exception as _ct_exc:
+        log.warning(f"[ColorTheme] not applied: {_ct_exc}")
+
     # Native right-click menus, including the ones Chromium builds inside
     # every QWebEngineView, are Qt widgets that no page CSS can reach.
     # They used to keep the STARTUP theme forever, because the app-wide
@@ -772,6 +795,12 @@ def main():
         palette.setColor(QPalette.ColorRole.Link, QColor("#4da3ff"))
         palette.setColor(QPalette.ColorRole.Highlight, QColor("#228df2"))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    try:
+        from src.ui.color_themes import qpalette_colors
+        for _role, _hex in qpalette_colors().items():
+            palette.setColor(getattr(QPalette.ColorRole, _role), QColor(_hex))
+    except Exception as _pal_exc:
+        log.debug(f"[ColorTheme] palette not recoloured: {_pal_exc}")
     app.setPalette(palette)
     log.info(f"[THEME] Base QPalette set for '{_saved_theme}' theme")
 
@@ -819,12 +848,17 @@ def main():
     else:
         log.warning(f"[ICON] No icon loaded! Searched: {icon_candidates}")
 
-    # Global font - try Segoe UI first, fall back to system font
+    # Global font: the interface token (bundled Inter, then system fallbacks).
+    # setFamilies keeps the first family Qt has, so the stack works whether
+    # or not the bundled file loaded.
     try:
-        font = QFont("Segoe UI", 10)
+        from src.ui.tokens import TOKENS as _T, family_list as _family_list
+        font = QFont()
+        font.setFamilies(_family_list(_T['font_ui']))
+        font.setPointSize(10)
         app.setFont(font)
     except Exception as e:
-        log.warning(f"Could not set Segoe UI font: {e}, using system default")
+        log.warning(f"Could not set the interface font: {e}, using system default")
         font = QFont()
         font.setPointSize(10)
         app.setFont(font)

@@ -123,8 +123,13 @@ DARK = {
     "status_error":   "#f85149",
 
     # Fonts
-    "font_ui":           "Geist, 'Segoe UI', system-ui, -apple-system, sans-serif",
-    "font_mono":         "'JetBrains Mono','Fira Code',Consolas,'Courier New',monospace",
+    # Bundled with Cortex (src/assets/fonts, see src/ui/fonts.py): Inter for
+    # the interface, JetBrains Mono for code. Qt registers the Inter file as
+    # "Inter Variable"; web pages name it "Inter" through @font-face - the
+    # list carries both so each side finds its own name first. Geist was
+    # named here before but never shipped, so it always fell back.
+    "font_ui":           "'Inter', 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif",
+    "font_mono":         "'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace",
     "font_size":         "14px",
     "font_size_sm":      "13px",
     "font_size_xs":      "12px",
@@ -488,6 +493,10 @@ CHAT_LIGHT = {
 
 _chat_cache: dict = {}
 
+# Cortex's own palettes as shipped; a colour theme is applied on top of these
+# (apply_named_palette) and removed by restoring them.
+_PRISTINE = {"dark": (dict(DARK), dict(CHAT_DARK)), "light": (dict(LIGHT), dict(CHAT_LIGHT))}
+
 
 def chat_theme(mode: str | None = None) -> dict:
     """The chat panel's full palette for `mode` (default: the active theme):
@@ -540,6 +549,42 @@ def set_theme(mode: str = "dark"):
     """Switch the active theme tokens ('dark' or 'light')."""
     global _current_theme
     _current_theme = LIGHT if mode == "light" else DARK
+
+
+def set_code_font(stack: str) -> None:
+    """Point the font_mono token (both palettes) at the user's code font.
+
+    Settings -> Editor -> Font family. Widgets built after this read the new
+    stack; src/ui/fonts.py restyles the ones already on screen.
+    """
+    if not stack:
+        return
+    for pal in (DARK, LIGHT):
+        pal["font_mono"] = stack
+    _chat_cache.clear()
+
+
+def apply_named_palette(mode, base: dict, chat: dict) -> None:
+    """Recolour the palettes for a named colour theme (Settings -> Appearance
+    -> Color theme, see src/ui/color_themes.py).
+
+    Both palettes go back to Cortex's own first, so switching from one named
+    theme to another never leaves the previous one's colours behind; then the
+    `mode` palette takes the theme. mode=None restores Cortex's own theme.
+    The code font (set_code_font) is kept.
+    """
+    for pal, chat_pal, (orig, orig_chat) in ((DARK, CHAT_DARK, _PRISTINE["dark"]),
+                                             (LIGHT, CHAT_LIGHT, _PRISTINE["light"])):
+        mono = pal.get("font_mono")
+        pal.clear(); pal.update(orig)
+        chat_pal.clear(); chat_pal.update(orig_chat)
+        if mono:
+            pal["font_mono"] = mono
+    if mode in ("dark", "light"):
+        pal, chat_pal = (LIGHT, CHAT_LIGHT) if mode == "light" else (DARK, CHAT_DARK)
+        pal.update(base)
+        chat_pal.update(chat)
+    _chat_cache.clear()
 
 
 def T() -> dict:

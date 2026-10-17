@@ -32,10 +32,9 @@ class DiffWindow(QDialog):
         self._viewer = QTextBrowser()
         self._viewer.setOpenExternalLinks(False)
         self._viewer.setReadOnly(True)
-        # Monospace font
-        font = QFont("Cascadia Code", 10)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        self._viewer.setFont(font)
+        # Code font: the bundled JetBrains Mono stack (src/ui/fonts.py)
+        from src.ui.fonts import mono_font
+        self._viewer.setFont(mono_font(10))
         
         layout.addWidget(self._viewer)
 

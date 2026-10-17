@@ -4508,17 +4508,8 @@ Required behavior:
             if _custom_instructions and isinstance(_custom_instructions, str) and _custom_instructions.strip():
                 prompt += f"\n## User's Custom Instructions\n{_custom_instructions.strip()}\n"
 
-            # Inject verbosity preference
-            _verbosity = _settings.get("ai", "verbosity", default="balanced")
-            if _verbosity == "concise":
-                prompt += "\n## Response Style\nBe concise. Give short, direct answers. Skip explanations unless asked.\n"
-            elif _verbosity == "detailed":
-                prompt += "\n## Response Style\nBe thorough. Explain your reasoning, include context, and provide examples.\n"
-
-            # Inject code style preference
-            _code_style = _settings.get("ai", "code_style", default="standard")
-            if _code_style and _code_style != "standard":
-                prompt += f"\n## Code Style\nFollow {_code_style} coding conventions and formatting style.\n"
+            # Verbosity / code style (Settings -> Personalization) go at the
+            # very END of the prompt, see personalization_prompt().
 
             # Privacy mode, instruct agent to never share code externally
             _privacy_mode = _settings.get("safety", "privacy_mode", default=True)
@@ -4604,6 +4595,9 @@ Required behavior:
                 )
         except Exception:
             pass  # MCP is optional, prompt works without it
+        # Last on purpose: a one-line hint in the middle of a long prompt was
+        # outweighed by the many sections after it.
+        prompt += personalization_prompt()
         return prompt
 
     # ── Persistent Memory ───────────────────────────────────
@@ -16801,6 +16795,73 @@ def get_skill_router_block(query: str = "") -> str:
     except Exception as e:
         log.debug(f"[BRIDGE] Skill router block failed: {e}")
         return ""
+
+
+_VERBOSITY_RULES = {
+    "concise": (
+        "Length: CONCISE. The user chose short answers in Settings; this overrides any "
+        "default habit of explaining at length.\n"
+        "- Lead with the answer or the result. No preamble, no restating the question.\n"
+        "- Explanations: at most about 5 short sentences or a short list.\n"
+        "- After code changes: what changed and where, in 1-3 bullets. No step-by-step "
+        "narration of what you did, no recap of unchanged parts.\n"
+        "- No closing offers (\"Let me know if...\", \"Would you like...\").\n"
+        "- Go longer ONLY when the user asks for detail or the task truly needs it "
+        "(a plan, a review, an error the user must act on)."
+    ),
+    "detailed": (
+        "Length: DETAILED. The user chose thorough answers in Settings.\n"
+        "- Explain the reasoning and why this approach, not just what.\n"
+        "- Mention trade-offs, alternatives considered and edge cases.\n"
+        "- Include short examples where they make the point clearer.\n"
+        "- After code changes: what changed, why, and how to verify it."
+    ),
+}
+
+_CODE_STYLE_RULES = {
+    "airbnb": (
+        "Code style: AIRBNB (user setting) for all code you write or edit.\n"
+        "- JavaScript / TypeScript / React: Airbnb style guide. 2-space indent, single "
+        "quotes, semicolons, trailing commas in multi-line literals, const by default "
+        "and let when reassigned (never var), arrow functions for callbacks, "
+        "camelCase variables and functions, PascalCase components and classes, "
+        "=== not ==, template literals over concatenation.\n"
+        "- Other languages have no Airbnb guide: use their standard style "
+        "(Python: PEP 8).\n"
+        "- When editing an existing file whose established style differs, match the file."
+    ),
+    "google": (
+        "Code style: GOOGLE (user setting) for all code you write or edit.\n"
+        "- Python: Google Python Style Guide. 4-space indent, 80-column lines, "
+        "snake_case functions and variables, CapWords classes, Google-style docstrings "
+        "with Args: / Returns: / Raises: sections, type hints on public functions.\n"
+        "- JavaScript / TypeScript: Google JS/TS style. 2-space indent, single quotes, "
+        "semicolons, const/let (never var), camelCase, JSDoc on exported functions.\n"
+        "- Java / C++ / Go: the matching Google style guide (Go: gofmt).\n"
+        "- When editing an existing file whose established style differs, match the file."
+    ),
+}
+
+
+def personalization_prompt() -> str:
+    """Settings -> Personalization -> Response Style, as concrete rules.
+
+    Read on every message, so a change applies to the next one. "balanced"
+    and "standard" add nothing: they are the model's normal behaviour.
+    """
+    try:
+        from src.config.settings import get_settings
+        s = get_settings()
+        verbosity = str(s.get("ai", "verbosity", default="balanced") or "balanced").lower()
+        code_style = str(s.get("ai", "code_style", default="standard") or "standard").lower()
+    except Exception:
+        return ""
+    rules = [r for r in (_VERBOSITY_RULES.get(verbosity), _CODE_STYLE_RULES.get(code_style)) if r]
+    if not rules:
+        return ""
+    return ("\n## User Preferences (Settings -> Personalization)\n"
+            "These are the user's own settings. Follow them in every reply unless the "
+            "user asks otherwise in the conversation.\n\n" + "\n\n".join(rules) + "\n")
 
 
 def get_all_system_prompt_extras() -> str:

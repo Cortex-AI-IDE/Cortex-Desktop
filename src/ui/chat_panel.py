@@ -1137,6 +1137,10 @@ def _card_frame_qss(border_color=None, bg_color=None):
 
 _RGBA_TOKEN_RE = re.compile(r"rgba\((\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\)")
 
+# The chat palette on screen before a colour-theme switch (main_window.
+# _apply_color_theme_live); None after a plain dark/light switch.
+_ADAPT_SOURCE = None
+
 
 def _might_carry_theme_colors(tb) -> bool:
     """Cheap pre-check: could this browser's HTML contain theme colors?
@@ -1199,7 +1203,12 @@ def _adapt_restored_html_to_theme(html: str) -> str:
        never that dark or that light) are never touched.
     """
     DARK, LIGHT = chat_theme("dark"), chat_theme("light")
-    if T["bg"] == DARK["bg"]:
+    if _ADAPT_SOURCE is not None:
+        # A colour-theme switch (Settings -> Appearance -> Color theme): the
+        # colours on screen are the previous theme's, which need not be
+        # either of today's palettes.
+        src_pal, dst_pal = _ADAPT_SOURCE, chat_theme()
+    elif T["bg"] == DARK["bg"]:
         src_pal, dst_pal = LIGHT, DARK   # restoring under dark → remap light colors
     else:
         src_pal, dst_pal = DARK, LIGHT   # restoring under light → remap dark colors
@@ -4979,9 +4988,15 @@ class MessageWidget(QWidget):
         if videos:
             # Named, because a video is a deliberate, heavy attachment and the
             # sent message is the only place that records WHAT was sent.
-            labels += [f"[Video {v['index']}: {v.get('name', 'video')}"
-                       + (f", {v['size']}]" if v.get('size') else "]")
-                       for v in videos]
+            for v in videos:
+                if v.get('refused'):
+                    # Attached, but this model could not take it: say so,
+                    # rather than drop it from the record of what was sent.
+                    labels.append(f"[Video: {v.get('name', 'video')} - not sent, "
+                                  f"{v.get('why', 'this model does not read video')}]")
+                else:
+                    labels.append(f"[Video {v['index']}: {v.get('name', 'video')}"
+                                  + (f", {v['size']}]" if v.get('size') else "]"))
         if images:
             labels += [f"[Image {img['index']}]" for img in images]
         if labels:
@@ -6003,8 +6018,37 @@ class SpellCheckInput(QTextEdit):
             self._run_spellcheck()
 
 
+class _ElidedLabel(QLabel):
+    """One-line label that ends in "…" instead of growing its parent.
+
+    A plain QLabel asks for its full text width; a long queued prompt made
+    the queued row wider than the chat and pushed its buttons out of view.
+    """
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(parent)
+        self._full = text
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(40)
+        self._elide()
+
+    def setFullText(self, text: str):
+        self._full = text
+        self._elide()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._elide()
+
+    def _elide(self):
+        w = max(10, self.width())
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, w))
+
+
 class InputArea(QWidget):
     """Compact command bar with auto-grow + paste chip."""
+    # Prompts that can wait while the AI works; see _emit_send.
+    MAX_QUEUED = 2
     send_requested = pyqtSignal(str)
     stop_requested = pyqtSignal()
     # feature name, description. Shown as the same card OCR and web search
@@ -6020,7 +6064,9 @@ class InputArea(QWidget):
         self.model = "auto"
         self.model_label = "Auto"
         self._generating = False
-        self._queued_prompt = None   # typed while AI running, sent on turn_done
+        # Prompts sent while the AI runs: [{"text": str, "images": list}], in
+        # order. One is sent each time a turn ends (set_generating(False)).
+        self._queue = []
         # Pasted text lives on its own chip (chip["payload"]), not here. A
         # single shared _pasted_text meant the second paste overwrote the
         # first, so only the last one ever reached the model.
@@ -6028,10 +6074,12 @@ class InputArea(QWidget):
         self._image_count = 0
         self._pasted_videos = []  # list of {"data": data-URL, "index": n}
         self._video_count = 0
+        # Videos the selected model cannot read: never sent, but the sent
+        # bubble still records them and the AI is told they did not arrive.
+        self._refused_videos = []  # list of {"name": ..., "why": ...}
         self._chip_widgets = []  # list of chip data dicts
         self._project_root = None  # set by main_window for file matching
-        self._queued_images = []  # images queued with prompt
-        self._queued_chip = None  # visual queued chip widget
+        self._queued_chip = None  # the queued-prompts panel above the input
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 4, 12, 4)
@@ -7250,19 +7298,19 @@ class InputArea(QWidget):
             self.input.setFocus()
         else:
             self._reset_input_style()
-            # Clear queued chip
-            self._clear_queued_chip()
-            # Flush queued prompt, user typed while AI was running
-            if self._queued_prompt:
-                queued = self._queued_prompt
-                queued_images = list(getattr(self, '_queued_images', []))
-                self._queued_prompt = None
-                self._queued_images = []
-                self._clear_paste_state()
-                # Store images for _on_send to pick up
-                if queued_images:
-                    self._pending_send_images = queued_images
-                self.send_requested.emit(queued)
+            # Send the next queued prompt (the rest stay queued, one per turn).
+            # The input box is NOT cleared: it may hold a draft being typed,
+            # and the queued prompt's own chips were cleared when it queued.
+            if self._queue:
+                item = self._queue.pop(0)
+                self._render_queue()
+                if item.get("images"):
+                    self._pending_send_images = list(item["images"])
+                self._sending_queued = True     # ChatPanel._on_send keeps the draft
+                self.send_requested.emit(item["text"])
+                self._sending_queued = False
+            else:
+                self._clear_queued_chip()
 
     def _emit_send(self):
         # Capture images BEFORE any clearing
@@ -7354,15 +7402,28 @@ class InputArea(QWidget):
             return
 
         if self._generating:
-            # Queue the prompt, will fire automatically when turn ends
-            self._queued_prompt = full_text
-            self._queued_images = images  # Store images with queue
-            # Show "Queued" chip on input
-            # The pasted blocks are now inside _queued_prompt, so retire their
-            # chips before showing the queued one. Leaving them would resend
-            # every block again with whatever is typed next.
+            # At most MAX_QUEUED prompts wait. A further one stays in the
+            # input box - text, pasted blocks and images untouched - until a
+            # queued one has been sent; nothing is dropped or merged.
+            if len(self._queue) >= self.MAX_QUEUED:
+                from PyQt6.QtWidgets import QToolTip
+                QToolTip.showText(
+                    self.input.mapToGlobal(self.input.rect().topLeft()),
+                    f"{self.MAX_QUEUED} prompts are already queued. This one stays "
+                    "here - press Enter again once one of them has been sent.",
+                    self.input)
+                self.input.setFocus()
+                return
+            # Queue the prompt; one queued prompt is sent each time a turn
+            # ends. A second one used to REPLACE the first, silently.
+            self._queue.append({"text": full_text, "images": list(images)})
+            # Its pasted blocks AND images now live in the queue entry, so
+            # retire their chips. The image chips used to stay ("Image 1",
+            # "Image 2" under the queued row) and were sent again with
+            # whatever was typed next.
             self._clear_code_chips()
-            self._show_queued_chip(full_text, images)
+            self._clear_image_chips()
+            self._render_queue()
             # Clear input field immediately so user sees it was accepted
             self.input.clear()
             self._reset_input_style()
@@ -7373,6 +7434,10 @@ class InputArea(QWidget):
         self._pending_send_images = images
         # Same for video: captured before _clear_paste_state() wipes the chips.
         self._pending_send_videos = list(self._pasted_videos) if self._pasted_videos else []
+        # And the ones this model could not take: shown in the bubble as
+        # "not sent", and announced to the AI (main_window) so it does not
+        # answer - or go looking - as if it had received them.
+        self._pending_send_refused_videos = list(self._refused_videos)
 
         # Clear input text only (not images yet). The paste chips have been
         # consumed into full_text above, so drop them with it, otherwise the
@@ -7386,75 +7451,160 @@ class InputArea(QWidget):
         # Emit the signal with combined text
         self.send_requested.emit(full_text)
 
-    def _show_queued_chip(self, text: str, images: list):
-        """Show a 'Queued' chip above the input while AI is working."""
-        # Clear any existing queued chip
+    # ── Queued prompts (sent while the AI is working) ─────────────────────
+    #
+    # Was one "Queued: <text>" chip with a transparent ✕: a long or
+    # multi-line prompt made the label wider than the panel and pushed the ✕
+    # out of view, so only a pointing-hand cursor hinted that clicking
+    # somewhere would remove something. A second queued prompt silently
+    # replaced the first. Now: one row per queued prompt, a one-line
+    # preview, and labelled Edit / Remove buttons that are always visible.
+
+    @staticmethod
+    def _queue_preview(text: str) -> str:
+        if not text or text == "[Image attached]":
+            return "Image only"
+        return " ".join(text.split())
+
+    def _render_queue(self):
+        """(Re)build the queued-prompts panel above the input."""
         self._clear_queued_chip()
-
-        chip = QWidget()
-        chip.setObjectName("queuedChip")
-        chip.setStyleSheet(
-            f"QWidget#queuedChip {{ background: {T['bg_card']};"
+        if not self._queue:
+            return
+        panel = QFrame()
+        panel.setObjectName("queuedPanel")
+        panel.setStyleSheet(
+            f"QFrame#queuedPanel {{ background: {T['bg_card']};"
             f" border: 1px solid {T['border']}; border-radius: 8px; }}"
+            f"QFrame#queuedPanel QLabel {{ background: transparent; border: none; }}"
         )
-        ch = QHBoxLayout(chip)
-        ch.setContentsMargins(8, 6, 8, 6)
-        ch.setSpacing(8)
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(10, 6, 6, 6)
+        v.setSpacing(2)
 
-        # Queued icon
-        icon = QLabel("⏳")
-        icon.setStyleSheet("background:transparent;border:none;")
-        ch.addWidget(icon)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        n = len(self._queue)
+        title = QLabel(f"Queued ({n})" if n > 1 else "Queued")
+        title.setStyleSheet(f"color:{T['text']};font-size:12px;font-weight:600;")
+        head.addWidget(title)
+        hint = QLabel("sends when the current reply finishes" if n == 1
+                      else "sent one at a time, in this order")
+        hint.setStyleSheet(f"color:{T['muted']};font-size:11px;")
+        head.addWidget(hint, 1)
+        if n > 1:
+            clear_all = self._queue_button("Remove all", danger=True)
+            clear_all.setToolTip("Remove every queued prompt")
+            clear_all.clicked.connect(self._cancel_queued)
+            head.addWidget(clear_all)
+        v.addLayout(head)
 
-        # Preview text
-        preview = text[:60] + "..." if len(text) > 60 else text
-        lbl = QLabel(f"Queued: {preview}")
-        lbl.setStyleSheet(
-            f"color:{T['accent']};font-size:12px;background:transparent;border:none;"
-        )
-        ch.addWidget(lbl, 1)
+        for i, item in enumerate(self._queue):
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            if n > 1:
+                num = QLabel(f"{i + 1}.")
+                num.setStyleSheet(f"color:{T['muted']};font-size:12px;")
+                row.addWidget(num)
+            preview = _ElidedLabel(self._queue_preview(item.get("text", "")))
+            preview.setToolTip(item.get("text", "")[:1500])
+            preview.setStyleSheet(f"color:{T['text_dim']};font-size:12px;")
+            row.addWidget(preview, 1)
+            imgs = len(item.get("images") or [])
+            if imgs:
+                badge = QLabel(f"{imgs} image" + ("s" if imgs != 1 else ""))
+                badge.setStyleSheet(
+                    f"color:{T['text_dim']};font-size:11px;padding:1px 6px;"
+                    f"border:1px solid {T['border']};border-radius:4px;")
+                row.addWidget(badge)
+            edit = self._queue_button("Edit")
+            edit.setToolTip("Take it out of the queue and back into the input box")
+            edit.clicked.connect(lambda _=False, k=i: self._edit_queued(k))
+            row.addWidget(edit)
+            remove = self._queue_button("Remove", danger=True)
+            remove.setToolTip("Remove this queued prompt - it will not be sent")
+            remove.clicked.connect(lambda _=False, k=i: self._remove_queued(k))
+            row.addWidget(remove)
+            v.addLayout(row)
 
-        # Image count
-        if images:
-            img_lbl = QLabel(f"[{len(images)} image(s)]")
-            img_lbl.setStyleSheet(
-                f"color:{T['text_dim']};font-size:11px;background:transparent;border:none;"
-            )
-            ch.addWidget(img_lbl)
-
-        # Cancel button
-        cancel_btn = QPushButton("✕")
-        cancel_btn.setFixedSize(20, 20)
-        cancel_btn.setStyleSheet(
-            f"background:transparent;border:none;color:{T['text_dim']};font-size:12px;"
-        )
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self._cancel_queued)
-        ch.addWidget(cancel_btn)
-
-        # Insert above input
-        self._queued_chip = chip
+        self._queued_chip = panel
         outer = self.parent().layout() if self.parent() else None
         if outer:
-            # Find input area index and insert before it
-            for i in range(outer.count()):
-                if outer.itemAt(i).widget() == self:
-                    outer.insertWidget(i, chip)
+            for k in range(outer.count()):
+                if outer.itemAt(k).widget() == self:
+                    outer.insertWidget(k, panel)
                     break
 
+    def _queue_button(self, text: str, danger: bool = False) -> QPushButton:
+        b = QPushButton(text)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setFixedHeight(22)
+        hover_fg = T['red'] if danger else T['text']
+        hover_bg = "rgba(248,81,73,0.15)" if danger else T['bg_hover']
+        b.setStyleSheet(
+            f"QPushButton {{ background:{T['bg_secondary']}; color:{T['text_dim']};"
+            f" border:1px solid {T['border']}; border-radius:4px;"
+            f" font-size:11px; padding:0 8px; }}"
+            f"QPushButton:hover {{ background:{hover_bg}; color:{hover_fg};"
+            f" border-color:{hover_fg}; }}")
+        return b
+
+    def _remove_queued(self, index: int):
+        if 0 <= index < len(self._queue):
+            self._queue.pop(index)
+        self._render_queue()
+
+    def _edit_queued(self, index: int):
+        """Move a queued prompt back into the input box, unsent. A draft
+        already in the box is kept, after it."""
+        if not (0 <= index < len(self._queue)):
+            return
+        item = self._queue.pop(index)
+        self._render_queue()
+        text = item.get("text", "")
+        if text == "[Image attached]":
+            text = ""
+        draft = self.input.toPlainText().strip()
+        if draft:
+            text = f"{text}\n\n{draft}" if text else draft
+        self._restore_prompt(text, item.get("images") or [])
+
+    def _take_all_queued(self):
+        """(text, images) of every queued prompt, combined; empties the queue."""
+        texts = [q["text"] for q in self._queue
+                 if q.get("text") and q["text"] != "[Image attached]"]
+        images = [img for q in self._queue for img in (q.get("images") or [])]
+        had = bool(self._queue)
+        self._cancel_queued()
+        if not had:
+            return None, []
+        return "\n\n".join(texts), images
+
     def _clear_queued_chip(self):
-        """Remove the queued chip from UI."""
-        if hasattr(self, '_queued_chip') and self._queued_chip:
+        """Remove the queued-prompts panel from the UI (the queue stays)."""
+        if getattr(self, '_queued_chip', None):
             self._queued_chip.setParent(None)
             self._queued_chip.deleteLater()
             self._queued_chip = None
 
     def _cancel_queued(self):
-        """Cancel the queued prompt."""
-        self._queued_prompt = None
-        self._queued_images = []
+        """Remove every queued prompt."""
+        self._queue = []
         self._clear_queued_chip()
         self._reset_input_style()
+
+    def _clear_image_chips(self):
+        """Drop the image chips (their images went into a queued prompt)."""
+        for chip in [c for c in self._chip_widgets if c.get("type") == "image"]:
+            widget = chip.get("widget")
+            if widget:
+                self._chip_layout.removeWidget(widget)
+                widget.deleteLater()
+            self._chip_widgets.remove(chip)
+        self._pasted_images = []
+        self._image_count = 0
+        if not self._chip_widgets:
+            self._chip_row.setVisible(False)
 
     def _restore_prompt(self, text: str, images: list):
         """Put a prompt back in the input box, unsent, with its images as chips.
@@ -7493,6 +7643,7 @@ class InputArea(QWidget):
         self._image_count = 0
         self._pasted_videos = []
         self._video_count = 0
+        self._refused_videos = []
         self._chip_widgets = []
         # Clear chip row
         while self._chip_layout.count():
@@ -7771,6 +7922,36 @@ class InputArea(QWidget):
                         return True
         return super().eventFilter(a0, a1)
 
+    def _log_paste_probe(self, mime) -> None:
+        """One line per Ctrl+V: what Qt reports next to what Windows holds.
+
+        Reported 2026-10-17: now and then a NEW screenshot pasted as the OLD
+        copied text, until Cortex was restarted. Nothing was logged on this
+        path, and the obvious suspect - Qt keeping its own copy after another
+        app replaced the clipboard - did not reproduce (Qt saw the new image
+        at once). This line makes the next occurrence diagnosable: if Qt says
+        "text" while Windows says "image" and the sequence number moved, the
+        cache is stale; if both agree, the cause is elsewhere in Cortex.
+
+        Only formats and sizes are logged - never the clipboard's content.
+        """
+        try:
+            fmts = [f for f in mime.formats()][:6]
+            qt_img = mime.hasImage()
+            qt_txt = len(mime.text()) if mime.hasText() else 0
+            win = ""
+            if sys.platform == "win32":
+                import ctypes
+                u32 = ctypes.windll.user32
+                win = (f" | windows: image={bool(u32.IsClipboardFormatAvailable(8) or u32.IsClipboardFormatAvailable(17))}"
+                       f" text={bool(u32.IsClipboardFormatAvailable(13))}"
+                       f" seq={u32.GetClipboardSequenceNumber()}")
+            log.info("[Paste] qt: image=%s text_len=%d formats=%s%s | chips=%d queued=%s",
+                     qt_img, qt_txt, fmts, win, len(getattr(self, '_chip_widgets', []) or []),
+                     len(getattr(self, '_queue', None) or []))
+        except Exception:
+            pass
+
     def _handle_paste(self):
         """Intercept paste, handle images and large text as chips above input."""
         from PyQt6.QtWidgets import QApplication
@@ -7779,6 +7960,7 @@ class InputArea(QWidget):
 
         clipboard = QApplication.clipboard()
         mime = clipboard.mimeData()
+        self._log_paste_probe(mime)
 
         # ── Image paste (screenshots, copied images, etc.) ──
         if mime.hasImage():
@@ -8027,11 +8209,16 @@ class InputArea(QWidget):
             if alt:
                 why += f" — try {alt}"
             self._add_chip(f"⚠ {name}: {why}", "image")
+            # Remembered, not dropped: 2026-10-17 a refused video vanished at
+            # Send, the bubble showed only "what you saw on this video ?", and
+            # the AI - told nothing - went searching the disk for .mp4 files.
+            self._refused_videos.append({"name": name, "why": why})
             log.info("[VIDEO] Refused %s: model=%s has no video input", name, model)
             return True
         url, why = video_data_url(path)
         if url is None:
             self._add_chip(f"⚠ {name}: {why}", "image")
+            self._refused_videos.append({"name": name, "why": why})
             log.info("[VIDEO] Refused %s: %s", name, why)
             return True
         self._video_count += 1
@@ -8180,9 +8367,11 @@ class BrandLogo(QWidget):
             h = self.height()
 
             # ── "Cortex" ──────────────────────────────────────────
-            font_main = QFont("Geist", 13)
-            if not QFont("Geist").exactMatch():
-                font_main = QFont("Segoe UI", 13)
+            # Interface stack (bundled Inter). Geist was requested here but
+            # never shipped, so this always fell back to Segoe UI.
+            font_main = QFont()
+            font_main.setFamilies(family_list(T['font_ui']))
+            font_main.setPointSize(13)
             font_main.setWeight(QFont.Weight.DemiBold)    # 600
             font_main.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -0.3)
             p.setFont(font_main)
@@ -8213,9 +8402,9 @@ class BrandLogo(QWidget):
             )
 
             # ── "AI" ──────────────────────────────────────────────
-            font_sub = QFont("Geist", 11)
-            if not QFont("Geist").exactMatch():
-                font_sub = QFont("Segoe UI", 11)
+            font_sub = QFont()
+            font_sub.setFamilies(family_list(T['font_ui']))
+            font_sub.setPointSize(11)
             font_sub.setWeight(QFont.Weight.Normal)       # 400
             font_sub.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)
             p.setFont(font_sub)
@@ -13488,8 +13677,13 @@ class ChatPanel(QWidget):
         # Get images that were stored by _emit_send before clearing
         images = list(getattr(self.input_area, '_pending_send_images', []))
 
-        # Now fully clear paste state
-        self.input_area._clear_paste_state()
+        # Now fully clear paste state - unless this is a queued prompt being
+        # sent at turn end: the input box then holds the user's NEXT draft
+        # (text and chips), and wiping it lost whatever they were typing.
+        if getattr(self.input_area, "_sending_queued", False):
+            self.input_area._sending_queued = False
+        else:
+            self.input_area._clear_paste_state()
         self.input_area._pending_send_images = []
 
         # Re-enable autoscroll on new message
@@ -13512,6 +13706,8 @@ class ChatPanel(QWidget):
         # list is NOT cleared here: main_window's handler for the same signal
         # reads it to hand the video to the bridge, and clears it there.
         videos = list(getattr(self.input_area, '_pending_send_videos', []))
+        videos += [dict(v, refused=True) for v in
+                   getattr(self.input_area, '_pending_send_refused_videos', []) or []]
         self.add_user(text, images, videos)
 
         # Store images for agent to access
@@ -13535,14 +13731,12 @@ class ChatPanel(QWidget):
         # prompt back in the input box, unsent. This holds whichever of the two
         # Stop slots Qt runs first, since the other one only stops the agent.
         ia = self.input_area
-        queued = getattr(ia, '_queued_prompt', None)
-        queued_images = list(getattr(ia, '_queued_images', None) or [])
-        if queued:
-            ia._cancel_queued()
+        # Every queued prompt comes back, in order (there can be several).
+        queued, queued_images = ia._take_all_queued()
         if hasattr(self, "_worker") and self._worker:
             self._worker.cancel()
         ia.set_generating(False)
-        if queued:
+        if queued is not None:
             try:
                 ia._restore_prompt(queued, queued_images)
             except Exception as e:
@@ -15012,15 +15206,12 @@ class ChatPanel(QWidget):
         # A prompt queued while the old reply ran goes back into the input
         # box, unsent: set_generating(False) would otherwise send it into
         # the new chat on its own.
-        queued = getattr(ia, '_queued_prompt', None)
-        queued_images = list(getattr(ia, '_queued_images', None) or [])
-        if queued:
-            ia._cancel_queued()
+        queued, queued_images = ia._take_all_queued()
         if getattr(self, "_worker", None):
             self._worker.cancel()
         self.clear_messages()
         ia.set_generating(False)
-        if queued:
+        if queued is not None:
             try:
                 ia._restore_prompt(queued, queued_images)
             except Exception as e:
