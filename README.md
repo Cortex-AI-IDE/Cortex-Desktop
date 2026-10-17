@@ -7,7 +7,7 @@
 Hand a task to an AI agent and watch it plan, read your code, edit files, run
 commands and iterate until the work is done, inside a real IDE.
 
-**Version 3.0.41** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11
+**Version 3.0.61** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11
 
 [Website](https://cortex-ide.app/) &nbsp;·&nbsp; [Documentation](https://cortex-ide.app/docs/) &nbsp;·&nbsp; [Pricing](https://cortex-ide.app/pricing/) &nbsp;·&nbsp; [Issues](https://github.com/Cortex-AI-IDE/Cortex-Desktop/issues)
 
