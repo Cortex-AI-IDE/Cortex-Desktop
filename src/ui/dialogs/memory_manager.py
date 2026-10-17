@@ -950,8 +950,51 @@ scope: project
 
                 self._settings.set(section, setting_key, coerced)
                 log.info(f"[MemoryManager] setSetting({section}.{setting_key} = {coerced!r})")
+                # Editor font family / size: push to the open Monaco editor.
+                if key in ("editor.font_family", "editor.font_size"):
+                    try:
+                        from src.ui.fonts import notify_editor_font_changed
+                        notify_editor_font_changed()
+                    except Exception:
+                        pass
+                elif key == "ui.color_theme":
+                    self._apply_color_theme(str(coerced))
+                elif key in ("terminal.font_family", "terminal.font_size"):
+                    try:
+                        from src.ui.fonts import notify_terminal_font_changed
+                        notify_terminal_font_changed()
+                    except Exception:
+                        pass
         except Exception as e:
             log.warning(f"[MemoryManager] setSetting failed: {e}")
+
+    def _apply_color_theme(self, tid: str):
+        """Settings -> Appearance -> Color theme changed.
+
+        Web pages, the editor and the terminal switch through
+        notify_color_theme_changed; the chat panel, menus and the rest of the
+        native UI through the main window's live switch, which also sets the
+        theme's dark / light mode. See src/ui/color_themes.py.
+        """
+        try:
+            from src.ui.color_themes import notify_color_theme_changed
+            notify_color_theme_changed()
+            from PyQt6.QtWidgets import QApplication as _App
+            for widget in _App.instance().topLevelWidgets():
+                if hasattr(widget, "_apply_color_theme_live"):
+                    widget._apply_color_theme_live(tid)
+                    break
+        except Exception as e:
+            log.warning(f"[MemoryManager] color theme not applied: {e}")
+
+    @pyqtSlot(result=str)
+    def colorThemeNeedsRestart(self) -> str:
+        """"1" when the native UI still shows another colour theme."""
+        try:
+            from src.ui.color_themes import active_at_start, color_theme
+            return "1" if active_at_start() != color_theme() else ""
+        except Exception:
+            return ""
 
     @pyqtSlot(str)
     def setTheme(self, theme: str):
@@ -1829,6 +1872,15 @@ scope: project
         except Exception:
             pass
         return ""
+
+    @pyqtSlot(result=str)
+    def listCodeFonts(self) -> str:
+        """Installed code fonts for the Editor / Terminal font dropdowns."""
+        try:
+            from src.ui.fonts import installed_code_fonts
+            return json.dumps(installed_code_fonts())
+        except Exception:
+            return "[]"
 
     @pyqtSlot(result=str)
     def getSettings(self) -> str:

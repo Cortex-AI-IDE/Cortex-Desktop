@@ -428,7 +428,13 @@ class DeepSeekProvider(BaseProvider):
                     except Exception:
                         pass  # Non-critical safety net
 
-                    _last_event_ts = time.time()
+                    # monotonic, not time.time(): this measures how long the
+                    # stream has been silent, and a wall clock jumps when the
+                    # user corrects the date/time. On 2026-10-15 two clock
+                    # corrections mid-answer (+10,594 s, then +3,807 s, both
+                    # in the Windows event log to the second) looked like
+                    # hours of silence and aborted two healthy requests.
+                    _last_event_ts = time.monotonic()
                     try:
                         # ── Event-level stall watchdog ──────────────────────
                         # The connect/read/socket timeouts reset on EVERY byte,
@@ -445,10 +451,10 @@ class DeepSeekProvider(BaseProvider):
                         # points; a fully dead socket is caught by the 90s
                         # socket timeout above.)
                         for line in response.iter_lines():
-                            if time.time() - _last_event_ts > self._event_stall_timeout:
+                            if time.monotonic() - _last_event_ts > self._event_stall_timeout:
                                 raise RuntimeError(
                                     f"DeepSeek stream stalled: no data event for "
-                                    f"{int(time.time() - _last_event_ts)}s (keep-alives "
+                                    f"{int(time.monotonic() - _last_event_ts)}s (keep-alives "
                                     f"only), aborting instead of hanging"
                                 )
                             if line:
@@ -459,7 +465,7 @@ class DeepSeekProvider(BaseProvider):
                                     line_text = line.decode('utf-8', errors='replace').strip()
 
                                 if line_text.startswith('data: '):
-                                    _last_event_ts = time.time()   # real event, stream is live
+                                    _last_event_ts = time.monotonic()   # real event, stream is live
                                     data_str = line_text[6:]
 
                                     if data_str.strip() == '[DONE]':
@@ -514,7 +520,7 @@ class DeepSeekProvider(BaseProvider):
                         return  # Successfully streamed, exit retry loop
 
                     except (socket.timeout, urllib3.exceptions.ReadTimeoutError) as _chunk_tmo:
-                        _elapsed = time.time() - _last_event_ts
+                        _elapsed = time.monotonic() - _last_event_ts
                         log.error(
                             "[DeepSeek] STREAM STALLED: no chunk received for %.1fs "
                             "(chunk_timeout=%.0fs). Connection likely dead, aborting turn.",

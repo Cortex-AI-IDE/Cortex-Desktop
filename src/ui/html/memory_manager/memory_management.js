@@ -57,6 +57,7 @@
     theme: "theme",
     editorFontSize: "editor.font_size",
     editorFont: "editor.font_family",
+    colorTheme: "ui.color_theme",
     tabSize: "editor.tab_size",
     wordWrap: "editor.word_wrap",
     minimap: "editor.minimap",
@@ -101,6 +102,7 @@
     /* Terminal */
     defaultShell: "terminal.default_shell",
     shellArgs: "terminal.shell_args",
+    termFont: "terminal.font_family",
     termFontSize: "terminal.font_size",
     scrollback: "terminal.scrollback",
     cursorStyle: "terminal.cursor_style",
@@ -352,6 +354,34 @@
     return out;
   }
 
+  /* "Restart to apply to the chat panel" - shown while the native UI still
+     has the colour theme Cortex started with. */
+  function refreshColorThemeNote() {
+    const note = $("colorThemeRestart");
+    if (!note || !bridge || typeof bridge.colorThemeNeedsRestart !== "function") return;
+    bridge.colorThemeNeedsRestart((r) => { note.style.display = r ? "block" : "none"; });
+  }
+
+  /* Editor / Terminal font family: only fonts installed on this computer
+     (Python's installed_code_fonts, JetBrains Mono first). */
+  function fillCodeFontSelects(families) {
+    if (!Array.isArray(families) || !families.length) return;
+    ["editorFont", "termFont"].forEach((id) => {
+      const sel = $(id);
+      if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = "";
+      families.forEach((fam, i) => {
+        const o = document.createElement("option");
+        o.value = fam;
+        o.textContent = fam;
+        if (i === 0) o.selected = true;
+        sel.appendChild(o);
+      });
+      if (families.includes(keep)) sel.value = keep;
+    });
+  }
+
   /* ═══════ LIVE SETTINGS HYDRATION ═══════
      Called once on bridge connect with the full nested settings dict
      from Python's getSettings(). Iterates SETTINGS_MAP and sets every
@@ -379,6 +409,18 @@
         }
       } else if (el.tagName === "TEXTAREA") {
         el.value = val;
+      } else if (el.tagName === "SELECT") {
+        /* A saved value that matches no option made the box render EMPTY
+           (seen on Editor -> Font family: the options were slugs like
+           "jetbrains" while settings held "JetBrains Mono"). Older builds
+           saved those slugs, so map them; otherwise keep the default. */
+        const legacy = { jetbrains: "JetBrains Mono", cascadia: "Cascadia Code",
+                         fira: "Fira Code", consolas: "Consolas" };
+        const want = String(val);
+        const opts = Array.from(el.options).map((o) => o.value);
+        if (opts.includes(want)) el.value = want;
+        else if (legacy[want.toLowerCase()] && opts.includes(legacy[want.toLowerCase()])) el.value = legacy[want.toLowerCase()];
+        /* else: leave the option marked `selected` in the HTML */
       } else {
         el.value = val;
       }
@@ -488,15 +530,28 @@
           /* Load memory state */
           const loadFn = bridge.loadInitialData || bridge.getState || bridge.refresh;
           if (typeof loadFn === "function") loadFn.call(bridge, (s) => window.receiveMemoryState(s));
-          /* Load ALL settings and hydrate every control */
-          if (typeof bridge.getSettings === "function") {
+          /* Load ALL settings and hydrate every control. The font
+             dropdowns are filled first, from the fonts installed on this
+             computer, so the saved font has an option to select. */
+          const hydrateSettings = () => {
+            if (typeof bridge.getSettings !== "function") return;
             bridge.getSettings((raw) => {
               if (!raw) return;
               try {
                 const data = typeof raw === "string" ? JSON.parse(raw) : raw;
                 applySettingsFromBridge(data);
+                refreshColorThemeNote();
               } catch (e) { console.error("[SETTINGS] getSettings parse error:", e); }
             });
+          };
+          if (typeof bridge.listCodeFonts === "function") {
+            bridge.listCodeFonts((raw) => {
+              try { fillCodeFontSelects(JSON.parse(raw || "[]")); }
+              catch (e) { console.warn("[SETTINGS] listCodeFonts:", e); }
+              hydrateSettings();
+            });
+          } else {
+            hydrateSettings();
           }
           /* Apply current theme from Python.
              getTheme() returns the RAW setting (dark/light/system), used
@@ -646,6 +701,14 @@
          orphaned key ui.theme (nothing ever reads that), while setTheme()
          separately persists the real top-level "theme" key. Every click
          was writing two divergent copies to settings.json. */
+      /* Dark / Light / System are Cortex's own theme: leave any named
+         colour theme first, so its colours do not stay on top. */
+      const ct = $("colorTheme");
+      if (ct && ct.value !== "cortex") {
+        ct.value = "cortex";
+        persistSetting("colorTheme", "cortex");
+        refreshColorThemeNote();
+      }
       if (bridge && typeof bridge.setTheme === "function") {
         bridge.setTheme(theme);
       } else if (bridge && typeof bridge.setSetting === "function") {
@@ -699,6 +762,25 @@
     document.querySelectorAll(".switch input").forEach(t => t.addEventListener("change", () => persistSetting(t.id, t.checked)));
     document.querySelectorAll(".setting-select").forEach(s => s.addEventListener("change", () => persistSetting(s.id, s.value)));
     document.querySelectorAll(".setting-input, .setting-textarea").forEach(i => i.addEventListener("blur", () => persistSetting(i.id, i.value)));
+
+    /* ── Color theme: the restart note, and the mode buttons follow it ── */
+    const colorThemeSel = $("colorTheme");
+    if (colorThemeSel) {
+      colorThemeSel.addEventListener("change", () => {
+        /* persistSetting (the generic select handler above) already sent it;
+           Python switches the live surfaces and the dark/light mode. Show
+           that mode here too: the theme decides it. */
+        const v = colorThemeSel.value;
+        if (v !== "cortex") {
+          const base = ["light-plus", "github-light", "solarized-light"].includes(v) ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme", base);
+          document.querySelectorAll(".theme-option").forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.themeChoice === base);
+          });
+        }
+        setTimeout(refreshColorThemeNote, 300);
+      });
+    }
 
     /* ── Agentic Loop Mode special handler (show/hide warning) ── */
     const agenticLoopToggle = $("agenticLoopMode");

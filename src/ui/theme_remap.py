@@ -70,6 +70,22 @@ def _role(prop: str) -> Optional[str]:
     return None
 
 
+# A colour-theme switch (Settings -> Appearance -> Color theme) changes the
+# palettes themselves, so "the old theme" is no longer DARK or LIGHT: the
+# switch hands the palettes it left here, and they are the source until the
+# next switch.
+_previous: Optional[Tuple[dict, dict]] = None
+
+
+def set_previous_palettes(base: Optional[dict], chat: Optional[dict]) -> None:
+    """The (base, chat) palettes on screen before a colour-theme switch;
+    None after a plain dark/light switch. Clears the cached tables."""
+    global _previous
+    _previous = (dict(base), dict(chat or {})) if base is not None else None
+    _tables.clear()
+    _old_only.clear()
+
+
 def _table(was_dark: bool, is_dark: bool) -> Dict[str, List[Tuple[str, str]]]:
     """old colour -> [(token, new colour), ...] from the base and chat palettes."""
     key = (was_dark, is_dark)
@@ -78,7 +94,7 @@ def _table(was_dark: bool, is_dark: bool) -> Dict[str, List[Tuple[str, str]]]:
     from src.ui import tokens
     side = lambda dark: (tokens.DARK if dark else tokens.LIGHT,
                          tokens.chat_theme("dark" if dark else "light"))
-    old_base, old_chat = side(was_dark)
+    old_base, old_chat = _previous if _previous else side(was_dark)
     new_base, new_chat = side(is_dark)
     table: Dict[str, List[Tuple[str, str]]] = {}
     for old, new in ((old_base, new_base), (old_chat, new_chat)):
@@ -112,7 +128,7 @@ def _pick(cands: List[Tuple[str, str]], role: Optional[str]) -> str:
 
 def remap_stylesheet(ss: str, was_dark: bool, is_dark: bool) -> str:
     """`ss` with the old theme's token colours swapped for the new theme's."""
-    if not ss or was_dark == is_dark:
+    if not ss or (was_dark == is_dark and _previous is None):
         return ss
     # A live-theme block (apply_theme_outside) is already the new theme;
     # remap only what the widget set itself.
@@ -147,7 +163,7 @@ def remap_all(was_dark: bool, is_dark: bool, on_done=None) -> None:
 
     `on_done(changed, scanned)` runs after the last chunk.
     """
-    if was_dark == is_dark:
+    if was_dark == is_dark and _previous is None:
         if on_done:
             on_done(0, 0)
         return

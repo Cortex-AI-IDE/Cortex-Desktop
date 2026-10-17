@@ -139,6 +139,13 @@
               <span>System</span>
             </button>
           </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Color theme</label>
+              <p>One theme for all of Cortex: chat, editor, terminal, sidebar, menus, Settings and Project Health.</p>
+            </div>
+            <select class="setting-select" id="colorTheme"><option value="cortex" selected>Cortex (Dark / Light / System)</option><option value="dark-plus">Dark+ (VS Code)</option><option value="light-plus">Light+ (VS Code)</option><option value="one-dark-pro">One Dark Pro</option><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="github-dark">GitHub Dark</option><option value="github-light">GitHub Light</option><option value="night-owl">Night Owl</option><option value="tokyo-night">Tokyo Night</option><option value="catppuccin-mocha">Catppuccin Mocha</option><option value="nord">Nord</option><option value="solarized-light">Solarized Light</option></select>
+          </div>
+          <p class="setting-note" id="colorThemeRestart" style="display:none;margin-top:8px">Restart Cortex to apply this theme to the chat panel and menus.</p>
         </div>
         <div class="settings-card">
           <h3>Editor</h3>
@@ -154,7 +161,7 @@
             <div class="setting-info"><label>Font family</label>
               <p>Monospace font for code editing.</p>
             </div>
-            <select class="setting-select" id="editorFont"><option value="cascadia" selected>Cascadia Code</option><option value="fira">Fira Code</option><option value="jetbrains">JetBrains Mono</option><option value="consolas">Consolas</option></select>
+            <select class="setting-select" id="editorFont" title="Code font for the editor, chat code and all code text in Cortex"><option value="JetBrains Mono" selected>JetBrains Mono</option></select>
           </div>
           <div class="setting-row">
             <div class="setting-info"><label>Tab size</label>
@@ -1033,11 +1040,17 @@
         <div class="settings-card">
           <h3>Appearance</h3>
           <div class="setting-row">
+            <div class="setting-info"><label>Font family</label>
+              <p>Code font for the terminal. Lists the fonts installed on this computer.</p>
+            </div>
+            <select class="setting-select" id="termFont"><option value="JetBrains Mono" selected>JetBrains Mono</option></select>
+          </div>
+          <div class="setting-row">
             <div class="setting-info"><label>Font size</label>
               <p>Font size for the terminal.</p>
             </div>
             <div class="range-control">
-              <input type="range" id="termFontSize" min="10" max="24" value="14" class="setting-range"><span class="range-value" id="termFontSizeVal">14px</span>
+              <input type="range" id="termFontSize" min="10" max="24" value="13" class="setting-range"><span class="range-value" id="termFontSizeVal">13px</span>
             </div>
           </div>
           <div class="setting-row">

@@ -596,6 +596,25 @@ class WebviewPanel(QWidget):
         log.info("[WebviewPanel] Monaco Editor ready")
         self.editor_ready.emit()
 
+        # The font chosen in Settings -> Editor (src/ui/fonts.py). Applied now
+        # and again whenever it changes, so Settings drives Monaco live.
+        try:
+            from src.ui.fonts import editor_font_js, on_editor_font_changed
+            self._safe_run_js(editor_font_js())
+            on_editor_font_changed(lambda: self._safe_run_js(editor_font_js()))
+        except Exception as e:
+            log.debug(f"[WebviewPanel] editor font not applied: {e}")
+
+        # Settings -> Editor -> Theme (src/ui/editor_theme.py), same pattern.
+        try:
+            from src.ui.editor_theme import editor_theme_js, on_editor_theme_changed
+            self._safe_run_js(editor_theme_js())
+            if not getattr(self, "_theme_listener", None):
+                self._theme_listener = lambda: self._safe_run_js(editor_theme_js())
+                on_editor_theme_changed(self._theme_listener)
+        except Exception as e:
+            log.debug(f"[WebviewPanel] editor theme not applied: {e}")
+
         # ── Session restore: ensure Monaco has the file content ──
         if self._active_file_path:
             f = self._open_files.get(self._active_file_path)

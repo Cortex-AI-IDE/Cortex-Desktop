@@ -425,10 +425,55 @@ class XTermWidget(QWidget):
         if self._output_buffer:
             self._bridge.send_output.emit(self._output_buffer)
             self._output_buffer = ""
-        
+
+        # Settings -> Appearance -> Color theme: same pattern as the font.
+        self._apply_color_theme()
+        if not getattr(self, "_color_listener", None):
+            try:
+                from src.ui.color_themes import on_color_theme_changed, remove_listener
+                ccb = self._apply_color_theme
+                self._color_listener = ccb
+                on_color_theme_changed(ccb)
+                self.destroyed.connect(lambda *_a, ccb=ccb: remove_listener(ccb))
+            except Exception as exc:
+                log.debug(f"[XTerm] colour theme listener not set: {exc}")
+
+        # Settings -> Terminal -> Font family / Font size: apply now, and
+        # again whenever they change while this terminal is open.
+        self._apply_terminal_font()
+        if not getattr(self, "_font_listener", None):
+            try:
+                from src.ui.fonts import (on_terminal_font_changed,
+                                          remove_terminal_font_listener)
+                cb = self._apply_terminal_font
+                self._font_listener = cb
+                on_terminal_font_changed(cb)
+                self.destroyed.connect(lambda *_a, cb=cb: remove_terminal_font_listener(cb))
+            except Exception as exc:
+                log.debug(f"[XTerm] terminal font listener not set: {exc}")
+
         # Notify main_window that this terminal is ready so it can sync the dropdown list
         self.terminal_ready.emit()
-            
+
+    def _apply_color_theme(self):
+        """Push the colour theme's 16 colours into xterm, or - for Cortex's
+        own theme - re-send the dark / light palette."""
+        try:
+            from src.ui.color_themes import terminal_theme, terminal_theme_js
+            self._webview.page().runJavaScript(terminal_theme_js())
+            if terminal_theme() is None:
+                self._bridge.update_theme.emit(self._is_dark)
+        except Exception as exc:
+            log.debug(f"[XTerm] colour theme not applied: {exc}")
+
+    def _apply_terminal_font(self):
+        """Push the saved terminal font family / size into xterm."""
+        try:
+            from src.ui.fonts import terminal_font_js
+            self._webview.page().runJavaScript(terminal_font_js())
+        except Exception as exc:
+            log.debug(f"[XTerm] terminal font not applied: {exc}")
+
     def _on_js_input(self, data: str):
         """Called when user types in xterm.js"""
         if self._ai_access is not None:
