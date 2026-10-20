@@ -174,7 +174,12 @@ hiddenimports += collect_submodules('multiprocessing')
 hiddenimports += collect_submodules('pydantic')
 hiddenimports += collect_submodules('cryptography')
 hiddenimports += collect_submodules('openai')
-hiddenimports += collect_submodules('mcp')
+# mcp.cli is the command line front end of the mcp package: it imports typer
+# (a CLI-only extra Cortex never installs) and calls sys.exit(1) when that
+# import fails, which kills PyInstaller's own collection subprocess. Only the
+# client and server halves are used, so the CLI is skipped by name.
+hiddenimports += collect_submodules(
+    'mcp', filter=lambda name: not name.startswith('mcp.cli'))
 hiddenimports += collect_submodules('anyio')
 hiddenimports += ['pydantic_settings', 'httpx_sse', 'jsonschema']
 
@@ -212,6 +217,8 @@ a = Analysis(
         'pandas', 'litellm', 'tokenizers', 'speech_recognition',
         'sqlalchemy', 'boto3', 'botocore', 'grpc', 'mem0',
         'qdrant_client', 'redis', 'mistralai', 'git', 'tiktoken',
+        # CLI-only front ends of packages whose libraries are kept.
+        'mcp.cli', 'typer',
         # Windows-only: keep a transitive import from dragging them in.
         'winpty', 'pywinpty', 'win32ctypes', 'pefile',
     ],

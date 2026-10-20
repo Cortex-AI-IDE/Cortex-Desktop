@@ -117,6 +117,13 @@ jobs:
               p.terminate(force=True)
           except Exception:
               pass
+
+          # The same thing through TerminalSession, which is what the app uses.
+          s2 = ts.TerminalSession(os.getcwd(), name="probe2")
+          print("start():", s2.start(), "pid:", s2.pid)
+          print("wait_ready(10):", s2.wait_ready(10))
+          print("is_alive:", s2.is_alive)
+          s2.close()
           PY
 
       - name: The shared AI session works

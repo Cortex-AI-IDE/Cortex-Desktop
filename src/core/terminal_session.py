@@ -495,6 +495,7 @@ class TerminalSession:
         # macOS and Linux. zsh is the macOS default and has no --rcfile, so
         # ZDOTDIR is pointed at a folder holding .zshrc that sources the real
         # one first; bash gets --rcfile and the same arrangement.
+        os.makedirs(_SHELL_DIR, exist_ok=True)
         shell_path, shell_name = _posix_shell()
         quoted = shlex.quote(shell_path)
         if shell_name == "zsh":
