@@ -2,7 +2,7 @@
 
 # Cortex AI IDE
 
-### The agentic IDE for Windows
+### An agentic workspace with a native code editor
 
 Hand a task to an AI agent and watch it plan, read your code, edit files, run
 commands and iterate until the work is done, inside a real IDE.

@@ -238,6 +238,80 @@ jobs:
           shasum -a 256 "Cortex-${VERSION}-macos-arm64.dmg" | tee dmg.sha256
           ls -lh ./*.dmg
 
+      - name: Mount the .dmg and run the app the way a user would
+        run: |
+          set -uo pipefail
+          mkdir -p shots mnt
+
+          # No Developer ID is needed for this: a .dmg built here carries no
+          # com.apple.quarantine attribute, so Gatekeeper does not intercept it.
+          # Only a *downloaded* copy gets quarantined, and that is the case that
+          # needs right-click > Open until the app is notarised.
+          DMG=$(ls Cortex-*-macos-arm64.dmg | head -n 1)
+          hdiutil attach -nobrowse -readonly -mountpoint mnt "$DMG"
+          test -d mnt/Cortex.app || { echo "::error::the .dmg has no Cortex.app"; exit 1; }
+          test -x mnt/Cortex.app/Contents/MacOS/Cortex \
+            || { echo "::error::the app inside the .dmg has no executable"; exit 1; }
+          codesign --verify --strict mnt/Cortex.app || true
+          echo "mounted copy: OK"
+
+          # The runner is a real macOS session with a WindowServer, so the
+          # shipped binary can draw its own window. This is the closest CI gets
+          # to somebody opening the downloaded .dmg.
+          QT_QPA_PLATFORM=cocoa \
+            mnt/Cortex.app/Contents/MacOS/Cortex > app.log 2>&1 &
+          APP_PID=$!
+
+          # Bring it to the front so the capture is the app, not the desktop.
+          osascript -e 'tell application "System Events" to set frontmost of first process whose name is "Cortex" to true' >/dev/null 2>&1 || true
+
+          # QtWebEngine paints the chat and editor panes late, so capture on a
+          # loop and keep the last frame, which is the most fully rendered one.
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            sleep 5
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              echo "::warning::the app exited after ~$((i * 5))s, capturing what is there"
+              break
+            fi
+            screencapture -x -o shots/macos.png 2>/dev/null || true
+          done
+
+          kill "$APP_PID" 2>/dev/null || true
+          sleep 2
+          kill -9 "$APP_PID" 2>/dev/null || true
+          pkill -f 'Cortex.app/Contents/MacOS/Cortex' 2>/dev/null || true
+
+          echo "----- app.log (tail) -----"
+          tail -n 40 app.log || true
+          hdiutil detach mnt -force >/dev/null 2>&1 || true
+
+      - name: Check the screenshot is a real window, not a blank frame
+        run: |
+          # Deliberately a warning, never a failure: the .dmg is the deliverable
+          # and a cosmetic capture problem must not withhold it.
+          python - <<'PY'
+          import os, sys
+          from PIL import Image
+
+          path = "shots/macos.png"
+          if not os.path.exists(path) or os.path.getsize(path) < 1024:
+              print("::warning::no screenshot was captured")
+              sys.exit(0)
+
+          im = Image.open(path).convert("RGB")
+          w, h = im.size
+          colors = im.getcolors(maxcolors=200_000)
+          distinct = len(colors) if colors else 200_000
+          lo, hi = im.convert("L").getextrema()
+          print(f"{path}: {w}x{h}px, {distinct} distinct colours, luminance {lo}-{hi}")
+
+          # A blank desktop or a black frame is under ~20 distinct colours.
+          if distinct < 20 or hi - lo < 10:
+              print("::warning::the screenshot looks blank, the window may not have drawn")
+          else:
+              print("screenshot: OK, a window was painted")
+          PY
+
       - name: Upload the .dmg
         uses: actions/upload-artifact@v4
         with:
@@ -246,4 +320,15 @@ jobs:
             Cortex-*.dmg
             dmg.sha256
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the screenshot and the app log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-macos-${{ steps.ver.outputs.version }}-screenshot
+          path: |
+            shots/macos.png
+            app.log
+          if-no-files-found: warn
           retention-days: 14
