@@ -7,7 +7,7 @@
 Hand a task to an AI agent and watch it plan, read your code, edit files, run
 commands and iterate until the work is done, inside a real IDE.
 
-**Version 3.0.61** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11
+**Version 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11
 
 [Website](https://cortex-ide.app/) &nbsp;·&nbsp; [Documentation](https://cortex-ide.app/docs/) &nbsp;·&nbsp; [Pricing](https://cortex-ide.app/pricing/) &nbsp;·&nbsp; [Issues](https://github.com/Cortex-AI-IDE/Cortex-Desktop/issues)
 
@@ -18,6 +18,7 @@ commands and iterate until the work is done, inside a real IDE.
 ## Contents
 
 - [What Cortex is](#what-cortex-is)
+- [Appearance and accessibility](#appearance-and-accessibility)
 - [Licence and scope](#licence-and-scope)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -69,6 +70,59 @@ panels that would be painful to build natively:
   tool loop.
 - **Bundled skills.** PDF, Word, Excel, PowerPoint, test-driven development,
   browser testing and more, loaded on demand.
+- **One theme everywhere.** Sixteen colour themes plus Cortex's own, applied to
+  the native shell, the chat, the editor and the terminal at once, with two
+  high-contrast and two colour-blind-safe variants. See
+  [Appearance and accessibility](#appearance-and-accessibility).
+- **Workspace trust.** Opening an unfamiliar folder asks first. Until you trust
+  it, the folder runs in Restricted Mode with project MCP servers, project
+  skills, venv activation and automatic git held back.
+
+---
+
+## Appearance and accessibility
+
+Cortex has **one** theme setting: **Settings → Appearance → Color theme**. It
+is not per-panel, so the window, the chat transcript, Monaco and the terminal
+cannot drift apart.
+
+| Group | Themes |
+|-------|--------|
+| Cortex | Cortex (Dark / Light / System), Cortex's own palette |
+| Colour themes | Dark+ and Light+ (VS Code), One Dark Pro, Dracula, Monokai, GitHub Dark, GitHub Light, Night Owl, Tokyo Night, Catppuccin Mocha, Nord, Solarized Light |
+| Accessibility | High Contrast Dark, High Contrast Light, Distinct Colors Dark, Distinct Colors Light |
+
+The four accessibility themes sit in their own **Accessibility** group at the
+bottom of the dropdown:
+
+- **High Contrast Dark / Light** hold body text and every syntax colour at
+  WCAG AAA (7:1) and switch Monaco to its `hc-black` / `hc-light` bases, so
+  focus rings and selections get outlines instead of relying on colour alone.
+- **Distinct Colors Dark / Light** use the Okabe-Ito palette. Anything that
+  normally leans on red versus green, such as error versus success, git
+  removed versus added, or terminal red versus green, becomes orange versus
+  blue and stays readable with protanopia, deuteranopia or tritanopia.
+
+Picking a theme also sets dark or light mode, so widgets that have no explicit
+rule still match instead of showing a light gap in a dark window.
+
+### Fonts
+
+Inter (UI) and JetBrains Mono (code, terminal) ship in `src/assets/fonts/`
+under the SIL Open Font License 1.1, with both licence texts alongside. There
+is nothing to install. The fonts are registered twice on purpose: through
+`QFontDatabase` for the native Qt widgets, and through `@font-face` in every
+Qt WebEngine page, because Chromium cannot see fonts that Qt registered.
+
+### Chat, editor and layout
+
+| Setting | Where | Effect |
+|---------|-------|--------|
+| Chat activity | Settings → Appearance → Interface | **Compact** (default) folds the thoughts, commands, searches and edits between two messages into one collapsible line. **Detailed** keeps a card per step. Applies to new replies and to chats you reopen. |
+| Sidebar position | Settings → Appearance → Interface | File explorer on the left or right, mirroring the VS Code layout. |
+| Font size, font family | Settings → Appearance → Editor | The code editor updates live, not just on restart. |
+| Tab size, word wrap, minimap | Settings → Appearance → Editor | Pushed to Monaco on load and while it is running. |
+| Font size, font family, scrollback, cursor | Settings → Terminal → Appearance | The terminal updates live too. |
 
 ---
 
@@ -288,6 +342,13 @@ for whichever provider you want to use.
 2. Go to the **Models** or **Providers** section.
 3. Paste an API key for one of the providers listed below and pick a model.
 
+The first time you open a folder, Cortex asks whether you trust it. Answering
+**no** keeps it in Restricted Mode for as long as you have it open: venv
+activation, the project's MCP servers, project skills, `.cortex` rules in the AI
+prompt and automatic git are all held back, and commands and edits wait for
+your approval one at a time. The **Restricted Mode** button in the status bar
+tells you which state you are in and lets you change your mind later.
+
 Where keys live:
 
 | Location | Contents |
@@ -306,7 +367,13 @@ Useful paths:
 | `~/.cortex/` | Settings, memories, rules, logs, semantic index |
 | `~/.cortex/memory/` | Project and user memories, as Markdown |
 | `~/.cortex/logs/` | `cortex.log`, the main diagnostic log |
+| `~/.cortex/workspace_trust.json` | Which folders you trusted and which you declined |
+| `~/.cortex/always_allow.json` | Folders you granted "always allow" permission edits for |
 | `%LOCALAPPDATA%\Cortex\bin` | Cached `rg.exe` |
+
+Both permission files live here rather than inside the project, so a repository
+cannot grant itself access by shipping a file that looks like a saved answer.
+Clearing either one is safe: Cortex simply asks again.
 
 When something goes wrong, `~/.cortex/logs/cortex.log` is the first place to
 look. Cortex writes stall reports there too: if the window freezes, the log
@@ -319,29 +386,41 @@ usually names the exact function.
 
 ```
 Cortex-Desktop/
-├── src/                     Application source (~191,000 lines, 750+ Python files)
+├── src/                     Application source (~206,000 lines, 779 Python files)
 │   ├── main.py              Entry point, boot sequence, single-instance guard
 │   ├── main_window.py       Main window, tabs, splitters, menus
 │   ├── version.py           Single source of truth for the version
+│   ├── assets/
+│   │   ├── editor.html      Monaco host page
+│   │   └── fonts/           Inter and JetBrains Mono, SIL OFL 1.1
 │   ├── ai/                  Agent orchestration and model providers
 │   │   ├── agent_bridge.py  The brain: message history, tool dispatch, streaming
-│   │   ├── providers/       10 provider integrations and the message serializers
+│   │   ├── providers/       Provider integrations and the message serializers
 │   │   ├── agent_safety.py  Directives that survive context compaction
 │   │   ├── circuit_breaker.py, reasoning_loop.py   Runaway-loop guards
+│   │   ├── mcp_context.py, mcp_guidance.py   MCP roots, snapshot pruning, usage hints
 │   │   └── context/         Project context, skeletons, compaction
 │   ├── agent/               Agent runtime (tools, skills, permissions, MCP)
-│   │   ├── src/tools/       24 tools: Bash, Read, Edit, Grep, Glob, WebFetch...
+│   │   ├── src/tools/       Bash, Read, Edit, Grep, Glob, WebFetch...
 │   │   ├── src/skills/      Bundled skills (pdf, docx, xlsx, pptx, tdd...)
 │   │   ├── src/services/    Compaction, session memory, MCP, analytics
 │   │   └── src/utils/permissions/   The permission model that gates tool calls
 │   ├── core/                Platform services
 │   │   ├── database.py      SQLite schema and access
 │   │   ├── terminal_session.py   ConPTY terminal host
+│   │   ├── workspace_trust.py, project_permissions.py   Trust and remember-access stores
+│   │   ├── invocation_tokens.py   The skills:/mcp: tokens written into a prompt
+│   │   ├── exit_hooks.py    Cleanup that runs even through os._exit
 │   │   ├── semantic_search.py, embeddings.py, codebase_index.py
 │   │   ├── loop_engine/     Verified iteration: verify, review, budget
 │   │   ├── security_toolkit/  Recon, defense, web probe, reporting
 │   │   └── git_manager.py, memory_storage.py, secure_http.py
 │   ├── ui/                  PyQt6 widgets and the embedded web assets
+│   │   ├── fonts.py         Registers the bundled fonts with Qt and WebEngine
+│   │   ├── color_themes.py  The 16 colour themes for shell, chat and terminal
+│   │   ├── editor_theme.py, theme_remap.py   Monaco themes, live theme remap
+│   │   ├── editor_prefs.py  Tab size, word wrap, minimap
+│   │   └── html/            Sidebar, chat transcript, memory manager
 │   ├── services/            MCP manager, error taxonomy, update checker
 │   ├── coordinator/         Multi-agent coordination
 │   ├── config/              Settings, theme manager
@@ -353,7 +432,8 @@ Cortex-Desktop/
 ├── package.json             Node dependency: monaco-editor
 ├── requirements.txt         Runtime Python dependencies
 ├── requirements-dev.txt     Runtime plus development tooling
-└── requirements-lock.txt    Exact pip freeze of the build environment
+├── requirements-lock.txt    Exact pip freeze of the build environment
+└── MACOS-PORT.md            What a macOS port would need to change
 ```
 
 ---
@@ -481,6 +561,35 @@ search and says so in the result.
 Ask the model for something the skills do not cover. Skills load on demand
 rather than all at once, so the first request for one is slower.
 
+**Cortex keeps asking to allow the same folder.**
+A one-off "allow" lasts only until the app closes. Choose **Allow always** to
+record it in `~/.cortex/always_allow.json`, or use the switch in the status bar
+to revoke every grant. Nothing is recorded while the folder is in Restricted
+Mode.
+
+**A project's MCP servers or skills did not load.**
+Check the status bar: if it says **Restricted Mode**, trust the folder. Project
+MCP servers, project skills and `.cortex` rules are all deliberately held back
+until you do, because each of them is code or instructions from the repository.
+
+**The interface uses Segoe UI instead of Inter.**
+The bundled fonts failed to register, which usually means `src/assets/fonts/` is
+missing or was not copied into a packaged build. The app still works, it just
+falls back to the system font. `~/.cortex/logs/cortex.log` says which one it
+was: `[Fonts] missing bundled font`, `[Fonts] Qt could not load`, or
+`[Fonts] registered with Qt` when it worked.
+
+**Half the window kept the old colours after switching theme.**
+A theme should reach all four surfaces at once. If one lags behind, the log
+records `color_themes` activity; restarting re-applies the saved theme from
+scratch and is the quickest way to confirm whether the theme itself is broken.
+
+**Text is hard to read against a dark background.**
+Switch to **High Contrast Dark** or **Distinct Colors Dark** in Settings →
+Appearance. The first raises every text and syntax colour to WCAG AAA, the
+second replaces red-versus-green distinctions with orange-versus-blue for
+colour vision deficiency.
+
 ---
 
 ## Development
@@ -512,9 +621,18 @@ python -m black src
 ### Notes for contributors
 
 - The version lives only in `src/version.py`. Do not hardcode it elsewhere.
+- There is one theme setting, not one per panel. A new surface should read its
+  colours from `src/ui/color_themes.py` rather than defining its own, or it will
+  be the one grey panel when someone picks Dracula.
+- Anything that streams should use `time.monotonic()`, never `time.time()`. A
+  wall-clock correction on 2026-10-15 jumped forward by over three hours and two
+  healthy requests were abandoned as "no data for hours".
 - GUI handlers must not do unbounded work on streamed content. A single agent
   run can emit multi-megabyte payloads, and any `re.findall` or `"".join()` over
   one of them on the GUI thread will freeze the window. Cap first, then process.
+- Work that must survive `os._exit` belongs in `src/core/exit_hooks.py`. Do not
+  reach for `atexit` there: `atexit._run_exitfuncs()` also runs PyQt's hooks and
+  segfaults on the way out.
 - Prefer editing files through the Edit and Write paths in the app so line
   endings and encodings are preserved.
 - The chat transcript is rendered live from streaming signals. The rendered

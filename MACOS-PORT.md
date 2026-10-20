@@ -4,10 +4,14 @@
 
 ### The official port roadmap
 
-**Cortex 3.0.47** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Maintainer-authorized porting guide
+**Cortex 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Maintainer-authorized porting guide
 
 **Windows 10/11 and Linux ship today.** This is the step-by-step roadmap for
 building the macOS version, published with the maintainer's permission.
+
+**Verified against the 3.0.63 source tree.** Each file, line number and platform
+check below was re-read in the released 3.0.63 code (`src/version.py:21`), not
+carried forward from an earlier revision.
 
 </div>
 
@@ -58,6 +62,7 @@ it, a double-clickable `.app` inside a `.dmg`.
 
 ## Contents
 
+- [What 3.0.61 and 3.0.63 changed for macOS](#what-3061-and-3063-changed-for-macos)
 - [What already works on macOS](#what-already-works-on-macos)
 - [What needs changing](#what-needs-changing)
 - [The 30 to 45 minute build](#the-30-to-45-minute-build)
@@ -73,26 +78,107 @@ it, a double-clickable `.app` inside a `.dmg`.
 
 ---
 
+## What 3.0.61 and 3.0.63 changed for macOS
+
+Two releases landed after this guide was first written, and both touch things a
+port cares about: fonts, theming and process cleanup. The short answer is that
+**neither release adds a Windows dependency.** Every module introduced by them
+was searched for `win32`, `winpty`, `powershell`, `sys.platform`, `os.name`,
+`LOCALAPPDATA` and `APPDATA`. None contains a platform branch. The only hit is a
+comment in `src/ai/mcp_context.py` that mentions PowerShell in passing, while
+explaining why browser actions count as progress.
+
+| Release | Change | New or changed files | Effect on macOS |
+|---|---|---|---|
+| 3.0.61 | Bundled fonts | `src/ui/fonts.py`, `src/assets/fonts/` | New behaviour, and the one item that adds a build check. See [Bundled fonts](#bundled-fonts-3061-and-your-build) |
+| 3.0.61 | Whole-app colour themes | `src/ui/color_themes.py`, `src/ui/editor_theme.py` | Works. A theme reaches Monaco, xterm.js, the Qt token palettes and a style element on the shared WebEngine profile, none of which is platform-specific |
+| 3.0.61 | Stream stall timer switched to `time.monotonic()` | `src/ai/providers/deepseek_provider.py` | Removes a macOS hazard too. A laptop that sleeps mid-answer shifts the wall clock, and the old `time.time()` delta read that as hours of silence and aborted a healthy request |
+| 3.0.61 | Verbosity and code-style rules moved to the end of the system prompt | `src/ai/agent_bridge.py` | Prompt order only |
+| 3.0.63 | Accessibility themes, High Contrast and Distinct Colors | `src/ui/color_themes.py`, `src/ui/editor_theme.py` | Works. Editor themes go from 13 to 17, mapped onto Monaco's `hc-black` and `hc-light` bases, so focus and selection get real outlines |
+| 3.0.63 | Compact chat activity | `src/ui/chat_panel.py`, `src/config/settings.py` | Works, and matters more on a laptop screen than on a desktop monitor |
+| 3.0.63 | Remembered project access | `src/core/project_permissions.py` | Works. Decisions live in `~/.cortex/always_allow.json`, which already sits outside the project, so nothing about the path changes on macOS |
+| 3.0.63 | MCP roots, guidance, stale snapshot pruning | `src/ai/mcp_context.py`, `src/ai/mcp_guidance.py`, `src/services/mcp_manager.py` | Works. Trimming 187K-character page snapshots helps most on an 8 GB machine |
+| 3.0.63 | Sign-in window no longer blocks the GUI thread | `src/core/auth_manager.py` | `webbrowser.open` now runs on a daemon thread, which is the correct shape on macOS as well |
+| 3.0.63 | Editor tab size, word wrap and minimap actually applied | `src/ui/editor_prefs.py`, `src/ui/components/webview_panel.py`, `src/assets/editor.html` | Works. They reach Monaco through `editor.html`, a plain web asset |
+| 3.0.63 | Exit cleanup before `os._exit` | `src/utils/exit_hooks.py` | Works. Temp-file and clean-shutdown marker cleanup run identically on macOS |
+| 3.0.63 | Update check sends `platform` | `src/services/update_checker.py` | Fixes a build being offered an installer for another platform |
+| 3.0.63 | Sign-in window and sidebar follow the theme | `src/ui/dialogs/login_dialog.py`, `src/ui/components/sidebar.py`, `src/ui/html/sidebar.html` | Works. The sidebar can also sit on the right, which some macOS users prefer |
+| 3.0.63 | Semantic memory LRU cache and time budget | `src/core/semantic_memory.py` | Works. Keeps a slow search from holding up a turn |
+
+Nothing above changes the port plan. The terminal work in
+[What needs changing](#what-needs-changing) is unchanged and still the real job.
+
+### Bundled fonts (3.0.61) and your build
+
+Cortex used to name Geist and JetBrains Mono in its design tokens while shipping
+neither file, so every platform silently fell back to the system font. Since
+3.0.61 five files ship in `src/assets/fonts/`:
+
+| File | Size | Purpose |
+|---|---|---|
+| `InterVariable.ttf` | 859 KB | Interface font |
+| `JetBrainsMono-Regular.ttf` | 267 KB | Code and terminal |
+| `JetBrainsMono-Bold.ttf` | 271 KB | Code and terminal, bold |
+| `Inter-LICENSE.txt`, `JetBrainsMono-OFL.txt` | 4 KB each | SIL OFL 1.1 requires the notices to travel with the font |
+
+Two mechanisms load them, and both are cross-platform:
+
+- **Native Qt** through `QFontDatabase.addApplicationFont` at
+  `src/ui/fonts.py:82`. Qt names the face from the file, so the variable Inter
+  file registers as **"Inter Variable"**. That is why the font stacks list both
+  names.
+- **Every WebEngine page** through `@font-face` rules plus the `--font-ui` and
+  `--font-mono` variables, built by `font_face_css()` at `src/ui/fonts.py:427`
+  and installed on the shared profile by `install_web_fonts()`. Chromium cannot
+  see fonts registered with Qt, so the web half needs its own copy.
+
+From a source checkout there is nothing to do. In a frozen build the files must
+be inside the bundle, because `fonts_dir()` at `src/ui/fonts.py:57` resolves to
+`sys._MEIPASS/src/assets/fonts` when frozen. The macOS spec below copies
+`src/assets` wholesale, so it already covers this, but confirm that
+`src/assets/fonts/InterVariable.ttf` exists inside the finished `Cortex.app`
+before you ship. If it is missing the app still runs; it simply falls back to
+the system font and logs one `[Fonts]` line.
+
+### Themes (3.0.61 and 3.0.63) and what they touch
+
+The theme work replaced the old "apply one global stylesheet" model, which is
+the same code path that used to freeze a large chat for several seconds. On
+macOS there is nothing to port, but two things are worth knowing while you test:
+
+- A theme is four surfaces, so a broken theme on macOS means one surface did not
+  receive it: the WebEngine style element for web pages, xterm's 16-colour
+  palette, the Qt token palettes, and Monaco. If only the editor stays dark,
+  that is the Monaco mapping, not the theme system.
+- Choosing a theme also sets dark or light, so widgets the theme does not cover
+  still follow it. If something looks half-themed on your Mac, report the
+  widget, not the palette.
+
+---
+
 ## What already works on macOS
 
 Before anything is changed, a surprising amount is already portable. Each row
-below was read directly from this source tree. This is the good news, and it is
-why the job is short.
+below was read directly in the 3.0.63 source tree. This is the good news, and it
+is why the job is short.
 
 | Area | Evidence | Status |
 |------|----------|--------|
-| **Master encryption secret** | `src/core/key_manager.py:228` branches to `_macos_keychain_secret()` (line 232), which uses the macOS `security` CLI to read and create a Keychain item | Works |
-| **Linux secret store** | `src/core/key_manager.py:262` uses `secret-tool` | Works |
-| **Server platform reporting** | `src/core/cortex_api.py:33` maps `darwin` to `macos` | Works |
-| **MCP server resolving** | `src/services/mcp_manager.py:123` has an explicit `darwin` branch (the `npx.cmd` shim problem is Windows-only) | Works |
-| **Recycle Bin / Trash** | `src/utils/safe_delete.py:117` tries `send2trash` first, which is cross-platform. The Windows-only `SHFileOperationW` path is guarded by `sys.platform != "win32"` and returns unavailable | Works |
+| **Master encryption secret** | `src/core/key_manager.py:231` branches to `_macos_keychain_secret()` (line 234), which uses the macOS `security` CLI to read and create a Keychain item | Works |
+| **Linux secret store** | `src/core/key_manager.py:267` uses `secret-tool` | Works |
+| **Server platform reporting** | `src/core/cortex_api.py:41` maps `darwin` to `macos` | Works |
+| **MCP server resolving** | `src/services/mcp_manager.py:115` has an explicit `darwin` branch (the `npx.cmd` shim problem is Windows-only) | Works |
+| **Recycle Bin / Trash** | `src/utils/safe_delete.py:132` tries `send2trash` first, which is cross-platform. The Windows-only `SHFileOperationW` path is guarded at line 69 by `sys.platform != "win32"` and returns unavailable | Works |
 | **Single instance guard** | `src/core/instance_ipc.py:41` selects `AF_UNIX` on non-Windows and puts the socket in `$XDG_RUNTIME_DIR` or `~/.cortex` | Works |
 | **GPU compatibility probe** | `src/core/gpu_compat.py:106` returns early on non-Windows | Works |
-| **Process spawning** | `src/ui/components/sidebar_bridge.py:1331` already uses the macOS and Linux fire-and-forget path | Works |
-| **Startup sequence** | Every `sys.platform == 'win32'` block in `src/main.py` (lines 22, 40, 53, 244, 286, 297, 331, 458, 811) is an `if`, not an assumption. They no-op on macOS | Works |
-| **Bash tool backend** | `src/agent/src/tools/BashTool/BashTool.py:139` resolves the shell with `shutil.which("bash")`, which finds `/bin/bash` on macOS. Line 160 already sets the Windows-only `CREATE_NO_WINDOW` flag to `0` elsewhere | Works |
-| **Grep fallback chain** | `src/agent/src/tools/GrepTool/GrepTool.py:639` ends at line 720 with `return shutil.which('rg')` | Works once `rg` is installed |
-| **Terminal UI** | `src/ui/components/xterm_terminal.py:991` falls back to a `QProcess` shell when pywinpty is absent | Partial, see below |
+| **Process spawning** | `src/ui/components/sidebar_bridge.py:1346` already branches to the macOS and Linux fire-and-forget path, and the five `CREATE_NO_WINDOW` call sites are all written as `... if sys.platform == "win32" else 0` | Works |
+| **Process killing** | `src/utils/proc_kill.py` gives the Bash tool a real POSIX process-group kill, used from `BashTool.py:187`. Windows uses `taskkill /T` instead | Works |
+| **Startup sequence** | Every `sys.platform == 'win32'` block in `src/main.py` (lines 76, 94, 107, 298, 340, 351, 385, 512, 899) is an `if`, not an assumption. They no-op on macOS | Works |
+| **Bash tool backend** | `src/agent/src/tools/BashTool/BashTool.py:139` resolves the shell with `shutil.which("bash")`, which finds `/bin/bash` on macOS. Line 160 sets `CREATE_NO_WINDOW` to `0` off Windows, and the `taskkill` block at 171 is Windows-gated | Works |
+| **Grep fallback chain** | `src/agent/src/tools/GrepTool/GrepTool.py:639` tries the npm ripgrep package first, then ends at line 720 with `return shutil.which('rg')` | Works once `rg` is installed |
+| **Bundled fonts** (3.0.61) | `src/ui/fonts.py:64` registers the shipped `.ttf` files with Qt and line 454 installs `@font-face` rules on the shared WebEngine profile. Both are platform-neutral | Works, see the build note above |
+| **Colour themes** (3.0.61, 3.0.63) | `src/ui/color_themes.py` and `src/ui/editor_theme.py` contain no `sys.platform` check at all | Works |
+| **Terminal UI** | `src/ui/components/xterm_terminal.py:1061` falls back to a `QProcess` shell when pywinpty is absent | Partial, see below |
 | **The four Chromium panels** | Monaco, xterm.js, Mermaid and the HTML panels are all vendored web assets. Qt WebEngine is identical on macOS | Works |
 
 ---
@@ -104,15 +190,15 @@ are correctness and polish.
 
 | # | Priority | File | Problem on macOS | What to do |
 |---|----------|------|------------------|------------|
-| 1 | **Blocker** | `src/core/terminal_session.py:390` | `if sys.platform != "win32" or not _WINPTY: return False`. The shared AI shell session can **never start** on macOS. This is what the agent's persistent shell is built on | Add a POSIX PTY backend |
+| 1 | **Blocker** | `src/core/terminal_session.py:390` | `if sys.platform != "win32" or not _WINPTY: return False` (the same guard is repeated at line 984). The shared AI shell session can **never start** on macOS. This is what the agent's persistent shell is built on | Add a POSIX PTY backend |
 | 2 | **Blocker** | `src/core/terminal_session.py:67` | `_INTEGRATION_PS1` is a PowerShell integration script. The command start/end/cwd markers the AI relies on are written by a PowerShell prompt | Write the zsh/bash equivalent |
-| 3 | **High** | `src/ui/components/xterm_terminal.py:798` | `_SHELL_EXE` and `_SHELL_ARGS` only contain `powershell.exe`, `cmd.exe`, `bash.exe`, `wsl.exe`. Line 813 defaults to `"powershell"`, line 828 hardcodes `powershell.exe` | Map the names to `/bin/zsh` and `/bin/bash`, default to `zsh` |
-| 4 | **High** | `src/core/key_manager.py:491` | `if os.name != 'nt': return None`. The **master secret** has a Keychain path, but per-provider **API keys** do not. Same at `store_key` (line 402, Windows branch at 424) and both delete sites | Add a Keychain branch, or accept the fallback |
-| 5 | **Medium** | `src/ui/components/xterm_terminal.py:24` | `import winpty` fails, so `WINPTY_AVAILABLE` is `False` and the terminal drops to the `QProcess` fallback (line 991). The source comment at line 23 says it plainly: this "doesn't support interactive terminal apps like vim or python repl well" | Point it at a POSIX PTY |
-| 6 | **Medium** | `src/ai/agent_bridge.py:1341` | The Recycle Bin rewrite builds a **PowerShell** command to move files to Trash | Use `send2trash` or `osascript` |
-| 7 | **Medium** | `src/ai/agent_bridge.py:1407`, `2161` | The `PowerShell` tool description and the shell preamble tell the model it is on Windows | Gate the tool off on macOS, prefer `Bash` |
-| 8 | **Medium** | `src/ai/agent_bridge.py:2566` | `PowerShell` sits in the always-exposed tool list | Hide it when `sys.platform != "win32"` |
-| 9 | **Build** | `bin/rg.exe` | A 5.4 MB **Windows** binary cannot run on macOS | Do not ship it. Use `brew install ripgrep` or the npm package |
+| 3 | **High** | `src/ui/components/xterm_terminal.py:877` | `_SHELL_EXE` and `_SHELL_ARGS` only contain `powershell.exe`, `cmd.exe`, `bash.exe`, `wsl.exe`. Line 892 defaults to `"powershell"`, line 907 hardcodes `powershell.exe` | Map the names to `/bin/zsh` and `/bin/bash`, default to `zsh` |
+| 4 | **High** | `src/core/key_manager.py:489` | `if os.name != 'nt': return None` at line 493. The **master secret** has a Keychain path, but per-provider **API keys** do not. Same shape in `store_key` (line 404) and `delete_key` (line 614) | Add a Keychain branch, or accept the fallback |
+| 5 | **Medium** | `src/ui/components/xterm_terminal.py:25` | `import winpty` fails, so `WINPTY_AVAILABLE` is `False` (line 28) and the terminal drops to the `QProcess` fallback (line 1061). The source comment at line 23 says it plainly: this "doesn't support interactive terminal apps like vim or python repl well" | Point it at a POSIX PTY |
+| 6 | **Medium** | `src/ai/agent_bridge.py:1344` | `_build_recycle_bin_command` builds a **PowerShell** command to move files to the Recycle Bin | Use `send2trash` or `osascript` |
+| 7 | **Medium** | `src/ai/agent_bridge.py:1411`, `2025` | The `PowerShell` tool description and the `_TERMINAL_GUIDANCE` preamble tell the model it is on Windows | Gate the tool off on macOS, prefer `Bash` |
+| 8 | **Medium** | `src/ai/agent_bridge.py:2594` | `PowerShell` sits in the always-exposed tool list | Hide it when `sys.platform != "win32"` |
+| 9 | **Build** | `bin/rg.exe` | A 5.2 MB **Windows** binary cannot run on macOS | Do not ship it. Use `brew install ripgrep` or the npm package |
 | 10 | **Build** | `src/utils/pyinstaller_hooks/hook-winpty.py` | Bundles `conpty.dll`, `winpty.dll`, `winpty-agent.exe`, `OpenConsole.exe` | Mac spec must not reference it |
 | 11 | **Build** | `src/utils/runtime_hook_noconsole.py` | Hides the Windows console window via the Win32 API | Skip it in the mac spec |
 | 12 | **Build** | `requirements-dev.txt` | `pywin32-ctypes==0.2.3` and `pefile==2024.8.26` are Windows-only. They install but do nothing | Leave them or strip them |
@@ -240,7 +326,7 @@ both are Windows-shaped:
 
 ### Problem A: the shell names are hardcoded Windows executables
 
-At `src/ui/components/xterm_terminal.py:798`:
+At `src/ui/components/xterm_terminal.py:877`:
 
 ```python
 _SHELL_EXE = {
@@ -251,7 +337,7 @@ _SHELL_EXE = {
 }
 ```
 
-And at line 813 the default is `"powershell"`, with line 828 falling back to
+And at line 892 the default is `"powershell"`, with line 907 falling back to
 `powershell.exe -NoLogo <ctrl-c fix>`.
 
 **Change it to select by platform.** The smallest correct version:
@@ -289,16 +375,16 @@ else:
     _DEFAULT_SHELL = "powershell"
 ```
 
-Then, in the same method, change the two defaults (`line 813`) from
+Then, in the same method, change the two defaults (`line 892`) from
 `default="powershell"` to `default=_DEFAULT_SHELL`, and change the hardcoded
-return on line 828 so the PowerShell Ctrl+C fix is applied **only** on Windows.
+return on line 907 so the PowerShell Ctrl+C fix is applied **only** on Windows.
 The `_PS_ENABLE_CTRL_C` blob is a C# `kernel32.dll` `P/Invoke`; it is meaningless
 on macOS and passing it to `/bin/zsh` would be treated as a filename.
 
 **Do not try to shortcut this by editing `~/.cortex/settings.json`.** It looks
 tempting: set `terminal.default_shell` to `"zsh"` and skip the code. It will not
 work. The read is `settings.get("terminal", "default_shell", default="powershell")`
-at line 813, but the very next line resolves it through the dictionary:
+at line 892, but line 893 resolves it through the dictionary:
 
 ```python
 cmd = _SHELL_EXE.get(shell, "powershell.exe")
@@ -309,7 +395,7 @@ cmd = _SHELL_EXE.get(shell, "powershell.exe")
 dictionary or the setting is inert. This is the single most likely way to lose
 twenty minutes on the port.
 
-Also fix the fallback at line 1014:
+Also fix the fallback at line 1093:
 
 ```python
 shell = parts[0] if parts else "powershell.exe"
@@ -374,7 +460,10 @@ if sys.platform != "win32":
 ```
 
 Then replace the Windows-only guard at line 390 with a backend check, and give
-the spawn at line 411 a POSIX twin. The Windows call is:
+the spawn at line 411 a POSIX twin. There is a **second copy of the same guard
+at line 984**, which gates writing to the session; grep the file for
+`sys.platform != "win32"` and fix both, or the session will start and then
+refuse to accept input. The Windows call is:
 
 ```python
 self.pty = winpty.PtyProcess.spawn(cmd, cwd=self.cwd, env=env, dimensions=(rows, cols))
@@ -445,8 +534,9 @@ as a `$` bash one, so it likely needs no change.
 
 ### Problem D: the visible terminal uses the QProcess fallback
 
-`src/ui/components/xterm_terminal.py:840` branches on `WINPTY_AVAILABLE`. On
-macOS that is `False`, so control goes to the `QProcess` path at line 991. A
+`src/ui/components/xterm_terminal.py:919` branches on `WINPTY_AVAILABLE`. On
+macOS that is `False` (line 28), so control goes to the `QProcess` path at
+line 1061. A
 `QProcess` is not a PTY. The source comment at line 23 is candid about the
 consequence: it "doesn't support interactive terminal apps like vim or python
 repl well". Simple commands work, full-screen programs do not.
@@ -618,16 +708,19 @@ Cortex exposes two shell tools to the model. On macOS you want one of them.
 
 Three specific places carry Windows assumptions into the agent:
 
-**The tool list.** `src/ai/agent_bridge.py:2566` includes `'PowerShell'` among the
+**The tool list.** `src/ai/agent_bridge.py:2594` includes `'PowerShell'` among the
 always-exposed tools. Gate that entry on `sys.platform == "win32"` so a macOS
 model is not offered a shell it cannot use.
 
-**The tool description.** `src/ai/agent_bridge.py:1407` describes the tool as
+**The tool description.** `src/ai/agent_bridge.py:1411` describes the tool as
 "Run a command in Windows PowerShell". That text is a prompt. It teaches the
 model Windows habits. Either hide the tool or rewrite the description.
 
-**The Recycle Bin rewrite.** `src/ai/agent_bridge.py:1341` builds a PowerShell
+**The Recycle Bin rewrite.** `src/ai/agent_bridge.py:1344` builds a PowerShell
 command to send files to the Recycle Bin instead of deleting them permanently.
+Note the helper is `_build_recycle_bin_command`, and its caller is around
+line 1609, so a platform branch belongs at the top of the helper rather than at
+the call site.
 On macOS, replace that with `send2trash`, which is already a dependency and
 already used by `src/utils/safe_delete.py:117`, or with `osascript` to move the
 item to Trash:
@@ -639,10 +732,10 @@ osascript -e 'tell application "Finder" to delete POSIX file "/path/to/file"'
 Do not simply delete the rewrite. It exists to make destructive commands
 recoverable, and that guarantee should hold on macOS too.
 
-**The shell preamble.** `src/ai/agent_bridge.py:1997` tells the model
+**The shell preamble.** `src/ai/agent_bridge.py:2025` tells the model
 "On this PC your Bash commands run hidden, in a one-off PowerShell". That is a
-Windows statement injected into the system prompt. It needs a macOS variant
-describing zsh.
+Windows statement injected into the system prompt from the `_TERMINAL_GUIDANCE`
+constant declared at line 2023. It needs a macOS variant describing zsh.
 
 None of this stops the app from running, which is why it sits below the terminal
 work in priority. But a model told it is on Windows will write PowerShell, so
@@ -716,8 +809,20 @@ datas = [
     (os.path.join(ROOT, 'src', 'ui', 'components'), os.path.join('src', 'ui', 'components')),
     (os.path.join(ROOT, 'src', 'ui', 'themes'), os.path.join('src', 'ui', 'themes')),
     (os.path.join(ROOT, 'src', 'assets'), os.path.join('src', 'assets')),
-    (os.path.join(ROOT, 'plugins'), 'plugins'),
 ]
+
+# plugins/ is not in this repository: the Windows build copies it from the
+# private build folder. Guard the entry rather than listing it unconditionally,
+# because PyInstaller stops with "Unable to find" on a missing datas source and
+# you would be debugging a folder that was never supposed to be here.
+if os.path.isdir(os.path.join(ROOT, 'plugins')):
+    datas.append((os.path.join(ROOT, 'plugins'), 'plugins'))
+
+# The fonts added in 3.0.61 live in src/assets/fonts and are already covered by
+# the src/assets entry above. They matter: src/ui/fonts.py:57 resolves them from
+# sys._MEIPASS/src/assets/fonts when frozen, and without them the app silently
+# falls back to the system font. Check the finished bundle for
+# src/assets/fonts/InterVariable.ttf before shipping.
 
 # Neither of these is optional. Without certifi's cacert.pem every HTTPS
 # request dies before it leaves the machine, and without the spellchecker
@@ -800,6 +905,19 @@ hiddenimports = [
     'src.ui.native_menu',
     'src.core.voice_input',
     'src.core.voice_stream',
+    # Modules added in 3.0.61 and 3.0.63. collect_submodules('src.*') below
+    # already reaches these, but naming them keeps the dependency visible and
+    # survives a future change to the collect_submodules list.
+    'src.ui.fonts',
+    'src.ui.color_themes',
+    'src.ui.editor_theme',
+    'src.ui.editor_prefs',
+    'src.core.project_permissions',
+    'src.core.semantic_memory',
+    'src.ai.mcp_context',
+    'src.ai.mcp_guidance',
+    'src.utils.exit_hooks',
+    'src.utils.proc_kill',
     'websocket',
     # data and config
     'yaml',
@@ -917,7 +1035,7 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'Cortex',
         'CFBundleDisplayName': 'Cortex AI IDE',
-        'CFBundleShortVersionString': '3.0.47',
+        'CFBundleShortVersionString': '3.0.63',
         'NSHighResolutionCapable': True,
         # Qt WebEngine needs this on macOS. Without it the app may be
         # killed for using an unsigned executable memory region.
@@ -932,7 +1050,10 @@ optional: UPX compression breaks code signing, and macOS refuses to launch a
 binary whose signature does not match.
 
 Also correct the version in `CFBundleShortVersionString` to match
-`src/version.py` (currently `3.0.47`) when you build.
+`src/version.py` when you build. In 3.0.63 that is `VERSION = "3.0.63"` at
+`src/version.py:21`, and the value above is already set to it. Read it from
+that file rather than trusting this document, because the whole point of
+`src/version.py` is that the version exists in exactly one place.
 
 ### Build it
 
@@ -973,7 +1094,7 @@ ln -s /Applications dmg-staging/Applications
 hdiutil create -volname "Cortex" \
   -srcfolder dmg-staging \
   -ov -format UDZO \
-  Cortex-3.0.47-macos.dmg
+  Cortex-3.0.63-macos.dmg
 ```
 
 ### About Gatekeeper
@@ -1023,9 +1144,17 @@ earlier in this document.
 | 16 | `~/.cortex/logs/cortex.log` | No repeated errors, in particular nothing about winpty or PowerShell |
 | 17 | Frozen build: `open dist/Cortex.app` | Same behavior as item 5 onwards |
 | 18 | Frozen build: chat works | Proves `certifi` data files are bundled |
+| 19 | Interface and chat font | Rendered in Inter, not the macOS system font. `~/.cortex/logs/cortex.log` shows a `[Fonts]` line from `register_qt_fonts` |
+| 20 | Settings, Appearance, colour theme | Changing it recolours the sidebar, the chat and the editor together. Editor themes now number 17 in 3.0.63 |
+| 21 | Settings, Editor, tab size, word wrap, minimap | Each one changes Monaco immediately. These were inert before 3.0.63 |
+| 22 | Quit, then read the log | No exit-hook traceback. Cleanup added in 3.0.63 runs before `os._exit` |
+| 23 | Frozen build: fonts | `src/assets/fonts/InterVariable.ttf` exists inside `Cortex.app` |
 
 Items 13 and 14 are the two that distinguish a ported terminal from a working
-but degraded one. Everything else should pass before you touch a line of code.
+but degraded one. Items 19 to 23 are the 3.0.61 and 3.0.63 additions, and all
+five should pass without any porting work: if one fails, the cause is the build
+or the theme, not the platform. Everything else should pass before you touch a
+line of code.
 
 ---
 
@@ -1067,6 +1196,21 @@ Qt WebEngine failed to start its render process, usually after an unclean exit.
 Close Cortex fully, delete the Qt WebEngine profile under your home directory,
 and relaunch. On macOS the profile is not under `%LOCALAPPDATA%`, which is a
 Windows-only path.
+
+**The interface or the chat uses the system font instead of Inter.**
+The bundled fonts did not load. From source, check that `src/assets/fonts/`
+contains `InterVariable.ttf` and both `JetBrainsMono` files. In a frozen build,
+check they exist inside `Cortex.app`. `~/.cortex/logs/cortex.log` has a `[Fonts]`
+line either way. This is not fatal: `register_qt_fonts()` returns an empty list
+and the app deliberately keeps its fallback font.
+
+**Only half the app changes when I switch theme.**
+A theme covers four separate surfaces: web pages through a style element on the
+shared WebEngine profile, the terminal through xterm's 16-colour palette, native
+widgets through the token palettes, and the editor through Monaco. If only the
+editor stays dark, the Monaco mapping did not apply. If only the chat stays
+dark, the WebEngine style element did not reach that page. Neither is
+macOS-specific, and both are fixed in the theme layer rather than the port.
 
 **A provider returns 401.**
 Check the key and the endpoint. The Alibaba Token Plan is the usual trap:
@@ -1156,5 +1300,7 @@ maintainer's update channel, so note both of those in your release notes.
 **Cortex AI IDE** &nbsp;·&nbsp; Think Limitless. Build Beyond.
 
 *The official macOS port roadmap. Authorized by the maintainer, published for you to build.*
+
+*Reviewed line by line against Cortex 3.0.63.*
 
 </div>
