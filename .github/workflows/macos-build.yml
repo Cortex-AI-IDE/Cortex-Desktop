@@ -1,0 +1,240 @@
+name: macOS build
+
+# Builds Cortex.app and a .dmg on Apple hardware, so nobody needs a Mac to get
+# a macOS build: standard GitHub-hosted runners are free for public
+# repositories. See MACOS-PORT.md for the reasoning.
+#
+# Two jobs, on purpose:
+#   terminal  fast, dependency-free check of the ported terminal layer. Runs on
+#             every pull request that touches src/.
+#   build     the full PyInstaller .app + .dmg. Runs on a tag or manually,
+#             because it takes about 20 minutes.
+#
+# The runner is an Apple Silicon machine (macos-14). For an Intel build, change
+# it to macos-13 and install an x86_64 virtualenv; PyInstaller cannot
+# cross-compile the PyQt6 native libraries.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'cortex-macos.spec'
+      - 'requirements*.txt'
+      - '.github/workflows/macos-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terminal:
+    name: POSIX terminal
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: The PTY backend speaks
+        run: |
+          python - <<'PY'
+          import sys, time
+          sys.path.insert(0, '.')
+          from src.core.pty_backend import PTY_AVAILABLE, PtyProcess
+
+          assert PTY_AVAILABLE, "PTY_AVAILABLE is False on macOS"
+
+          p = PtyProcess.spawn("/bin/sh", dimensions=(24, 80))
+          assert p.pid > 0, "no pid"
+          p.setwinsize(40, 120)
+          p.write("echo CORTEX_PTY_OK\r")
+
+          buf, deadline = "", time.time() + 15
+          while time.time() < deadline and "CORTEX_PTY_OK" not in buf:
+              try:
+                  buf += p.read(4096)
+              except EOFError:
+                  break
+          assert p.isalive(), "the shell died immediately"
+          p.terminate(force=True)
+          assert "CORTEX_PTY_OK" in buf, f"no output from the pty: {buf!r}"
+          print("POSIX PTY backend: OK")
+          PY
+
+      - name: The shared AI session works
+        run: |
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, '.')
+          from src.core.terminal_session import TerminalSession
+
+          s = TerminalSession(os.getcwd(), name="ci")
+          assert s.start(), "TerminalSession.start() returned False"
+          assert s.wait_ready(30), "no first prompt: the integration markers never arrived"
+          print("shell started, pid", s.pid)
+
+          r = s.run("echo CORTEX_SESSION_OK", idle_timeout=15, hard_cap=45)
+          assert r is not None, "run() refused the command"
+          assert not r.timed_out, "the command timed out"
+          assert "CORTEX_SESSION_OK" in r.output, f"unexpected output: {r.output!r}"
+
+          # The whole point of the shared session: state survives between calls.
+          s.run("cd /tmp && export CORTEX_RC=42", idle_timeout=15, hard_cap=45)
+          r = s.run("echo $CORTEX_RC && pwd", idle_timeout=15, hard_cap=45)
+          assert r is not None, "the second command was refused"
+          assert "42" in r.output and "/tmp" in r.output, \
+              f"state did not carry over: {r.output!r}"
+          s.close()
+          print("shared session keeps state across calls: OK")
+          PY
+
+  build:
+    name: Cortex.app and .dmg
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read the version
+        id: ver
+        run: |
+          VERSION=$(python3 - <<'PY'
+          import re
+          src = open('src/version.py', encoding='utf-8').read()
+          print(re.search(r"^VERSION\s*=\s*['\"]([^'\"]+)", src, re.M).group(1))
+          PY
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Cortex $VERSION"
+
+      - name: Node (Monaco is mandatory, the editor pane is blank without it)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Monaco
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          test -f node_modules/monaco-editor/min/vs/loader.js
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          # pywinpty is marked sys_platform == "win32" in requirements.txt and
+          # must stay absent: the POSIX PTY comes from the standard library.
+          python -c "import pty, termios, fcntl; print('posix pty modules ok')"
+
+      - name: Build the app icon
+        run: |
+          mkdir -p icon.iconset
+          SRC=src/assets/logo/app.png
+          sips -z 16 16     "$SRC" --out icon.iconset/icon_16x16.png        >/dev/null
+          sips -z 32 32     "$SRC" --out icon.iconset/icon_16x16@2x.png     >/dev/null
+          sips -z 32 32     "$SRC" --out icon.iconset/icon_32x32.png        >/dev/null
+          sips -z 64 64     "$SRC" --out icon.iconset/icon_32x32@2x.png     >/dev/null
+          sips -z 128 128   "$SRC" --out icon.iconset/icon_128x128.png      >/dev/null
+          sips -z 256 256   "$SRC" --out icon.iconset/icon_128x128@2x.png   >/dev/null
+          sips -z 256 256   "$SRC" --out icon.iconset/icon_256x256.png      >/dev/null
+          sips -z 512 512   "$SRC" --out icon.iconset/icon_256x256@2x.png   >/dev/null
+          sips -z 512 512   "$SRC" --out icon.iconset/icon_512x512.png      >/dev/null
+          sips -z 1024 1024 "$SRC" --out icon.iconset/icon_512x512@2x.png   >/dev/null
+          iconutil -c icns icon.iconset
+          ls -la icon.icns
+
+      - name: Write the build info
+        run: |
+          # The release pipeline generates this file. Without it the app reports
+          # channel "dev", which is correct for a build made here.
+          printf 'CHANNEL = "dev"\n' > src/_build_info.py
+
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller cortex-macos.spec --noconfirm --log-level WARN
+          ls -la dist
+
+      - name: Verify what actually landed in the bundle
+        run: |
+          set -euo pipefail
+          APP=dist/Cortex.app
+          test -d "$APP" || { echo "::error::no .app was produced"; exit 1; }
+          test -x "$APP/Contents/MacOS/Cortex" \
+            || { echo "::error::the app has no executable"; exit 1; }
+
+          # certifi: without cacert.pem every HTTPS call fails, and only in the
+          # frozen build. This is the most common "chat is broken" report.
+          find "$APP" -name 'cacert.pem' -print -quit | grep -q . \
+            || { echo "::error::cacert.pem is missing from the bundle"; exit 1; }
+
+          # Bundled fonts (3.0.61). Missing them means a silent fallback to the
+          # system font.
+          for f in InterVariable.ttf JetBrainsMono-Regular.ttf; do
+            find "$APP" -name "$f" -print -quit | grep -q . \
+              || { echo "::error::$f is missing from the bundle"; exit 1; }
+          done
+
+          # Monaco, read at runtime from node_modules.
+          find "$APP" -path '*monaco-editor/min/vs/loader.js' -print -quit | grep -q . \
+            || { echo "::error::Monaco loader.js is missing"; exit 1; }
+
+          # Windows terminal libraries must never appear in a macOS build.
+          if find "$APP" \( -name 'winpty*' -o -name 'conpty.dll' \) -print -quit | grep -q .; then
+            echo "::error::Windows terminal binaries leaked into the macOS bundle"
+            exit 1
+          fi
+
+          du -sh "$APP"
+          echo "bundle contents: OK"
+
+      - name: Ad-hoc sign
+        run: |
+          # Enough to launch locally, and to let other people right-click > Open.
+          # A clean double-click for everyone needs a Developer ID certificate
+          # and notarisation, which is a paid Apple account.
+          codesign --deep --force --sign - dist/Cortex.app
+          codesign --verify --deep --strict dist/Cortex.app
+          echo "ad-hoc signature: OK"
+
+      - name: Make the .dmg
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          rm -rf dmg-staging
+          mkdir -p dmg-staging
+          cp -R dist/Cortex.app dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "Cortex" -srcfolder dmg-staging -ov -format UDZO \
+            "Cortex-${VERSION}-macos-arm64.dmg"
+          shasum -a 256 "Cortex-${VERSION}-macos-arm64.dmg" | tee dmg.sha256
+          ls -lh ./*.dmg
+
+      - name: Upload the .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-macos-${{ steps.ver.outputs.version }}-arm64
+          path: |
+            Cortex-*.dmg
+            dmg.sha256
+          if-no-files-found: error
+          retention-days: 14

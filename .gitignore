@@ -88,6 +88,9 @@ credentials.json
 
 # --- Build / packaging ----------------------------------------------------
 *.spec
+# The macOS spec is part of the source: CI builds from it, so it must be
+# committed. The Windows cortex.spec stays private and ignored.
+!cortex-macos.spec
 *.iss
 *.msix
 *.msixbundle

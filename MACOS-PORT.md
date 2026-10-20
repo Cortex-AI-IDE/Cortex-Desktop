@@ -43,11 +43,12 @@ Here is the full picture:
   pipeline for the macOS case. It hands you a complete macOS PyInstaller spec,
   the terminal and shell changes, and the `.dmg` recipe. Nothing in it depends on
   anything that is not published, and nothing you need is hidden.
-- **The port is small.** This is not a rewrite. The codebase already branches on
-  `sys.platform` in the places that matter, and there is already a macOS code
-  path in the key store. What is missing is a POSIX terminal backend and a set
-  of shell names. Budget **30 to 45 minutes** for a working development build,
-  and plan a second session if you want a signed `.dmg`.
+- **The port is done in the source tree.** This is not a rewrite, and it is no
+  longer something you have to write: the POSIX terminal backend, the zsh and
+  bash integration, the shell names, a macOS spec and a CI build are all
+  committed. What remains is building it and, if you want a clean double-click
+  for other people, signing it. Budget **30 to 45 minutes** for a working
+  development build, and plan a second session for a signed `.dmg`.
 
 Use whatever agent you already work with (Cursor, Claude Code, Codex, Cortex
 itself on a Windows or Linux machine pointed at this folder). This document is
@@ -65,12 +66,14 @@ it, a double-clickable `.app` inside a `.dmg`.
 - [What 3.0.61 and 3.0.63 changed for macOS](#what-3061-and-3063-changed-for-macos)
 - [What already works on macOS](#what-already-works-on-macos)
 - [What needs changing](#what-needs-changing)
+- [The port is in the source tree](#the-port-is-in-the-source-tree)
 - [The 30 to 45 minute build](#the-30-to-45-minute-build)
 - [Terminal: replacing PowerShell with zsh or bash](#terminal-replacing-powershell-with-zsh-or-bash)
 - [Monaco editor and Node.js](#monaco-editor-and-nodejs)
 - [Grep and ripgrep](#grep-and-ripgrep)
 - [API keys and the macOS Keychain](#api-keys-and-the-macos-keychain)
 - [The agent's shell tools on macOS](#the-agents-shell-tools-on-macos)
+- [Building without a Mac](#building-without-a-mac)
 - [Packaging a .dmg](#packaging-a-dmg)
 - [Verification checklist](#verification-checklist)
 - [Troubleshooting](#troubleshooting)
@@ -185,6 +188,13 @@ is why the job is short.
 
 ## What needs changing
 
+> **Status: done in this source tree.** The blockers below were the work, and
+> that work is now committed, so a macOS build needs no hand-editing. This table
+> stays because it is the map of what the port touches: if a line number shifts
+> or a regression appears, this is where to look. The original analysis is kept
+> unchanged underneath it, and [The port is in the source tree](#the-port-is-in-the-source-tree)
+> says exactly where each item now lives.
+
 Ranked by how much it hurts. Rows 1 to 3 are the real work. Rows 4 and below
 are correctness and polish.
 
@@ -209,6 +219,34 @@ Note on `requirements.txt`: `pywinpty>=2.0` is already correctly marked
 `; sys_platform == "win32"`, so it will not install on your Mac. That is
 deliberate and correct. It is also exactly why row 1 exists: the terminal
 session code was written against pywinpty and has no POSIX twin.
+
+---
+
+## The port is in the source tree
+
+These are the files the port added or changed. Read them before changing
+anything else, because the reasoning is in the comments.
+
+| What | Where | Why it is shaped that way |
+|------|-------|---------------------------|
+| One PTY interface for every platform | `src/core/pty_backend.py` (new) | Exports `PTY_AVAILABLE` and `PtyProcess.spawn(...)`. On Windows it delegates to pywinpty; everywhere else it uses `pty.fork()`, which does the three things a controlling terminal needs (fork, `setsid`, open the slave as stdin/stdout/stderr) so Ctrl+C raises a real SIGINT instead of being four echoed bytes. `PosixPty` copies pywinpty's method names on purpose (`read`, `write`, `isalive`, `pid`, `setwinsize`, `terminate`), so neither panel needed a second code path. |
+| The AI's shared session | `src/core/terminal_session.py` | `start()` now calls `_launch_command()`, which returns the Windows PowerShell line unchanged or a POSIX one. Both `sys.platform != "win32"` guards are gone; the gate is `PTY_AVAILABLE`. |
+| zsh and bash integration | `_INTEGRATION_ZSH`, `_INTEGRATION_BASH`, `_INTEGRATION_ZSHENV` in the same file | The same three OSC 633 markers the PowerShell prompt writes, produced by shell hooks instead: zsh `preexec`/`precmd`, bash `DEBUG` trap plus `PROMPT_COMMAND`. The user's own rc file is sourced first and the hooks are added after it, so their prompt and theme survive and the markers sit beside the prompt that is really drawn. zsh has no `--rcfile`, so `ZDOTDIR` points at a generated folder. |
+| Shell names | `XTermWidget._get_posix_shell_command` in `src/ui/components/xterm_terminal.py` | `zsh` then `bash`, resolved with `shutil.which`. A synced setting of `powershell` falls back to zsh rather than launching nothing. |
+| The agent's own instructions | `_BASH_TOOL_DESC_POSIX` and `_TERMINAL_GUIDANCE_POSIX` in `src/ai/agent_bridge.py` | On Windows the model is told "this runs PowerShell, NOT bash". On macOS that sentence has to invert, or it spends turns writing `;` and `2>$null` into a shell that rejects them. |
+| The macOS build | `cortex-macos.spec` (new, project root) | Same structure as the Windows spec, with the Windows-only binaries excluded, `upx=False` because UPX breaks signing, and the version read from `src/version.py` rather than typed in. |
+| The CI build | `.github/workflows/macos-build.yml` (new) | Two jobs: a dependency-free terminal test on every pull request, and the full `.app` plus `.dmg` on a tag or on demand. Standard runners are free for public repositories, which is why no Mac is required. |
+
+### What is still Windows-shaped, and why it is fine
+
+| Item | Effect on macOS | Where |
+|------|-----------------|-------|
+| Per-provider API keys | They work, but are kept in the encrypted key file rather than the macOS Keychain. The master secret that encrypts that file does come from the Keychain, so the file is not readable without it | `src/core/key_manager.py:425` |
+| The `PowerShell` tool | Stays in the tool list and errors if the model calls it. The `Bash` tool description now steers the model away | `src/ai/agent_bridge.py` |
+| `windows_terminal.py` | A legacy panel the main window does not use | `src/ui/components/windows_terminal.py` |
+
+None of these stops the app from running, and none is on the path of a normal
+session.
 
 ---
 
@@ -282,47 +320,63 @@ build a `.dmg` later, since PyInstaller is in it.
 python src/main.py
 ```
 
-**Right now, before any code change.** Expect this to open a window. The first
-launch is slow, because Qt WebEngine unpacks and warms its profile. Give it
-fifteen or twenty seconds.
+Expect this to open a window. The first launch is slow, because Qt WebEngine
+unpacks and warms its profile. Give it fifteen or twenty seconds.
 
 What to check on that first launch:
 
-| Panel | Expected now | Note |
-|-------|--------------|------|
+| Panel | Expected | Note |
+|-------|----------|------|
 | Window and splitters | Opens | Native PyQt6, fully portable |
 | Chat transcript | Renders | HTML in Qt WebEngine |
 | Model provider | Configure it in Settings with your own API key | See the Keychain section |
 | File explorer | Works | HTML panel |
 | Editor | Works if you ran `npm install` | Monaco |
-| Terminal | Opens, but degraded | Drops to the `QProcess` fallback, no real PTY |
-| Agent shell commands | Run, but with no memory between calls | The session never starts, see row 1 |
+| Terminal | Works, with a real PTY | zsh, through `src/core/pty_backend.py` |
+| Agent shell commands | Work, and remember the directory | The shared session starts; that was blocker 1 |
 
-If the window opens and the editor shows code, you have a working Cortex. Fix 1
-and 2 below turn the terminal from "usable" into "correct".
+If the window opens and the editor shows code, you have a working Cortex.
 
-### Step 5: Make the three essential changes
+### Step 5: Check the terminal
 
-Work through [Terminal: replacing PowerShell](#terminal-replacing-powershell-with-zsh-or-bash)
-next. That section has the exact edits. Then run
-`python src/main.py` again and confirm the terminal accepts `ls -la`, `git status`
-and `python3 -c "print(1)"`, with a real interactive prompt.
+Run these in the terminal panel. Each one exercises something the old QProcess
+fallback could not do:
 
-That is the 30 to 45 minute path. Steps 1 to 4 get a running app. Step 5 makes
-the terminal correct.
+| Command | What it proves |
+|---------|----------------|
+| `ls -la` | A real PTY: colour, a prompt, cursor control |
+| `vim`, then `:q` | Full-screen apps work, so the alternate screen and cursor addressing are real |
+| `python3 -c "print(1)"` | Interactive programs run, with no QProcess warning at the top of the tab |
+| `git status` inside a repo | The shell inherited your PATH and git config |
+
+Then ask the agent to run `pwd`, then `cd /tmp`, then `pwd` again. The second
+answer must be `/tmp`. That is the shared session carrying state between tool
+calls, which used to be impossible on macOS.
+
+Finally, `~/.cortex/logs/cortex.log` should contain
+`[AI-TERM] session 1 started, pid=..., shell=/bin/zsh` and no mention of winpty
+or PowerShell.
+
+With the port already in the source tree, steps 1 to 5 are the whole job.
 
 ---
 
 ## Terminal: replacing PowerShell with zsh or bash
 
-This is the heart of the port. There are two separate terminal systems, and
-both are Windows-shaped:
+This was the heart of the port. There are two separate terminal systems, and
+both were Windows-shaped:
 
 1. **`src/ui/components/xterm_terminal.py`** is the visible terminal panel the
    user sees and types into.
 2. **`src/core/terminal_session.py`** is the shared "Cortex AI" session that the
    agent's shell commands run inside, so that `cd`, variables, an activated
    virtualenv and `$env:` changes survive between tool calls.
+
+Both now go through `src/core/pty_backend.py`. What follows records the four
+problems the port had to solve and how each one was solved, in the order they
+bite. Read it if you are changing the terminal; skip to
+[Packaging a .dmg](#packaging-a-dmg) if you only want a build. The line numbers
+refer to 3.0.63 as published, before the port.
 
 ### Problem A: the shell names are hardcoded Windows executables
 
@@ -743,15 +797,54 @@ fixing it materially improves agent behavior on your Mac.
 
 ---
 
+## Building without a Mac
+
+You do not need Apple hardware. `.github/workflows/macos-build.yml` builds the
+`.app` and the `.dmg` on a GitHub-hosted macOS runner, and standard runners are
+free for public repositories.
+
+How to get a build:
+
+1. Push this repository to GitHub, or use an existing fork.
+2. Open **Actions**, choose **macOS build** in the left column, then **Run
+   workflow**.
+3. Wait about twenty minutes. The run uploads an artifact named
+   `cortex-macos-<version>-arm64` containing the `.dmg` and its SHA-256.
+4. Download it from the run summary, then
+   `open Cortex-<version>-macos-arm64.dmg` and drag the app to Applications.
+
+The workflow also runs on a tag, so `git tag v3.0.63 && git push origin v3.0.63`
+produces a build with no clicking.
+
+It has two jobs for a reason:
+
+| Job | When | What it proves | Time |
+|-----|------|----------------|------|
+| `POSIX terminal` | Every pull request that touches `src/` | Spawns a PTY, writes a command into it and reads the answer back, then starts the shared session and checks that `cd` and an exported variable survive between two calls. It installs nothing, so it is fast | about 1 minute |
+| `Cortex.app and .dmg` | A tag, or manually | Installs Qt, builds Monaco, runs PyInstaller, checks the bundle for `cacert.pem`, the bundled fonts and Monaco, checks that no `winpty` file leaked in, ad-hoc signs it, and makes the `.dmg` | about 20 minutes |
+
+The first job is the one that matters over time: it fails if the POSIX terminal
+regresses, which is the only part of this port that can break quietly.
+
+Two limits, stated plainly:
+
+- The runner is Apple Silicon, so the artifact is an `arm64` build. For Intel,
+  change `runs-on` to `macos-13` and install an x86_64 virtualenv; PyInstaller
+  cannot cross-compile the PyQt6 native libraries.
+- The build is ad-hoc signed, not notarised. The first user on another Mac has to
+  right-click and choose **Open**. See [About Gatekeeper](#about-gatekeeper).
+
+---
+
 ## Packaging a .dmg
 
 Do this only after `python src/main.py` is working. A build freezes whatever
 bugs you have.
 
-**Read this first: there is no spec in this repository.** The `cortex.spec`
-referenced by the Windows build lives in a separate, private folder that is not
-published here. What follows is a macOS spec written for you. Save it as
-`cortex-macos.spec` in the project root.
+**The spec is in the repository now:** `cortex-macos.spec` in the project root.
+The Windows `cortex.spec` lives in the private release pipeline and is not
+published, which is why a macOS one had to be written from scratch. The copy
+below is that file, with the reasoning attached to each part.
 
 ### What differs from the Windows spec
 
@@ -1049,11 +1142,10 @@ transitive import cannot drag them into your mac bundle. And `upx=False` is not
 optional: UPX compression breaks code signing, and macOS refuses to launch a
 binary whose signature does not match.
 
-Also correct the version in `CFBundleShortVersionString` to match
-`src/version.py` when you build. In 3.0.63 that is `VERSION = "3.0.63"` at
-`src/version.py:21`, and the value above is already set to it. Read it from
-that file rather than trusting this document, because the whole point of
-`src/version.py` is that the version exists in exactly one place.
+One difference from the copy above: the shipped `cortex-macos.spec` reads
+`CFBundleShortVersionString` out of `src/version.py` with a regex, so it can
+never drift from the app's own version. The literal `'3.0.63'` you see here is
+only what that regex returns today.
 
 ### Build it
 
@@ -1138,8 +1230,8 @@ earlier in this document.
 | 10 | Terminal, `ls -la` | Real output, real prompt |
 | 11 | Terminal, `git status` | Works inside a repo |
 | 12 | Terminal, `python3 -c "print(1)"` | Prints `1` |
-| 13 | Terminal, `vim` then `:q` | **After the PTY fix only.** Full-screen apps work |
-| 14 | Ask the agent to run `pwd` twice, with a `cd` between | Second call remembers the new directory, **after the session fix only** |
+| 13 | Terminal, `vim` then `:q` | Full-screen apps work, which proves a real PTY |
+| 14 | Ask the agent to run `pwd` twice, with a `cd` between | The second call remembers the new directory, which proves the shared session |
 | 15 | Ask the agent to search for a string | Grep results, no "ripgrep was unavailable" note |
 | 16 | `~/.cortex/logs/cortex.log` | No repeated errors, in particular nothing about winpty or PowerShell |
 | 17 | Frozen build: `open dist/Cortex.app` | Same behavior as item 5 onwards |

@@ -19,14 +19,11 @@ from .terminal_bridge import AsyncFileReader
 
 log = get_logger("xterm_terminal")
 
-# We will try to use pywinpty on Windows for true PTY support (ANSI, arrows, etc), 
-# otherwise fallback to QProcess (which doesn't support interactive terminal apps like vim or python repl well)
-try:
-    import winpty
-    WINPTY_AVAILABLE = True
-except ImportError:
-    WINPTY_AVAILABLE = False
-    log.warning("winpty not available. Interactive terminal apps may not work correctly.")
+# A real PTY is what makes arrows, Ctrl+C, vim and a REPL work. pywinpty
+# provides it on Windows (ConPTY); macOS and Linux get the same interface from
+# the standard library. Without one, this widget falls back to QProcess, which
+# "doesn't support interactive terminal apps like vim or python repl well".
+from src.core.pty_backend import PTY_AVAILABLE, PtyProcess
 
 
 class TerminalBridge(QObject):
@@ -249,9 +246,12 @@ class XTermWidget(QWidget):
             from src.config.settings import get_settings
             _s = get_settings()
             _shell_name = _s.get("terminal", "default_shell", default="powershell")
+            if sys.platform != "win32" and _shell_name not in ("zsh", "bash"):
+                _shell_name = "zsh"   # same rule as _get_posix_shell_command
             self._terminal_name_text = f"{_shell_name.capitalize()} {self._terminal_number}"
         except Exception:
-            self._terminal_name_text = f"PowerShell {self._terminal_number}"
+            _fallback = "zsh" if sys.platform != "win32" else "PowerShell"
+            self._terminal_name_text = f"{_fallback} {self._terminal_number}"
 
         # NOTE: PyQt6 header removed, terminal.html provides the HTML header bar
         # with terminal name, + New, Kill, Clear, Restart buttons via QWebChannel.
@@ -807,7 +807,7 @@ class XTermWidget(QWidget):
         """Resolve PATH and start the backend process."""
         self._tdebug("=" * 50)
         self._tdebug("_start_shell called")
-        self._tdebug(f"WINPTY_AVAILABLE={WINPTY_AVAILABLE}")
+        self._tdebug(f"PTY_AVAILABLE={PTY_AVAILABLE}")
         self._tdebug(f"frozen={getattr(sys, 'frozen', False)}")
         self._tdebug(f"cwd={self._cwd}")
         self._tdebug(f"shell_cmd={self._get_shell_command()}")
@@ -874,6 +874,8 @@ class XTermWidget(QWidget):
         invalid flag. Args are now per-shell; the stored shell_args setting is
         honoured only for PowerShell (its value is a PowerShell flag).
         """
+        if sys.platform != "win32":
+            return self._get_posix_shell_command()
         _SHELL_EXE = {
             "powershell": "powershell.exe",
             "cmd": "cmd.exe",
@@ -905,7 +907,24 @@ class XTermWidget(QWidget):
             return cmd
         except Exception:
             return f"powershell.exe -NoLogo {self._PS_ENABLE_CTRL_C}"
-        
+
+    def _get_posix_shell_command(self) -> str:
+        """The macOS and Linux shell: zsh (the macOS default), else bash.
+
+        The stored setting is not trusted on its own: a profile synced from a
+        Windows machine carries "powershell", and "cmd"/"wsl" name nothing
+        here. Anything that is not zsh or bash falls back to zsh.
+        """
+        try:
+            from src.config.settings import get_settings
+            shell = get_settings().get("terminal", "default_shell", default="zsh")
+        except Exception:
+            shell = "zsh"
+        if shell not in ("zsh", "bash"):
+            shell = "zsh"
+        path = shutil.which(shell) or f"/bin/{shell}"
+        return f"{path} -i"
+
     def _on_path_resolved(self, resolved_path: str):
         self._tdebug("_on_path_resolved called")
         self._tdebug(f"resolved_path length={len(resolved_path)}")
@@ -916,7 +935,7 @@ class XTermWidget(QWidget):
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         
-        if WINPTY_AVAILABLE:
+        if PTY_AVAILABLE:
             # --- START WINPTY (REAL TERMINAL) ---
             try:
                 # Console hiding is handled by runtime_hook_noconsole.py
@@ -932,7 +951,7 @@ class XTermWidget(QWidget):
                 # in the spawned shell and its children. The shell now
                 # re-enables it at startup (_PS_ENABLE_CTRL_C above), so
                 # Ctrl+C only needs to write  (see _on_js_input).
-                self._pty_process = winpty.PtyProcess.spawn(
+                self._pty_process = PtyProcess.spawn(
                     cmd,
                     cwd=self._cwd,
                     env=env,
@@ -1058,14 +1077,14 @@ class XTermWidget(QWidget):
             
         else:
             # --- START QPROCESS (FALLBACK) ---
-            self._tdebug("Using QProcess fallback (WINPTY_AVAILABLE=False)")
+            self._tdebug("Using QProcess fallback (PTY_AVAILABLE=False)")
             self._start_qprocess_fallback(resolved_path, env)
 
     def _start_qprocess_fallback(self, resolved_path: str, env: dict):
             self._tdebug("_start_qprocess_fallback called")
             # QProcess does not provide a true PTY, meaning no interactive REPLs (like python or node)
             # and no rich CLI apps (like vim, nano, htop).
-            self._write_to_terminal("\r\n\x1b[33m[ Warning: 'pywinpty' not installed. Interactive terminal apps and REPLs may not function correctly. ]\x1b[0m\r\n")
+            self._write_to_terminal("\r\n\x1b[33m[ Warning: no pseudo-terminal available. Interactive terminal apps and REPLs may not function correctly. ]\x1b[0m\r\n")
             
             self._process = QProcess(self)
             self._process.setWorkingDirectory(self._cwd)

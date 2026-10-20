@@ -7,7 +7,7 @@
 Hand a task to an AI agent and watch it plan, read your code, edit files, run
 commands and iterate until the work is done, inside a real IDE.
 
-**Version 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11
+**Version 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11 &nbsp;·&nbsp; Linux &nbsp;·&nbsp; macOS (source build)
 
 [Website](https://cortex-ide.app/) &nbsp;·&nbsp; [Documentation](https://cortex-ide.app/docs/) &nbsp;·&nbsp; [Pricing](https://cortex-ide.app/pricing/) &nbsp;·&nbsp; [Issues](https://github.com/Cortex-AI-IDE/Cortex-Desktop/issues)
 
@@ -167,15 +167,16 @@ of this repository yet.
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Windows | 10 or 11, 64-bit | The terminal layer uses ConPTY and the shell layer uses Win32 APIs |
+| Platform | Windows 10 or 11 (64-bit), Linux, macOS 12+ | Windows runs the terminal in ConPTY and keeps keys in Credential Manager; Linux and macOS use the POSIX PTY in `src/core/pty_backend.py`. See [MACOS-PORT.md](MACOS-PORT.md) for the macOS build |
 | Python | 3.11 or newer | 3.14 is what this release was built and tested on |
 | Node.js | 18 or newer | Required for the editor and for MCP servers. See [below](#why-nodejs-is-required) |
 | Git | any recent | To clone the repository |
 | Disk space | about 2 GB | Chromium, Qt and the Python environment |
 | RAM | 8 GB recommended | Four embedded Chromium panels are live at once |
 
-`ripgrep` is **not** required. A copy ships in `bin/rg.exe`, and if it is
-removed the Grep tool falls back to a pure-Python search.
+`ripgrep` is **not** required. A copy ships in `bin/rg.exe` for Windows; on
+Linux and macOS install it with your package manager if you want the fast path.
+Without it the Grep tool falls back to a pure-Python search.
 
 ---
 
@@ -407,7 +408,8 @@ Cortex-Desktop/
 │   │   └── src/utils/permissions/   The permission model that gates tool calls
 │   ├── core/                Platform services
 │   │   ├── database.py      SQLite schema and access
-│   │   ├── terminal_session.py   ConPTY terminal host
+│   │   ├── pty_backend.py   One PTY interface: ConPTY on Windows, pty.fork elsewhere
+│   │   ├── terminal_session.py   Shared shell session for the AI and the terminal panel
 │   │   ├── workspace_trust.py, project_permissions.py   Trust and remember-access stores
 │   │   ├── invocation_tokens.py   The skills:/mcp: tokens written into a prompt
 │   │   ├── exit_hooks.py    Cleanup that runs even through os._exit
@@ -433,7 +435,9 @@ Cortex-Desktop/
 ├── requirements.txt         Runtime Python dependencies
 ├── requirements-dev.txt     Runtime plus development tooling
 ├── requirements-lock.txt    Exact pip freeze of the build environment
-└── MACOS-PORT.md            What a macOS port would need to change
+├── cortex-macos.spec        PyInstaller spec for the macOS .app and .dmg
+├── .github/workflows/       macos-build.yml: CI build, no Mac needed
+└── MACOS-PORT.md            The macOS port: what changed and how to build it
 ```
 
 ---

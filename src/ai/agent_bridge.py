@@ -1401,34 +1401,62 @@ def _powershell_error_line(stderr_b: bytes) -> str:
     return text.splitlines()[0][:300]
 
 
+_BASH_TOOL_DESC_WIN = (
+    "Run a command in Windows PowerShell and return its output. "
+    "Commands run in one persistent PowerShell session (the user's "
+    "\"Cortex AI\" terminal tab), so the working directory, variables, "
+    "$env: changes and an activated venv carry over between calls. The "
+    "session starts in the project root; cd back to it if you moved.\n"
+    "Servers and watchers: pass background=true; the command keeps running "
+    "in its terminal (follow it with BashOutput, stop it with KillShell). "
+    "`ssh user@host` with no remote command opens an SSH session in that "
+    "terminal (the user types any password there); your next commands then "
+    "run on that server until `exit`.\n"
+    "This runs PowerShell, NOT bash, despite the tool name. POSIX "
+    "syntax fails here and costs a turn each time:\n"
+    "  &&  ->  ;   (or `if ($?) { ... }` to chain on success)\n"
+    "  2>/dev/null -> 2>$null       $VAR -> $env:VAR\n"
+    "  head -n5 -> Select-Object -First 5   |   wc -l -> Measure-Object -Line\n"
+    "  which x -> Get-Command x     |   touch f -> New-Item f\n"
+    "  rm -rf d -> Remove-Item -Recurse -Force d\n"
+    "Escape with a backtick, not a backslash. For a remote command over "
+    "ssh, put the remote side in SINGLE quotes so PowerShell passes it "
+    "through untouched: ssh host 'grep -c foo /var/log/app.log'."
+)
+
+# macOS and Linux run a real POSIX shell, so the warning above is inverted
+# here: POSIX syntax works and PowerShell syntax does not.
+_BASH_TOOL_DESC_POSIX = (
+    "Run a command in a POSIX shell and return its output. "
+    "Commands run in one persistent shell session (the user's \"Cortex AI\" "
+    "terminal tab), so the working directory, exported variables and an "
+    "activated virtualenv carry over between calls. The session starts in the "
+    "project root; cd back to it if you moved.\n"
+    "Servers and watchers: pass background=true; the command keeps running "
+    "in its terminal (follow it with BashOutput, stop it with KillShell). "
+    "`ssh user@host` with no remote command opens an SSH session in that "
+    "terminal (the user types any password there); your next commands then "
+    "run on that server until `exit`.\n"
+    "This is a real shell (zsh on macOS, bash on Linux), so `&&`, `||`, "
+    "`$(...)`, pipes, globs, heredocs and `2>/dev/null` all work as written. "
+    "PowerShell syntax does NOT: `;` chains unconditionally, `$env:VAR` is "
+    "not a variable, and there is no `Select-Object` or `Start-Process`. "
+    "Prefer `python3` over `python`, and never put a password on the command "
+    "line: sudo and ssh prompt in the terminal and the user answers there."
+)
+
+_BASH_TOOL_DESCRIPTION = (
+    _BASH_TOOL_DESC_WIN if sys.platform == "win32" else _BASH_TOOL_DESC_POSIX
+)
+
+
 class BridgeBashTool:
     """
     Bridge-native Bash tool, real BashTool.py does not exist in
     src/agent/src/tools/BashTool/ (only helper modules).
     """
     name = "Bash"
-    description = (
-        "Run a command in Windows PowerShell and return its output. "
-        "Commands run in one persistent PowerShell session (the user's "
-        "\"Cortex AI\" terminal tab), so the working directory, variables, "
-        "$env: changes and an activated venv carry over between calls. The "
-        "session starts in the project root; cd back to it if you moved.\n"
-        "Servers and watchers: pass background=true; the command keeps running "
-        "in its terminal (follow it with BashOutput, stop it with KillShell). "
-        "`ssh user@host` with no remote command opens an SSH session in that "
-        "terminal (the user types any password there); your next commands then "
-        "run on that server until `exit`.\n"
-        "This runs PowerShell, NOT bash, despite the tool name. POSIX "
-        "syntax fails here and costs a turn each time:\n"
-        "  &&  ->  ;   (or `if ($?) { ... }` to chain on success)\n"
-        "  2>/dev/null -> 2>$null       $VAR -> $env:VAR\n"
-        "  head -n5 -> Select-Object -First 5   |   wc -l -> Measure-Object -Line\n"
-        "  which x -> Get-Command x     |   touch f -> New-Item f\n"
-        "  rm -rf d -> Remove-Item -Recurse -Force d\n"
-        "Escape with a backtick, not a backslash. For a remote command over "
-        "ssh, put the remote side in SINGLE quotes so PowerShell passes it "
-        "through untouched: ssh host 'grep -c foo /var/log/app.log'."
-    )
+    description = _BASH_TOOL_DESCRIPTION
     parameters: Dict[str, Any] = {
         "type": "object",
         "properties": {
@@ -2020,7 +2048,7 @@ class BridgeLSTool:
 # Owner's request (2026-09-13): during commit/push/deploy the AI must run the
 # steps that need a sign-in itself and let the user authenticate in the
 # terminal, never hand over a wall of commands to copy, run and paste back.
-_TERMINAL_GUIDANCE = (
+_TERMINAL_GUIDANCE_WIN = (
     "## TERMINAL AND SIGN-IN\n"
     "On this PC your Bash commands run hidden, in a one-off PowerShell that cannot "
     "answer prompts: use flags that avoid questions (-y, --yes, --no-input). git over "
@@ -2037,6 +2065,32 @@ _TERMINAL_GUIDANCE = (
     "prompts are handled in that terminal.\n"
     "- background=true works only over SSH. To keep a local server running, start "
     "it with Start-Process -WindowStyle Hidden and check it with a request."
+)
+
+# macOS and Linux: the same rules, but the shell is POSIX, the terminal is
+# visible, and neither PowerShell nor Start-Process exists.
+_TERMINAL_GUIDANCE_POSIX = (
+    "## TERMINAL AND SIGN-IN\n"
+    "Your Bash commands run in the user's shell (zsh on macOS, bash on Linux) in "
+    "the visible \"Cortex AI\" terminal, so a command that stops to ask a question "
+    "waits for the user: pass flags that avoid prompts (-y, --yes, --no-input). "
+    "git over HTTPS may ask for credentials in that terminal; the command waits "
+    "while the user answers there.\n"
+    "- Do the work yourself. Never hand the user commands to copy, run and paste "
+    "back, and never ask for passwords or keys in chat.\n"
+    "- Server work (deploy, logs, restarts): run `ssh user@host` with no remote "
+    "command. That opens the user's visible \"Cortex AI\" terminal, where the user "
+    "types passwords, key passphrases and sudo answers (you never see secrets). Once "
+    "connected, your next Bash commands run on that server in its shell: do the "
+    "steps there (git pull, migrations, restart), then `exit`.\n"
+    "- Over SSH, do not add -o BatchMode=yes or other tricks to avoid prompts: "
+    "prompts are handled in that terminal.\n"
+    "- background=true works only over SSH. To keep a local server running, start "
+    "it with `nohup command > /tmp/out.log 2>&1 &` and check it with a request."
+)
+
+_TERMINAL_GUIDANCE = (
+    _TERMINAL_GUIDANCE_WIN if sys.platform == "win32" else _TERMINAL_GUIDANCE_POSIX
 )
 
 
