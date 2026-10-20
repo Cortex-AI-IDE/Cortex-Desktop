@@ -73,6 +73,52 @@ jobs:
           print("POSIX PTY backend: OK")
           PY
 
+      - name: Probe the shell launch
+        run: |
+          python - <<'PY'
+          import os, shutil, sys, time
+          sys.path.insert(0, '.')
+          from src.core import terminal_session as ts
+          from src.core.pty_backend import PtyProcess
+
+          print("platform:", sys.platform)
+          print("which zsh:", shutil.which("zsh"))
+          print("which bash:", shutil.which("bash"))
+          print("HOME:", os.environ.get("HOME"))
+          print("SHELL:", os.environ.get("SHELL"))
+
+          s = ts.TerminalSession(os.getcwd(), name="probe")
+          cmd, env = s._launch_command()
+          print("launch cmd:", cmd)
+          zd = env.get("ZDOTDIR")
+          print("ZDOTDIR:", zd)
+          for name in (".zshenv", ".zshrc"):
+              path = os.path.join(zd, name) if zd else None
+              if path and os.path.exists(path):
+                  print("---", name, "---")
+                  print(open(path, encoding="utf-8").read())
+
+          p = PtyProcess.spawn(cmd, cwd=os.getcwd(), env=env, dimensions=(40, 120))
+          print("pid:", p.pid)
+          buf = ""
+          deadline = time.time() + 8
+          while time.time() < deadline and len(buf) < 4000:
+              try:
+                  chunk = p.read(8192)
+              except EOFError:
+                  print("EOF from the pty")
+                  break
+              if not chunk:
+                  break
+              buf += chunk
+          print("alive:", p.isalive())
+          print("RAW:", repr(buf[:3000]))
+          try:
+              p.terminate(force=True)
+          except Exception:
+              pass
+          PY
+
       - name: The shared AI session works
         run: |
           python - <<'PY'
