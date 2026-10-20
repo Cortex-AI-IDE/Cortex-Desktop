@@ -270,10 +270,16 @@ jobs:
           for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             sleep 5
             if ! kill -0 "$APP_PID" 2>/dev/null; then
-              echo "::warning::the app exited after ~$((i * 5))s, capturing what is there"
-              break
+              # A build that ships an app which cannot start is a broken build,
+              # so this is an error and not a warning. It happened once: a
+              # runtime hook imported asyncio.windows_events on macOS.
+              echo "::error::the app exited after ~$((i * 5))s, it never drew a window"
+              echo "----- app.log -----"
+              cat app.log || true
+              hdiutil detach mnt -force >/dev/null 2>&1 || true
+              exit 1
             fi
-            screencapture -x -o shots/macos.png 2>/dev/null || true
+            screencapture -x -o shots/macos.png 2> shots/screencapture.err || true
           done
 
           kill "$APP_PID" 2>/dev/null || true
@@ -283,6 +289,8 @@ jobs:
 
           echo "----- app.log (tail) -----"
           tail -n 40 app.log || true
+          echo "----- screencapture stderr -----"
+          cat shots/screencapture.err 2>/dev/null || true
           hdiutil detach mnt -force >/dev/null 2>&1 || true
 
       - name: Check the screenshot is a real window, not a blank frame
@@ -329,6 +337,7 @@ jobs:
           name: cortex-macos-${{ steps.ver.outputs.version }}-screenshot
           path: |
             shots/macos.png
+            shots/screencapture.err
             app.log
           if-no-files-found: warn
           retention-days: 14
