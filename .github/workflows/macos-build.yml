@@ -73,84 +73,40 @@ jobs:
           print("POSIX PTY backend: OK")
           PY
 
-      - name: Probe the shell launch
-        run: |
-          python - <<'PY'
-          import os, shutil, sys, time
-          sys.path.insert(0, '.')
-          from src.core import terminal_session as ts
-          from src.core.pty_backend import PtyProcess
-
-          print("platform:", sys.platform)
-          print("which zsh:", shutil.which("zsh"))
-          print("which bash:", shutil.which("bash"))
-          print("HOME:", os.environ.get("HOME"))
-          print("SHELL:", os.environ.get("SHELL"))
-
-          s = ts.TerminalSession(os.getcwd(), name="probe")
-          cmd, env = s._launch_command()
-          print("launch cmd:", cmd)
-          zd = env.get("ZDOTDIR")
-          print("ZDOTDIR:", zd)
-          for name in (".zshenv", ".zshrc"):
-              path = os.path.join(zd, name) if zd else None
-              if path and os.path.exists(path):
-                  print("---", name, "---")
-                  print(open(path, encoding="utf-8").read())
-
-          p = PtyProcess.spawn(cmd, cwd=os.getcwd(), env=env, dimensions=(40, 120))
-          print("pid:", p.pid)
-          buf = ""
-          deadline = time.time() + 8
-          while time.time() < deadline and len(buf) < 4000:
-              try:
-                  chunk = p.read(8192)
-              except EOFError:
-                  print("EOF from the pty")
-                  break
-              if not chunk:
-                  break
-              buf += chunk
-          print("alive:", p.isalive())
-          print("RAW:", repr(buf[:3000]))
-          try:
-              p.terminate(force=True)
-          except Exception:
-              pass
-
-          # The same thing through TerminalSession, which is what the app uses.
-          s2 = ts.TerminalSession(os.getcwd(), name="probe2")
-          print("start():", s2.start(), "pid:", s2.pid)
-          print("wait_ready(10):", s2.wait_ready(10))
-          print("is_alive:", s2.is_alive)
-          s2.close()
-          PY
-
-      - name: The shared AI session works
+      - name: The shared AI session works, in bash and in zsh
         run: |
           python - <<'PY'
           import os, sys
           sys.path.insert(0, '.')
           from src.core.terminal_session import TerminalSession
 
-          s = TerminalSession(os.getcwd(), name="ci")
-          assert s.start(), "TerminalSession.start() returned False"
-          assert s.wait_ready(30), "no first prompt: the integration markers never arrived"
-          print("shell started, pid", s.pid)
+          # Both shells, not just $SHELL: the runner sets SHELL=/bin/bash while a
+          # real Mac runs zsh, and macOS ships bash 3.2, which parses options
+          # differently from the bash 5 on Linux.
+          for shell in ("/bin/bash", "/bin/zsh"):
+              os.environ["SHELL"] = shell          # _posix_shell() reads this
+              name = os.path.basename(shell)
+              s = TerminalSession(os.getcwd(), name=name)
 
-          r = s.run("echo CORTEX_SESSION_OK", idle_timeout=15, hard_cap=45)
-          assert r is not None, "run() refused the command"
-          assert not r.timed_out, "the command timed out"
-          assert "CORTEX_SESSION_OK" in r.output, f"unexpected output: {r.output!r}"
+              assert s.start(), f"{name}: start() returned False"
+              assert s.wait_ready(30), (
+                  f"{name}: no first prompt, the integration markers never arrived")
+              print(name, "started, pid", s.pid)
 
-          # The whole point of the shared session: state survives between calls.
-          s.run("cd /tmp && export CORTEX_RC=42", idle_timeout=15, hard_cap=45)
-          r = s.run("echo $CORTEX_RC && pwd", idle_timeout=15, hard_cap=45)
-          assert r is not None, "the second command was refused"
-          assert "42" in r.output and "/tmp" in r.output, \
-              f"state did not carry over: {r.output!r}"
-          s.close()
-          print("shared session keeps state across calls: OK")
+              r = s.run("echo CORTEX_SESSION_OK", idle_timeout=15, hard_cap=45)
+              assert r is not None, f"{name}: run() refused the command"
+              assert not r.timed_out, f"{name}: the command timed out"
+              assert "CORTEX_SESSION_OK" in r.output, f"{name}: {r.output!r}"
+
+              # The whole point of the shared session: state survives between
+              # calls, including the working directory and exported variables.
+              s.run("cd /tmp && export CORTEX_RC=42", idle_timeout=15, hard_cap=45)
+              r = s.run("echo $CORTEX_RC && pwd", idle_timeout=15, hard_cap=45)
+              assert r is not None, f"{name}: the second command was refused"
+              assert "42" in r.output and "/tmp" in r.output, \
+                  f"{name}: state did not carry over: {r.output!r}"
+              s.close()
+              print(name, ": shared session keeps state across calls OK")
           PY
 
   build:

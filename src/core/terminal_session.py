@@ -508,7 +508,10 @@ class TerminalSession:
         if shell_name == "bash":
             rc = os.path.join(_SHELL_DIR, "cortex_integration.bashrc")
             _write_if_changed(rc, _INTEGRATION_BASH)
-            return f"{quoted} -i --rcfile {shlex.quote(rc)}", env
+            # Long option before -i: macOS ships bash 3.2, which parses GNU long
+            # options first and rejects "--rcfile" as an invalid short option
+            # ("bash: --: invalid option") once -i is in front of it.
+            return f"{quoted} --rcfile {shlex.quote(rc)} -i", env
         # /bin/sh only: it has no hook to hang the markers on, so commands run
         # but their boundaries are guessed from the echo of the typed line.
         return f"{quoted} -i", env
