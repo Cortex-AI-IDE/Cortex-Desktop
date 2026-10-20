@@ -150,6 +150,52 @@ def _change_lines(tools: List[Dict[str, Any]]) -> List[str]:
     return lines
 
 
+_FILE_PARAMS = ("filePath", "filename", "file_path", "path", "outputPath")
+
+
+def _workflow_lines(tools: List[Dict[str, Any]]) -> List[str]:
+    """Long-session rules for servers that expose a page snapshot or a
+    screenshot that can go to a file (any browser server).
+
+    From the 2026-10-19/20 chrome-devtools sessions: 35 snapshots in an hour
+    (one 187K chars) piled up in the conversation although only the newest
+    describes the page, screenshots came back into the context instead of a
+    file, and multi-step browser tasks without a todo list ended after one
+    step. Cortex now trims old snapshots and lets servers write into the
+    project; these lines tell the model to work with that.
+    """
+    names = [t.get("name", "") for t in tools]
+    # The PAGE snapshot - chrome-devtools also has take_heapsnapshot (a
+    # memory profile), which is not it.
+    pages = [n for n in names if "snapshot" in n.lower() and "heap" not in n.lower()]
+    snap = next((n for n in pages if n.lower() in ("take_snapshot", "browser_snapshot", "snapshot")),
+                pages[0] if pages else "")
+    shot_param = ""
+    shot = ""
+    for t in tools:
+        n = t.get("name", "")
+        if "screenshot" not in n.lower():
+            continue
+        props = ((t.get("inputSchema") or {}).get("properties") or {})
+        p = next((p for p in _FILE_PARAMS if p in props), "")
+        if p:
+            shot, shot_param = n, p
+            break
+    lines: List[str] = []
+    if snap:
+        lines.append(f"- Only the newest `{snap}` describes the page. After a navigation, or "
+                     "a click that changes the page, take a new one before using its ids; "
+                     "older snapshots are removed from the conversation.")
+    if shot:
+        lines.append(f"- `{shot}`: pass `{shot_param}` (a path under the project's "
+                     "`.cortex/shots/`) to keep a screenshot without loading it into the "
+                     "conversation; leave it out only when you need to look at the image.")
+    if snap or shot:
+        lines.append("- For a multi-step task here, keep a TodoWrite list and tick steps off "
+                     "as they finish: the task continues on its own while todos remain.")
+    return lines
+
+
 def server_card(s: Dict[str, Any], own_limit: int = MAX_SERVER_INSTRUCTIONS) -> str:
     """The guide for one server; "" when there is nothing useful to say."""
     tools = s.get("tools") or []
@@ -166,6 +212,7 @@ def server_card(s: Dict[str, Any], own_limit: int = MAX_SERVER_INSTRUCTIONS) -> 
         body.append(own)
     body += _dependency_lines(tools)
     body += _change_lines(tools)
+    body += _workflow_lines(tools)
     return head + "\n" + "\n".join(body) if body else ""
 
 

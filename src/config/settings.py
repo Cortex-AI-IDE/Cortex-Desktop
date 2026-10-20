@@ -41,6 +41,7 @@ DEFAULT_SETTINGS = {
         "show_sidebar": False,  # Hide traditional sidebar by default
         "editor_default_readonly": True,  # Editor starts in read-only preview mode
         "show_terminal_by_default": False,  # Terminal hidden by default
+        "sidebar_position": "left",  # Settings -> Appearance -> Sidebar position
     },
     "ai_command": {
         "show_conversation_history": True,
@@ -55,6 +56,7 @@ DEFAULT_SETTINGS = {
         "font_size": 14,  # Increased for better readability in preview mode
         "tab_size": 4,
         "word_wrap": False,
+        "minimap": False,
         "line_numbers": True,
         "highlight_current_line": True,
         "auto_indent": True,
@@ -66,6 +68,10 @@ DEFAULT_SETTINGS = {
         "code_font_family": "JetBrains Mono",
         "code_font_stack": '"Berkeley Mono", "Geist Mono", "JetBrains Mono", "Consolas", monospace',
         "code_font_size": 13,  # Terminal and inline code - 13px
+        # Settings -> Appearance -> Chat activity: "compact" folds thoughts,
+        # tool calls and diffs into one line between the AI's messages
+        # (chat_panel.ActivityGroup); "detailed" shows every card.
+        "chat_activity": "compact",
         # Compatibility switch for machines whose GPU driver cannot give
         # Chromium a context. Symptom: the sidebar, editor, terminal and
         # settings pages render BLANK/dark while everything else works and

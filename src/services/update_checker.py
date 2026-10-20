@@ -125,12 +125,18 @@ class UpdateChecker:
             api = get_api_client()
 
             params = {"current": self._current_version}
-            # Tell the server which channel is asking. Today it answers both
-            # from the one web release row; sending the channel now means a
-            # per-channel release (e.g. the Store build lagging the exe by a
-            # few days while it certifies) can be honoured later without
-            # shipping another client. Unknown params are ignored by the
-            # current endpoint, so this is safe on an older backend.
+            # Tell the server which platform and channel is asking. Today it
+            # answers all channels from the one web release row; sending both
+            # now means a per-channel release (e.g. the Store build lagging the
+            # exe by a few days while it certifies) can be honoured later
+            # without shipping another client. Unknown params are ignored by
+            # the current endpoint, so this is safe on an older backend.
+            # A Windows build must never be offered a Linux-only version.
+            try:
+                from src.core.cortex_api import APP_PLATFORM
+                params["platform"] = APP_PLATFORM
+            except Exception:
+                pass
             try:
                 from src.version import CHANNEL
                 params["channel"] = CHANNEL

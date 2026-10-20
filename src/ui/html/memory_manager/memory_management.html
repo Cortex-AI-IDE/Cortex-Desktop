@@ -143,7 +143,7 @@
             <div class="setting-info"><label>Color theme</label>
               <p>One theme for all of Cortex: chat, editor, terminal, sidebar, menus, Settings and Project Health.</p>
             </div>
-            <select class="setting-select" id="colorTheme"><option value="cortex" selected>Cortex (Dark / Light / System)</option><option value="dark-plus">Dark+ (VS Code)</option><option value="light-plus">Light+ (VS Code)</option><option value="one-dark-pro">One Dark Pro</option><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="github-dark">GitHub Dark</option><option value="github-light">GitHub Light</option><option value="night-owl">Night Owl</option><option value="tokyo-night">Tokyo Night</option><option value="catppuccin-mocha">Catppuccin Mocha</option><option value="nord">Nord</option><option value="solarized-light">Solarized Light</option></select>
+            <select class="setting-select" id="colorTheme"><option value="cortex" selected>Cortex (Dark / Light / System)</option><option value="dark-plus">Dark+ (VS Code)</option><option value="light-plus">Light+ (VS Code)</option><option value="one-dark-pro">One Dark Pro</option><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="github-dark">GitHub Dark</option><option value="github-light">GitHub Light</option><option value="night-owl">Night Owl</option><option value="tokyo-night">Tokyo Night</option><option value="catppuccin-mocha">Catppuccin Mocha</option><option value="nord">Nord</option><option value="solarized-light">Solarized Light</option><optgroup label="Accessibility"><option value="high-contrast-dark">High Contrast Dark</option><option value="high-contrast-light">High Contrast Light</option><option value="distinct-colors-dark">Distinct Colors Dark</option><option value="distinct-colors-light">Distinct Colors Light</option></optgroup></select>
           </div>
           <p class="setting-note" id="colorThemeRestart" style="display:none;margin-top:8px">Restart Cortex to apply this theme to the chat panel and menus.</p>
         </div>
@@ -167,36 +167,34 @@
             <div class="setting-info"><label>Tab size</label>
               <p>Number of spaces per tab character.</p>
             </div>
-            <select class="setting-select" id="tabSize"><option value="2" selected>2 spaces</option><option value="4">4 spaces</option><option value="8">8 spaces</option></select>
+            <select class="setting-select" id="tabSize"><option value="2">2 spaces</option><option value="4" selected>4 spaces</option><option value="8">8 spaces</option></select>
           </div>
           <div class="setting-row">
             <div class="setting-info"><label>Word wrap</label>
               <p>Wrap long lines in the editor.</p>
             </div>
-            <label class="switch"><input type="checkbox" id="wordWrap" checked><span class="switch-slider"></span></label>
+            <label class="switch"><input type="checkbox" id="wordWrap"><span class="switch-slider"></span></label>
           </div>
           <div class="setting-row">
             <div class="setting-info"><label>Minimap</label>
               <p>Show a minimap overview on the right side of the editor.</p>
             </div>
-            <label class="switch"><input type="checkbox" id="minimap" checked><span class="switch-slider"></span></label>
+            <label class="switch"><input type="checkbox" id="minimap"><span class="switch-slider"></span></label>
           </div>
         </div>
         <div class="settings-card">
           <h3>Interface</h3>
           <div class="setting-row">
-            <div class="setting-info"><label>UI Scale</label>
-              <p>Zoom level for the entire Cortex interface.</p>
-            </div>
-            <div class="range-control">
-              <input type="range" id="uiScale" min="80" max="150" value="100" class="setting-range"><span class="range-value" id="uiScaleVal">100%</span>
-            </div>
-          </div>
-          <div class="setting-row">
             <div class="setting-info"><label>Sidebar position</label>
               <p>Place the sidebar on the left or right side.</p>
             </div>
             <select class="setting-select" id="sidebarPosition"><option value="left" selected>Left</option><option value="right">Right</option></select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Chat activity</label>
+              <p>Compact folds the AI's thoughts, commands, searches and edits into one line between its messages. Detailed shows every step as its own card. Applies to new replies and to chats you reopen.</p>
+            </div>
+            <select class="setting-select" id="chatActivity"><option value="compact" selected>Compact</option><option value="detailed">Detailed</option></select>
           </div>
         </div>
       </section>
@@ -372,7 +370,7 @@
             <button class="setting-btn primary-btn" id="upgradePlanBtn" onclick="openUpgradePage()">Upgrade plan</button>
           </div>
           <div id="planFeatures" style="margin-top:12px;display:none;">
-            <span style="font-size:13px;color:var(--muted);">Includes: Mistral OCR · SiliconFlow Embeddings · Web Search</span>
+            <span style="font-size:13px;color:var(--muted);">Includes: SiliconFlow Embeddings · Web Search</span>
           </div>
         </div>
 
@@ -380,10 +378,6 @@
         <div class="settings-card" id="serviceUsageBlock">
           <h3 id="serviceUsageTitle">Service Usage (Billing Period)</h3>
           <div id="serviceUsageCounters" style="display:flex;gap:24px;flex-wrap:wrap;">
-            <div style="text-align:center;min-width:80px;">
-              <div style="font-size:24px;font-weight:600;color:var(--text);" id="ocrPages">0</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:4px;">OCR pages</div>
-            </div>
             <div style="text-align:center;min-width:80px;">
               <div style="font-size:24px;font-weight:600;color:var(--text);" id="embeddingsCount">0</div>
               <div style="font-size:12px;color:var(--muted);margin-top:4px;">embedding tokens</div>
@@ -395,7 +389,7 @@
           </div>
           <div id="serviceUsageSubscribe" style="display:none;font-size:13px;color:var(--muted);padding:8px 0;">
             Subscribe to <a href="#" onclick="openUpgradePage();return false" style="color:#58a6ff;">Cortex Pro</a> to
-            unlock: Mistral OCR, embeddings, and web search.
+            unlock: embeddings and web search.
           </div>
         </div>
 
@@ -516,32 +510,6 @@
                 <option value="ih/gpt-5.6-luna">GPT-5.6 Luna, 1M ctx · 64k out · new</option>
               </optgroup>
             </select>
-          </div>
-        </div>
-        <div class="settings-card">
-          <h3>Subscription Services</h3>
-          <p class="card-desc">Included with Cortex subscription, OCR, embeddings, and web search.</p>
-          <div class="provider-row" style="opacity:0.8">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#f43f5e;color:white">M</div>
-              <div><label>Mistral Large</label>
-                <p>OCR · Image text extraction · Vision</p>
-              </div>
-            </div>
-            <div class="provider-key">
-              <span class="setting-btn" style="background:#3fb950;color:white;cursor:default;">Included</span>
-            </div>
-          </div>
-          <div class="provider-row" style="opacity:0.8">
-            <div class="provider-info">
-              <div class="provider-logo" style="background:#10b981;color:white">S</div>
-              <div><label>SiliconFlow</label>
-                <p>Embeddings · Semantic search</p>
-              </div>
-            </div>
-            <div class="provider-key">
-              <span class="setting-btn" style="background:#3fb950;color:white;cursor:default;">Included</span>
-            </div>
           </div>
         </div>
         <div class="settings-card">

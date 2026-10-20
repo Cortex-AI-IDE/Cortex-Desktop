@@ -393,7 +393,8 @@ class WebviewPanel(QWidget):
                         self._tmp_html.unlink()
                 except Exception:
                     pass
-            atexit.register(_cleanup_tmp)
+            from src.utils.exit_hooks import register as _register_exit_hook
+            _register_exit_hook(_cleanup_tmp)
 
             # Cache-busting: append timestamp to force fresh page load every restart.
             # boot=1 tells editor.html to stay boot-hidden (flat dark, content
@@ -604,6 +605,14 @@ class WebviewPanel(QWidget):
             on_editor_font_changed(lambda: self._safe_run_js(editor_font_js()))
         except Exception as e:
             log.debug(f"[WebviewPanel] editor font not applied: {e}")
+
+        # Settings -> Editor -> Tab size / Word wrap / Minimap, same pattern.
+        try:
+            from src.ui.editor_prefs import editor_prefs_js, on_editor_prefs_changed
+            self._safe_run_js(editor_prefs_js())
+            on_editor_prefs_changed(lambda: self._safe_run_js(editor_prefs_js()))
+        except Exception as e:
+            log.debug(f"[WebviewPanel] editor preferences not applied: {e}")
 
         # Settings -> Editor -> Theme (src/ui/editor_theme.py), same pattern.
         try:

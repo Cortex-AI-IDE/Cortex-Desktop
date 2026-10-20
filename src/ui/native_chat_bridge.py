@@ -65,6 +65,12 @@ class NativeChatBridge(QObject):
         # State for parsing thinking tags from response_chunk
         self._in_thought = False
         self._text_emitted = False  # track if any text was streamed
+        # What the model wrote since the last tool started (visible or routed
+        # into a Thought), and whether this turn ran any tool: the end-of-turn
+        # fallback re-emits only that last segment (see _fallback_text).
+        self._segment_raw = ""
+        self._turn_raw = ""
+        self._turn_had_tool = False
         self._tool_counter = 0
         self._active_tools: dict[str, str] = {}
         self._seen_tools: set[str] = set()  # keys of tools whose card is OPEN
@@ -141,6 +147,9 @@ class NativeChatBridge(QObject):
         self._muted = True
         self._in_thought = False
         self._text_emitted = False
+        self._segment_raw = ""
+        self._turn_raw = ""
+        self._turn_had_tool = False
         self._text_buffer = ""
         self._active_tools.clear()
         self._seen_tools.clear()
@@ -159,6 +168,10 @@ class NativeChatBridge(QObject):
             if not chunk:
                 return
             log.debug("[NATIVE-BRIDGE] response_chunk received: len=%d", len(chunk))
+            if len(self._segment_raw) < 200_000:
+                self._segment_raw += chunk
+            if len(self._turn_raw) < 1_000_000:
+                self._turn_raw += chunk
             self._handle_response_chunk(chunk)
         except Exception as e:
             import traceback
@@ -267,12 +280,53 @@ class NativeChatBridge(QObject):
             self._maybe_extract_todos(response)
 
         if not self._text_emitted and response and response.strip():
-            self.signals.text_delta.emit(response)
+            fallback = self._fallback_text(response)
+            if fallback.strip():
+                self.signals.text_delta.emit(fallback)
+            else:
+                log.info("[TODO-COMPLETE] Fallback skipped: the turn ended on a tool call, "
+                         "its text is already on screen")
         self._text_emitted = False
+        self._segment_raw = ""
+        self._turn_raw = ""
+        self._turn_had_tool = False
         self._active_tools.clear()
         self._seen_tools.clear()
         self._active_start_key.clear()
         self.signals.turn_done.emit()
+
+    def _fallback_text(self, response: str) -> str:
+        """What to show when the turn's last segment put no visible text on screen.
+
+        `response` is the WHOLE turn's text: every segment the model wrote
+        between tool calls, joined. Emitting all of it re-showed every
+        progress line of the turn as one wall at the bottom (2026-10-19
+        17:41: a deploy run hit the 50-turn limit on an Edit, and its 25
+        "Code is live. Now HTTPS." lines, already shown between the tool
+        cards, were repeated as a 2,497-char block). Only the last segment -
+        what came after the last tool - is the answer that may be missing -
+        plus any paragraph that never streamed at all (a provider that hands
+        over its answer only at the end). Nothing when the turn ended on a
+        tool call. A turn without tools keeps the whole response, as before.
+        """
+        if not self._turn_had_tool:
+            return response
+
+        def plain(raw: str) -> str:
+            raw = self._RE_THOUGHT_DELTA.sub(" ", raw)         # model reasoning
+            return self._RE_THOUGHT_END.sub(" ", self._RE_THOUGHT_START.sub(" ", raw))
+
+        seg = plain(self._segment_raw)
+        seg_norm = " ".join(seg.split())
+        turn_norm = " ".join(plain(self._turn_raw).split())
+        kept = []
+        for p in re.split(r"\n\s*\n", response):
+            norm = " ".join(p.split())
+            if norm and ((seg_norm and norm in seg_norm) or norm not in turn_norm):
+                kept.append(p.strip("\n"))
+        if kept:
+            return "\n\n".join(kept)
+        return seg.strip()
 
     def _maybe_extract_todos(self, text: str) -> bool:
         """If the agent wrote a todo block as text, parse it and emit the widget signal.
@@ -358,6 +412,8 @@ class NativeChatBridge(QObject):
             # being suppressed by prose from earlier agentic turns.
             self._in_thought = False
             self._text_emitted = False
+            self._segment_raw = ""
+            self._turn_had_tool = True
             if dedup_key in self._seen_tools:
                 # Suppressed: this exact name+info[:50] was already shown earlier
                 # in the run (session-wide set, cleared only at response_complete).

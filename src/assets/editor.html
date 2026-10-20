@@ -1434,7 +1434,9 @@ if (typeof require !== 'undefined') {
         // Settings -> Editor -> Theme wins over both (_cxThemeName).
         theme: _cxThemeName(),
         automaticLayout: true,
-        minimap: { enabled: false },
+        // Settings -> Editor -> Tab size / Word wrap / Minimap arrive through
+        // window.__cortexSetEditorPrefs (src/ui/editor_prefs.py).
+        minimap: { enabled: !!(window.__cortexEditorPrefs && window.__cortexEditorPrefs.minimap) },
         fontSize: (window.__cortexEditorFont && window.__cortexEditorFont.size) || 14,
         // Bundled JetBrains Mono (src/ui/fonts.py). Settings -> Editor ->
         // Font family / Font size reach this editor through
@@ -1442,10 +1444,10 @@ if (typeof require !== 'undefined') {
         fontFamily: (window.__cortexEditorFont && window.__cortexEditorFont.stack)
             || "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
         fontLigatures: false,
-        tabSize: 4,
+        tabSize: (window.__cortexEditorPrefs && window.__cortexEditorPrefs.tabSize) || 4,
         insertSpaces: true,
         scrollBeyondLastLine: false,
-        wordWrap: 'off',
+        wordWrap: (window.__cortexEditorPrefs && window.__cortexEditorPrefs.wordWrap) ? 'on' : 'off',
         lineNumbers: 'on',
         renderWhitespace: 'none',
         bracketPairColorization: { enabled: false },
@@ -1492,6 +1494,32 @@ if (typeof require !== 'undefined') {
                 }).catch(function () {});
             }
         } catch (e) { console.warn('[Editor] font not applied:', e); }
+    };
+
+    // Settings -> Editor -> Tab size / Word wrap / Minimap, pushed by the
+    // editor panel (src/ui/editor_prefs.py). Remembered in
+    // window.__cortexEditorPrefs for editors created later. Tab size is a
+    // per-FILE option in Monaco: every open file gets it now, and every file
+    // opened later through onDidCreateModel (the one place all models pass).
+    function _cxApplyModelPrefs(model) {
+        var p = window.__cortexEditorPrefs;
+        if (!p || !model || (model.isDisposed && model.isDisposed())) return;
+        try { model.updateOptions({ tabSize: p.tabSize, indentSize: p.tabSize }); } catch (e) {}
+    }
+    window.__cortexSetEditorPrefs = function (prefs) {
+        try {
+            window.__cortexEditorPrefs = prefs;
+            var eds = (monaco.editor.getEditors && monaco.editor.getEditors()) || (editor ? [editor] : []);
+            eds.forEach(function (ed) {
+                ed.updateOptions({ wordWrap: prefs.wordWrap ? 'on' : 'off',
+                                   minimap: { enabled: !!prefs.minimap } });
+            });
+            monaco.editor.getModels().forEach(_cxApplyModelPrefs);
+            if (!window.__cxPrefsHooked && monaco.editor.onDidCreateModel) {
+                window.__cxPrefsHooked = true;
+                monaco.editor.onDidCreateModel(_cxApplyModelPrefs);
+            }
+        } catch (e) { console.warn('[Editor] preferences not applied:', e); }
     };
 
     // ── NUCLEAR OPTION: Disable ALL Monaco built-in diagnostics permanently ──
@@ -2646,8 +2674,8 @@ function switchToFile(filePath) {
                     fontSize: (window.__cortexEditorFont && window.__cortexEditorFont.size) || 14,
                     fontFamily: (window.__cortexEditorFont && window.__cortexEditorFont.stack)
                         || "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
-                    minimap: { enabled: true },
-                    wordWrap: 'on',
+                    minimap: { enabled: !!(window.__cortexEditorPrefs && window.__cortexEditorPrefs.minimap) },
+                    wordWrap: (window.__cortexEditorPrefs && window.__cortexEditorPrefs.wordWrap) ? 'on' : 'off',
                     lightbulb: { enabled: false },
                     noSemanticValidation: true,
                     noSyntaxValidation: true,
@@ -3677,7 +3705,13 @@ var _CX_EDITOR_THEMES = {
     'tokyo-night':      ['vs-dark', '1A1B26', 'A9B1D6', 'BB9AF7', '9ECE6A', '7AA2F7', '565F89', 'FF9E64', '1E202E', '283457', '363B54', 'C0CAF5'],
     'catppuccin-mocha': ['vs-dark', '1E1E2E', 'CDD6F4', 'CBA6F7', 'A6E3A1', '89B4FA', '6C7086', 'FAB387', '2A2B3C', '45475A', '6C7086', 'F5E0DC'],
     'nord':             ['vs-dark', '2E3440', 'D8DEE9', '81A1C1', 'A3BE8C', '88C0D0', '616E88', 'B48EAD', '3B4252', '434C5E', '4C566A', 'D8DEE9'],
-    'solarized-light':  ['vs',      'FDF6E3', '657B83', '859900', '2AA198', '268BD2', '93A1A1', 'D33682', 'EEE8D5', 'EEE8D5', '93A1A1', '657B83']
+    'solarized-light':  ['vs',      'FDF6E3', '657B83', '859900', '2AA198', '268BD2', '93A1A1', 'D33682', 'EEE8D5', 'EEE8D5', '93A1A1', '657B83'],
+    // Accessibility (src/ui/color_themes.py): Monaco's high-contrast bases
+    // add outlines around the current line, focus and selections.
+    'high-contrast-dark':  ['hc-black', '000000', 'FFFFFF', '7CC0FF', 'FFD27F', 'FFF36B', 'C8C8C8', 'FFAD5C', '1A1A1A', '1F4F8F', 'C8C8C8', 'FFD60A'],
+    'high-contrast-light': ['hc-light', 'FFFFFF', '000000', '0039A6', 'A31515', '6D1FA8', '2F5F2F', '005B66', 'E8E8E8', 'B3D7FF', '3D3D3D', '000000'],
+    'distinct-colors-dark':     ['vs-dark',  '0D1117', 'E6EDF3', '56B4E9', 'F0E442', 'E6A0C4', '8B949E', 'E69F00', '161B22', '1D3F66', '6E7681', 'E6EDF3'],
+    'distinct-colors-light':    ['vs',       'FFFFFF', '1F2328', '0072B2', '9A4A00', '9C3F72', '656D76', '00658F', 'F6F8FA', 'CCE4F6', '8C959F', '1F2328']
 };
 var _CX_BUILTIN_THEMES = { 'dark-plus': 'vs-dark', 'light-plus': 'vs' };
 window.__cortexEditorTheme = window.__cortexEditorTheme || 'auto';

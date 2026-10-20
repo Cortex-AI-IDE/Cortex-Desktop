@@ -15,6 +15,7 @@ Architecture:
 import json
 import time
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,6 +23,47 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.utils.logger import get_logger
 
 log = get_logger("semantic_memory")
+
+# ---------------------------------------------------------------------------
+# Query cache
+# ---------------------------------------------------------------------------
+# The query embedding is a network round-trip. Measured on a real session it
+# cost 1.9-3.4 s and was paid before every prompt. Repeating a prompt (a
+# retry, a queued prompt, the same text sent twice) must not pay it again.
+_SEARCH_CACHE: "OrderedDict[Tuple[str, int], List[Tuple[SemanticMemoryEntry, float]]]" = OrderedDict()
+_SEARCH_CACHE_LOCK = threading.Lock()
+_SEARCH_CACHE_MAX = 32
+
+# How long a prompt may wait for the optional "Relevant Past Sessions"
+# section before it goes out without it. The section is supplementary
+# context; a slow embedding server must not hold up the turn.
+PROMPT_SECTION_BUDGET_S = 1.5
+
+
+def _cache_key(query: str, top_k: int) -> Tuple[str, int]:
+    """Stable key for a query: case and whitespace are not significant."""
+    return (" ".join(query.lower().split())[:400], top_k)
+
+
+def _cache_get(query: str, top_k: int) -> Optional[List[Tuple["SemanticMemoryEntry", float]]]:
+    """Cached results for this query, or None. Moves it to the fresh end."""
+    key = _cache_key(query, top_k)
+    with _SEARCH_CACHE_LOCK:
+        hit = _SEARCH_CACHE.get(key)
+        if hit is not None:
+            _SEARCH_CACHE.move_to_end(key)
+        return hit
+
+
+def _cache_put(query: str, top_k: int,
+               results: List[Tuple["SemanticMemoryEntry", float]]) -> None:
+    """Store results, dropping the least recently used beyond the cap."""
+    key = _cache_key(query, top_k)
+    with _SEARCH_CACHE_LOCK:
+        _SEARCH_CACHE[key] = results
+        _SEARCH_CACHE.move_to_end(key)
+        while len(_SEARCH_CACHE) > _SEARCH_CACHE_MAX:
+            _SEARCH_CACHE.popitem(last=False)
 
 # ---------------------------------------------------------------------------
 # Embedding backend — try SiliconFlow first, fall back gracefully
@@ -159,6 +201,11 @@ class SemanticMemoryIndex:
         if not self._entries:
             return []
 
+        cached = _cache_get(query, top_k)
+        if cached is not None:
+            log.debug("[SEMANTIC] cache hit for q=%r", query[:60])
+            return cached
+
         embedder = _get_embedder()
         if embedder is None:
             log.warning("[SEMANTIC] No embedder available for search")
@@ -187,6 +234,7 @@ class SemanticMemoryIndex:
                 results.append((entry, sim))
 
         log.info(f"[SEMANTIC] search(q={query!r}) → {len(results)} results")
+        _cache_put(query, top_k, results)
         return results
 
     def build_prompt_section(self, user_message: str, max_entries: int = INJECT_TOP_N) -> str:
@@ -228,6 +276,41 @@ class SemanticMemoryIndex:
             lines.append("")
 
         return "\n".join(lines)
+
+    def build_prompt_section_within(
+        self,
+        user_message: str,
+        max_entries: int = INJECT_TOP_N,
+        budget_s: float = PROMPT_SECTION_BUDGET_S,
+    ) -> str:
+        """The prompt section, or "" when the search outlasts *budget_s*.
+
+        The query embedding is a network round-trip: 1.9-3.4 s measured on a
+        real session, paid on the GUI thread while the turn's system prompt
+        was being assembled. That is why the first message of a session sat
+        still before the request even left. This section is supplementary
+        context, so the turn goes out without it and the worker runs on: it
+        fills the query cache, and the next prompt that repeats this text
+        gets the section with no wait (``search`` serves it from the cache).
+        """
+        if not self._entries:
+            return ""
+
+        box: List[str] = []
+
+        def _work() -> None:
+            try:
+                box.append(self.build_prompt_section(user_message, max_entries=max_entries))
+            except Exception as exc:
+                log.debug("[SEMANTIC] budgeted section failed: %s", exc)
+
+        worker = threading.Thread(target=_work, daemon=True, name="semantic-section")
+        worker.start()
+        worker.join(max(0.0, float(budget_s)))
+        if worker.is_alive():
+            log.info("[SEMANTIC] section not ready within %.1fs, sending without it", budget_s)
+            return ""
+        return box[0] if box else ""
 
     def count(self) -> int:
         """Return the number of stored entries."""

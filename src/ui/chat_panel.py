@@ -27,6 +27,7 @@ import base64
 import io
 import json
 import logging
+import math
 from src.utils.logger import get_logger as _get_cortex_logger
 # Wire this module's logger into ~/.cortex/logs/cortex.log, plain
 # logging.getLogger(__name__) has no file handler, so every ChatPanel
@@ -3349,6 +3350,328 @@ class DiffCard(CollapsibleCard):
         pass
 
 
+def compact_activity() -> bool:
+    """Settings -> Appearance -> Chat activity: "compact" (default) or "detailed".
+
+    Compact is the Claude Code-style chat: only what the AI says to you stays
+    in the stream; thoughts, tool calls and diffs between two pieces of its
+    text fold into one ActivityGroup line. Detailed is the original view,
+    every card shown. Read at the start of each turn and on restore.
+    """
+    try:
+        from src.config.settings import get_settings
+        return str(get_settings().get("ui", "chat_activity", default="compact")
+                   or "compact").lower() != "detailed"
+    except Exception:
+        return True
+
+
+_ACT_KIND = {
+    # normalize_tool_name() kind -> activity bucket
+    "terminal": "cmd", "read": "read", "grep": "search", "glob": "search",
+    "search": "search", "list_dir": "list", "web_search": "web", "web_fetch": "fetch",
+    "edit": "edit", "write": "write",
+    # The names saved with a reply are the cards' DISPLAY labels
+    # (tool_cards.py): restore sees "Run", "Wrote", "Fetch", not "Bash".
+    "run": "cmd", "wrote": "write", "fetch": "fetch", "list": "list",
+    "shell": "cmd", "execute": "cmd",
+}
+
+
+class ActivityGroup(CollapsibleCard):
+    """One quiet line for everything between two pieces of the AI's text.
+
+    Claude Code desktop's chat shows the assistant's words to the user, and
+    folds the work in between - thoughts, Bash/Grep/Glob/Read, edits and
+    their diffs - behind a single muted summary such as
+        Ran 2 commands, read deploy.sh, edited deploy.sh +10 -6 ›
+    Clicking it opens the original cards (ThoughtsBlock, ToolGroup, DiffCard)
+    unchanged inside. While the agent is working the line is live: a spinner
+    and the current step ("Running npm test…"). Permission cards, questions,
+    the to-do list and the turn's edited-files summary are never folded:
+    they are placed in the message itself, which also ends the group.
+
+    The summary is built from its own tally (note_* methods), fed by the live
+    tool events and, on restore, by the saved blocks - so the persisted
+    timeline format does not change.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__("", header_id="activityHeader", label_id="activityLabel",
+                         collapsed=True, parent=parent)
+        self.setObjectName("activityGroup")
+        self._frame_qss = self._activity_qss
+        self.setStyleSheet(self._activity_qss())
+        self._tools: dict = {}          # tool_id -> [bucket, name, arg, state]
+        self._order: list = []
+        self._thoughts = 0
+        self._diffs: dict = {}          # filename -> [added, removed]
+        self._live = True
+        # Line up with the AI's text: prose blocks carry their own ~18px
+        # document padding, the activity line has none.
+        self._v.setContentsMargins(18, 0, 0, 0)
+        # Claude Code puts the chevron AFTER the words: "Ran 2 commands ›".
+        h = self._header_layout
+        h.setContentsMargins(0, 2, 0, 2)
+        h.setSpacing(6)
+        h.removeWidget(self.chev)
+        self._spin = None
+        try:
+            self._spin = GridSpinner(size=12, color=T['mono_muted'])
+            h.insertWidget(0, self._spin)
+        except Exception:
+            self._spin = None
+        self.label.setTextFormat(Qt.TextFormat.RichText)
+        h.insertWidget(h.indexOf(self.label) + 1, self.chev)
+        self.body_layout.setContentsMargins(12, 4, 0, 6)
+        self.body.setObjectName("activityBody")
+        self.body.setStyleSheet(
+            f"QWidget#activityBody {{ background: transparent; border-left: 1px solid {T['border']}; }}")
+        self.header.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.header.setAccessibleName("Show the steps")
+        self._style()
+        self._refresh()
+
+    # ---- look -------------------------------------------------------
+    def _activity_qss(self) -> str:
+        return "QFrame#activityGroup { border: none; background: transparent; }"
+
+    def _style(self):
+        try:
+            self.label.setStyleSheet(
+                f"color:{T['mono_muted']}; font-family:{T['font_ui']}; font-size:13px;")
+            self.chev.setStyleSheet(f"color:{T['mono_muted']}; font-size:12px;")
+        except RuntimeError:
+            pass
+
+    def retheme(self):
+        try:
+            self.setStyleSheet(self._activity_qss())
+            self.body.setStyleSheet(
+                f"QWidget#activityBody {{ background: transparent; border-left: 1px solid {T['border']}; }}")
+            self._style()
+            self._refresh()
+        except RuntimeError:
+            pass
+
+    def eventFilter(self, a0, a1):
+        if a0 == self.header and a1 is not None and a1.type() == QEvent.Type.KeyPress:
+            if a1.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                self.toggle()
+                return True
+        return super().eventFilter(a0, a1)
+
+    def _on_expanded(self):
+        # Cards built while the body was hidden measured a zero width; let
+        # them fit to the real one now.
+        for w in self.body.findChildren(QWidget):
+            fit = getattr(w, "_fit", None)
+            if callable(fit):
+                QTimer.singleShot(0, fit)
+
+    # ---- content ----------------------------------------------------
+    def add_block(self, w):
+        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.body_layout.addWidget(w)
+
+    def blocks(self) -> list:
+        out = []
+        for i in range(self.body_layout.count()):
+            item = self.body_layout.itemAt(i)
+            w = item.widget() if item else None
+            if w is not None:
+                out.append(w)
+        return out
+
+    def note_thought(self):
+        self._thoughts += 1
+        self._refresh()
+
+    def note_tool_start(self, tool_id, name, arg):
+        try:
+            from src.ui.tool_cards import normalize_tool_name
+            kind = normalize_tool_name(str(name or ""))
+        except Exception:
+            kind = ""
+        raw = str(name or "")
+        if raw.startswith("mcp__") or raw.lower().startswith("mcp:"):
+            bucket = "mcp"
+        else:
+            bucket = _ACT_KIND.get(kind) or _ACT_KIND.get(raw.strip().lower(), "other")
+        if isinstance(arg, dict):
+            for key in ("command", "pattern", "query", "file_path", "path", "url", "file"):
+                if arg.get(key):
+                    arg = arg[key]
+                    break
+            else:
+                arg = ""
+        tid = str(tool_id)
+        if tid not in self._tools:
+            self._order.append(tid)
+        self._tools[tid] = [bucket, raw, " ".join(str(arg or "").split()), "run"]
+        self._refresh()
+
+    def note_tool_end(self, tool_id, ok=True):
+        t = self._tools.get(str(tool_id))
+        if t is not None:
+            t[3] = "ok" if ok else "fail"
+            self._refresh()
+
+    def note_diff(self, filename, added, removed):
+        name = str(filename or "").replace("\\", "/").split("/")[-1] or "a file"
+        d = self._diffs.setdefault(name, [0, 0])
+        d[0] += int(added or 0)
+        d[1] += int(removed or 0)
+        self._refresh()
+
+    def finish(self):
+        """The AI moved on (wrote to the user, or the turn ended)."""
+        self._live = False
+        for t in self._tools.values():
+            if t[3] == "run":
+                t[3] = "ok"
+        self._refresh()
+
+    # ---- the summary --------------------------------------------------
+    @staticmethod
+    def _short(text, n=48):
+        text = str(text or "")
+        return text if len(text) <= n else text[:n - 1] + "\u2026"
+
+    @staticmethod
+    def _base(path):
+        return str(path or "").replace("\\", "/").rstrip("/").split("/")[-1]
+
+    def _running_phrase(self):
+        for tid in reversed(self._order):
+            bucket, name, arg, state = self._tools[tid]
+            if state != "run":
+                continue
+            if bucket == "cmd":
+                return "Running " + self._short(arg or "a command")
+            if bucket == "read":
+                return "Reading " + (self._base(arg) or "a file")
+            if bucket == "search":
+                return "Searching " + (("for " + self._short(arg, 32)) if arg else "the code")
+            if bucket == "list":
+                return "Listing " + (self._base(arg) or "a folder")
+            if bucket in ("edit", "write"):
+                return ("Editing " if bucket == "edit" else "Writing ") + (self._base(arg) or "a file")
+            if bucket == "web":
+                return "Searching the web"
+            if bucket == "fetch":
+                return "Fetching " + self._short(arg, 40)
+            if bucket == "mcp":
+                return "Using " + self._mcp_server(name)
+            return "Using " + (name or "a tool")
+        return ""
+
+    @staticmethod
+    def _mcp_server(name):
+        raw = str(name or "")
+        if raw.startswith("mcp__"):
+            parts = raw.split("__")
+            return parts[1] if len(parts) > 1 else raw
+        return raw.split(":")[1] if raw.lower().startswith("mcp:") and ":" in raw else raw
+
+    def summary_parts(self) -> list:
+        by = {}
+        for tid in self._order:
+            bucket, name, arg, state = self._tools[tid]
+            by.setdefault(bucket, []).append((name, arg))
+        parts = []
+        cmds = by.get("cmd", [])
+        if cmds:
+            parts.append("ran a command" if len(cmds) == 1 else f"ran {len(cmds)} commands")
+        reads = by.get("read", [])
+        if reads:
+            files = []
+            for _, a in reads:
+                b = self._base(a)
+                if b and b not in files:
+                    files.append(b)
+            parts.append(f"read {files[0]}" if len(files) == 1 else f"read {len(files) or len(reads)} files")
+        srch = by.get("search", [])
+        if srch:
+            parts.append("searched the code" if len(srch) == 1 else f"searched {len(srch)} times")
+        lst = by.get("list", [])
+        if lst:
+            parts.append("listed a folder" if len(lst) == 1 else f"listed {len(lst)} folders")
+        if self._diffs:
+            names = list(self._diffs)
+            parts.append(f"edited {names[0]}" if len(names) == 1 else f"edited {len(names)} files")
+        else:
+            ed = by.get("edit", []) + by.get("write", [])
+            if ed:
+                files = {self._base(a) for _, a in ed if a}
+                parts.append(f"edited {next(iter(files))}" if len(files) == 1
+                             else f"edited {len(files) or len(ed)} files")
+        if by.get("web"):
+            parts.append("searched the web")
+        fetch = by.get("fetch", [])
+        if fetch:
+            parts.append("fetched a page" if len(fetch) == 1 else f"fetched {len(fetch)} pages")
+        mcp = []
+        for n, _ in by.get("mcp", []):
+            srv = self._mcp_server(n)
+            if srv not in mcp:
+                mcp.append(srv)
+        if mcp:
+            parts.append("used " + ", ".join(mcp))
+        other = by.get("other", [])
+        if other:
+            names = []
+            for n, _ in other:
+                if n and n not in names:
+                    names.append(n)
+            parts.append(f"used {names[0]}" if len(names) == 1 else f"used {len(other)} tools")
+        if not parts and self._thoughts:
+            parts.append("thought it through")
+        return parts
+
+    def _refresh(self):
+        try:
+            import html as _h
+            failed = sum(1 for t in self._tools.values() if t[3] == "fail")
+            parts = self.summary_parts()
+            if self._live:
+                text = self._running_phrase() or (", ".join(parts) if parts else "Thinking")
+                text = text[:1].upper() + text[1:] + "\u2026"
+            else:
+                text = ", ".join(parts) if parts else "Worked"
+                text = text[:1].upper() + text[1:]
+            html_txt = _h.escape(text)
+            # Double-quoted style attributes: the font_mono token itself
+            # contains single quotes ('Ubuntu Mono', ...).
+            mono = str(T['font_mono']).replace('"', "'")
+            if self._diffs and not (self._live and self._running_phrase()):
+                a = sum(v[0] for v in self._diffs.values())
+                r = sum(v[1] for v in self._diffs.values())
+                if a:
+                    html_txt += f' <span style="color:{T["green"]};font-family:{mono};font-size:12px;">+{a}</span>'
+                if r:
+                    html_txt += f' <span style="color:{T["red"]};font-family:{mono};font-size:12px;">\u2212{r}</span>'
+            if failed:
+                html_txt += f' <span style="color:{T["red"]};">&middot; {failed} failed</span>' 
+            self.label.setText(html_txt)
+            self.header.setAccessibleDescription(text)
+            if self._spin is not None:
+                if self._live:
+                    self._spin.show()
+                    try:
+                        self._spin.start()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self._spin.stop()
+                    except Exception:
+                        pass
+                    self._spin.hide()
+        except RuntimeError:
+            pass
+
+
 class CreatingCard(QFrame):
     """Animated 'Creating...' row shown while a file is being written."""
     def __init__(self, filename: str, parent=None):
@@ -5007,10 +5330,13 @@ class MessageWidget(QWidget):
             _paint_invocation_chips(self._user_label.document(), display)
 
     # ----- ordered-block builders (called by the timeline router) -----
-    def new_thoughts(self) -> ThoughtsBlock:
+    def new_thoughts(self, into=None) -> ThoughtsBlock:
         b = ThoughtsBlock()
         b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._card_v.addWidget(b)
+        if into is not None:
+            into.add_block(b)
+        else:
+            self._card_v.addWidget(b)
         return b
 
     def new_prose(self, streaming: bool = False) -> QTextBrowser:
@@ -5025,11 +5351,33 @@ class MessageWidget(QWidget):
         self._card_v.addWidget(b)
         return b
 
-    def new_tool_group(self) -> ToolGroup:
+    def new_tool_group(self, into=None) -> ToolGroup:
         g = ToolGroup()
         g.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        if into is not None:
+            into.add_block(g)
+        else:
+            self._card_v.addWidget(g)
+        return g
+
+    def new_activity(self) -> "ActivityGroup":
+        """A fresh activity line at the end of this reply (compact chat)."""
+        g = ActivityGroup()
         self._card_v.addWidget(g)
         return g
+
+    def last_block(self):
+        """The widget at the end of this reply, or None."""
+        try:
+            n = self._card_v.count()
+            for i in range(n - 1, -1, -1):
+                item = self._card_v.itemAt(i)
+                w = item.widget() if item else None
+                if w is not None:
+                    return w
+        except RuntimeError:
+            pass
+        return None
 
     def edited_files_section(self) -> "EditedFilesSection":
         # lazily created, always appended at the END of the turn's blocks
@@ -5041,6 +5389,14 @@ class MessageWidget(QWidget):
     # ---- serialization (save/restore) ----
     def serialize(self) -> dict | None:
         """Serialize this message to a JSON-friendly dict for persistence."""
+        # Collapsed to a one-line label to save memory (ChatPanel.
+        # _collapse_message): its widgets are gone, so return what it held
+        # just before. Without this a long session lost its older messages
+        # from saved history - 15 of 30 replies "serialized to nothing" on
+        # 2026-10-20, and user prompts, which the save guard does not cover,
+        # were dropped outright.
+        if getattr(self, "_collapsed_to_label", False):
+            return getattr(self, "_collapsed_data", None)
         if self.role == "user":
             text = ""
             if hasattr(self, "_user_label"):
@@ -5059,6 +5415,10 @@ class MessageWidget(QWidget):
             except RuntimeError:
                 # Qt layout already deleted, widget is being destroyed
                 return None
+            # An ActivityGroup (compact chat) is only a fold: save the cards
+            # inside it in order, so the timeline format stays flat and a
+            # chat saved in one view restores in the other.
+            _flat = []
             for i in range(count):
                 try:
                     item = self._card_v.itemAt(i)
@@ -5067,6 +5427,14 @@ class MessageWidget(QWidget):
                 w = item.widget() if item else None
                 if w is None:
                     continue
+                if isinstance(w, ActivityGroup):
+                    try:
+                        _flat.extend(w.blocks())
+                    except RuntimeError:
+                        pass
+                else:
+                    _flat.append(w)
+            for w in _flat:
                 try:
                     # Check if the C++ object is still alive
                     w.objectName()
@@ -5272,9 +5640,14 @@ class MessageWidget(QWidget):
                          "content": _RESTORE_HIDDEN_NOTE % _dropped}]
                        + _blocks[-_MAX_BLOCKS_ON_RESTORE:])
 
+        # Compact chat: short sentences before the last tool call are the AI
+        # talking to the user ("Checking the deploy script now."), so they
+        # stay visible text; the steps between them fold into activity lines.
+        # The detailed view keeps turning them into thoughts, as before.
+        _compact = compact_activity()
         _last_act = max((i for i, b in enumerate(_blocks)
                          if b.get("type") in ("tools", "diff")), default=-1)
-        if _last_act > 0:
+        if _last_act > 0 and not _compact:
             for _i, _b in enumerate(_blocks):
                 if _b.get("type") == "prose" and _i < _last_act:
                     _md = (_b.get("md") or _b.get("content") or "").strip()
@@ -5284,10 +5657,25 @@ class MessageWidget(QWidget):
 
         msg._restore_hidden_blocks = _hidden_blocks
         # assistant: rebuild blocks
+        _grp = None
+
+        def _group():
+            nonlocal _grp
+            if not _compact:
+                return None
+            if _grp is None or msg.last_block() is not _grp:
+                if _grp is not None:
+                    _grp.finish()
+                _grp = msg.new_activity()
+            return _grp
+
         for bd in _blocks:
             bt = bd.get("type")
             if bt == "thoughts":
-                tb = msg.new_thoughts()
+                _g = _group()
+                tb = msg.new_thoughts(into=_g)
+                if _g is not None:
+                    _g.note_thought()
                 _t_content = bd.get("content", "")
                 # Collapse a saved repetition loop (see src/ai/reasoning_loop.py).
                 try:
@@ -5515,9 +5903,15 @@ class MessageWidget(QWidget):
                 if _fn and _hl:
                     dc = DiffCard(_fn, _hl, _a, _rm)
                     dc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-                    msg._card_v.addWidget(dc)
+                    _g = _group()
+                    if _g is not None:
+                        _g.add_block(dc)
+                        _g.note_diff(_fn, _a, _rm)
+                    else:
+                        msg._card_v.addWidget(dc)
             elif bt == "tools":
-                tg = msg.new_tool_group()
+                _g = _group()
+                tg = msg.new_tool_group(into=_g)
                 for idx, td in enumerate(bd.get("items", [])):
                     _name = td.get("name", "")
                     _arg = td.get("arg", "")
@@ -5525,12 +5919,18 @@ class MessageWidget(QWidget):
                         from src.ui.tool_cards import normalize_tool_name
                         tg.add_tool(f"restored_{idx}", _name, _arg,
                                     kind=normalize_tool_name(_name))
+                        if _g is not None:
+                            _g.note_tool_start(f"r{id(tg)}_{idx}", _name, _arg)
                 # Restored tools already finished. add_tool only queues rows
                 # (it returns None, so the old per-row spinner stop never ran):
                 # build them now and settle the group, which stops the row
                 # spinners and marks the header done.
                 tg._flush_tools()
                 tg.freeze()
+        if _grp is not None:
+            _grp.finish()
+        for _g in msg.findChildren(ActivityGroup):
+            _g.finish()
         return msg
 
 
@@ -5769,13 +6169,67 @@ class StreamingCursor(QWidget):
 # ============================================================
 # Chip colours for skills:/mcp: tokens: (text, background). The background is
 # translucent so the same pair reads on the dark and the light theme.
+#
+# skills: wears the theme's accent. mcp: takes its own hue from the colour
+# theme's palette - the first of these that sits well away from the accent
+# on the colour wheel, so the two chips never look alike: violet next to
+# Cortex's lime, green next to Dracula's purple, purple next to a blue accent.
+# "magenta" is the terminal's bright magenta (its pink).
+_MCP_CHIP_HUES = ("purple", "magenta", "green", "cyan", "blue", "orange")
+# The Cortex theme has no palette of its own: violet, pink, teal, blue.
+_MCP_CHIP_FALLBACK = {True: ("#b48cff", "#ff7ac8", "#4fd6c8", "#6fa8ff"),
+                      False: ("#7444d0", "#c13a85", "#0e8277", "#2d63c8")}
+_MCP_CHIP_MIN_GAP = 75          # degrees of hue between the two chips
+
+
+def _hue_gap(a: QColor, b: QColor) -> int:
+    ha, hb = a.hslHue(), b.hslHue()
+    if ha < 0 or hb < 0:        # grey: no hue
+        return 0
+    d = abs(ha - hb) % 360
+    return min(d, 360 - d)
+
+
+def _mcp_chip_hue(dark: bool) -> QColor:
+    """The mcp: chip's colour for the live colour theme."""
+    from src.ui.color_themes import THEMES, color_theme
+    theme = THEMES.get(color_theme())
+    if theme:
+        ui, ansi = theme["ui"], theme.get("ansi") or []
+        named = dict(ui, magenta=(ansi[13] if dark else ansi[5]) if len(ansi) > 13 else "")
+        cands = [named[k] for k in _MCP_CHIP_HUES if named.get(k)]
+    else:
+        cands = list(_MCP_CHIP_FALLBACK[dark])
+    accent = QColor(T['accent_fill'])
+    cols = [QColor(c) for c in cands]
+    for c in cols:
+        if _hue_gap(c, accent) >= _MCP_CHIP_MIN_GAP:
+            return c
+    return max(cols, key=lambda c: _hue_gap(c, accent)) if cols else QColor(T['muted'])
+
+
+def _readable_on(fg: QColor, bg: QColor, dark: bool, ratio: float = 4.5) -> QColor:
+    """`fg` made lighter (dark theme) or darker (light theme) until it reads on `bg`."""
+    from src.ui.spinner import _contrast
+    c = QColor(fg)
+    for _ in range(20):
+        if _contrast(c, bg) >= ratio:
+            break
+        c = c.lighter(112) if dark else c.darker(112)
+    return c
+
+
 def _chip_colors(kind: str):
     """(text, background) for a skills:/mcp: chip, read from the live theme."""
     if kind == "skill":
         bg = QColor(T['accent_fill']); bg.setAlpha(56)
         return T['accent'], bg
-    bg = QColor(T['muted']); bg.setAlpha(46)
-    return T['text'], bg
+    from src.ui.spinner import _luminance
+    page = QColor(T['bg_input'])
+    dark = _luminance(page) < 0.4
+    hue = _mcp_chip_hue(dark)
+    bg = QColor(hue); bg.setAlpha(56)
+    return _readable_on(hue, page, dark).name(), bg
 
 
 def _paint_invocation_chips(doc, text: str) -> bool:
@@ -5922,8 +6376,14 @@ class SpellCheckInput(QTextEdit):
             cursor.select(cursor.SelectionType.Document)
             cursor.mergeCharFormat(_clear)
 
-            # 2️⃣ Apply red underline ONLY to actual misspelled words
+            # 2️⃣ Apply red underline ONLY to actual misspelled words. Not
+            # inside a skills:/mcp: chip: "mcp:chrome-devtools" is a name
+            # picked from the menu, not a typo.
+            from src.core.invocation_tokens import TOKEN_RE
+            chips = [m.span() for m in TOKEN_RE.finditer(text)]
             for match in re.finditer(r"\b[a-zA-Z']+\b", text):
+                if any(a <= match.start() < b for a, b in chips):
+                    continue
                 word = match.group().strip("'")
                 if not word or len(word) < 2:
                     continue
@@ -7181,6 +7641,10 @@ class InputArea(QWidget):
             self._row_sep.setStyleSheet(
                 f"background:{T['separator']}; border:none; margin:2px 2px 3px 2px;")
             self._loader_label.setStyleSheet(f"color:{T['status_running']}; font-size:11px;")
+            # The stylesheet swap re-polishes the input and can change its
+            # resolved font metrics; the box height must follow or the text
+            # is clipped after the switch (reported 2026-10-20).
+            self._autogrow()
         except RuntimeError:
             pass  # widgets torn down mid-switch
 
@@ -7663,9 +8127,36 @@ class InputArea(QWidget):
             self._pending_images = []
         self._pending_images.extend(images)
 
+    def resizeEvent(self, e):
+        """Width changes re-wrap typed text; the height has to follow.
+
+        Without this the box kept the height of the old wrap after a window
+        resize and the extra lines were cut off (no contentsChanged fires on
+        a re-wrap).
+        """
+        super().resizeEvent(e)
+        self._autogrow()
+
+    def _input_chrome(self) -> int:
+        """Vertical pixels the text does not own: QSS padding (8+8) + frame.
+
+        Measured from the widget rather than a constant, so it stays exact
+        under any font, theme or UI scale. 16 is the floor for the pre-show
+        case where the viewport has no geometry yet.
+        """
+        return max(self.input.height() - self.input.viewport().height(), 16)
+
     def _min_input_height(self) -> int:
-        """Single-line height + padding for the chat input."""
-        return self.input.fontMetrics().lineSpacing() + 16
+        """One line of text + the input's real chrome.
+
+        Was fontMetrics().lineSpacing() + 16, which forgot the QTextDocument's
+        own 4+4px margins. The empty box came out 8px short, so the placeholder
+        and the first keystrokes were drawn with their tops cut off (reported
+        2026-10-20). The document knows its true one-line height, margins
+        included.
+        """
+        doc = self.input.document()
+        return int(math.ceil(doc.size().height()) + self._input_chrome())
 
     def _apply_input_height(self, h: int):
         """Set the input widget to a fixed height."""
@@ -7688,16 +8179,12 @@ class InputArea(QWidget):
         if not self.input.toPlainText().strip():
             self._apply_input_height(self._min_input_height())
         else:
-            # Input has text, just ensure height is correct without reflowing.
-            # Don't call _autogrow() here, it calls setTextWidth() which
-            # reflows text. Instead, just check if height needs adjustment.
-            doc = self.input.document()
-            cur_w = doc.textWidth()
-            vp_w = self.input.viewport().width()
-            if cur_w > 0 and abs(cur_w - vp_w) > 2:
-                # Width changed significantly, need to recalculate
-                self._autogrow()
-            # else: width is same, height is fine, don't touch it
+            # Text present: re-check the height. _do_autogrow_inner only
+            # calls setTextWidth() when the width actually changed, so this
+            # no longer reflows the user's text - and the old "width is same,
+            # height is fine" skip left the box at a stale height after a
+            # theme switch (typed text clipped).
+            self._autogrow()
 
     def _autogrow(self):
         """Auto-grow input from single line up to ~6 lines.
@@ -7729,11 +8216,13 @@ class InputArea(QWidget):
             cur_w = doc.textWidth()
             if cur_w <= 0 or abs(cur_w - vp_w) > 2:
                 doc.setTextWidth(vp_w)
-            doc_h = int(doc.size().height())
-            # Add padding (8px top + 8px bottom = 16px)
-            content_h = doc_h + 16
+            # Document height (line boxes + its 4+4px margins) plus the
+            # widget's chrome. The old +16 counted only the QSS padding, so
+            # the box was 8px short and the top line clipped into the scroll.
+            content_h = int(math.ceil(doc.size().height()) + self._input_chrome())
             # Cap at ~6 lines for scrollbar
-            max_h = self.input.fontMetrics().lineSpacing() * 6 + 16
+            max_h = int(math.ceil(self.input.fontMetrics().lineSpacing() * 6)
+                        + 2 * doc.documentMargin() + self._input_chrome())
             new_h = min(content_h, max_h)
             self._apply_input_height(new_h)
             self.panel.setMinimumHeight(new_h + 4)
@@ -8951,9 +9440,15 @@ class ChatPanel(QWidget):
         self._root_bg = _QColor(T['bg'])
 
         # ── Header bar ──
+        # Scoped to #chatHeader, same reason as the footer's #chatFooter:
+        # a bare rule cascades border-bottom onto every child that does not
+        # set its own border (the brand, the project name).
         self._header = QWidget()
+        self._header.setObjectName("chatHeader")
         self._header.setFixedHeight(48)
-        self._header.setStyleSheet(f"background: transparent; border-bottom: 1px solid {T['border']};")
+        self._header.setStyleSheet(
+            "QWidget#chatHeader {"
+            f" background: transparent; border-bottom: 1px solid {T['border']}; }}")
         hbar = QHBoxLayout(self._header)
         hbar.setContentsMargins(16, 0, 16, 0)
         hbar.setSpacing(0)
@@ -9064,9 +9559,17 @@ class ChatPanel(QWidget):
         # ── Unified flat footer: context + input in one block ──
         # Clean flat border-top divides chat section from input section.
         # No border-radius, flat design throughout.
+        # The rule MUST be scoped to this widget (#chatFooter). A bare
+        # `QWidget { border-top }` set on the footer cascades to every
+        # descendant that does not set its own border, so the Tasks row, the
+        # Changed Files row, the loader row and the input area each painted
+        # an extra full-width hairline ("line behind the task / input
+        # section", glaring in the high-contrast themes).
         self._footer = QWidget()
+        self._footer.setObjectName("chatFooter")
         self._footer.setStyleSheet(
-            f"QWidget {{ background:transparent; border-top:1px solid {T['border']}; }}"
+            "QWidget#chatFooter {"
+            f" background:transparent; border-top:1px solid {T['border']}; }}"
         )
         footer_v = QVBoxLayout(self._footer)
         footer_v.setContentsMargins(0, 0, 0, 0)
@@ -9228,6 +9731,11 @@ class ChatPanel(QWidget):
         # Count what actually repaints this turn; reported in on_turn_done.
         self._get_paint_audit().arm()
         self._open_kind = None; self._open_block = None; self._prose_buf = ""
+        # Compact chat (Settings -> Appearance -> Chat activity): thoughts,
+        # tools and diffs fold into ActivityGroup lines. Decided per turn.
+        self._compact = compact_activity()
+        self._activity = None
+        self._hard_breaks = set()
         # Thinking left over from the previous turn must not open this one.
         self._think_buf = ""
         self._prose_blocks = []
@@ -9283,8 +9791,15 @@ class ChatPanel(QWidget):
             if self._open_block is not None and hasattr(self._open_block, "freeze"):
                 self._open_block.freeze()
             self._open_kind = kind
+            if kind == "prose":
+                # The AI is talking to the user again: the steps before this
+                # are one finished activity line.
+                self._end_activity()
             if kind == "think":
-                self._open_block = self._cur_msg.new_thoughts()
+                _grp = self._activity_group()
+                self._open_block = self._cur_msg.new_thoughts(into=_grp)
+                if _grp is not None:
+                    _grp.note_thought()
             elif kind == "prose":
                 self._open_block = self._cur_msg.new_prose(streaming=True)
                 self._open_block._rendered_len = 0
@@ -9318,7 +9833,7 @@ class ChatPanel(QWidget):
                 self._cursor.hide()
             elif kind == "tools":
                 # Each tool call gets its own group
-                self._open_block = self._cur_msg.new_tool_group()
+                self._open_block = self._cur_msg.new_tool_group(into=self._activity_group())
         finally:
             # ROOT CAUSE FIX: Removed updateGeometry(), it forces synchronous
             # layout during the freeze, which queues paint events that fire on
@@ -9341,6 +9856,50 @@ class ChatPanel(QWidget):
                 self._thaw_viewport()
             # NOTE: No deferred _autoscroll(), synchronous scroll inside freeze
             # is sufficient and avoids the 50ms jitter gap.
+
+    def _mark_hard_break(self):
+        """A tool call or file edit now separates the last text block from
+        whatever text comes next: never merge across it at turn end.
+
+        _render_prose_batched re-joins text blocks that do not end on a
+        paragraph break, because a thought interleaved MID-sentence splits one
+        sentence into two blocks. Text before a tool call ("I'll check the
+        deploy script first.") rarely ends with a blank line, so the final
+        answer was glued onto the first sentence and its own block emptied
+        (2026-10-20, both chat views)."""
+        if self._prose_blocks:
+            if not hasattr(self, "_hard_breaks"):
+                self._hard_breaks = set()
+            self._hard_breaks.add(id(self._prose_blocks[-1][0]))
+
+    def _activity_group(self):
+        """The ActivityGroup new thoughts / tools / diffs go into, or None in
+        the detailed view. A new one starts whenever something else (the AI's
+        text, a permission card, a question) was placed after the last one."""
+        if not getattr(self, "_compact", False) or self._cur_msg is None:
+            return None
+        g = getattr(self, "_activity", None)
+        try:
+            if g is not None and self._cur_msg.last_block() is g:
+                return g
+        except RuntimeError:
+            pass
+        if g is not None:
+            try:
+                g.finish()
+            except RuntimeError:
+                pass
+        self._activity = self._cur_msg.new_activity()
+        return self._activity
+
+    def _end_activity(self):
+        g = getattr(self, "_activity", None)
+        self._activity = None
+        if g is not None:
+            try:
+                g.finish()
+            except RuntimeError:
+                pass
 
     def _stop_cursor(self):
         """Stop and remove the streaming cursor if active."""
@@ -11076,10 +11635,21 @@ class ChatPanel(QWidget):
             self._rapid_insert_timer.timeout.connect(lambda: setattr(self, '_rapid_insert_mode', False))
             self._rapid_insert_timer.start()
         with self._stabilize_scroll():
-            # Force new tool block after text or thinking
-            if self._open_kind in ("prose", "think"):
+            # Force new tool block after thinking. NOT after prose: nulling
+            # the kind there made _ensure() skip saving the open prose block,
+            # so text written right before a tool call never got its final
+            # markdown render (bold, code, tables stayed raw) - 2026-10-20.
+            # _ensure("tools") switches away from prose on its own.
+            if self._open_kind == "think":
                 self._open_kind = None  # Force new block
             self._ensure("tools")
+            self._mark_hard_break()
+            _grp = getattr(self, "_activity", None)
+            if _grp is not None and getattr(self, "_compact", False):
+                try:
+                    _grp.note_tool_start(tool_id, name, arg)
+                except RuntimeError:
+                    pass
             # Normalize tool name for dispatch + spinner
             from src.ui.tool_cards import normalize_tool_name
             norm = normalize_tool_name(name)
@@ -11117,6 +11687,12 @@ class ChatPanel(QWidget):
         # Without this, end_tool() → _update_rich_card() rebuilds HTML → triggers
         # immediate layout recalc → visible flicker/jump.
         with self._stabilize_scroll():
+            _grp = getattr(self, "_activity", None)
+            if _grp is not None:
+                try:
+                    _grp.note_tool_end(tool_id, ok=(status == "ok"))
+                except RuntimeError:
+                    pass
             if self._open_kind == "tools" and self._open_block:
                 self._open_block.end_tool(tool_id, ok=(status == "ok"), result_data=result_data)
                 # Force new block on next text/thinking, but ONLY when a tool
@@ -11167,6 +11743,7 @@ class ChatPanel(QWidget):
         """Swap the CreatingCard for a live DiffCard, inline where it was created."""
         # Wrap in stabilize to prevent scroll jump when widgets are swapped
         with self._stabilize_scroll():
+            self._mark_hard_break()
             self._on_file_diff_inner(file_id, filename, hunk_lines)
 
     def _on_file_diff_inner(self, file_id, filename, hunk_lines):
@@ -11202,8 +11779,14 @@ class ChatPanel(QWidget):
         live = DiffCard(filename, hunk_lines, added, removed,
                        edit_state=self._edit_state)
 
-        # Add DiffCard directly to message (OUTSIDE ToolGroup)
-        if self._cur_msg:
+        # Add DiffCard directly to message (OUTSIDE ToolGroup); in the
+        # compact chat it folds into the current activity line, whose summary
+        # shows "edited <file> +a -r".
+        _grp = self._activity_group() if self._cur_msg else None
+        if _grp is not None:
+            _grp.add_block(live)
+            _grp.note_diff(filename, added, removed)
+        elif self._cur_msg:
             self._cur_msg._card_v.addWidget(live)
         else:
             self._ensure("tools")
@@ -11458,6 +12041,14 @@ class ChatPanel(QWidget):
         self.on_turn_done()
 
     def on_turn_done(self):
+        # Compact chat: every activity line of this reply is finished.
+        self._activity = None
+        try:
+            if self._cur_msg is not None:
+                for _g in self._cur_msg.findChildren(ActivityGroup):
+                    _g.finish()
+        except RuntimeError:
+            pass
         # Diagnostic: panel state at turn end. blocks=0 with empty buf means
         # nothing will render, the "summary missing / instant notification"
         # signature. Kept at INFO: one line per turn.
@@ -11592,7 +12183,9 @@ class ChatPanel(QWidget):
         while _i < len(blocks):
             _tb, _buf = blocks[_i]
             _j = _i
-            while _unsafe_boundary(_buf) and _j + 1 < len(blocks):
+            _hard = getattr(self, "_hard_breaks", set())
+            while (_unsafe_boundary(_buf) and _j + 1 < len(blocks)
+                   and id(blocks[_j][0]) not in _hard):
                 _j += 1
                 _buf += blocks[_j][1]
             _extras = [blocks[_k][0] for _k in range(_i + 1, _j + 1)]
@@ -13118,6 +13711,13 @@ class ChatPanel(QWidget):
 
     def _collapse_message(self, mw: MessageWidget):
         """Replace a MessageWidget's children with a single lightweight label."""
+        # Keep its saved form first: the widgets that serialize() reads are
+        # deleted below.
+        try:
+            mw._collapsed_data = mw.serialize()
+        except Exception as exc:
+            log.warning("[ChatPanel] could not keep a collapsed message: %s", exc)
+            return                      # never collapse what cannot be saved
         # Build a summary from the user text or first prose block
         summary = ""
         if mw.role == "user":
@@ -15288,9 +15888,13 @@ class ChatPanel(QWidget):
             self.update()
             self.container.set_bg(T['bg'])
             self._header.setStyleSheet(
-                f"background: transparent; border-bottom: 1px solid {T['border']};")
+                "QWidget#chatHeader {"
+                f" background: transparent; border-bottom: 1px solid {T['border']}; }}")
+            # Scoped to #chatFooter, see __init__: a bare QWidget rule here
+            # cascades border-top onto every widget inside the footer.
             self._footer.setStyleSheet(
-                f"QWidget {{ background:transparent; border-top:1px solid {T['border']}; }}")
+                "QWidget#chatFooter {"
+                f" background:transparent; border-top:1px solid {T['border']}; }}")
             # Both header buttons and the History dropdown, in the first pass of
             # the switch: History was left to the late stale-colour pass,
             # so it showed the previous theme for seconds on a long chat.

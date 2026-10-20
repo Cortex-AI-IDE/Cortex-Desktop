@@ -272,6 +272,20 @@ class SidebarWidget(QWidget):
         except Exception:
             pass
 
+    def set_side(self, side: str):
+        """'left' or 'right': which window edge the sidebar is on. On the
+        right, the page mirrors so the icon strip is the outer edge (VS Code).
+        Kept for a page that loads (or reloads) later."""
+        self._side = 'right' if str(side).lower() == 'right' else 'left'
+        self._push_side()
+
+    def _push_side(self):
+        try:
+            self._web_view.page().runJavaScript(
+                f"window.__cortexSetSidebarSide && window.__cortexSetSidebarSide('{getattr(self, '_side', 'left')}');")
+        except Exception as e:
+            log.debug(f"[Sidebar] side not applied: {e}")
+
     def _on_page_loaded(self, ok):
         if hasattr(self, '_load_safety_timer'):
             self._load_safety_timer.stop()
@@ -285,6 +299,8 @@ class SidebarWidget(QWidget):
             except Exception:
                 pass
         self.page_loaded.emit()  # notify main_window to hide startup overlay
+        if ok:
+            self._push_side()
         if not ok:
             log.error("[Sidebar] sidebar.html failed to load")
             try:

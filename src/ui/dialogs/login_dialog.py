@@ -1,22 +1,49 @@
 """The full-screen window Cortex shows when nobody is signed in.
 
 Shown before the main window exists, so it cannot use anything the IDE sets
-up: the palette and the wordmark are restated here from the same values the
-rest of the product uses.
+up. That is exactly why it must not hardcode a palette either: the first
+thing a user sees has to look like the product they configured, not like a
+different app that happens to share the logo.
 
-  colour     src/ui/tokens.py dark palette - #1e1e1e surfaces, #2a2a2e
-             hairlines, #06b6d4 accent, #e6edf3 / #8b949e text. The site's
-             green is deliberately not used: this window belongs to the IDE.
-  wordmark   the brand rule - "Cortex" at weight 800 with -0.02em tracking
-             over "AI IDE" at weight 700 with wide tracking, uppercase.
-             "AI IDE" is painted in the accent so the lockup carries the same
-             cyan as the in-app BrandLogo instead of reading as a grey label.
-             The emblem is sized against the wordmark's cap height rather than
-             the other way round, so the word stays the hero of the lockup.
-  type       Geist is the brand face but is not installed on Linux, so the
-             stack falls through Inter to Ubuntu, which carries the same
-             weights. Never leave this to the default sans: at weight 800 the
-             fallback is what the wordmark actually looks like.
+  colours    read from the SAME source the rest of Cortex reads, in this
+             order:
+               1. Settings -> Appearance -> Color theme. A named theme
+                  (Tokyo Night, Dracula, High Contrast Light, ...) carries
+                  its own `ui` palette in src/ui/color_themes.py, so those
+                  values are used directly.
+               2. Otherwise "Cortex (Dark / Light / System)", resolved from
+                  the saved mode through src/ui/tokens.py, which is what
+                  main.py already pointed at the saved theme before this
+                  dialog is built.
+             Nothing here is a literal colour. The old version painted
+             #141417 / #06b6d4 regardless of settings, so a Tokyo Night or
+             Light+ user met a dark grey sign-in card that belonged to no
+             theme at all.
+
+  contrast   every text colour is composited onto the surface it actually
+             sits on and nudged until it clears WCAG AA (4.5:1). Tokens are
+             authored for the app's own surfaces, and this screen puts text
+             on a canvas, a card and a button, so the pairing has to be
+             checked rather than assumed. The button's label colour is
+             chosen from the accent's luminance: a mid-blue accent needs
+             white ink, a yellow or lilac accent needs near-black.
+
+  wordmark   the brand rule, matching the site's lockup: the emblem sits
+             left of a two-line wordmark, "Cortex" at weight 700 with tight
+             tracking over "AI IDE" at weight 700 with wide tracking. The
+             emblem is sized against the two-line block, not against the
+             window, so the mark reads as part of the word rather than a
+             picture above a caption. The mark file is chosen by the
+             background it sits on: brand_mark_dark.png is the LIGHT-ink
+             mark (its name is the background, not the colour).
+
+  emblem     scaled at the window's device pixel ratio, so it stays crisp on
+             a HiDPI screen instead of being upsampled from logical pixels.
+
+  canvas     a faint dot grid, the same visual language as an editor's
+             canvas. It is drawn at 10% of the text colour, which is
+             visible structure on an empty screen and disappears once the
+             card is in front of it.
 
 One way in: the browser OAuth loopback flow. The password is typed on the web
 page and never here, so this window carries no credential fields at all.
@@ -32,28 +59,37 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QFontDatabase, QPixmap
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout,
                              QLabel, QProgressBar, QPushButton, QVBoxLayout,
                              QWidget)
 
 log = logging.getLogger(__name__)
 
-# ── palette, from src/ui/tokens.py ────────────────────────────────────────
-CANVAS   = "#141417"     # full-bleed field, a step under bg so the card lifts
-SURFACE  = "#1c1c20"
-HAIRLINE = "#2a2a2e"
-FIELD    = "#161616"
-TEXT     = "#e6edf3"
-MUTED    = "#8b949e"
-ACCENT   = "#06b6d4"
-ACCENT_HI = "#22d3ee"
-DANGER   = "#e06c75"
+# ── layout metrics, kept in one place so the rhythm cannot drift ───────────
+CARD_WIDTH      = 400
+CARD_RADIUS     = 14
+CARD_PAD_H      = 28
+CARD_PAD_V      = 26
+BUTTON_HEIGHT   = 44
+BUTTON_RADIUS   = 10
+MARK_PX         = 38      # emblem edge, sized against the wordmark block
+GAP_MARK        = 14      # emblem -> wordmark
+WORD_PX         = 28      # "Cortex"
+GAP_WORD        = 3       # "Cortex" -> "AI IDE", an optical gap
+SUB_PX          = 10      # "AI IDE"
+SUB_TRACK       = 2.3     # "AI IDE" tracking, wide and uppercase
+LOCKUP_TO_CARD  = 34
+CARD_TO_HELP    = 16
+STATUS_H        = 28
+DOT_STEP        = 26      # dot-grid pitch on the canvas
+DOT_SIZE        = 1
 
 
 def _asset(relative: str) -> str:
@@ -110,10 +146,300 @@ def _ui_font(size: int, weight: int, tracking: float = 0.0) -> QFont:
     return f
 
 
+# ── colour maths ───────────────────────────────────────────────────────────
+# Qt stylesheets accept "#rrggbb" everywhere, but the app's tokens also use
+# rgba() with a fractional alpha for text. Compositing to a solid hex here
+# means every colour this screen applies is unambiguous, and it is what makes
+# the contrast checks below measurable.
+
+_RGB_RE = re.compile(r"rgba?\(\s*([^)]+)\)")
+
+
+def _parse(color: str) -> tuple[int, int, int, float]:
+    """'#abc' / '#aabbcc' / '#aabbccdd' / 'rgb(...)' / 'rgba(...)' -> RGBA."""
+    c = str(color).strip()
+    if c.startswith("#"):
+        h = c[1:]
+        if len(h) == 3:
+            h = "".join(ch * 2 for ch in h)
+        if len(h) == 8:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16),
+                    int(h[6:8], 16) / 255.0)
+        if len(h) >= 6:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 1.0)
+    m = _RGB_RE.match(c)
+    if m:
+        parts = [p.strip() for p in m.group(1).replace("/", " ").split(",")]
+        if len(parts) >= 3:
+            r, g, b = (int(float(p)) for p in parts[:3])
+            a = 1.0
+            if len(parts) >= 4:
+                raw = parts[3]
+                a = float(raw[:-1]) / 100.0 if raw.endswith("%") else float(raw)
+            return r, g, b, max(0.0, min(1.0, a))
+    raise ValueError(f"unsupported colour: {color!r}")
+
+
+def _hex(rgb) -> str:
+    r, g, b = (max(0, min(255, int(round(v)))) for v in rgb[:3])
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _solid(color: str, over: str = "#000000") -> str:
+    """`color` composited onto the opaque `over` -> '#rrggbb'."""
+    r, g, b, a = _parse(color)
+    if a >= 0.999:
+        return _hex((r, g, b))
+    br, bg, bb, _ = _parse(over)
+    return _hex((r * a + br * (1 - a),
+                 g * a + bg * (1 - a),
+                 b * a + bb * (1 - a)))
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    """`t` of the way from colour `a` to colour `b`."""
+    t = max(0.0, min(1.0, t))
+    ar, ag, ab, _ = _parse(a)
+    br, bg, bb, _ = _parse(b)
+    return _hex((ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t))
+
+
+def _luminance(color: str) -> float:
+    """WCAG relative luminance."""
+    def channel(v: float) -> float:
+        v = v / 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b, _ = _parse(color)
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _contrast(a: str, b: str) -> float:
+    la, lb = _luminance(a), _luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _best_ink(bg: str) -> str:
+    """Black or white, whichever reads better on `bg`."""
+    return ("#0b0b0d" if _contrast(bg, "#0b0b0d") >= _contrast(bg, "#ffffff")
+            else "#ffffff")
+
+
+def _readable(color: str, bg: str, target: float = 4.5) -> str:
+    """`color` on `bg`, moved toward black or white until it clears `target`."""
+    c = _solid(color, bg)
+    if _contrast(c, bg) >= target:
+        return c
+    toward = ("#000000" if _contrast("#000000", bg) >= _contrast("#ffffff", bg)
+              else "#ffffff")
+    for i in range(1, 21):
+        cand = _mix(c, toward, i / 20.0)
+        if _contrast(cand, bg) >= target:
+            return cand
+    return toward
+
+
+def _saved_theme_id() -> str:
+    """The saved Settings -> Appearance -> Color theme id, "cortex" if none."""
+    try:
+        from src.ui.color_themes import THEMES, color_theme
+        tid = color_theme()
+        return tid if tid in THEMES else "cortex"
+    except Exception as exc:
+        log.debug("[Login] colour theme not readable: %s", exc)
+        return "cortex"
+
+
+def _saved_mode() -> str:
+    """The saved Dark / Light / System mode, resolved to "dark" or "light"."""
+    mode = "dark"
+    try:
+        from src.config.settings import get_settings
+        mode = str(get_settings().theme or "dark").lower()
+    except Exception as exc:
+        log.debug("[Login] theme mode not readable: %s", exc)
+    if mode not in ("dark", "light"):
+        try:
+            from src.config.theme_manager import _detect_system_theme
+            mode = _detect_system_theme()
+        except Exception:
+            mode = "dark"
+    return "light" if mode == "light" else "dark"
+
+
+def theme_palette(tid: str | None = None) -> dict:
+    """Every colour this screen paints, resolved for the saved appearance.
+
+    `tid` is only for tests and screenshots; production passes nothing.
+    """
+    tid = tid or _saved_theme_id()
+    if tid not in ("cortex",):
+        try:
+            from src.ui.color_themes import THEMES
+            entry = THEMES[tid]
+        except Exception:
+            entry = None
+        if entry:
+            base = entry["base"]
+            c = entry["ui"]
+            canvas, canvas_alt = c["bg"], c["bg_alt"]
+            surface, border = c["surface"], c["border"]
+            fg, fg_dim, muted = c["fg"], c["fg_dim"], c["muted"]
+            accent, danger, ok = c["accent"], c["red"], c["green"]
+            return _assemble(base, canvas, canvas_alt, surface, border,
+                             fg, fg_dim, muted, accent, danger, ok)
+
+    # Cortex's own look: main.py has already pointed these palettes at the
+    # saved Dark / Light / System mode (color_themes.apply_at_startup).
+    from src.ui import tokens
+    base = _saved_mode()
+    t = tokens.get_theme(base)
+    canvas = _solid(t["bg"], "#000000")
+    return _assemble(
+        base,
+        canvas,
+        _solid(t["bg_tertiary"], canvas),
+        _solid(t["bg_card"], canvas),
+        _solid(t["border"], canvas),
+        _solid(t["text"], canvas),
+        _solid(t["text_dim"], canvas),
+        _solid(t["muted"], canvas),
+        _solid(t["accent"], canvas),
+        _solid(t["error"], canvas),
+        _solid(t["green"], canvas),
+    )
+
+
+def _assemble(base: str, canvas: str, canvas_alt: str, surface: str,
+              border: str, fg: str, fg_dim: str, muted: str, accent: str,
+              danger: str, ok: str) -> dict:
+    """Check the pairings this screen actually uses, then build the palette."""
+    accent = _solid(accent, surface)
+    toward = "#ffffff" if base == "dark" else "#000000"
+    hover = _mix(accent, toward, 0.14)
+    press = _mix(accent, toward, 0.26)
+
+    off = _mix(accent, canvas, 0.80)
+    return {
+        "theme": base,
+        "canvas": canvas,
+        "canvas_alt": canvas_alt,
+        "surface": surface,
+        "border": border,
+        "fg": _readable(fg, surface),
+        "fg_dim": _readable(fg_dim, surface),
+        # The help line sits on the canvas, not on the card.
+        "muted": _readable(muted, canvas),
+        "accent": accent,
+        "accent_hover": hover,
+        "accent_press": press,
+        "accent_ink": _best_ink(accent),
+        "btn_off": off,
+        "btn_off_ink": _readable(fg_dim, off, 3.0),
+        "danger": _readable(danger, canvas),
+        "ok": _readable(ok, canvas),
+        # Dot grid: structure you notice only when the screen is empty.
+        "dots": _mix(canvas, fg, 0.10),
+    }
+
+
+def _qss(p: dict) -> str:
+    """One stylesheet for the window, every rule pinned to an object name.
+
+    A type selector set on a container cascades to its children (that is how
+    a `QWidget { border-top: ... }` rule once drew a hairline across every
+    unstyled row of the chat footer), so nothing here selects by type for a
+    property that would inherit into a child.
+    """
+    return f"""
+    QDialog#loginRoot {{ background: {p['canvas']}; }}
+    QLabel {{ color: {p['fg']}; background: transparent; }}
+    QFrame#loginCard {{
+        background: {p['surface']};
+        border: 1px solid {p['border']};
+        border-radius: {CARD_RADIUS}px;
+    }}
+    QLabel#loginNote {{ color: {p['fg_dim']}; }}
+    QLabel#loginHelp {{ color: {p['muted']}; }}
+    QPushButton#loginPrimary {{
+        background: {p['accent']};
+        color: {p['accent_ink']};
+        border: 2px solid transparent;
+        border-radius: {BUTTON_RADIUS}px;
+    }}
+    QPushButton#loginPrimary:hover {{ background: {p['accent_hover']}; }}
+    QPushButton#loginPrimary:pressed {{ background: {p['accent_press']}; }}
+    QPushButton#loginPrimary:focus {{ border: 2px solid {p['fg']}; }}
+    QPushButton#loginPrimary:disabled {{
+        background: {p['btn_off']};
+        color: {p['btn_off_ink']};
+    }}
+    QProgressBar#loginBusy {{
+        background: {p['border']};
+        border: none;
+        border-radius: 1px;
+    }}
+    QProgressBar#loginBusy::chunk {{
+        background: {p['accent']};
+        border-radius: 1px;
+    }}
+    QFrame#loginBar {{
+        background: {p['canvas_alt']};
+        border: none;
+        border-top: 1px solid {p['border']};
+    }}
+    QPushButton#loginGhost {{
+        color: {p['muted']};
+        background: transparent;
+        border: none;
+    }}
+    QPushButton#loginGhost:hover {{ color: {p['fg']}; }}
+    QPushButton#loginQuit {{
+        color: {p['muted']};
+        background: transparent;
+        border: none;
+    }}
+    QPushButton#loginQuit:hover {{ color: {p['danger']}; }}
+    """
+
+
 # How long to keep waiting for someone to finish signing in in their browser.
 # Generous on purpose: it can mean finding a password manager, or 2FA on a
 # phone that is in another room.
 BROWSER_TIMEOUT_SECONDS = 300
+
+
+class _DotField(QWidget):
+    """The empty canvas: the theme's background with a faint dot grid.
+
+    Drawn rather than styled because QSS has no repeating pattern. The grid
+    is the screen's one piece of structure: it makes the emptiness deliberate
+    instead of an unfinished page, and it is gone the moment the card covers
+    it.
+    """
+
+    def __init__(self, canvas: str, dots: str, parent=None):
+        super().__init__(parent)
+        self._canvas = QColor(canvas)
+        self._dots = QColor(dots)
+        self.setAutoFillBackground(False)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        try:
+            p.fillRect(self.rect(), self._canvas)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(self._dots)
+            w, h = self.width(), self.height()
+            y = DOT_STEP
+            while y < h:
+                x = DOT_STEP
+                while x < w:
+                    p.drawRect(x, y, DOT_SIZE, DOT_SIZE)
+                    x += DOT_STEP
+                y += DOT_STEP
+        finally:
+            p.end()
 
 
 class _LoginWorker(QThread):
@@ -182,38 +508,36 @@ class LoginDialog(QDialog):
 
     # brand_mark_DARK is the light-coloured mark - the name says which
     # background it is for, not what colour it is. brand_mark_light.png is
-    # near-black (measured 10.9/255) and vanishes on this canvas.
-    LOGO = _asset("src/assets/logo/brand_mark_dark.png")
+    # near-black (measured 10.9/255) and vanishes on a dark canvas.
+    LOGO_ON_DARK = _asset("src/assets/logo/brand_mark_dark.png")
+    LOGO_ON_LIGHT = _asset("src/assets/logo/brand_mark_light.png")
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, theme_id: str | None = None):
         super().__init__(parent)
         self.setWindowTitle("Cortex AI IDE")
         self.setModal(True)
+        self.setObjectName("loginRoot")
         self._worker: _LoginWorker | None = None
         self.user_info: dict | None = None
-        self.setStyleSheet(f"QDialog {{ background: {CANVAS}; }}")
+        self._p = theme_palette(theme_id)
+        self.setStyleSheet(_qss(self._p))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── centred column ────────────────────────────────────────────────
-        body = QWidget()
+        body = _DotField(self._p["canvas"], self._p["dots"])
         outer.addWidget(body, 1)
         col = QVBoxLayout(body)
         col.setContentsMargins(24, 24, 24, 24)
+        col.setSpacing(0)
         col.addStretch(2)
 
         col.addWidget(self._build_brand(), 0, Qt.AlignmentFlag.AlignHCenter)
-        col.addSpacing(34)
+        col.addSpacing(LOCKUP_TO_CARD)
         col.addWidget(self._build_card(), 0, Qt.AlignmentFlag.AlignHCenter)
-        col.addSpacing(18)
-
-        self._help = QLabel("Trouble signing in?  cortex-ide.app/support")
-        self._help.setFont(_ui_font(12, 400))
-        self._help.setStyleSheet(f"color:{MUTED};")
-        self._help.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        col.addWidget(self._help, 0, Qt.AlignmentFlag.AlignHCenter)
+        col.addSpacing(CARD_TO_HELP)
+        col.addWidget(self._build_help(), 0, Qt.AlignmentFlag.AlignHCenter)
         col.addStretch(3)
 
         outer.addWidget(self._build_status_bar())
@@ -221,107 +545,113 @@ class LoginDialog(QDialog):
 
     # ── brand ─────────────────────────────────────────────────────────────
 
-    # Lockup metrics, kept in one place so the ratio cannot drift when a single
-    # number is touched. The emblem is sized against the WORDMARK's cap height,
-    # not the other way round: at 54px over a 40px word it reads as ~1.9 cap
-    # heights, which is a balanced stacked lockup. The first version put an
-    # 84px emblem over a 42px word - 2.8 cap heights - so the lockup read as a
-    # giant icon with a caption under it, not as one brand unit.
-    MARK_PX   = 54      # emblem edge, px
-    GAP_MARK  = 20      # emblem -> wordmark
-    WORD_PX   = 40      # "Cortex"
-    GAP_WORD  = 7       # "Cortex" -> "AI IDE", an optical gap, not a box gap
-    SUB_PX    = 12      # "AI IDE"
-    SUB_TRACK = 3       # "AI IDE" tracking; also cancels its trailing advance
-
     def _build_brand(self) -> QWidget:
+        """Emblem left, two-line wordmark right: the site's lockup."""
         w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(GAP_MARK)
 
         mark = QLabel()
-        pix = QPixmap(self.LOGO)
+        mark.setStyleSheet("border: none;")
+        path = (self.LOGO_ON_DARK if self._p["theme"] == "dark"
+                else self.LOGO_ON_LIGHT)
+        pix = QPixmap(path)
         if not pix.isNull():
-            mark.setPixmap(pix.scaled(
-                self.MARK_PX, self.MARK_PX,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation))
+            # Scale in DEVICE pixels so a HiDPI screen gets a real 38px mark
+            # instead of a 38px image upsampled by a factor of two.
+            dpr = self.devicePixelRatioF() or 1.0
+            edge = int(round(MARK_PX * dpr))
+            scaled = pix.scaled(edge, edge,
+                                Qt.AspectRatioMode.KeepAspectRatio,
+                                Qt.TransformationMode.SmoothTransformation)
+            scaled.setDevicePixelRatio(dpr)
+            mark.setPixmap(scaled)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(mark)
-        v.addSpacing(self.GAP_MARK)
+        h.addWidget(mark, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # The wordmark rule: 800 tight over 700 wide-and-uppercase.
+        words = QWidget()
+        v = QVBoxLayout(words)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(GAP_WORD)
+
         top = QLabel("Cortex")
-        top.setFont(_ui_font(self.WORD_PX, 800, -0.8))
-        top.setStyleSheet(f"color:{TEXT};")
-        top.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.setFont(_ui_font(WORD_PX, 700, -WORD_PX * 0.022))
+        top.setStyleSheet(f"color:{self._p['fg']};border:none;")
         v.addWidget(top)
 
-        # The two marks need air between them: at spacing 0 the tight descender
-        # row of "Cortex" sits straight on top of the subtitle's cap line.
-        v.addSpacing(self.GAP_WORD)
-
-        # AbsoluteSpacing advances the LAST glyph too, so a centred label
-        # paints its ink half a tracking step left of true centre. Insetting
-        # the left edge by one tracking step pushes it back: Qt centres the
-        # label box, so a left margin of t moves the text by t / 2.
+        # AbsoluteSpacing advances the LAST glyph too, so the ink ends one
+        # tracking step before the label's right edge. The stack is left
+        # aligned and "Cortex" is wider than this line, so no centring
+        # correction is needed, only the optical gap above.
         sub = QLabel("AI IDE")
-        sub.setFont(_ui_font(self.SUB_PX, 700, self.SUB_TRACK))
-        sub.setContentsMargins(self.SUB_TRACK, 0, 0, 0)
-        sub.setStyleSheet(f"color:{ACCENT};")
-        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setFont(_ui_font(SUB_PX, 700, SUB_TRACK))
+        sub.setStyleSheet(f"color:{self._p['fg_dim']};border:none;")
         v.addWidget(sub)
+
+        h.addWidget(words, 0, Qt.AlignmentFlag.AlignVCenter)
         return w
 
     # ── sign-in card ──────────────────────────────────────────────────────
 
     def _build_card(self) -> QWidget:
         card = QFrame()
-        card.setFixedWidth(392)
-        card.setStyleSheet(
-            f"QFrame {{ background:{SURFACE}; border:1px solid {HAIRLINE};"
-            f" border-radius:12px; }}")
+        card.setObjectName("loginCard")
+        card.setFixedWidth(CARD_WIDTH)
         v = QVBoxLayout(card)
-        v.setContentsMargins(26, 24, 26, 24)
-        v.setSpacing(12)
+        v.setContentsMargins(CARD_PAD_H, CARD_PAD_V, CARD_PAD_H, CARD_PAD_V)
+        v.setSpacing(0)
 
         head = QLabel("Sign in")
-        head.setFont(_ui_font(15, 700))
-        head.setStyleSheet(f"color:{TEXT};border:none;")
+        head.setFont(_ui_font(17, 700, -0.2))
         v.addWidget(head)
 
+        v.addSpacing(7)
+
         note = QLabel("A Cortex account is required to use the IDE.")
+        note.setObjectName("loginNote")
         note.setFont(_ui_font(12, 400))
-        note.setStyleSheet(f"color:{MUTED};border:none;")
         note.setWordWrap(True)
         v.addWidget(note)
-        v.addSpacing(6)
+
+        v.addSpacing(20)
 
         self._browser_btn = QPushButton("Continue in browser")
-        self._browser_btn.setFixedHeight(40)
+        self._browser_btn.setObjectName("loginPrimary")
+        self._browser_btn.setFixedHeight(BUTTON_HEIGHT)
         self._browser_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._browser_btn.setFont(_ui_font(13, 600))
-        self._browser_btn.setStyleSheet(
-            f"QPushButton {{ background:{ACCENT}; color:#08282e; border:none;"
-            f" border-radius:8px; }}"
-            f"QPushButton:hover {{ background:{ACCENT_HI}; }}"
-            f"QPushButton:focus {{ border:2px solid {ACCENT_HI}; }}"
-            f"QPushButton:disabled {{ background:#1d3b41; color:#5b7d84; }}")
         self._browser_btn.setDefault(True)
+        self._browser_btn.setAccessibleName("Continue sign-in in your browser")
         self._browser_btn.clicked.connect(self._sign_in_browser)
         v.addWidget(self._browser_btn)
 
         self._busy = QProgressBar()
+        self._busy.setObjectName("loginBusy")
         self._busy.setRange(0, 0)
         self._busy.setVisible(False)
         self._busy.setFixedHeight(2)
         self._busy.setTextVisible(False)
-        self._busy.setStyleSheet(
-            f"QProgressBar {{ background:{HAIRLINE}; border:none; border-radius:1px; }}"
-            f"QProgressBar::chunk {{ background:{ACCENT}; }}")
+        v.addSpacing(8)
         v.addWidget(self._busy)
         return card
+
+    def _build_help(self) -> QWidget:
+        """Support line. It is a real link: the address is meant to be used."""
+        self._help = QLabel()
+        self._help.setObjectName("loginHelp")
+        self._help.setFont(_ui_font(12, 400))
+        self._help.setTextFormat(Qt.TextFormat.RichText)
+        self._help.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction)
+        self._help.setOpenExternalLinks(True)
+        self._help.setText(
+            f"Trouble signing in?&nbsp; "
+            f"<a href='https://cortex-ide.app/support' "
+            f"style='color:{self._p['accent']};text-decoration:none;'>"
+            f"cortex-ide.app/support</a>")
+        self._help.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return self._help
 
     # ── status bar ────────────────────────────────────────────────────────
 
@@ -333,14 +663,14 @@ class LoginDialog(QDialog):
         appears and vanishes.
         """
         bar = QFrame()
-        bar.setFixedHeight(28)
-        bar.setStyleSheet(f"QFrame {{ background:#101013; border-top:1px solid {HAIRLINE}; }}")
+        bar.setObjectName("loginBar")
+        bar.setFixedHeight(STATUS_H)
         h = QHBoxLayout(bar)
         h.setContentsMargins(14, 0, 14, 0)
         h.setSpacing(8)
 
-        self._dot = QLabel("●")
-        self._dot.setFont(_ui_font(11, 400))
+        self._dot = QLabel("\u25cf")
+        self._dot.setFont(_ui_font(10, 400))
         h.addWidget(self._dot)
 
         self._status = QLabel("")
@@ -355,31 +685,30 @@ class LoginDialog(QDialog):
         h.addStretch(1)
 
         self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setObjectName("loginGhost")
         self._cancel_btn.setVisible(False)
         self._cancel_btn.setFlat(True)
         self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._cancel_btn.setFont(_ui_font(12, 500))
-        self._cancel_btn.setStyleSheet(
-            f"QPushButton {{ color:{MUTED}; border:none; }}"
-            f"QPushButton:hover {{ color:{TEXT}; }}")
         self._cancel_btn.clicked.connect(self._cancel_wait)
         h.addWidget(self._cancel_btn)
 
         quit_btn = QPushButton("Quit")
+        quit_btn.setObjectName("loginQuit")
         quit_btn.setFlat(True)
         quit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         quit_btn.setFont(_ui_font(12, 500))
-        quit_btn.setStyleSheet(
-            f"QPushButton {{ color:{MUTED}; border:none; }}"
-            f"QPushButton:hover {{ color:{DANGER}; }}")
         quit_btn.clicked.connect(self.reject)
         h.addWidget(quit_btn)
         return bar
 
     def _set_state(self, kind: str, message: str):
-        colour = {"idle": MUTED, "busy": ACCENT, "error": DANGER, "ok": "#4ade80"}[kind]
+        colour = {"idle": self._p["muted"], "busy": self._p["accent"],
+                  "error": self._p["danger"], "ok": self._p["ok"]}[kind]
         self._dot.setStyleSheet(f"color:{colour};border:none;")
-        self._status.setStyleSheet(f"color:{TEXT if kind != 'idle' else MUTED};border:none;")
+        self._status.setStyleSheet(
+            f"color:{self._p['fg'] if kind != 'idle' else self._p['muted']};"
+            f"border:none;")
         self._status.setText(message)
 
     # ── behaviour ─────────────────────────────────────────────────────────
@@ -398,7 +727,7 @@ class LoginDialog(QDialog):
 
     def _sign_in_browser(self):
         self._start(_LoginWorker(),
-                    "Waiting for sign-in to finish in your browser…")
+                    "Waiting for sign-in to finish in your browser\u2026")
         self._cancel_btn.setVisible(True)
 
     def _cancel_wait(self):

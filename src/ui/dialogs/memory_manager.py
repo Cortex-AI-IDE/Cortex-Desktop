@@ -959,6 +959,14 @@ scope: project
                         pass
                 elif key == "ui.color_theme":
                     self._apply_color_theme(str(coerced))
+                elif key in ("editor.tab_size", "editor.word_wrap", "editor.minimap"):
+                    try:
+                        from src.ui.editor_prefs import notify_editor_prefs_changed
+                        notify_editor_prefs_changed()
+                    except Exception:
+                        pass
+                elif key == "layout.sidebar_position":
+                    self._apply_sidebar_position(str(coerced))
                 elif key in ("terminal.font_family", "terminal.font_size"):
                     try:
                         from src.ui.fonts import notify_terminal_font_changed
@@ -986,6 +994,17 @@ scope: project
                     break
         except Exception as e:
             log.warning(f"[MemoryManager] color theme not applied: {e}")
+
+    def _apply_sidebar_position(self, position: str):
+        """Settings -> Appearance -> Sidebar position: move it now."""
+        try:
+            from PyQt6.QtWidgets import QApplication as _App
+            for widget in _App.instance().topLevelWidgets():
+                if hasattr(widget, "_apply_sidebar_position"):
+                    widget._apply_sidebar_position(position)
+                    break
+        except Exception as e:
+            log.warning(f"[MemoryManager] sidebar position not applied: {e}")
 
     @pyqtSlot(result=str)
     def colorThemeNeedsRestart(self) -> str:
@@ -1192,8 +1211,6 @@ scope: project
                         _services = (server_usage.get("usage", {}) or {}).get("services") or {}
                         if _services:
                             _cp = local_stats.setdefault("current_period", {})
-                            _cp["ocr_pages_used"] = _services.get(
-                                "ocr_pages", _cp.get("ocr_pages_used", 0))
                             _cp["embedding_tokens_used"] = _services.get(
                                 "embedding_tokens", _cp.get("embedding_tokens_used", 0))
                             _cp["web_searches_used"] = _services.get(
@@ -1452,8 +1469,8 @@ scope: project
         Rows the server marks ``togglable=False`` are skipped: "auto" is
         smart routing (no key of its own) and the Mistral / SiliconFlow
         subscription services are paid for by the Cortex subscription, so
-        neither belongs in a "paste your key" panel. They are rendered by
-        their own cards on the same page.
+        neither belongs in a "paste your key" panel. (The page's separate
+        "Subscription Services" card for them was removed on 2026-10-20.)
         """
         try:
             from src.ai.remote_models import get_provider_directory
@@ -1655,17 +1672,14 @@ scope: project
     @pyqtSlot(result=str)
     def getMcpStatus(self) -> str:
         """JSON list of configured MCP servers with live status/tools.
-        Includes 'subscribed', MCP is a subscription feature."""
+        MCP is free for every user, so there is no subscription flag."""
         try:
-            from src.services.mcp_manager import (get_mcp_manager,
-                                                  _has_active_subscription)
+            from src.services.mcp_manager import get_mcp_manager
             return json.dumps({"success": True,
-                               "subscribed": _has_active_subscription(),
                                "servers": get_mcp_manager().get_status()})
         except Exception as e:
             log.warning(f"[MemoryManager] getMcpStatus error: {e}")
-            return json.dumps({"success": False, "error": str(e),
-                               "subscribed": False, "servers": []})
+            return json.dumps({"success": False, "error": str(e), "servers": []})
 
     @pyqtSlot(str, str, str, result=str)
     def addMcpServer(self, name: str, command_line: str, env_text: str) -> str:
@@ -2103,8 +2117,10 @@ class MemoryManagerDialog(QDialog):
             else:
                 log.warning(f"[MemoryManager] Cannot refresh UI: _view={self._view}, _page_loaded={self._page_loaded}")
 
-            # MCP is subscription-gated and its servers were parked in
-            # status="subscription" while logged out, signing in must
+            # (MCP is free since 2026-10-20 and no longer waits for a
+            # subscription; the restart below just refreshes the panel.)
+            # History: MCP was subscription-gated and its servers were parked
+            # in status="subscription" while logged out, so signing in had to
             # relaunch them and refresh the MCP panel. Bug history: login
             # refreshed profile/usage only, so the "Subscription Required"
             # lock card stayed (and servers stayed unlaunched) until the

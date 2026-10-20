@@ -212,6 +212,26 @@
       background: rgba(0, 122, 204, 0.35);
     }
 
+    /* Sidebar on the right (Settings -> Appearance -> Sidebar position):
+       mirrored the way VS Code does it - the icon strip stays on the
+       window's OUTER edge (now the right one), the panel sits inside it, and
+       the active-icon marker moves to the strip's outer side. Set by
+       window.__cortexSetSidebarSide (main_window._apply_sidebar_position). */
+    body.sidebar-right .sidebar-root {
+      flex-direction: row-reverse;
+    }
+
+    body.sidebar-right .icon-strip {
+      border-right: none;
+      border-left: 1px solid #252526;
+    }
+
+    body.sidebar-right .icon-btn.checked {
+      border-left: none;
+      border-right: 3px solid var(--border-accent);
+      border-radius: 8px 0 0 8px;
+    }
+
     /* Custom themed tooltip, replaces the native title="" tooltip.
        Bug history: a plain `title` attribute is rendered by Chromium's
        OWN native tooltip, entirely outside this page's CSS/data-theme -
@@ -1693,6 +1713,11 @@
   <!-- ================================================
      ROOT: Icon Strip + Panel Container
      ================================================ -->
+  <script>
+    window.__cortexSetSidebarSide = function (side) {
+      document.body.classList.toggle('sidebar-right', side === 'right');
+    };
+  </script>
   <div class="sidebar-root">
     <!-- Icon Strip (Activity Bar) -->
     <div class="icon-strip" id="iconStrip">

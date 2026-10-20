@@ -183,12 +183,81 @@ THEMES = {
     },
 }
 
-# Order shown in Settings.
+# ── Accessibility themes ────────────────────────────────────────────────────
+# For users with low vision or colour-vision deficiency. Same structure as
+# the themes above, so they reach every part of Cortex the same way.
+#
+# High Contrast: text and every syntax colour at least 7:1 on the background
+# (WCAG AAA), strong borders, and Monaco's own hc-black / hc-light editor
+# bases, which outline the current line, focus and selections.
+#
+# Distinct Colors: built on the Okabe-Ito palette, whose colours stay
+# distinguishable for every type of colour vision (including protanopia,
+# deuteranopia and tritanopia). Meanings that other themes carry in red vs
+# green (errors vs success, git removed vs added, terminal red vs green) use
+# orange vs blue here instead, as GitHub's colour-vision themes do. Named for
+# what the theme does, not for who might pick it: anyone can choose it
+# without labelling themselves.
+THEMES.update({
+    "high-contrast-dark": {
+        "label": "High Contrast Dark", "base": "dark", "a11y": True,
+        "ui": dict(bg="#000000", bg_alt="#000000", surface="#0a0a0a", surface2="#1a1a1a",
+                   hover="#262626", border="#9a9a9a", fg="#ffffff", fg_dim="#e6e6e6",
+                   muted="#c8c8c8", accent="#ffd60a", selection="#1f4f8f",
+                   red="#ff7a7a", green="#5cff8f", yellow="#ffff4d", orange="#ffad5c",
+                   blue="#7cc0ff", purple="#e0b0ff", cyan="#5cf2ff",
+                   kw="#7cc0ff", str="#ffd27f", fn="#fff36b", num="#ffad5c",
+                   cmt="#c8c8c8", type="#5cf2ff"),
+        "ansi": ["#000000", "#ff7a7a", "#5cff8f", "#ffff4d", "#7cc0ff", "#ff8cff", "#5cf2ff", "#ffffff",
+                 "#a6a6a6", "#ff9999", "#85ffab", "#ffff80", "#a3d4ff", "#ffadff", "#8cf7ff", "#ffffff"],
+    },
+    "high-contrast-light": {
+        "label": "High Contrast Light", "base": "light", "a11y": True,
+        "ui": dict(bg="#ffffff", bg_alt="#f5f5f5", surface="#f5f5f5", surface2="#e8e8e8",
+                   hover="#dedede", border="#5a5a5a", fg="#000000", fg_dim="#1f1f1f",
+                   muted="#3d3d3d", accent="#0f4a85", selection="#b3d7ff",
+                   red="#a80000", green="#005a16", yellow="#6b5000", orange="#8a3600",
+                   blue="#0039a6", purple="#6d1fa8", cyan="#005b66",
+                   kw="#0039a6", str="#a31515", fn="#6d1fa8", num="#005b66",
+                   cmt="#2f5f2f", type="#7a3d00"),
+        "ansi": ["#000000", "#a80000", "#005a16", "#6b5000", "#0039a6", "#8b008b", "#005b66", "#3d3d3d",
+                 "#3d3d3d", "#c00000", "#007a1f", "#7a5c00", "#0047c2", "#9c1aa8", "#006b78", "#000000"],
+    },
+    "distinct-colors-dark": {
+        "label": "Distinct Colors Dark", "base": "dark", "a11y": True,
+        "ui": dict(bg="#0d1117", bg_alt="#010409", surface="#161b22", surface2="#21262d",
+                   hover="#1c2128", border="#3d444d", fg="#e6edf3", fg_dim="#9ea7b3",
+                   muted="#8b949e", accent="#56b4e9", selection="#1d3f66",
+                   red="#ff8c42", green="#5aa9ff", yellow="#f0e442", orange="#e69f00",
+                   blue="#5aa9ff", purple="#e6a0c4", cyan="#8fd3f5",
+                   kw="#56b4e9", str="#f0e442", fn="#e6a0c4", num="#e69f00",
+                   cmt="#8b949e", type="#2fd1a0"),
+        "ansi": ["#484f58", "#ff8c42", "#5aa9ff", "#f0e442", "#56b4e9", "#e6a0c4", "#8fd3f5", "#b1bac4",
+                 "#6e7681", "#ffa666", "#85c1ff", "#f5ec75", "#85c8f0", "#f0bcd8", "#b3e3fa", "#ffffff"],
+    },
+    "distinct-colors-light": {
+        "label": "Distinct Colors Light", "base": "light", "a11y": True,
+        "ui": dict(bg="#ffffff", bg_alt="#f6f8fa", surface="#f6f8fa", surface2="#eaeef2",
+                   hover="#eef1f4", border="#c4ccd5", fg="#1f2328", fg_dim="#57606a",
+                   muted="#656d76", accent="#0072b2", selection="#cce4f6",
+                   red="#b84a00", green="#0062b8", yellow="#6e5c00", orange="#9a5600",
+                   blue="#0062b8", purple="#9c3f72", cyan="#00658f",
+                   kw="#0072b2", str="#9a4a00", fn="#9c3f72", num="#00658f",
+                   cmt="#656d76", type="#00775a"),
+        "ansi": ["#24292f", "#b84a00", "#0062b8", "#6e5c00", "#0072b2", "#9c3f72", "#00658f", "#57606a",
+                 "#57606a", "#d55e00", "#1f7fd6", "#857000", "#2d8fd5", "#b5558a", "#0083b3", "#1f2328"],
+    },
+})
+
+# Order shown in Settings: Cortex, the colour themes, then the accessibility
+# themes (an "Accessibility" group in the dropdown).
 COLOR_THEME_CHOICES = (("cortex", "Cortex (Dark / Light / System)"),) + tuple(
     (tid, THEMES[tid]["label"]) for tid in (
         "dark-plus", "light-plus", "one-dark-pro", "dracula", "monokai", "github-dark",
         "github-light", "night-owl", "tokyo-night", "catppuccin-mocha", "nord",
-        "solarized-light"))
+        "solarized-light",
+        "high-contrast-dark", "high-contrast-light", "distinct-colors-dark", "distinct-colors-light"))
+ACCESSIBILITY_THEMES = tuple(t for t, v in THEMES.items() if v.get("a11y"))
 
 _listeners: list = []
 _active_at_start = DEFAULT_COLOR_THEME     # the theme the native palettes hold now

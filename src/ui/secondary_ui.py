@@ -15,7 +15,17 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QProgressBar, QSizePolicy, QScrollArea,
 )
 
-from src.ui.tokens import TOKENS as T
+from src.ui.tokens import TOKENS as T, CHAT_TOKENS as C
+
+
+def _tint(hexcol: str, alpha: float) -> str:
+    """'#rrggbb' -> 'rgba(r,g,b,alpha)' for a translucent wash of a theme colour."""
+    h = hexcol.lstrip("#")
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return "transparent"
+    return f"rgba({r},{g},{b},{alpha})"
 
 
 # ============================================================
@@ -24,7 +34,8 @@ from src.ui.tokens import TOKENS as T
 class PermissionCard(QFrame):
     """
     Gates the agent loop, user must Allow once, Allow always, or Reject.
-    Allow always → confirm step with "until Cortex is restarted" warning.
+    Allow always → confirm step: remembered for this project, also after a
+    restart, until turned off in the status bar (src/core/project_permissions.py).
 
     Emits: allow_once(str), allow_always(str), rejected(str) with request_id.
     """
@@ -44,10 +55,12 @@ class PermissionCard(QFrame):
         # Responsive containment: fill parent width, never overflow
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
+        # The chat's accent, like the Send button: it follows the colour
+        # theme (it was a fixed orange on every theme).
         self.setObjectName("permFrame")
         self.setStyleSheet(
-            f"QFrame#permFrame {{ border-left: 2px solid {T['orange']};"
-            f" background: rgba(255,184,108,0.04); border-radius: 0px; }}")
+            f"QFrame#permFrame {{ border-left: 2px solid {C['accent']};"
+            f" background: {_tint(C['accent'], 0.05)}; border-radius: 0px; }}")
         self._v = QVBoxLayout(self)
         self._v.setContentsMargins(16, 12, 16, 12)
         self._v.setSpacing(10)
@@ -81,8 +94,9 @@ class PermissionCard(QFrame):
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         if filled:
             b.setStyleSheet(
-                f"background:{color};color:#1a1205;border:none;"
-                f"font-size:12px;font-weight:600;padding:4px 12px;border-radius:4px;")
+                f"QPushButton {{ background:{C['accent_fill']};color:{C['accent_ink']};border:none;"
+                f"font-size:12px;font-weight:600;padding:4px 12px;border-radius:4px; }}"
+                f"QPushButton:hover {{ background:{C['accent_fill_hover']}; }}")
         else:
             b.setStyleSheet(
                 f"background:transparent;color:{color};border:none;"
@@ -93,7 +107,7 @@ class PermissionCard(QFrame):
         self._clear()
         head = QHBoxLayout()
         ic = QLabel("\u26A0")
-        ic.setStyleSheet(f"color:{T['orange']};font-size:14px;")
+        ic.setStyleSheet(f"color:{C['accent']};font-size:14px;")
         ti = QLabel("Permission required")
         ti.setStyleSheet(f"color:{T['text']};font-weight:600;font-size:13px;")
         head.addWidget(ic)
@@ -112,7 +126,7 @@ class PermissionCard(QFrame):
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        once = self._btn("Allow once", T['orange'], filled=True)
+        once = self._btn("Allow once", C['accent_fill'], filled=True)
         always = self._btn("Allow always", T['text_dim'])
         rej = self._btn("Reject", T['text_dim'])
         once.clicked.connect(lambda: (self.allow_once.emit(self._rid), self._resolved_ok("Allowed once", T['green'])))
@@ -128,7 +142,7 @@ class PermissionCard(QFrame):
         self._clear()
         head = QHBoxLayout()
         ic = QLabel("\u26A0")
-        ic.setStyleSheet(f"color:{T['orange']};font-size:14px;")
+        ic.setStyleSheet(f"color:{C['accent']};font-size:14px;")
         ti = QLabel("Always allow")
         ti.setStyleSheet(f"color:{T['text']};font-weight:600;font-size:13px;")
         head.addWidget(ic)
@@ -136,14 +150,16 @@ class PermissionCard(QFrame):
         head.addStretch()
         self._v.addLayout(head)
 
-        sub = QLabel("This will allow all operations until Cortex is restarted")
+        sub = QLabel("The AI will edit files and run commands in this project without "
+                     "asking, also after a restart. Turn it off with \"Always allow\" "
+                     "in the status bar.")
         sub.setStyleSheet(f"color:{T['muted']};font-size:12px;")
         sub.setWordWrap(True)
         self._v.addWidget(sub)
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        confirm = self._btn("Confirm", T['orange'], filled=True)
+        confirm = self._btn("Confirm", C['accent_fill'], filled=True)
         cancel = self._btn("Cancel", T['text_dim'])
         confirm.clicked.connect(lambda: (self.allow_always.emit(self._rid), self._resolved_ok("Always allowed", T['green'])))
         cancel.clicked.connect(lambda: self._build_main(self._command, self._warning))
@@ -179,7 +195,7 @@ class _OptionRow(QFrame):
         self.setStyleSheet(
             f"QFrame#qOption {{ background:rgba(255,255,255,0.03); border:1px solid {T['border']};"
             f" border-radius:4px; }}"
-            f"QFrame#qOption:hover {{ background:rgba(6,182,212,0.12); border-color:{T['accent']}; }}"
+            f"QFrame#qOption:hover {{ background:{_tint(C['accent'], 0.12)}; border-color:{C['accent']}; }}"
         )
         v = QVBoxLayout(self)
         v.setContentsMargins(12, 6, 12, 6)
@@ -225,8 +241,8 @@ class QuestionCard(QFrame):
         self.setObjectName("questionCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setStyleSheet(
-            f"QFrame#questionCard {{ border: 1px solid {T['accent']}; "
-            f"border-radius: 6px; background: rgba(6,182,212,0.04); }}"
+            f"QFrame#questionCard {{ border: 1px solid {C['accent']}; "
+            f"border-radius: 6px; background: {_tint(C['accent'], 0.04)}; }}"
         )
 
         v = QVBoxLayout(self)
@@ -369,7 +385,11 @@ class TodoSection(QFrame):
 
         v.addWidget(self._head_widget)
 
-        # ── Progress bar (always visible, thin) ──
+        # ── Progress bar (thin, only once tasks start completing) ──
+        # Was "always visible" with a solid border_dim track: at 0/4 that
+        # track rendered as a bare line right under the Tasks header and
+        # read as a stray design line (reported 2026-10-20). The track is
+        # now a soft wash and the bar stays hidden until there is progress.
         self._progress = QProgressBar()
         self._progress.setMaximum(100)
         self._progress.setValue(0)
@@ -377,7 +397,7 @@ class TodoSection(QFrame):
         self._progress.setFixedHeight(3)
         self._progress.setStyleSheet(f"""
             QProgressBar {{
-                background: {T['border_dim']};
+                background: {_tint(T['border_dim'], 0.3)};
                 border: 0;
                 border-radius: 0px;
                 margin: 0 4px;
@@ -387,6 +407,7 @@ class TodoSection(QFrame):
                 border-radius: 0px;
             }}
         """)
+        self._progress.setVisible(False)
         v.addWidget(self._progress)
 
         # ── Body (collapsible todo items) ──
@@ -531,9 +552,10 @@ class TodoSection(QFrame):
         total = len(self._items)
         self._count.setText(f"{done_count}/{total}")
 
-        # Progress bar
+        # Progress bar: hidden until there is progress, see __init__.
         pct = int(done_count / total * 100) if total > 0 else 0
         self._progress.setValue(pct)
+        self._progress.setVisible(pct > 0)
 
         # Update title
         if main_task:
@@ -563,15 +585,19 @@ class ContextBar(QFrame):
 
         self._label = QLabel("Context")
         self._label.setStyleSheet(f"color:{T['muted']};font-size:{T['font_size_xxs']};")
+        # Budget meter: soft track, hidden at 0%. A solid border_dim track
+        # at 0% rendered as a stray dash on the row (same report as
+        # TodoSection's progress bar, 2026-10-20).
         self._bar = QProgressBar()
         self._bar.setMaximum(100)
         self._bar.setValue(0)
         self._bar.setTextVisible(False)
         self._bar.setFixedHeight(4)
         self._bar.setStyleSheet(
-            f"QProgressBar {{ background:{T['border_dim']};border:0;border-radius:2px; }}"
+            f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
             f"QProgressBar::chunk {{ background:{T['accent']};border-radius:2px; }}"
         )
+        self._bar.setVisible(False)
         self._usage = QLabel("0%")
         self._usage.setStyleSheet(f"color:{T['muted']};font-size:{T['font_size_xxs']};")
         self._provider = QLabel("")
@@ -586,22 +612,23 @@ class ContextBar(QFrame):
         """Update the context budget display."""
         pct = int(used / budget * 100) if budget > 0 else 0
         self._bar.setValue(min(pct, 100))
+        self._bar.setVisible(pct > 0)  # soft track, hidden at 0% (see __init__)
         self._usage.setText(f"{pct}%")
         if provider:
             self._provider.setText(provider)
         # Color based on usage
         if pct > 90:
             self._bar.setStyleSheet(
-                f"QProgressBar {{ background:{T['border_dim']};border:0;border-radius:2px; }}"
+                f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
                 f"QProgressBar::chunk {{ background:{T['red']};border-radius:2px; }}"
             )
         elif pct > 70:
             self._bar.setStyleSheet(
-                f"QProgressBar {{ background:{T['border_dim']};border:0;border-radius:2px; }}"
+                f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
                 f"QProgressBar::chunk {{ background:{T['orange']};border-radius:2px; }}"
             )
         else:
             self._bar.setStyleSheet(
-                f"QProgressBar {{ background:{T['border_dim']};border:0;border-radius:2px; }}"
+                f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
                 f"QProgressBar::chunk {{ background:{T['accent']};border-radius:2px; }}"
             )

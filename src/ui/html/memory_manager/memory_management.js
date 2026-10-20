@@ -63,8 +63,8 @@
     minimap: "editor.minimap",
 
     /* Appearance, Interface */
-    uiScale: "ui.ui_scale",
     sidebarPosition: "layout.sidebar_position",
+    chatActivity: "ui.chat_activity",
 
     /* Models & Providers */
     defaultModel: "ai.model",
@@ -756,7 +756,7 @@
     };
 
     /* ── Range sliders, update display label ── */
-    [["editorFontSize", "editorFontSizeVal", "px"], ["uiScale", "uiScaleVal", "%"], ["termFontSize", "termFontSizeVal", "px"], ["watcherDebounce", "watcherDebounceVal", "ms"], ["requestTimeout", "requestTimeoutVal", "s"]].forEach(([i, v, u]) => { const inp = $(i), val = $(v); if (inp && val) inp.addEventListener("input", () => { val.textContent = inp.value + u; persistSetting(i, inp.value); }); });
+    [["editorFontSize", "editorFontSizeVal", "px"], ["termFontSize", "termFontSizeVal", "px"], ["watcherDebounce", "watcherDebounceVal", "ms"], ["requestTimeout", "requestTimeoutVal", "s"]].forEach(([i, v, u]) => { const inp = $(i), val = $(v); if (inp && val) inp.addEventListener("input", () => { val.textContent = inp.value + u; persistSetting(i, inp.value); }); });
 
     /* ── All toggles, selects, inputs → live persist ── */
     document.querySelectorAll(".switch input").forEach(t => t.addEventListener("change", () => persistSetting(t.id, t.checked)));
@@ -772,7 +772,7 @@
            that mode here too: the theme decides it. */
         const v = colorThemeSel.value;
         if (v !== "cortex") {
-          const base = ["light-plus", "github-light", "solarized-light"].includes(v) ? "light" : "dark";
+          const base = ["light-plus", "github-light", "solarized-light", "high-contrast-light", "distinct-colors-light"].includes(v) ? "light" : "dark";
           document.documentElement.setAttribute("data-theme", base);
           document.querySelectorAll(".theme-option").forEach(btn => {
             btn.classList.toggle("active", btn.dataset.themeChoice === base);
@@ -1126,11 +1126,10 @@ Use f-strings instead of .format().</code></pre>
       if ($("skillsExplored")) $("skillsExplored").textContent = skillsExplored.length > 0 ? skillsExplored.slice(0, 5).join(', ') + (skillsExplored.length > 5 ? '...' : '') : 'None yet';
       if ($("totalSkills")) $("totalSkills").textContent = insights.total_skills_used || 0;
 
-      /* Service usage, simple number counters */
-      const ocrUsed = period.ocr_pages_used || 0;
+      /* Service usage, simple number counters. No OCR pages: Cortex sends
+         images to vision models natively (removed 2026-10-20). */
       const embedUsed = period.embedding_tokens_used || 0;
       const searchUsed = period.web_searches_used || 0;
-      setCount("ocrPages", ocrUsed);
       setCount("embeddingsCount", embedUsed);
       setCount("webSearches", searchUsed);
 
@@ -2157,27 +2156,8 @@ Use f-strings instead of .format().</code></pre>
     const _MCP_STATUS_COLORS = {
       connected: '#3fb950', connecting: '#d29922',
       error: '#f85149', disabled: '#6b7280', stopped: '#6b7280',
-      subscription: '#d29922', needs_approval: '#d29922',
+      needs_approval: '#d29922',
     };
-
-    let _mcpSubscribed = false;
-
-    function _renderMcpLockCard() {
-      const list = $('mcpServerList');
-      const empty = $('mcpEmptyState');
-      if (!list) return;
-      list.querySelectorAll('.mcp-server-row, .mcp-lock-card').forEach(el => el.remove());
-      if (empty) empty.style.display = 'none';
-      const lock = document.createElement('div');
-      lock.className = 'mcp-lock-card';
-      lock.style.cssText = 'text-align:center;padding:28px 16px;';
-      lock.innerHTML =
-        '<div style="font-size:28px;margin-bottom:8px;">🔒</div>' +
-        '<h3 style="margin:0 0 6px;">MCP Servers, Subscription Required</h3>' +
-        '<p style="color:#8b949e;max-width:460px;margin:0 auto 12px;">Connect databases, web search, GitHub and hundreds of external tools to the AI agent. Available on the Pro plan ($5/month or $40/year) with a signed-in account.</p>' +
-        '<a href="https://cortex-ide.app/pricing/" onclick="openUpgradePage(); return false;" style="color:#4da3ff;text-decoration:none;font-weight:600;cursor:pointer;">View plans →</a>';
-      list.appendChild(lock);
-    }
 
     function _renderMcpServers(servers) {
       const list = $('mcpServerList');
@@ -2374,13 +2354,8 @@ Use f-strings instead of .format().</code></pre>
         bridge.getMcpStatus((raw) => {
           try {
             const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-            _mcpSubscribed = !!data.subscribed;
-            if (!_mcpSubscribed) {
-              _renderMcpLockCard();
-              _setMcpFormEnabled(false);
-            } else {
-              const list = $('mcpServerList');
-              if (list) list.querySelectorAll('.mcp-lock-card').forEach(el => el.remove());
+            {
+              // MCP is free for every user: no subscription lock card.
               _renderMcpServers(data.servers || []);
               _setMcpFormEnabled(true);
               const stillConnecting = (data.servers || []).some(s => s.status === 'connecting');
@@ -2398,7 +2373,6 @@ Use f-strings instead of .format().</code></pre>
     $('mcpRefreshBtn')?.addEventListener('click', () => { _loadMcpStatus(); showToast('Refreshing MCP status...'); });
 
     $('mcpAddBtn')?.addEventListener('click', () => {
-      if (!_mcpSubscribed) { showToast('MCP requires a Cortex subscription, cortex-ide.app/pricing'); return; }
       const name = ($('mcpAddName')?.value || '').trim();
       const cmd = ($('mcpAddCommand')?.value || '').trim();
       const env = ($('mcpAddEnv')?.value || '').trim();
@@ -2418,7 +2392,6 @@ Use f-strings instead of .format().</code></pre>
     });
 
     $('mcpImportBtn')?.addEventListener('click', () => {
-      if (!_mcpSubscribed) { showToast('MCP requires a Cortex subscription, cortex-ide.app/pricing'); return; }
       const text = ($('mcpImportJson')?.value || '').trim();
       if (!text) { showToast('Paste a JSON config first'); return; }
       if (bridge && typeof bridge.importMcpJson === 'function') {

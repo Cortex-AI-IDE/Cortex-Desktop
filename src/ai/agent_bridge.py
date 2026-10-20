@@ -3503,6 +3503,7 @@ class CortexAgentBridge(QObject):
     permission_requested = pyqtSignal(str, str, str)  # command, warning, files_json
     file_edit_permission_requested = pyqtSignal()     # first file edit this session
     project_access_requested = pyqtSignal()            # initial project access permission
+    always_allowed_changed = pyqtSignal(bool)          # "Allow always" on/off for the open project
     # File operation cards, show animated cards during create/edit operations
     file_creating_started = pyqtSignal(str)  # file_path
     file_editing_started = pyqtSignal(str)   # file_path
@@ -3606,6 +3607,13 @@ class CortexAgentBridge(QObject):
         # This survives across call_llm calls to track TOTAL mutations
         # made by the AI throughout the entire session (not just one message)
         self._session_mutation_count: int = 0
+        # Progress for auto-continue and the TodoWrite loop check: file
+        # mutations PLUS real MCP actions (click, fill, navigate...). Browser
+        # work used to count as no progress, so a browser-only task stopped
+        # after auto-continue cycle 1 (see src/ai/mcp_context.py). The
+        # mutation counters above stay file-only for verification.
+        self._session_progress_count: int = 0
+        self._mcp_action_count: int = 0
         self._stop_requested: bool = False  # Set to interrupt the streaming loop
         # ── Rejection tracking, after N rejections, AI stops and asks user ──
         self._rejection_counts: Dict[str, int] = {}  # file_path -> rejection count
@@ -4583,8 +4591,7 @@ Required behavior:
             _mcp_defs = _mgr.get_tool_definitions()
             _pending = [st for st in _mgr.get_status()
                         if st.get("enabled") and st.get("status") in
-                        ("needs_approval", "error", "connecting")] \
-                if getattr(_mgr, "_subscribed", False) else []
+                        ("needs_approval", "error", "connecting")]
             if _mcp_defs or _pending:
                 _ctx = getattr(getattr(self, "_model_limits", None), "context_window", None)
                 prompt += _mcp_prompt_section(
@@ -4823,10 +4830,19 @@ Required behavior:
                 # Use the actual user message for relevance-targeted search.
                 # Fall back to a generic query if no message is available.
                 _user_msg = getattr(self, '_last_user_message', '') or "coding project context decisions architecture"
-                semantic_section = _sem_idx.build_prompt_section(
-                    _user_msg,
-                    max_entries=3,
-                )
+                # Bounded wait: the query embedding is a network round-trip
+                # (1.9-3.4 s measured) and this section is supplementary. The
+                # turn goes out without it if the search is slow; the worker
+                # fills the query cache so a repeated prompt is instant
+                # (src/core/semantic_memory.py, UI-STALL 2026-10-20).
+                _build_bounded = getattr(_sem_idx, 'build_prompt_section_within', None)
+                if _build_bounded is not None:
+                    semantic_section = _build_bounded(_user_msg, max_entries=3)
+                else:
+                    semantic_section = _sem_idx.build_prompt_section(
+                        _user_msg,
+                        max_entries=3,
+                    )
                 if semantic_section:
                     # Keep memory section lean by tail-inserting
                     parts.append(semantic_section)
@@ -5537,6 +5553,7 @@ Required behavior:
         self._failover_exhausted = False
         # Per-request mutation progress counters.
         self._mutation_success_count = 0
+        self._mcp_action_count = 0
         self._last_todo_mutation_count = -1
         # Reset auto-cancel tracking
         self._todos_auto_cancelled = False
@@ -5550,7 +5567,7 @@ Required behavior:
         if not getattr(self, '_auto_continue_requested', False):
             self._auto_continue_cycle = 0
             self._auto_continue_compacted = None
-            self._last_cycle_session_mutations = self._session_mutation_count
+            self._last_cycle_session_mutations = self._session_progress_count
             # ── Reset stale-tracking counters so manual Continue gives
             #     the AI a clean slate rather than re-triggering the
             #     staleness gate immediately on the next turn limit.
@@ -5887,6 +5904,17 @@ Required behavior:
                                 tool_call_id=hist_msg.tool_call_id)
                         )
 
+                # Page snapshots carried over from earlier turns: keep only the
+                # newest (src/ai/mcp_context.py).
+                try:
+                    from src.ai.mcp_context import prune_stale_snapshots
+                    _pruned, _saved = prune_stale_snapshots(messages)
+                    if _pruned:
+                        log.info(f"[MCP] {_pruned} stale page snapshot(s) cut from history, "
+                                 f"~{_saved:,} chars saved")
+                except Exception as _ps_err:
+                    log.debug(f"[MCP] history snapshot pruning skipped: {_ps_err}")
+
                 # ── Mark the boundary before the new instruction ──────────
                 # A long agentic task floods the 24-message window with its own
                 # turns. Observed 2026-08-20 12:13: a 16-turn revert task left
@@ -6211,6 +6239,31 @@ Required behavior:
                         log.info("[BRIDGE] OpenAI turn 0, reasoning-first pass (no tools, thought card enabled)")
                         active_tool_defs = None
                         _reasoning_only_pass = True
+
+                # ── Last step of the run: explain, never stop silently ──────
+                # A run has max_turns steps. When the last one still calls a
+                # tool, the loop simply ran out and the user saw the task end
+                # mid-work with no word about what was done or what is left
+                # (cortex.log 2026-10-20 14:02, 14:10, 14:14, 14:19: "Agentic
+                # turn 50/50", response '' or a half sentence, 0 todos). With
+                # todos pending, auto-continue below takes over instead; with
+                # none, this step goes out WITHOUT tools and with a request
+                # for the wrap-up, so the turn always ends with an answer.
+                # (The "Verification turn cap" above logs that it drops the
+                # tools, but the expansion just above re-adds them.)
+                if turn == max_turns - 1 and not any(
+                        str(t.get('status', '')).upper() in ('PENDING', 'IN_PROGRESS')
+                        for t in self._current_todos):
+                    active_tool_defs = None
+                    log.info(f"[BRIDGE] Step limit: turn {turn + 1}/{max_turns} has no tools, "
+                             f"asking for the wrap-up")
+                    messages.append(PCM(role="user", content=(
+                        "[Cortex] This request has reached its step limit, so no more tools "
+                        "can run in it. Do not call tools. Write your reply to the user now: "
+                        "what you did and changed (files), what you verified and how, what is "
+                        "NOT done yet, and the exact next step. If the work is unfinished, say "
+                        "so plainly and tell the user they can reply \"continue\" to carry on "
+                        "from here.")))
 
                 # Context-length errors are retried up to 2 times per turn by
                 # compacting the message history before each retry.
@@ -7811,7 +7864,7 @@ Required behavior:
                     _cur_count = len(_pending_todos)
 
                     # ── Track mutation progress this cycle ────────────────
-                    _current_session_mutations = self._session_mutation_count
+                    _current_session_mutations = self._session_progress_count
                     _mutations_this_cycle = max(0, _current_session_mutations - self._last_cycle_session_mutations)
                     self._last_cycle_session_mutations = _current_session_mutations
 
@@ -8771,6 +8824,13 @@ Required behavior:
             except Exception as _sg_err:
                 log.debug(f"[SAFETY] register_tool_result skipped: {_sg_err}")
             if tool_name in ("Write", "Edit", "Bash", "PowerShell"):
+                self._session_progress_count += 1
+            else:
+                from src.ai.mcp_context import is_mcp_action
+                if is_mcp_action(tool_name):
+                    self._mcp_action_count += 1
+                    self._session_progress_count += 1
+            if tool_name in ("Write", "Edit", "Bash", "PowerShell"):
                 self._mutation_success_count += 1
                 self._session_mutation_count += 1  # Persistent session counter
                 # Reset TodoWrite streak, real progress was made,
@@ -8887,6 +8947,16 @@ Required behavior:
         messages.append(
             PCM(role="tool", content=result_str_for_history, tool_call_id=tool_id)
         )
+        if tool_name.startswith("mcp__"):
+            # A new page snapshot makes every older one stale (src/ai/mcp_context.py).
+            try:
+                from src.ai.mcp_context import prune_stale_snapshots
+                _pruned, _saved = prune_stale_snapshots(messages)
+                if _pruned:
+                    log.info(f"[MCP] {_pruned} stale page snapshot(s) cut from context, "
+                             f"~{_saved:,} chars saved")
+            except Exception as _ps_err:
+                log.debug(f"[MCP] snapshot pruning skipped: {_ps_err}")
 
         # ── Loop Debug Context Injection ──────────────────────────────
         # When the agentic loop terminates (halt_stalled, halt_budget, etc.),
@@ -12467,7 +12537,8 @@ Required behavior:
             
             normalized_todos.append(td)
 
-        if self._todo_write_streak >= 2 and self._mutation_success_count == self._last_todo_mutation_count:
+        if (self._todo_write_streak >= 2
+                and self._mutation_success_count + self._mcp_action_count == self._last_todo_mutation_count):
             return ToolResult(
                 tool_id=tool_id,
                 result=None,
@@ -12595,7 +12666,7 @@ Required behavior:
                 ),
             )
         self._last_todo_signature = _todo_sig
-        self._last_todo_mutation_count = self._mutation_success_count
+        self._last_todo_mutation_count = self._mutation_success_count + self._mcp_action_count
 
         # ── CRITICAL FIX: Never clear todos without verification ─────────
         # Even if AI marks all as "complete", we keep them in _current_todos
@@ -14191,6 +14262,8 @@ Required behavior:
             # so new requests start fresh instead of showing "after 50 mutations"
             self._session_mutation_count = 0
             self._mutation_success_count = 0
+            self._session_progress_count = 0
+            self._mcp_action_count = 0
             # Reset stale todo state from previous session snapshot
             # so fresh requests don't show leftover "2 todos pending"
             self._current_todos.clear()
@@ -14222,6 +14295,8 @@ Required behavior:
             self._todos_auto_cancelled = False
             self._mutation_success_count = 0
             self._session_mutation_count = 0
+            self._session_progress_count = 0
+            self._mcp_action_count = 0
             # Clear disabled tools from the stopped task
             self._tool_fail_counts.clear()
             self._disabled_tools.clear()
@@ -14388,6 +14463,8 @@ Required behavior:
         self._file_edit_permission = decision
         if decision == "always":
             self._always_allowed = True
+            self._remember_always_allowed()
+            self._announce_always_allowed()
         # ── ENFORCE USER CHOICE: reject = abort the current turn ──
         if decision == "rejected":
             self._stop_requested = True
@@ -14401,8 +14478,9 @@ Required behavior:
 
         'once'   → allow THIS edit only; _project_access_granted stays False
                     so the gate re-triggers for the next edit (one card per edit).
-        'always' → allow ALL future edits this session; _always_allowed=True
-                    skips every gate permanently.
+        'always' → allow ALL future edits in this project, also after a
+                    restart (src/core/project_permissions.py); _always_allowed
+                    =True skips every gate until the user turns it off.
         'rejected' → stop the agentic loop immediately.
         """
         log.info(f"[BRIDGE] Project access permission response: {decision}")
@@ -14415,6 +14493,8 @@ Required behavior:
             self._project_access_granted = True
             self._always_allowed = True
             self._file_edit_permission = "always"
+            self._remember_always_allowed()
+            self._announce_always_allowed()
         elif decision == "rejected":
             self._project_access_granted = False
             self._stop_requested = True
@@ -14918,6 +14998,9 @@ Required behavior:
 
         self._project_root = path
         self._access.set_project_root(path)  # also drops grants for outside paths
+        # "Allow always" is per project (src/core/project_permissions.py):
+        # this project's saved answer replaces the previous project's.
+        self.apply_remembered_access()
         self._memory_dir   = None  # reset so _get_memory_dir() recomputes for new project
         self._cached_project_summary = None  # reset so _get_project_summary() rebuilds for new project
         log.info(f"[BRIDGE] project root → {path}")
@@ -15149,7 +15232,70 @@ Required behavior:
         self._cursor_pos  = None
 
     def set_always_allowed(self, allowed: bool):
+        """True: the user chose "Allow always" (remembered for this project).
+        False: back to asking for now; what is remembered is left alone (Restricted
+        Mode calls this; turning it off for good is revoke_always_allowed)."""
         self._always_allowed = allowed
+        if allowed:
+            self._remember_always_allowed()
+        self._announce_always_allowed()
+
+    def _announce_always_allowed(self):
+        """Tell the window (status-bar switch) the setting may have changed."""
+        try:
+            self.always_allowed_changed.emit(self._always_allowed)
+        except RuntimeError:
+            pass
+
+    def _remember_always_allowed(self):
+        """Keep "Allow always" for the open project, across restarts. Not in
+        Restricted Mode: an untrusted folder keeps asking."""
+        root = self._project_root
+        if not root:
+            return
+        try:
+            from src.core import project_permissions, workspace_trust
+            if workspace_trust.is_restricted(root):
+                log.info("[BRIDGE] Allow always: not remembered, folder is in Restricted Mode")
+                return
+            project_permissions.remember(root)
+        except Exception as e:
+            log.warning(f"[BRIDGE] Allow always could not be remembered: {e}")
+
+    def apply_remembered_access(self) -> bool:
+        """Set the permission state to the open project's saved answer: on
+        when "Allow always" was chosen there (and the folder is trusted), else
+        asking. Returns whether it is on."""
+        root = self._project_root
+        granted = False
+        try:
+            from src.core import project_permissions, workspace_trust
+            granted = (bool(root) and project_permissions.is_always(root)
+                       and not workspace_trust.is_restricted(root))
+        except Exception as e:
+            log.warning(f"[BRIDGE] remembered Allow always not read: {e}")
+        self._always_allowed = granted
+        self._project_access_granted = granted
+        if not granted and self._file_edit_permission == "always":
+            self._file_edit_permission = None
+        if granted:
+            log.info(f"[BRIDGE] Allow always is on for this project (remembered): {root}")
+        self._announce_always_allowed()
+        return granted
+
+    def revoke_always_allowed(self):
+        """Turn "Allow always" off for the open project: forget it and ask again."""
+        try:
+            from src.core import project_permissions
+            project_permissions.forget(self._project_root)
+        except Exception as e:
+            log.warning(f"[BRIDGE] Allow always could not be forgotten: {e}")
+        self._always_allowed = False
+        self._project_access_granted = False
+        if self._file_edit_permission == "always":
+            self._file_edit_permission = None
+        log.info(f"[BRIDGE] Allow always turned off for {self._project_root}")
+        self._announce_always_allowed()
 
     def set_interaction_mode(self, mode: str):
         self._interaction_mode = mode

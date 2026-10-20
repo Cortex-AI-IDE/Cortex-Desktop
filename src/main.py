@@ -976,18 +976,10 @@ def main():
     _profile("window_created")
     # window.show() is now called in __init__
 
-    # ── PRO OFFER CARD, once per launch for signed-in free accounts ──
-    # Deliberately delayed: the IDE paints and settles first, so the card
-    # never races startup or the login gate. maybe_show_offer() is a
-    # no-op for subscribed accounts (the dialog is never constructed) and
-    # always skippable for the rest - see subscription_offer.py.
-    try:
-        from PyQt6.QtCore import QTimer as _OfferTimer
-        from src.ui.dialogs.subscription_offer import (
-            maybe_show_offer as _show_pro_offer_card)
-        _OfferTimer.singleShot(1200, lambda: _show_pro_offer_card(window))
-    except Exception as _offer_err:
-        log.debug(f"[ProOffer] offer scheduling skipped: {_offer_err}")
+    # No Pro offer card at startup (removed 2026-10-20, owner decision): it
+    # opened over the IDE on every launch of a free account. The same card
+    # stays available on request from Help -> Upgrade to Pro
+    # (main_window, subscription_offer.maybe_show_offer(force=True)).
 
     # ═══════════════════════════════════════════════════════════════
     # SHUTDOWN HARDENING, Emergency save on force-kill / crash
@@ -1247,7 +1239,8 @@ def main():
             _clean_shutdown_path.write_text("clean")
         except Exception:
             pass
-    _atexit.register(_atexit_clean_shutdown)
+    from src.utils.exit_hooks import register as _register_exit_hook
+    _register_exit_hook(_atexit_clean_shutdown)
     log.info("[SHUTDOWN] atexit clean-shutdown handler registered")
 
     # ── OS signal handlers (SIGTERM, SIGINT) for terminal-based kills ──
@@ -1338,10 +1331,38 @@ def main():
         
         res = app.exec()
         log.info(f"Application exited with code {res}")
-        sys.exit(res)
+        _exit_without_teardown(res)
     except Exception as e:
         log.critical(f"FATAL EXCEPTION in main loop: {e}", exc_info=True)
         sys.exit(1)
+
+
+def _exit_without_teardown(code: int) -> None:
+    """Leave after the event loop, skipping Python's object teardown.
+
+    sys.exit() made the interpreter destroy every PyQt wrapper in arbitrary
+    order while Qt objects they point at were already gone: a segfault in
+    sip_api_get_address under Py_Exit on most closes (crash.log, 6 identical
+    traces 2026-10-17..20). Everything Cortex must do at exit has already run
+    by now (closeEvent and aboutToQuit save the chat and state); the atexit
+    hooks (clean-shutdown marker, temp pages; src/utils/exit_hooks.py) run here, the logs
+    are flushed and closed, and the process ends without the teardown.
+    """
+    try:
+        from src.utils.exit_hooks import run_all
+        run_all()                      # Cortex's own hooks only, not PyQt's
+    except Exception:
+        pass
+    try:
+        logging.shutdown()
+    except Exception:
+        pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os._exit(int(code) if isinstance(code, int) else 0)
 
 
 if __name__ == "__main__":

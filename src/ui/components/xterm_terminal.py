@@ -398,7 +398,8 @@ class XTermWidget(QWidget):
                         self._tmp_html.unlink()
                 except Exception:
                     pass
-            atexit.register(_cleanup_tmp)
+            from src.utils.exit_hooks import register as _register_exit_hook
+            _register_exit_hook(_cleanup_tmp)
 
             # Cache-busting: append timestamp to force fresh page load every restart
             url = QUrl.fromLocalFile(str(self._tmp_html.resolve()))

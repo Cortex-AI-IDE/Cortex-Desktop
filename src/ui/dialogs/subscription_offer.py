@@ -1,4 +1,4 @@
-"""The one-time Cortex Pro offer card, shown after login to free accounts.
+"""The Cortex Pro offer card, opened from Help -> Upgrade to Pro.
 
 Cortex already requires a login (src/core/login_gate.py). This is the step
 after it: a signed-in account that has NO active subscription sees a single
@@ -7,8 +7,8 @@ Yearly $40 - with a way out. The rules, exactly as specified:
 
     subscribed              -> the card is never constructed, and the
                                Help-menu entry hides itself
-    not subscribed, launch  -> the card shows ONCE, a beat after the IDE
-                               paints so it never blocks startup or login
+    not subscribed, launch  -> nothing: the startup card was removed
+                               (2026-10-20); main.py no longer calls this
     Get Started             -> cortex-ide.app/pricing/ opens in the user's
                                real browser (pay & go); the card waits with
                                a "check again" that re-reads /auth/me and
@@ -74,7 +74,6 @@ PLANS = (
             "Web search included",
             "Voice prompts (speech to text)",
             "Semantic code search",
-            "MCP server connections",
             "All LLM models via BYOK",
             "Full IDE features",
         ),
@@ -160,7 +159,7 @@ class _StatusWorker(QThread):
     signal: the card needs to know WHEN the answer landed, not just that a
     refresh was kicked off. Merges the fresh account copy into the client
     (under its own lock, then persisted) so every other subscription gate -
-    web search, voice, MCP, embeddings - unlocks in the same instant.
+    web search, voice, embeddings - unlocks in the same instant.
     """
     done = pyqtSignal(bool)
 
@@ -200,7 +199,7 @@ class SubscriptionOfferDialog(QDialog):
                "the moment the server confirms.")
     CHECKING = "Checking your account…"
     ACTIVE = ("Cortex Pro is active — web search, voice prompts, semantic "
-              "search, MCP servers and every included model are unlocked.")
+              "search and every included model are unlocked.")
     NOT_FOUND = ("No active subscription on this account yet. If you just "
                  "paid, give it a minute and check again.")
 
@@ -251,8 +250,8 @@ class SubscriptionOfferDialog(QDialog):
         title = QLabel("Cortex Pro")
         title.setObjectName("offerTitle")
         sub = QLabel("One subscription unlocks the connected IDE — web "
-                     "search, voice prompts, semantic code search, MCP "
-                     "servers and every included model.")
+                     "search, voice prompts, semantic code search and every "
+                     "included model.")
         sub.setObjectName("offerSub")
         sub.setWordWrap(True)
         col.addWidget(title)

@@ -48,10 +48,6 @@ _NAME_RE = re.compile(r"[^A-Za-z0-9_-]")
 
 GLOBAL_CONFIG = Path.home() / ".cortex" / "mcp.json"
 
-_SUBSCRIPTION_MSG = ("MCP servers require an active Cortex subscription "
-                     "($5/month or $40/year) and a signed-in account, "
-                     "see https://cortex-ide.app/pricing/")
-
 _APPROVAL_MSG = ("This server is declared inside the project folder, which is "
                  "untrusted input. Review its command in Settings > MCP "
                  "Servers and approve it before it runs.")
@@ -69,14 +65,9 @@ def _cortex_home() -> Path:
     return Path(env) if env else Path.home() / ".cortex"
 
 
-def _has_active_subscription() -> bool:
-    """MCP is a SUBSCRIPTION feature: signed in + active plan required.
-    Fails CLOSED, if the check can't run, MCP stays locked."""
-    try:
-        from src.core.cortex_api import get_api_client
-        return bool(get_api_client().has_subscription())
-    except Exception:
-        return False
+# MCP is free for every user (2026-10-20, owner decision). It used to be a
+# subscription feature: without an active plan no server started, its tools
+# were hidden from the agent and adding a server raised an error.
 
 
 def _sanitize(name: str) -> str:
@@ -799,7 +790,47 @@ class MCPManager:
     # ── lifecycle ────────────────────────────────────────────────────────
 
     def set_project_root(self, root: Optional[str]) -> None:
+        changed = root != self._project_root
         self._project_root = root
+        if changed:
+            self._notify_roots_changed()
+
+    # ── MCP roots ────────────────────────────────────────────────────────
+    #
+    # Servers that read or write files (chrome-devtools: screenshots,
+    # snapshots, scripts with filePath) only accept paths inside the roots
+    # the CLIENT declares. Cortex declared none, so chrome-devtools refused
+    # every file in the project - "Access denied: path ".../.cortex/shots/x.png"
+    # is not within any of the configured workspace roots" (10-19 / 10-20
+    # logs) - and the agent fell back to pulling screenshots and page
+    # snapshots into the conversation instead.
+
+    def _roots(self) -> list:
+        """file:// roots for MCP servers: the open project, else home."""
+        from mcp import types
+        from pydantic import AnyUrl
+        folder = self._project_root if (self._project_root and
+                                        os.path.isdir(self._project_root)) else str(Path.home())
+        return [types.Root(uri=AnyUrl(Path(folder).resolve().as_uri()),
+                           name=os.path.basename(folder.rstrip(os.sep)) or "project")]
+
+    async def _list_roots(self, _context):
+        from mcp import types
+        return types.ListRootsResult(roots=self._roots())
+
+    def _notify_roots_changed(self) -> None:
+        """Tell connected servers the project changed (roots/list_changed)."""
+        loop = self._loop
+        if not loop or not loop.is_running():
+            return
+        for state in list(self._states.values()):
+            session = getattr(state, "session", None)
+            if session is None:
+                continue
+            try:
+                asyncio.run_coroutine_threadsafe(session.send_roots_list_changed(), loop)
+            except Exception as e:
+                log.debug(f"[MCP] roots change not sent to '{state.config.name}': {e}")
 
     def _needs_approval(self, cfg: McpServerConfig) -> bool:
         """True when this server comes from the project folder, unapproved.
@@ -826,10 +857,6 @@ class MCPManager:
     def start(self) -> None:
         """(Re)start all enabled servers from config. Non-blocking.
 
-        Subscription gate: without a signed-in account + active plan, the
-        configs are kept but NO server process is launched, every entry
-        shows status 'subscription' in Settings.
-
         Trust gate: a server declared inside the project folder is untrusted
         input, so it is listed but not launched until the user approves its
         exact command. See _ProjectTrust.
@@ -838,13 +865,9 @@ class MCPManager:
         self.stop()
         self._started = True
         self._config_checked_at = time.monotonic()
-        self._subscribed = _has_active_subscription()
         for name, cfg in configs.items():
             state = _ServerState(cfg)
-            if not self._subscribed:
-                state.status = "subscription"
-                state.error = _SUBSCRIPTION_MSG
-            elif not cfg.enabled:
+            if not cfg.enabled:
                 state.status = "disabled"
             elif self._needs_approval(cfg):
                 state.status = "needs_approval"
@@ -930,7 +953,7 @@ class MCPManager:
         from mcp import ClientSession
         cfg = state.config
         async with self._open_streams(cfg, transport) as (read, write):
-            async with ClientSession(read, write) as session:
+            async with ClientSession(read, write, list_roots_callback=self._list_roots) as session:
                 _init = await asyncio.wait_for(session.initialize(), self.CONNECT_TIMEOUT)
                 state.instructions = str(getattr(_init, "instructions", None) or "")[:4000]
                 _info = getattr(_init, "serverInfo", None)
@@ -1046,12 +1069,6 @@ class MCPManager:
         if old and self._loop and old.stop_event is not None:
             self._loop.call_soon_threadsafe(old.stop_event.set)
         state = _ServerState(cfg)
-        self._subscribed = _has_active_subscription()
-        if not self._subscribed:
-            state.status = "subscription"
-            state.error = _SUBSCRIPTION_MSG
-            self._states[name] = state
-            return
         if not cfg.enabled:
             state.status = "disabled"
             self._states[name] = state
@@ -1069,8 +1086,6 @@ class MCPManager:
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """OpenAI-style schemas for every tool of every CONNECTED server."""
         self.sync()
-        if not getattr(self, "_subscribed", False):
-            return []
         defs: List[Dict[str, Any]] = []
         for name, state in list(self._states.items()):
             if state.status != "connected":
@@ -1199,8 +1214,6 @@ class MCPManager:
 
     def _call_tool_inner(self, qualified_name: str, args: Dict[str, Any],
                          timeout: float) -> Tuple[bool, str, List[Tuple[str, str]]]:
-        if not getattr(self, "_subscribed", False):
-            return False, _SUBSCRIPTION_MSG, []
         try:
             _, server, tool = qualified_name.split("__", 2)
         except ValueError:
@@ -1294,8 +1307,6 @@ class MCPManager:
         form only took commands, so a remote server such as Context7's
         https://mcp.context7.com/mcp could not be added from Settings at all.
         """
-        if not _has_active_subscription():
-            raise PermissionError(_SUBSCRIPTION_MSG)
         configs = self.load_configs()
         name = _sanitize(name)
         line = (command_line or "").strip()
@@ -1496,8 +1507,6 @@ class MCPManager:
 
     def import_json(self, text: str, scope: str = "global") -> int:
         """Import a standard {"mcpServers": {...}} blob. Returns servers added."""
-        if not _has_active_subscription():
-            raise PermissionError(_SUBSCRIPTION_MSG)
         data = json.loads(text)
         servers = data.get("mcpServers", data if isinstance(data, dict) else {})
         if not isinstance(servers, dict) or not servers:

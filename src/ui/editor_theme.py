@@ -28,6 +28,10 @@ EDITOR_THEMES = (
     ("catppuccin-mocha", "Catppuccin Mocha"),
     ("nord", "Nord"),
     ("solarized-light", "Solarized Light"),
+    ("high-contrast-dark", "High Contrast Dark"),
+    ("high-contrast-light", "High Contrast Light"),
+    ("distinct-colors-dark", "Distinct Colors Dark"),
+    ("distinct-colors-light", "Distinct Colors Light"),
 )
 DEFAULT_EDITOR_THEME = "auto"
 

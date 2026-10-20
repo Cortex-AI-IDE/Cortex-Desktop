@@ -299,7 +299,10 @@ class AuthManager:
                 return False
 
             log.info(f"[AuthManager] Opening browser for login")
-            webbrowser.open(auth_url)
+            # Off the GUI thread: webbrowser.open waits for xdg-open, which
+            # froze the window for 5.5 s on Sign in (UI-STALL, 2026-10-20).
+            threading.Thread(target=webbrowser.open, args=(auth_url,),
+                             daemon=True, name="login-browser").start()
 
             threading.Thread(
                 target=self._wait_for_callback,

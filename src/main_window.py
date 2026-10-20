@@ -948,6 +948,10 @@ class CortexMainWindow(QMainWindow):
         
         # Agent bridge connects Cortex to agent module
         self._ai_agent = AIAgent(file_manager=self._file_manager)
+        # "Allow always" for the open project → the status-bar switch (both chat modes).
+        _aa_sig = getattr(self._ai_agent, 'always_allowed_changed', None)
+        if _aa_sig is not None:
+            _aa_sig.connect(lambda _on: QTimer.singleShot(0, self._refresh_always_allow_button))
         if HAS_AGENT_BRIDGE:
             log.info("[AGENT] Agent bridge initialized - full integration active")
         else:
@@ -2029,6 +2033,12 @@ class CortexMainWindow(QMainWindow):
 
         # Store reference for later access
         self._main_splitter = main_splitter
+        # Settings -> Appearance -> Sidebar position (saved as layout.sidebar_position).
+        try:
+            self._apply_sidebar_position(
+                self._settings.get('layout', 'sidebar_position', default='left'))
+        except Exception as e:
+            log.debug(f"[Layout] sidebar position not applied: {e}")
         self._sync_splitter_handles(main_splitter)
         self._sync_splitter_handles(self._editor_terminal_splitter)
         self._sync_splitter_handles(self._editor_preview_splitter)
@@ -2698,6 +2708,21 @@ class CortexMainWindow(QMainWindow):
         self._status_trust_btn.setVisible(_is_restricted())
         sb.insertWidget(0, self._status_trust_btn)
         self._style_trust_button()
+
+        # "Always allow": shown while the open project has a remembered
+        # "Allow always" (src/core/project_permissions.py); a click turns it off.
+        self._status_always_btn = QPushButton("Always allow")
+        self._status_always_btn.setObjectName("statusAlwaysAllow")
+        self._status_always_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._status_always_btn.setToolTip(
+            "The AI edits files and runs commands in this project without asking, "
+            "also after a restart. Click to turn it off.")
+        self._status_always_btn.clicked.connect(self._on_always_allow_clicked)
+        self._status_always_btn.setVisible(False)
+        # A PERMANENT widget, on the right just before the version label:
+        # the left side is where Qt paints temporary status messages
+        # ("Venv: environment ..."), drawn on top of normal widgets there.
+        sb.addPermanentWidget(self._status_always_btn)
 
         # ── Version ──
         _app_version = QApplication.instance().applicationVersion() or "2.8.6"
@@ -8160,22 +8185,62 @@ class CortexMainWindow(QMainWindow):
         sizes = self._main_splitter.sizes()
         if len(sizes) < 2:
             return
-        widget = self._main_splitter.widget(0)
+        # By widget, not position: Settings -> Sidebar position can put the
+        # sidebar last (_apply_sidebar_position).
+        widget = self._sidebar
+        i = self._main_splitter.indexOf(widget)
+        if i < 0:
+            return
         if show:
             widget.setVisible(True)
             widget.setMinimumWidth(180)
             widget.setMaximumWidth(400)
             saved = getattr(self, '_left_sidebar_saved_size', 0)
-            sizes[0] = saved if saved > 0 else self._left_sidebar_min_width
+            sizes[i] = saved if saved > 0 else self._left_sidebar_min_width
         else:
-            self._left_sidebar_saved_size = sizes[0] if sizes[0] > 0 else self._left_sidebar_min_width
+            self._left_sidebar_saved_size = sizes[i] if sizes[i] > 0 else self._left_sidebar_min_width
             widget.setMinimumWidth(0)
             widget.setMaximumWidth(0)
             widget.setVisible(False)
-            sizes[0] = 0
+            sizes[i] = 0
         self._main_splitter.setSizes(sizes)
         self._sync_splitter_handles(self._main_splitter)
         self._left_sidebar_hidden = not show
+
+    def _apply_sidebar_position(self, position: str):
+        """Put the sidebar first (left) or last (right) in the main splitter.
+
+        Settings -> Appearance -> Sidebar position saved the choice, but
+        nothing read it: the sidebar was always added first. Sizes move with
+        their panels and the sidebar keeps not stretching.
+        """
+        sp = getattr(self, '_main_splitter', None)
+        side = getattr(self, '_sidebar', None)
+        if sp is None or side is None:
+            return
+        cur = sp.indexOf(side)
+        if cur < 0:
+            return
+        want = sp.count() - 1 if str(position).lower() == 'right' else 0
+        # The page mirrors too: on the right its icon strip is the outer edge.
+        if hasattr(side, 'set_side'):
+            side.set_side('right' if want else 'left')
+        if cur == want:
+            return
+        by_widget = {sp.widget(i): size for i, size in enumerate(sp.sizes())}
+        if not sp.isVisible() or not any(by_widget.values()):
+            # At startup the splitter is not laid out yet (640 px wide, the
+            # sizes an even split like 209/210/209); copying those made the
+            # sidebar end at its 225 px minimum, header buttons cut off. Use
+            # the default proportions instead (300 / 500 / 500).
+            by_widget = {sp.widget(i): (300 if sp.widget(i) is side else 500)
+                         for i in range(sp.count())}
+        sp.insertWidget(want, side)
+        sp.setSizes([by_widget.get(sp.widget(i), 0) for i in range(sp.count())])
+        for i in range(sp.count()):
+            sp.setStretchFactor(i, 0 if sp.widget(i) is side else 1)
+        self._sync_splitter_handles(sp)
+        log.info(f"[Layout] sidebar moved to the {'right' if want else 'left'}")
 
     def _toggle_sidebar(self):
         """Toggle left sidebar via splitter (Ctrl+B).
@@ -8191,19 +8256,22 @@ class CortexMainWindow(QMainWindow):
         sizes = self._main_splitter.sizes()
         if len(sizes) < 2:
             return
-        widget = self._main_splitter.widget(1)
+        widget = self._chat_panel
+        i = self._main_splitter.indexOf(widget)
+        if i < 0:
+            return
         if show:
             widget.setVisible(True)
             widget.setMinimumWidth(300)
             widget.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
             saved = getattr(self, '_chat_panel_saved_size', 0)
-            sizes[1] = saved if saved > 0 else self._chat_panel_min_width
+            sizes[i] = saved if saved > 0 else self._chat_panel_min_width
         else:
-            self._chat_panel_saved_size = sizes[1] if sizes[1] > 0 else self._chat_panel_min_width
+            self._chat_panel_saved_size = sizes[i] if sizes[i] > 0 else self._chat_panel_min_width
             widget.setMinimumWidth(0)
             widget.setMaximumWidth(0)
             widget.setVisible(False)
-            sizes[1] = 0
+            sizes[i] = 0
         self._main_splitter.setSizes(sizes)
         self._sync_splitter_handles(self._main_splitter)
         self._chat_panel_hidden = not show
@@ -8213,19 +8281,22 @@ class CortexMainWindow(QMainWindow):
         sizes = self._main_splitter.sizes()
         if len(sizes) < 3:
             return
-        widget = self._main_splitter.widget(2)
+        widget = self._editor_terminal_splitter
+        i = self._main_splitter.indexOf(widget)
+        if i < 0:
+            return
         if show:
             widget.setVisible(True)
             widget.setMinimumWidth(500)
             widget.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
             saved = getattr(self, '_code_panel_saved_size', 0)
-            sizes[2] = saved if saved > 0 else self._code_panel_min_width
+            sizes[i] = saved if saved > 0 else self._code_panel_min_width
         else:
-            self._code_panel_saved_size = sizes[2] if sizes[2] > 0 else self._code_panel_min_width
+            self._code_panel_saved_size = sizes[i] if sizes[i] > 0 else self._code_panel_min_width
             widget.setMinimumWidth(0)
             widget.setMaximumWidth(0)
             widget.setVisible(False)
-            sizes[2] = 0
+            sizes[i] = 0
         self._main_splitter.setSizes(sizes)
         self._sync_splitter_handles(self._main_splitter)
         self._code_panel_hidden = not show
@@ -9671,6 +9742,61 @@ class CortexMainWindow(QMainWindow):
         wt.remember(folder, trusted, include_parent=parent)
         if not self._apply_workspace_trust(folder, ask=False):
             self._enable_trusted_features(folder)
+            # Trusted now: a remembered "Allow always" applies again.
+            _apply = getattr(getattr(self, '_ai_agent', None), 'apply_remembered_access', None)
+            if _apply:
+                _apply()
+        self._refresh_always_allow_button()
+
+    # ── "Allow always", per project ───────────────────────────────────
+    def _refresh_always_allow_button(self):
+        btn = getattr(self, '_status_always_btn', None)
+        if btn is None:
+            return
+        # Only a REMEMBERED grant: a session-only one (Restricted Mode keeps
+        # asking after a restart) is not what the switch turns off.
+        agent = getattr(self, '_ai_agent', None)
+        on = bool(getattr(agent, '_always_allowed', False))
+        if on:
+            try:
+                from src.core import project_permissions
+                on = project_permissions.is_always(getattr(agent, '_project_root', None))
+            except Exception:
+                on = False
+        btn.setVisible(on)
+        if on:
+            from src.ui.tokens import TOKENS as _T
+            btn.setStyleSheet(
+                f"QPushButton#statusAlwaysAllow {{ background: transparent; color: {_T['accent']};"
+                f" border: 1px solid {_T['accent']}; border-radius: 3px; padding: 0 8px;"
+                f" margin: 2px 6px 2px 2px; font-size: 11px; font-weight: 600; }}"
+                f"QPushButton#statusAlwaysAllow:hover {{ background: {_T['accent']}; color: {_T['bg']}; }}")
+
+    def _on_always_allow_clicked(self):
+        agent = getattr(self, '_ai_agent', None)
+        folder = getattr(self, '_current_project_path', None) or getattr(agent, '_project_root', None)
+        name = os.path.basename(str(folder).rstrip(os.sep)) if folder else "this project"
+        box = QMessageBox(self)
+        box.setWindowTitle("Always allow")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(f"Stop always allowing the AI in {name}?")
+        box.setInformativeText(
+            "The AI edits files and runs commands here without asking, also after a "
+            "restart. Turn this off and it asks again, starting with the next change.")
+        off = box.addButton("Turn off", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Keep", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not off:
+            return
+        revoke = getattr(agent, 'revoke_always_allowed', None)
+        if revoke:
+            revoke()
+        else:
+            from src.core import project_permissions
+            project_permissions.forget(folder)
+            if agent is not None:
+                agent.set_always_allowed(False)
+        self._refresh_always_allow_button()
 
     def _enable_trusted_features(self, folder: str):
         """Turn on what Restricted Mode held back, for the open folder."""
@@ -9717,6 +9843,7 @@ class CortexMainWindow(QMainWindow):
         # Set project root FIRST (this loads project-specific context)
         self._ai_agent.set_project_root(folder_path)
         self._current_project_path = folder_path  # Track current project
+        self._refresh_always_allow_button()
         if hasattr(self, '_git_manager'):
             repo_ok = self._git_manager.set_repository(folder_path)
             log.info(f"[GIT] Repository set on project-opened: {folder_path} (ok={repo_ok})")
