@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-def renderTruncatedContent(self, content: str, terminalWidth: int, suppressExpandHint = false) -> str:
+def renderTruncatedContent(self, content: str, terminalWidth: int, suppressExpandHint=False) -> str:
     """TODO: Implement renderTruncatedContent"""
     pass
 

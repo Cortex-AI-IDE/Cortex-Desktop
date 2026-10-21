@@ -12,6 +12,7 @@ from .dangerous_detection import (
     find_dangerous_permissions,
     find_overly_broad_permissions,
 )
+from ..permission_mode import PermissionMode
 
 
 # ============================================================================
