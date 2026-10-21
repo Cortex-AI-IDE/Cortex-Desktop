@@ -13,27 +13,27 @@ log = logging.getLogger("cortex.agent")
 
 # Defensive imports with fallback stubs
 try:
-    from ...tools.AgentTool.constants import AGENT_TOOL_NAME as _AGENT_TOOL_NAME
+    from ...tools.agent_tool.constants import AGENT_TOOL_NAME as _AGENT_TOOL_NAME
 except ImportError:
     _AGENT_TOOL_NAME = "Agent"
 
 try:
-    from ...tools.AskUserQuestionTool.prompt import ASK_USER_QUESTION_TOOL_NAME as _ASK_USER_QUESTION_TOOL_NAME
+    from ...tools.ask_user_question_tool.prompt import ASK_USER_QUESTION_TOOL_NAME as _ASK_USER_QUESTION_TOOL_NAME
 except ImportError:
     _ASK_USER_QUESTION_TOOL_NAME = "AskUserQuestion"
 
 try:
-    from ...tools.EnterPlanModeTool.constants import ENTER_PLAN_MODE_TOOL_NAME as _ENTER_PLAN_MODE_TOOL_NAME
+    from ...tools.enter_plan_mode_tool.constants import ENTER_PLAN_MODE_TOOL_NAME as _ENTER_PLAN_MODE_TOOL_NAME
 except ImportError:
     _ENTER_PLAN_MODE_TOOL_NAME = "EnterPlanMode"
 
 try:
-    from ...tools.ExitPlanModeTool.constants import EXIT_PLAN_MODE_TOOL_NAME as _EXIT_PLAN_MODE_TOOL_NAME
+    from ...tools.exit_plan_mode_tool.constants import EXIT_PLAN_MODE_TOOL_NAME as _EXIT_PLAN_MODE_TOOL_NAME
 except ImportError:
     _EXIT_PLAN_MODE_TOOL_NAME = "ExitPlanMode"
 
 try:
-    from ...tools.SkillTool.constants import SKILL_TOOL_NAME as _SKILL_TOOL_NAME
+    from ...tools.skill_tool.constants import SKILL_TOOL_NAME as _SKILL_TOOL_NAME
 except ImportError:
     _SKILL_TOOL_NAME = "Skill"
 
@@ -45,7 +45,7 @@ except ImportError:
         return False
 
 try:
-    from ...skills.bundledSkills import register_bundled_skill as _register_bundled_skill
+    from ...skills.bundled_skills import register_bundled_skill as _register_bundled_skill
 except ImportError:
     def _register_bundled_skill(definition: Dict[str, Any]) -> None:
         """Fallback stub for skill registration."""

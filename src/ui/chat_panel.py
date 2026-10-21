@@ -128,6 +128,71 @@ def _compact_diff_rows(rows: list, ctx: int = _DIFF_CONTEXT_LINES) -> list:
         prev = i
     return out
 
+
+# ── Tool-card data guards ────────────────────────────────────────────────
+# A tool card is rebuilt on restore from the dict it was constructed with,
+# so that dict has to reach timeline_json. It can also hold a command's full
+# stdout, a read file's whole text, or every grep match, which is the same
+# unbounded-growth problem the diff guards above were added for. These caps
+# keep a card FIDELITY-safe (the card still rebuilds with its real content)
+# while stopping one heavy turn from re-inflating the saved timeline that
+# every restart has to json.loads before the chat can render.
+_TOOL_DATA_MAX_STR = 8000      # one string value: stdout, file text, ...
+_TOOL_DATA_MAX_LIST = 200      # one list value: matches, entries, files
+_TOOL_DATA_MAX_KEYS = 40       # keys kept from one card's data dict
+_TOOL_DATA_MAX_DEPTH = 3       # nesting kept before values are stringified
+# Per-card ceiling. Without it a card with many string fields could still
+# store 40 x 8000 chars and re-create the growth the diff guards fixed.
+_TOOL_DATA_MAX_TOTAL = 20000
+
+
+def _cap_tool_value(value, depth: int = 0, limit: int = _TOOL_DATA_MAX_STR):
+    """A storage-safe copy of one value from a tool card's data dict."""
+    if isinstance(value, str):
+        if len(value) > limit:
+            return (value[:limit]
+                    + f"\n... [{len(value) - limit:,} more characters]")
+        return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if depth >= _TOOL_DATA_MAX_DEPTH:
+        return str(value)[:limit]
+    if isinstance(value, dict):
+        return _cap_tool_data(value, depth + 1, limit)
+    if isinstance(value, (list, tuple)):
+        kept = [_cap_tool_value(v, depth + 1, limit)
+                for v in list(value)[:_TOOL_DATA_MAX_LIST]]
+        if len(value) > _TOOL_DATA_MAX_LIST:
+            kept.append(f"... [{len(value) - _TOOL_DATA_MAX_LIST:,} more items]")
+        return kept
+    return str(value)[:limit]
+
+
+def _cap_tool_data(data, depth: int = 0,
+                   budget: int = _TOOL_DATA_MAX_TOTAL) -> dict:
+    """A capped, JSON-friendly copy of a tool card's data dict.
+
+    Keeps the shape make_card() expects so the same card can be rebuilt
+    after a restart, but bounds every value that grows with tool output and
+    stops the whole card at `budget` characters.
+    """
+    if not isinstance(data, dict):
+        return {}
+    out, used = {}, 0
+    for i, (key, value) in enumerate(data.items()):
+        if i >= _TOOL_DATA_MAX_KEYS:
+            out["_truncated_keys"] = len(data) - _TOOL_DATA_MAX_KEYS
+            break
+        limit = min(_TOOL_DATA_MAX_STR, max(200, budget - used))
+        capped = _cap_tool_value(value, depth, limit)
+        out[str(key)] = capped
+        used += len(str(capped))
+        if used >= budget:
+            if i + 1 < len(data):
+                out["_truncated"] = f"... card data capped at {budget:,} chars"
+            break
+    return out
+
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl
 
@@ -677,7 +742,11 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
 
 
 _LATEX_BLOCK = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
-_LATEX_INLINE = re.compile(r'(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)')
+# Inline math follows Pandoc's rule: no space just inside either "$", and the
+# closing "$" is not followed by a digit. Without it prices were read as
+# math and lost their dollar signs: "$10 → $5 /seat" showed as "10→5 /seat".
+_LATEX_INLINE = re.compile(r'(?<!\$)\$(?![\s$])(.+?)(?<![\s$])\$(?![$\d])')
+_INLINE_CODE_SPAN = re.compile(r'(`+)[^`\n].*?(?<!`)\1(?!`)')
 
 def _show_toast(parent, message: str, duration_ms: int = 3000):
     """Show a brief toast notification on the parent widget."""
@@ -713,9 +782,14 @@ def _convert_latex_to_unicode(text: str) -> str:
             return _conv.convert(m.group(1).strip())
         except Exception:
             return m.group(0)
-    text = _LATEX_BLOCK.sub(_replace, text)
-    text = _LATEX_INLINE.sub(_replace, text)
-    return text
+    # `code` keeps its "$" ($HOME/$USER is a shell line, not math).
+    parts, last = [], 0
+    for m in _INLINE_CODE_SPAN.finditer(text):
+        parts.append(_LATEX_INLINE.sub(_replace, _LATEX_BLOCK.sub(_replace, text[last:m.start()])))
+        parts.append(m.group(0))
+        last = m.end()
+    parts.append(_LATEX_INLINE.sub(_replace, _LATEX_BLOCK.sub(_replace, text[last:])))
+    return ''.join(parts)
 
 
 def _fade_in_widget(widget, duration_ms=150, slide_px=8):
@@ -844,7 +918,22 @@ def _markdown_to_clean_html(markdown_text: str, table_normalized: bool = False) 
         markdown_text = normalize_table_markdown(markdown_text)
 
     raw_html = _get_mistune_md()(markdown_text) or ""
+    if '\\|' in raw_html and '<t' in raw_html:
+        raw_html = _TABLE_CELL_RE.sub(_unescape_cell_code_pipes, raw_html)
     return raw_html
+
+
+# GFM: in a table, "\|" inside a code span is a literal "|" - the escape only
+# keeps the row's cell count right. mistune keeps the backslash, so commands
+# like `ls \| wc -l` showed as "ls \| wc -l" in table cells.
+_TABLE_CELL_RE = re.compile(r'<(td|th)\b[^>]*>.*?</\1>', re.S)
+_CODE_SPAN_RE = re.compile(r'(<code\b[^>]*>)(.*?)(</code>)', re.S)
+
+
+def _unescape_cell_code_pipes(m: "re.Match") -> str:
+    return _CODE_SPAN_RE.sub(
+        lambda c: c.group(1) + c.group(2).replace('\\|', '|') + c.group(3),
+        m.group(0))
 
 
 def _build_prose_html(text: str, doc_w: int, normalize_timeout: float = 1.0):
@@ -2464,6 +2553,16 @@ class ToolGroup(CollapsibleCard):
 
     def _update_rich_card(self, card, data: dict, ok: bool):
         """Update a ToolCardBase with result data that arrived at tool_end time."""
+        # Remember the outcome, and fold the result into the dict the card was
+        # built from. serialize() saves that dict, so without this merge a
+        # restored card carried the tool_start args and none of the output
+        # that arrived at tool_end (real stdout, exit code, match counts).
+        card._card_ok = bool(ok)
+        _saved = getattr(card, "_card_data", None)
+        if isinstance(_saved, dict) and isinstance(data, dict):
+            for _k, _v in data.items():
+                if _v is not None:
+                    _saved[_k] = _v
         # Stop spinner
         if hasattr(card, 'gutter'):
             card.gutter.mark_done(ok)
@@ -5180,6 +5279,177 @@ _RESTORE_HIDDEN_NOTE = "… %d earlier step(s) hidden on restore"
 _RESTORE_HIDDEN_RE = re.compile(r"^… \d+ earlier step\(s\) hidden on restore$")
 
 
+_RGBA_RE = re.compile(
+    r"^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$"
+)
+
+
+def _token_color(value, fallback: str = "#8a8a8a") -> QColor:
+    """Resolve a theme token (hex, named colour or CSS ``rgba(...)``) to QColor.
+
+    QColor only parses hex and SVG names, and several chat tokens are written
+    as ``rgba(255,255,255,0.35)``. Without this every state collapsed onto the
+    same fallback grey, so hovering a painted control changed nothing at all.
+    """
+    c = QColor(value) if value else QColor()
+    if c.isValid():
+        return c
+    m = _RGBA_RE.match((value or "").strip())
+    if m:
+        rgb = [max(0, min(255, int(round(float(m.group(i)))))) for i in (1, 2, 3)]
+        c = QColor(*rgb)
+        if m.group(4) is not None:
+            c.setAlphaF(max(0.0, min(1.0, float(m.group(4)))))
+        return c
+    return QColor(fallback)
+
+
+class MessageCopyButton(QToolButton):
+    """Copy glyph under a chat message, drawn from LIVE theme tokens.
+
+    Painted instead of styled: a widget stylesheet is construction-time here,
+    and the chat has already been bitten by that (a live theme switch left
+    cards dark-on-light). Resolving the colour in paintEvent from the
+    CHAT_TOKENS proxy means a switch only needs a repaint.
+
+    No setToolTip anywhere in chat: QToolTip is a NATIVE top-level window and
+    on Windows it leaves the DWM "capsule" ghost fragments over the panel (see
+    MessageWidget's created_ts note).
+    """
+
+    SIDE = 24          # click target
+    GLYPH = 16         # drawn size inside it, so the icon never reads heavy
+
+    def __init__(self, provider, parent=None):
+        super().__init__(parent)
+        self._provider = provider
+        self._hover = False
+        self._copied = False
+        self.setFixedSize(self.SIDE, self.SIDE)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # The app-wide QToolButton rule (4px padding, #292929 hover box,
+        # #228df2 pressed flash) made a 24px icon read as a stray button.
+        # Only theme-agnostic declarations here; every colour is painted.
+        self.setStyleSheet(
+            "QToolButton { background: transparent; border: none; padding: 0; }"
+        )
+        self.setAccessibleName("Copy message")
+        self.clicked.connect(self._do_copy)
+
+    # ── interaction ──
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def changeEvent(self, e):
+        # A live theme switch re-applies stylesheets down the tree; repaint so
+        # the glyph picks up the new muted/text colour.
+        if e.type() == QEvent.Type.StyleChange:
+            self.update()
+        super().changeEvent(e)
+
+    def _do_copy(self):
+        try:
+            text = self._provider() if self._provider else ""
+        except Exception:
+            text = ""
+        if not text.strip():
+            return
+        cb = QApplication.clipboard()
+        if cb is None:
+            return
+        cb.setText(text)
+        self._copied = True
+        self.update()
+        QTimer.singleShot(1400, self._reset)
+
+    def _reset(self):
+        self._copied = False
+        try:
+            self.update()
+        except RuntimeError:
+            pass  # message deleted while the feedback timer was pending
+
+    # ── painting ──
+    def paintEvent(self, e):
+        from PyQt6.QtGui import QPainter
+
+        p = QPainter(self)
+        self.paint_into(p)
+        p.end()
+
+    def paint_into(self, p):
+        """Chip + glyph into any painter (the widget's, or an image's).
+
+        Separate from paintEvent so the REAL paint path can be rendered
+        offscreen and checked: QToolButton.grab() hard-crashes on the
+        offscreen platform, which made the drawing untestable in CI.
+        """
+        from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QPainter
+
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.save()
+        if self._hover:
+            # A soft theme chip instead of the QSS square: it uses the same
+            # hover surface the rest of the app uses, so light mode gets its
+            # warm tint and dark mode a gentle lift, with no hard edges.
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(_token_color(T['bg_hover'], "#2a2a2a")))
+            p.drawRoundedRect(QRectF(0, 0, self.SIDE, self.SIDE), 6, 6)
+        p.translate((self.SIDE - self.GLYPH) / 2.0,
+                    (self.SIDE - self.GLYPH) / 2.0)
+        self.draw_glyph(p, self.GLYPH)
+        p.restore()
+
+    def draw_glyph(self, p, side: int):
+        """Paint just the glyph, scaled to ``side`` pixels."""
+        from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QPainter, QPen, QPainterPath
+
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.save()
+        p.scale(side / 24.0, side / 24.0)
+        if self._copied:
+            color = _token_color(T['accent'], "#06b6d4")
+        elif self._hover:
+            color = _token_color(T['text'], "#e6e8eb")
+        else:
+            color = _token_color(T['muted'], "#8a8a8a")
+        pen = QPen(color, 1.9)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        if self._copied:
+            check = QPainterPath()
+            check.moveTo(5.0, 12.5)
+            check.lineTo(9.5, 17.0)
+            check.lineTo(18.5, 7.0)
+            p.drawPath(check)
+        else:
+            # Two offset sheets: back sheet (open corner) + front sheet.
+            p.drawRoundedRect(QRectF(8.5, 8.5, 12.0, 12.0), 2.4, 2.4)
+            back = QPainterPath()
+            back.moveTo(5.5, 15.5)
+            back.lineTo(4.6, 15.5)
+            back.quadTo(3.5, 15.5, 3.5, 14.4)
+            back.lineTo(3.5, 4.6)
+            back.quadTo(3.5, 3.5, 4.6, 3.5)
+            back.lineTo(14.4, 3.5)
+            back.quadTo(15.5, 3.5, 15.5, 4.6)
+            back.lineTo(15.5, 5.5)
+            p.drawPath(back)
+        p.restore()
+
+
 class MessageWidget(QWidget):
     def __init__(self, role="assistant", parent=None):
         super().__init__(parent)
@@ -5278,6 +5548,26 @@ class MessageWidget(QWidget):
             row.addStretch(1)
             row.addWidget(bub)
             self.v.addLayout(row)
+            # Copy button on its own line, under the bubble and right-aligned
+            # with it, so a long prompt never pushes it beside the text.
+            # Wrapped in a WIDGET, not added as a bare sub-layout: the
+            # collapse path takes every item off `v` and deleteLater()s only
+            # widgets, which would orphan (and leave floating) a bare layout.
+            self._actions = QWidget()
+            # A bare QWidget inherits the global `QWidget { background }` rule,
+            # which painted this row as a full-width dark band under every
+            # message. Transparent is theme-agnostic, so it cannot leak.
+            self._actions.setStyleSheet("background: transparent;")
+            self._actions.setFixedHeight(MessageCopyButton.SIDE)
+            acts = QHBoxLayout(self._actions)
+            # 4px right inset matches the bubble's own edge, so the glyph sits
+            # under the bubble's corner instead of floating past it.
+            acts.setContentsMargins(0, 0, 4, 0)
+            acts.setSpacing(0)
+            acts.addStretch(1)
+            self._copy_btn = MessageCopyButton(self._copy_text)
+            acts.addWidget(self._copy_btn)
+            self.v.addWidget(self._actions)
             # The bubble's width follows the panel's, so refit on resize.
             def _on_self_resize(e, _orig=self.resizeEvent):
                 _orig(e)
@@ -5294,6 +5584,64 @@ class MessageWidget(QWidget):
             self._card_v.setContentsMargins(12, 4, 12, 4)
             self._card_v.setSpacing(8)
             self.v.addWidget(self._card)
+            # Copy button sits below the card and OUTSIDE `_card_v`: blocks are
+            # appended to that layout while the reply streams, so a footer
+            # added there would end up above the text. A widget wrapper keeps
+            # the card's 12px left indent and survives the collapse path.
+            self._actions = QWidget()
+            # Same as the user row: transparent, or the global QWidget
+            # background rule paints a dark band across the reply's footer.
+            self._actions.setStyleSheet("background: transparent;")
+            self._actions.setFixedHeight(MessageCopyButton.SIDE)
+            acts = QHBoxLayout(self._actions)
+            # 12px matches the card's own content indent, so the glyph lines
+            # up with the reply's first character.
+            acts.setContentsMargins(12, 0, 12, 0)
+            acts.setSpacing(0)
+            self._copy_btn = MessageCopyButton(self._copy_text)
+            acts.addWidget(self._copy_btn)
+            acts.addStretch(1)
+            self.v.addWidget(self._actions)
+
+    def _copy_text(self) -> str:
+        """The message's own content, as plain text, for the copy button.
+
+        Reasoning (ThoughtsBlock), tool rows and diff cards are deliberately
+        skipped: "copy message" means the prompt or the reply, not the work
+        behind it. Blocks keep their markdown source where there is one, so
+        tables and code paste back as paste-able markdown.
+        """
+        if self.role == "user":
+            try:
+                return self._user_label.toPlainText().strip()
+            except RuntimeError:
+                return ""
+        parts = []
+        try:
+            count = self._card_v.count()
+        except RuntimeError:
+            return ""
+        for i in range(count):
+            try:
+                item = self._card_v.itemAt(i)
+            except RuntimeError:
+                continue
+            w = item.widget() if item else None
+            if w is None:
+                continue
+            try:
+                if isinstance(w, CodeBlockWidget):
+                    parts.append(getattr(w, "_code_text", "") or "")
+                elif isinstance(w, TableWidget):
+                    parts.append(w.as_markdown())
+                elif isinstance(w, MermaidDiagramCard):
+                    parts.append("```mermaid\n" + (getattr(w, "_code", "") or "") + "\n```")
+                elif isinstance(w, QTextBrowser):
+                    parts.append(getattr(w, "_rendered_text", "") or w.toPlainText())
+            except RuntimeError:
+                # widget deleted mid-iteration (collapse/retheme); skip it
+                continue
+        return "\n\n".join(p.strip("\n") for p in parts if p and p.strip()).strip()
 
     def set_created_ts(self, ts) -> None:
         """Restore the ORIGINAL creation time (called by the restore paths so
@@ -5485,6 +5833,11 @@ class MessageWidget(QWidget):
                         # can never be structurally broken by a cap, and
                         # re-renders with CURRENT theme colors at restore.
                         _md_src = getattr(w, '_rendered_text', '') or ''
+                        if _md_src:
+                            # Save it repaired, so the stored copy is clean
+                            # too (idempotent: clean text is unchanged).
+                            from src.ui.chat_text import sanitize_prose_markdown
+                            _md_src = sanitize_prose_markdown(_md_src)
                         if _md_src.strip():
                             blocks.append({"type": "prose", "md": _md_src})
                         else:
@@ -5524,7 +5877,24 @@ class MessageWidget(QWidget):
                                     _name = child.text()
                                 elif obj_name == "toolArg":
                                     _arg = child.text()
-                            tools.append({"name": _name, "arg": _arg})
+                            _item = {"name": _name, "arg": _arg}
+                            _ctype = getattr(row, "_card_type", "") or ""
+                            if _ctype:
+                                # Rich card (Bash/Read/Grep/...): save its type
+                                # and the dict it was built from, so restore
+                                # rebuilds the SAME card with its real content.
+                                # Before this only name+arg survived, restore
+                                # had nothing to draw but a one-line text row,
+                                # and every run-command card disappeared on
+                                # restart (2026-10-21 report; measured on a live
+                                # timeline: 1,044 tool blocks, 0 with a type).
+                                _item["tool_type"] = _ctype
+                                _item["data"] = _cap_tool_data(
+                                    getattr(row, "_card_data", None))
+                                # settle state, so a restored card is not left
+                                # spinning and a failed one restores as failed
+                                _item["ok"] = bool(getattr(row, "_card_ok", True))
+                            tools.append(_item)
                         _label_text = ", ".join(w._tool_names) if w._tool_names else ""
                         blocks.append({"type": "tools", "label": _label_text, "items": tools})
                 except RuntimeError:
@@ -5815,6 +6185,13 @@ class MessageWidget(QWidget):
                         _md_src = _md_src[:6000] + "\n\n… *(long output truncated on restore, full text is in the conversation history)*"
                     elif len(_md_src) > 20000:
                         _md_src = _md_src[:20000] + "\n\n… *(truncated for restore)*"
+                    # Repair what older builds saved (chat_text.
+                    # sanitize_prose_markdown): a fence stuck in a table row,
+                    # an unclosed fence (also from the cut above), leaked
+                    # <task_summary> tags. Without it one such block turned
+                    # the rest of the reply into a code block after restart.
+                    from src.ui.chat_text import sanitize_prose_markdown
+                    _md_src = sanitize_prose_markdown(_md_src)
                     pb = msg.new_prose(streaming=False)
                     try:
                         # table_normalized=True, or the text is normalized
@@ -5915,7 +6292,28 @@ class MessageWidget(QWidget):
                 for idx, td in enumerate(bd.get("items", [])):
                     _name = td.get("name", "")
                     _arg = td.get("arg", "")
-                    if _name:
+                    _ttype = td.get("tool_type") or ""
+                    _tdata = td.get("data")
+                    if _ttype and isinstance(_tdata, dict):
+                        # A rich card saved by serialize(): rebuild the SAME
+                        # widget with its real content. This is the fix for
+                        # "run command cards are gone after a restart": those
+                        # blocks used to carry only name+arg, so the only thing
+                        # restore could draw was a plain text row. A dict copy
+                        # is passed because make_card() writes into it and the
+                        # stored block is reused by the next save.
+                        _card = tg.add_tool_card(
+                            f"restored_{idx}", _ttype, dict(_tdata),
+                            name=_name or _ttype)
+                        try:
+                            # Settle it: a restored card is finished, and a
+                            # failed one must come back as failed, not spin.
+                            _card.mark_done(bool(td.get("ok", True)))
+                        except (RuntimeError, AttributeError):
+                            pass
+                        if _g is not None:
+                            _g.note_tool_start(f"r{id(tg)}_{idx}", _name, _arg)
+                    elif _name:
                         from src.ui.tool_cards import normalize_tool_name
                         tg.add_tool(f"restored_{idx}", _name, _arg,
                                     kind=normalize_tool_name(_name))
@@ -14807,6 +15205,8 @@ class ChatPanel(QWidget):
                             _md_src = _md_src[:6000] + (
                                 "\n\n… *(long output truncated on restore, "
                                 "full text is in the conversation history)*")
+                        from src.ui.chat_text import sanitize_prose_markdown
+                        _md_src = sanitize_prose_markdown(_md_src)
                         try:
                             _r = _markdown_to_clean_html(
                                 normalize_table_markdown(_md_src),

@@ -7,7 +7,7 @@
 Hand a task to an AI agent and watch it plan, read your code, edit files, run
 commands and iterate until the work is done, inside a real IDE.
 
-**Version 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11 &nbsp;·&nbsp; Linux &nbsp;·&nbsp; macOS (source build)
+**Version 3.0.66** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Windows 10 / 11 &nbsp;·&nbsp; Linux &nbsp;·&nbsp; macOS (source build)
 
 [Website](https://cortex-ide.app/) &nbsp;·&nbsp; [Documentation](https://cortex-ide.app/docs/) &nbsp;·&nbsp; [Pricing](https://cortex-ide.app/pricing/) &nbsp;·&nbsp; [Issues](https://github.com/Cortex-AI-IDE/Cortex-Desktop/issues)
 
@@ -136,6 +136,18 @@ and state what you changed. There is an explicit patent grant, and no
 trademark rights are granted: do not present a modified build as the official
 Cortex product. The full text of these terms is in [LICENSE](LICENSE).
 
+### Binary distribution
+
+Cortex's own source code is licensed under Apache-2.0. The desktop app links
+PyQt6, which is licensed under GPL v3, so the compiled application as a whole
+is distributed under the terms of GPL v3. Full source for every release is
+available in this repository.
+
+Payments, hosted services and third-party content are not part of that
+combined work: they run as separate services or are bundled under their own
+licences. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the full
+list.
+
 ### What this repository contains
 
 The desktop application source: the PyQt6 shell, the agent bridge, the
@@ -150,10 +162,9 @@ read it, build on it, modify it and redistribute it as described above.
 
 | Not included | Why |
 |--------------|-----|
-| Build and packaging pipeline | PyInstaller specs, the Inno Setup installer script, the MSIX manifest and code signing configuration |
-| Automated test suite | Not part of this release |
+| Build and packaging pipeline | The Windows Inno Setup installer script, the MSIX manifest and code signing configuration. The PyInstaller specs are included. |
 | Hosted services | The account, billing and update-check backends run separately |
-| `Docs/` and `plugins/` | Not part of this release |
+| `plugins/` | Not part of this release |
 | Release binaries | Download the signed build from [cortex-ide.app](https://cortex-ide.app/) |
 
 The remaining pieces are being prepared for release separately. Until that work

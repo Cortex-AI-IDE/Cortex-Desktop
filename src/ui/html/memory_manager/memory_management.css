@@ -2032,6 +2032,17 @@ html[data-theme="light"] .confirm-btn.danger:hover {
     letter-spacing: 0.5px;
 }
 
+/* Secondary line under a stat label, states the relationship between
+   statistics (e.g. that cached input is part of input, not extra). */
+.stat-note {
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--muted);
+    opacity: 0.8;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    TOKEN ACTIVITY CHART
    ═══════════════════════════════════════════════════════════════ */
@@ -2975,6 +2986,10 @@ html[data-theme="light"] .stat-value {
 }
 
 html[data-theme="light"] .stat-label {
+    color: #4D4A44;
+}
+
+html[data-theme="light"] .stat-note {
     color: #4D4A44;
 }
 

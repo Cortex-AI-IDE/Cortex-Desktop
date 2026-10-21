@@ -102,7 +102,7 @@ except ImportError:
         _session_cache = None
 
 try:
-    from .managedPath import getManagedFilePath, getManagedSettingsDropInDir
+    from .managed_path import getManagedFilePath, getManagedSettingsDropInDir
 except ImportError:
     def getManagedFilePath():
         return _primary_config_home_dir()
@@ -140,7 +140,7 @@ except ImportError:
         return False
 
 try:
-    from ..services.remoteManagedSettings.syncCacheState import getRemoteManagedSettingsSyncFromCache
+    from ..services.remote_managed_settings.sync_cache_state import getRemoteManagedSettingsSyncFromCache
 except ImportError:
     def getRemoteManagedSettingsSyncFromCache():
         return None

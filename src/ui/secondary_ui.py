@@ -585,19 +585,18 @@ class ContextBar(QFrame):
 
         self._label = QLabel("Context")
         self._label.setStyleSheet(f"color:{T['muted']};font-size:{T['font_size_xxs']};")
-        # Budget meter: soft track, hidden at 0%. A solid border_dim track
-        # at 0% rendered as a stray dash on the row (same report as
-        # TodoSection's progress bar, 2026-10-20).
+        # Budget meter. It is the row's ONLY stretch-1 item, so it must stay
+        # visible at every percentage: hiding it at 0% left three zero-stretch
+        # labels sharing the slack and the "0%" drifted to the middle of the
+        # row (2026-10-21 report). At 0% only the TRACK goes transparent, which
+        # also avoids the stray dash a tinted border_dim track drew at rest
+        # (same report as TodoSection's progress bar, 2026-10-20).
         self._bar = QProgressBar()
         self._bar.setMaximum(100)
         self._bar.setValue(0)
         self._bar.setTextVisible(False)
         self._bar.setFixedHeight(4)
-        self._bar.setStyleSheet(
-            f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
-            f"QProgressBar::chunk {{ background:{T['accent']};border-radius:2px; }}"
-        )
-        self._bar.setVisible(False)
+        self._style(0.0, T['accent'])
         self._usage = QLabel("0%")
         self._usage.setStyleSheet(f"color:{T['muted']};font-size:{T['font_size_xxs']};")
         self._provider = QLabel("")
@@ -608,27 +607,31 @@ class ContextBar(QFrame):
         h.addWidget(self._usage)
         h.addWidget(self._provider)
 
+    def _style(self, track_alpha: float, chunk: str):
+        """One place that knows the meter's track and chunk colours.
+
+        ``track_alpha`` 0.0 is a fully transparent track: the bar keeps its
+        width (so the row never reflows) without drawing a visible line.
+        """
+        self._bar.setStyleSheet(
+            f"QProgressBar {{ background:{_tint(T['border_dim'], track_alpha)};border:0;border-radius:2px; }}"
+            f"QProgressBar::chunk {{ background:{chunk};border-radius:2px; }}"
+        )
+
     def update_budget(self, used: int, budget: int, provider: str = ""):
         """Update the context budget display."""
         pct = int(used / budget * 100) if budget > 0 else 0
         self._bar.setValue(min(pct, 100))
-        self._bar.setVisible(pct > 0)  # soft track, hidden at 0% (see __init__)
+        # Never hide the bar (see __init__): at 0% only the track goes
+        # transparent, so the label positions are identical at every value.
+        if pct > 90:
+            self._style(0.3, T['red'])
+        elif pct > 70:
+            self._style(0.3, T['orange'])
+        elif pct == 0:
+            self._style(0.0, T['accent'])
+        else:
+            self._style(0.3, T['accent'])
         self._usage.setText(f"{pct}%")
         if provider:
             self._provider.setText(provider)
-        # Color based on usage
-        if pct > 90:
-            self._bar.setStyleSheet(
-                f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
-                f"QProgressBar::chunk {{ background:{T['red']};border-radius:2px; }}"
-            )
-        elif pct > 70:
-            self._bar.setStyleSheet(
-                f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
-                f"QProgressBar::chunk {{ background:{T['orange']};border-radius:2px; }}"
-            )
-        else:
-            self._bar.setStyleSheet(
-                f"QProgressBar {{ background:{_tint(T['border_dim'], 0.3)};border:0;border-radius:2px; }}"
-                f"QProgressBar::chunk {{ background:{T['accent']};border-radius:2px; }}"
-            )

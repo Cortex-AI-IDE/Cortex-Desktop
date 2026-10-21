@@ -191,6 +191,12 @@
             <select class="setting-select" id="sidebarPosition"><option value="left" selected>Left</option><option value="right">Right</option></select>
           </div>
           <div class="setting-row">
+            <div class="setting-info"><label>Chat panel position</label>
+              <p>Place the chat panel on the left or right. The editor and terminal fill the space between it and the sidebar.</p>
+            </div>
+            <select class="setting-select" id="chatPosition"><option value="left" selected>Left</option><option value="right">Right</option></select>
+          </div>
+          <div class="setting-row">
             <div class="setting-info"><label>Chat activity</label>
               <p>Compact folds the AI's thoughts, commands, searches and edits into one line between its messages. Detailed shows every step as its own card. Applies to new replies and to chats you reopen.</p>
             </div>
@@ -277,14 +283,17 @@
           <div class="stat-card">
             <div class="stat-value" id="inputTokens">0</div>
             <div class="stat-label">Input tokens</div>
+            <div class="stat-note" id="inputNote">fresh + cached</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="cachedTokens">0</div>
+            <div class="stat-label">Cached input</div>
+            <div class="stat-note" id="cachedNote">0% of input</div>
           </div>
           <div class="stat-card">
             <div class="stat-value" id="outputTokens">0</div>
             <div class="stat-label">Output tokens</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="cachedTokens">0</div>
-            <div class="stat-label">Cached (of input)</div>
+            <div class="stat-note" id="outputNote">generated</div>
           </div>
         </div>
 

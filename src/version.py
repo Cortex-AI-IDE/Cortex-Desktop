@@ -18,7 +18,7 @@ value, so the two channels can never disagree about what "2.9.6" means.
 """
 from __future__ import annotations
 
-VERSION = "3.0.63"
+VERSION = "3.0.65"
 
 
 def to_msix_version(version: str = VERSION) -> str:

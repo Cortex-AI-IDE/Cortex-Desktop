@@ -13,7 +13,7 @@ from copy import deepcopy
 # ============================================================
 
 try:
-    from .PermissionResult import (
+    from .permission_result import (
         PermissionAskDecision,
         PermissionDecision,
         PermissionDecisionReason,
@@ -42,7 +42,7 @@ except ImportError:
             self.__dict__.update(kwargs)
 
 try:
-    from .PermissionRule import PermissionBehavior, PermissionRule, PermissionRuleSource, PermissionRuleValue
+    from .permission_rule import PermissionBehavior, PermissionRule, PermissionRuleSource, PermissionRuleValue
 except ImportError:
     PermissionBehavior = str  # 'allow' | 'deny' | 'ask'
     PermissionRuleSource = str
@@ -58,7 +58,7 @@ except ImportError:
             self.ruleValue = ruleValue
 
 try:
-    from .PermissionUpdate import applyPermissionUpdate, applyPermissionUpdates, persistPermissionUpdates
+    from .permission_update import applyPermissionUpdate, applyPermissionUpdates, persistPermissionUpdates
 except ImportError:
     def applyPermissionUpdate(context, update):
         return context
@@ -70,7 +70,7 @@ except ImportError:
         pass
 
 try:
-    from .PermissionUpdateSchema import PermissionUpdate, PermissionUpdateDestination
+    from .permission_update_schema import PermissionUpdate, PermissionUpdateDestination
 except ImportError:
     class PermissionUpdate:
         def __init__(self, type: str, rules: List, behavior: str, destination: str):
@@ -82,7 +82,7 @@ except ImportError:
     PermissionUpdateDestination = str
 
 try:
-    from .permissionRuleParser import permissionRuleValueFromString, permissionRuleValueToString
+    from .permission_rule_parser import permissionRuleValueFromString, permissionRuleValueToString
 except ImportError:
     def permissionRuleValueFromString(s: str) -> PermissionRuleValue:
         parts = s.split('(', 1)
@@ -96,7 +96,7 @@ except ImportError:
         return ruleValue.toolName
 
 try:
-    from .permissionsLoader import (
+    from .permissions_loader import (
         deletePermissionRuleFromSettings,
         PermissionRuleFromEditableSettings,
         shouldAllowManagedPermissionRulesOnly,
@@ -145,7 +145,7 @@ except ImportError:
                 state.totalDenials >= DENIAL_LIMITS['maxTotal'])
 
 try:
-    from .yoloClassifier import classifyYoloAction, formatActionForClassifier
+    from .yolo_classifier import classifyYoloAction, formatActionForClassifier
 except ImportError:
     def classifyYoloAction(messages, action, tools, context, signal):
         return {'shouldBlock': False, 'reason': 'Classifier unavailable', 'unavailable': True}
@@ -154,7 +154,7 @@ except ImportError:
         return f'{toolName}: {input}'
 
 try:
-    from .PermissionMode import permissionModeTitle
+    from .permission_mode import permissionModeTitle
 except ImportError:
     def permissionModeTitle(mode):
         return mode
@@ -201,7 +201,7 @@ except ImportError:
         return f'{toolName} denied in dontAsk mode'
 
 try:
-    from ..utils.stringUtils import plural
+    from ..utils.string_utils import plural
 except ImportError:
     def plural(n, singular, plural=None):
         return singular if n == 1 else (plural or singular + 's')
@@ -287,7 +287,7 @@ def toolMatchesRule(tool, rule: PermissionRule) -> bool:
     
     # Get tool name for permission check
     try:
-        from ..services.mcp.mcpStringUtils import getToolNameForPermissionCheck, mcpInfoFromString
+        from ..services.mcp.mcp_string_utils import getToolNameForPermissionCheck, mcpInfoFromString
     except ImportError:
         def getToolNameForPermissionCheck(t):
             return t.name
@@ -367,7 +367,7 @@ def filterDeniedAgents(agents: List, context, agentToolName: str) -> List:
 def getRuleByContentsForTool(context, tool, behavior: PermissionBehavior) -> Dict[str, PermissionRule]:
     """Map of rule contents to the associated rule for a given tool"""
     try:
-        from ..services.mcp.mcpStringUtils import getToolNameForPermissionCheck
+        from ..services.mcp.mcp_string_utils import getToolNameForPermissionCheck
     except ImportError:
         def getToolNameForPermissionCheck(t):
             return t.name
@@ -690,7 +690,7 @@ async def hasPermissionsToUseToolInner(
     askRule = getAskRuleForTool(appState.get('toolPermissionContext', {}), tool)
     if askRule:
         try:
-            from ..tools.BashTool.shouldUseSandbox import shouldUseSandbox
+            from ..tools.bash_tool.should_use_sandbox import shouldUseSandbox
             from ..utils.sandbox.sandbox_adapter import SandboxManager
         except ImportError:
             def shouldUseSandbox(inp):
@@ -810,7 +810,7 @@ async def hasPermissionsToUseToolInner(
     
     if getattr(result, 'behavior', None) == 'ask' and hasattr(result, 'suggestions') and result.suggestions:
         try:
-            from ..slowOperations import jsonStringify
+            from ..slow_operations import jsonStringify
             logForDebugging(f'Permission suggestions for {tool.name}: {jsonStringify(result.suggestions, indent=2)}')
         except:
             pass
@@ -1201,7 +1201,7 @@ async def checkRuleBasedPermissions(
     askRule = getAskRuleForTool(appState.get('toolPermissionContext', {}), tool)
     if askRule:
         try:
-            from ..tools.BashTool.shouldUseSandbox import shouldUseSandbox
+            from ..tools.bash_tool.should_use_sandbox import shouldUseSandbox
             from ..utils.sandbox.sandbox_adapter import SandboxManager
         except ImportError:
             def shouldUseSandbox(inp):

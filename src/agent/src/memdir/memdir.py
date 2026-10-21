@@ -11,7 +11,7 @@ import os
 from typing import Any, Dict
 
 from ..bootstrap.state import getKairosActive, getOriginalCwd
-from ..tools.GrepTool.prompt import GREP_TOOL_NAME
+from ..tools.grep_tool.prompt import GREP_TOOL_NAME
 
 __all__ = [
     'GREP_TOOL_NAME',

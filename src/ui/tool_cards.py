@@ -841,4 +841,15 @@ def make_card(tool_type: str, data: dict) -> ToolCardBase:
     # Inject name into data for GenericCard fallback
     if "name" not in data:
         data["name"] = tool_type
-    return cls(data)
+    card = cls(data)
+    # Persistence hooks. A saved timeline stores a card as its dispatch key
+    # plus this dict, and restore feeds both straight back into make_card().
+    # Held on the card because ChatPanel keys cards by tool_id only, so
+    # without it the type and the output were unrecoverable and every
+    # restored tool degraded to a one-line text row (2026-10-21 report:
+    # 1,044 tool blocks in a live timeline, none carrying a card type).
+    # _update_rich_card() merges tool_end results into this same dict, so
+    # the saved copy carries the real output, not just the start args.
+    card._card_type = key
+    card._card_data = data
+    return card

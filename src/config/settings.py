@@ -42,6 +42,12 @@ DEFAULT_SETTINGS = {
         "editor_default_readonly": True,  # Editor starts in read-only preview mode
         "show_terminal_by_default": False,  # Terminal hidden by default
         "sidebar_position": "left",  # Settings -> Appearance -> Sidebar position
+        # Settings -> Appearance -> Interface -> Chat panel position. The chat
+        # panel and the editor+terminal block trade places; the sidebar keeps
+        # its own edge. Both values are resolved together in
+        # src/ui/layout_positions.py so the two settings cannot fight. The
+        # editor has no setting of its own: it fills the space left over.
+        "chat_position": "left",
     },
     "ai_command": {
         "show_conversation_history": True,

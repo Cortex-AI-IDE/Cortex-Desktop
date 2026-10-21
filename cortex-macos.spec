@@ -17,7 +17,11 @@ Output:      dist/Cortex.app
 import os
 import re
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 block_cipher = None
 ROOT = os.path.abspath('.')
@@ -158,12 +162,11 @@ hiddenimports = [
     'orjson',
     'mcp',
     # file formats
-    'PyPDF2',
+    'pypdf',
     'docx',
     'openpyxl',
     'xlrd',
-    'pymupdf',
-    'fitz',
+    'pypdfium2',
     'spellchecker',
     'flatlatex',
     'send2trash',
@@ -183,6 +186,14 @@ hiddenimports += collect_submodules(
 hiddenimports += collect_submodules('anyio')
 hiddenimports += ['pydantic_settings', 'httpx_sse', 'jsonschema']
 
+# pypdfium2 loads PDFium from a compiled shared library that ships inside the
+# pypdfium2_raw package (pdfium.dll on Windows, libpdfium.dylib elsewhere).
+# PyInstaller does not reliably pull it in on its own, and without it the
+# frozen app dies at the first PDF open. Collected explicitly so a missing
+# PDFium shows up at build time instead of on a user's machine.
+hiddenimports += collect_submodules('pypdfium2_raw')
+pdfium_libs = collect_dynamic_libs('pypdfium2_raw')
+
 # Every Cortex src.* submodule, so a lazy importlib.import_module call resolves
 # in the frozen app exactly as it does in development.
 hiddenimports += collect_submodules('src.ai')
@@ -198,7 +209,7 @@ hiddenimports += collect_submodules('src.agent')
 a = Analysis(
     [os.path.join(ROOT, 'src', 'main.py')],
     pathex=[ROOT],
-    binaries=[],
+    binaries=pdfium_libs,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[os.path.join(ROOT, 'src', 'utils', 'pyinstaller_hooks')],

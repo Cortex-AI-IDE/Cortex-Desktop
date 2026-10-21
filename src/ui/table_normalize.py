@@ -528,6 +528,75 @@ def normalize_headerless_pipe_tables(text: str) -> str:
     return '\n'.join(result)
 
 
+def _scan_row(row: str):
+    """Walk a pipe row the way markdown reads it.
+
+    Returns (cells, row_with_code_pipes_escaped), or None when a backtick
+    is left open: then there is no code span and every "|" is a break.
+    """
+    cells, cur, out, code_run, k = [], [], [], 0, 0
+    while k < len(row):
+        ch = row[k]
+        if ch == '\\' and k + 1 < len(row) and row[k + 1] == '|':
+            cur.append('\\|'); out.append('\\|'); k += 2; continue
+        if ch == '`':
+            run = len(row[k:]) - len(row[k:].lstrip('`'))
+            cur.append(row[k:k + run]); out.append(row[k:k + run]); k += run
+            # A code span closes only on a run of the same length.
+            if code_run == 0:
+                code_run = run
+            elif run == code_run:
+                code_run = 0
+            continue
+        if ch == '|':
+            if code_run:
+                cur.append('|'); out.append('\\|'); k += 1; continue
+            cells.append(''.join(cur)); cur = []; out.append('|'); k += 1; continue
+        cur.append(ch); out.append(ch); k += 1
+    if code_run:
+        return None
+    cells.append(''.join(cur))
+    parts = [c.strip() for c in cells]
+    parts = parts[1:-1] if row.rstrip().endswith('|') else parts[1:]
+    return parts, ''.join(out)
+
+
+def _md_cells(row: str) -> list[str]:
+    """Cells of a pipe row, as markdown reads them: an escaped "\\|" and a
+    "|" inside `code` are cell CONTENT, not column breaks.
+
+    A plain split('|') counted them as columns, so a row like
+    "| Count | `git ls-tree -r \\| wc -l` | 241 |" looked one cell too long
+    and was "repaired": glued back with " &#124; " (shown literally inside
+    the code span) or re-split mid code span (2026-10-21).
+    """
+    scanned = _scan_row(row)
+    if scanned is not None:
+        return scanned[0]
+    parts = [c.strip() for c in re.split(r'(?<!\\)\|', row)]
+    return parts[1:-1] if row.rstrip().endswith('|') else parts[1:]
+
+
+def _escape_code_pipes(row: str) -> str:
+    """"| a | `x | y` |" -> "| a | `x \\| y` |".
+
+    mistune, like GFM, splits a row on a bare "|" even inside backticks, so
+    such a row had one cell too many and the whole table fell back to a
+    paragraph of raw pipes. Escaped, the cell count is right; the HTML side
+    (_markdown_to_clean_html) shows the "\\|" inside the code as "|".
+    """
+    if '`' not in row:
+        return row
+    scanned = _scan_row(row)
+    return scanned[1] if scanned is not None else row
+
+
+def _md_col_count(line: str) -> int:
+    """Column count of a pipe row (0 when the line is not one)."""
+    s = line.strip()
+    return len(_md_cells(s)) if s.startswith('|') else 0
+
+
 def fix_table_column_counts(text: str) -> str:
     """Ensure all rows in a table have the same column count.
 
@@ -537,13 +606,7 @@ def fix_table_column_counts(text: str) -> str:
     """
     _SEP_RE = re.compile(r'^\s*\|(?:[-:\s]+\|)+\s*$')
 
-    def _pipe_col_count(line: str) -> int:
-        stripped = line.strip()
-        if not stripped.startswith('|'):
-            return 0
-        parts = stripped.split('|')
-        # Leading and trailing empty strings from split on |...|
-        return len(parts) - 2 if stripped.endswith('|') else len(parts) - 1
+    _pipe_col_count = _md_col_count
 
     lines = text.split('\n')
     result: list[str] = []
@@ -582,7 +645,7 @@ def fix_table_column_counts(text: str) -> str:
                 elif tl.strip().startswith('|'):
                     cols = _pipe_col_count(tl)
                     if cols < header_cols:
-                        cells = [c.strip() for c in tl.strip().strip('|').split('|')]
+                        cells = _md_cells(tl.strip())
                         while len(cells) < header_cols:
                             cells.append('')
                         result.append('| ' + ' | '.join(cells) + ' |')
@@ -684,7 +747,7 @@ def _merge_excess_pipes(text: str) -> str:
             remainder_parts = [c.strip() for c in cells[target - 1:]]
             remainder = ' &#124; '.join(remainder_parts)
             cells = good + [remainder]
-        return '| ' + ' | '.join(c.strip() for c in cells) + ' |'
+        return _escape_code_pipes('| ' + ' | '.join(c.strip() for c in cells) + ' |')
 
     result: list[str] = []
     i = 0
@@ -702,12 +765,13 @@ def _merge_excess_pipes(text: str) -> str:
                 continue
 
             # Fix header row
-            hdr_parts = [p.strip() for p in stripped.split('|')]
-            if stripped.endswith('|'):
-                hdr_parts = hdr_parts[1:-1]
+            hdr_parts = _md_cells(stripped)
+            # Right count and closed: keep as written. An unclosed row (a reply
+            # cut off mid-row) is rebuilt - mistune drops it otherwise.
+            if len(hdr_parts) == n_cols and stripped.endswith('|'):
+                result.append(_escape_code_pipes(line))
             else:
-                hdr_parts = hdr_parts[1:]
-            result.append(_rebuild_row(hdr_parts, n_cols))
+                result.append(_rebuild_row(hdr_parts, n_cols))
 
             # Append separator as-is
             result.append(lines[i + 1])
@@ -720,12 +784,11 @@ def _merge_excess_pipes(text: str) -> str:
                     break
                 if _SEP_RE.match(lines[i]):
                     break
-                parts = [p.strip() for p in dl.split('|')]
-                if dl.endswith('|'):
-                    parts = parts[1:-1]
+                parts = _md_cells(dl)
+                if len(parts) == n_cols and dl.endswith('|'):
+                    result.append(_escape_code_pipes(lines[i]))
                 else:
-                    parts = parts[1:]
-                result.append(_rebuild_row(parts, n_cols))
+                    result.append(_rebuild_row(parts, n_cols))
                 i += 1
             continue
 
@@ -769,8 +832,7 @@ def escape_pipes_in_table_cells(text: str) -> str:
             hdr_cells = [c.strip() for c in stripped.split('|') if c.strip() != '']
             # Actually, split on | for proper count: "|a|b|c|" → ['', 'a', 'b', 'c', '']
             # So real count = total_parts - 2 (leading/trailing empty)
-            hdr_parts = stripped.split('|')
-            n_cols = len(hdr_parts) - 2  # subtract leading + trailing empty
+            n_cols = _md_col_count(stripped)
             if n_cols < 1:
                 n_cols = len(hdr_cells)
 
@@ -787,15 +849,9 @@ def escape_pipes_in_table_cells(text: str) -> str:
                     break
                 if _is_sep(dl):
                     break
-                parts = dl.split('|')
-                # "|a|b|c|" → ['', 'a', 'b', 'c', ''] → 5 parts → n_cols = 3
-                actual_parts = len(parts) - 2 if dl.endswith('|') else len(parts) - 1
-                if actual_parts > n_cols:
+                data_parts = _md_cells(dl)
+                if len(data_parts) > n_cols:
                     # Merge excess cells back into the last cell
-                    # Rebuild: first n_cols cells + remainder joined
-                    data_parts = [p.strip() for p in parts[1:]]  # skip leading empty
-                    if dl.endswith('|'):
-                        data_parts = data_parts[:-1]  # skip trailing empty
                     good = data_parts[:n_cols - 1]
                     remainder = '|'.join(data_parts[n_cols - 1:])
                     merged = good + [remainder]

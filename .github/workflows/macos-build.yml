@@ -208,6 +208,22 @@ jobs:
           find "$APP" -path '*monaco-editor/min/vs/loader.js' -print -quit | grep -q . \
             || { echo "::error::Monaco loader.js is missing"; exit 1; }
 
+          # PDFium (pypdfium2). PyInstaller does not reliably pull the shared
+          # library in and the failure only appears in the frozen build, at the
+          # first PDF open, so prove it is in the bundle.
+          find "$APP" -name 'libpdfium*.dylib' -print -quit | grep -q . \
+            || { echo "::error::libpdfium.dylib is missing, PDFs will not open"; exit 1; }
+
+          # The four Anthropic document skills are source-available under a
+          # proprietary licence and are not redistributable. Fail the build if
+          # one comes back, rather than shipping it.
+          for d in docx pdf pptx xlsx; do
+            if find "$APP" -type d -path "*/skills/bundled/$d" -print -quit | grep -q .; then
+              echo "::error::proprietary document skill '$d' leaked into the bundle"
+              exit 1
+            fi
+          done
+
           # Windows terminal libraries must never appear in a macOS build.
           if find "$APP" \( -name 'winpty*' -o -name 'conpty.dll' \) -print -quit | grep -q .; then
             echo "::error::Windows terminal binaries leaked into the macOS bundle"
@@ -257,8 +273,12 @@ jobs:
 
           # The runner is a real macOS session with a WindowServer, so the
           # shipped binary can draw its own window. This is the closest CI gets
-          # to somebody opening the downloaded .dmg.
+          # to somebody opening the downloaded .dmg. The sandbox is disabled for
+          # the run only: Chromium's sandbox needs entitlements that an ad-hoc
+          # signed bundle does not carry.
+          APP_DIED=0
           QT_QPA_PLATFORM=cocoa \
+          QTWEBENGINE_DISABLE_SANDBOX=1 \
             mnt/Cortex.app/Contents/MacOS/Cortex > app.log 2>&1 &
           APP_PID=$!
 
@@ -270,14 +290,9 @@ jobs:
           for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             sleep 5
             if ! kill -0 "$APP_PID" 2>/dev/null; then
-              # A build that ships an app which cannot start is a broken build,
-              # so this is an error and not a warning. It happened once: a
-              # runtime hook imported asyncio.windows_events on macOS.
               echo "::error::the app exited after ~$((i * 5))s, it never drew a window"
-              echo "----- app.log -----"
-              cat app.log || true
-              hdiutil detach mnt -force >/dev/null 2>&1 || true
-              exit 1
+              APP_DIED=1
+              break
             fi
             screencapture -x -o shots/macos.png 2> shots/screencapture.err || true
           done
@@ -287,11 +302,33 @@ jobs:
           kill -9 "$APP_PID" 2>/dev/null || true
           pkill -f 'Cortex.app/Contents/MacOS/Cortex' 2>/dev/null || true
 
-          echo "----- app.log (tail) -----"
-          tail -n 40 app.log || true
+          echo "----- app.log (all of it) -----"
+          cat app.log || true
           echo "----- screencapture stderr -----"
           cat shots/screencapture.err 2>/dev/null || true
           hdiutil detach mnt -force >/dev/null 2>&1 || true
+
+          # An app that never started is a broken build and must be red. A
+          # capture refused by macOS (Screen Recording is a TCC permission on
+          # runners) is cosmetic, so it only warns.
+          if [ "$APP_DIED" = "1" ]; then
+            echo "::error::Cortex.app from the .dmg does not start on macOS"
+            exit 1
+          fi
+          if [ ! -s shots/macos.png ]; then
+            echo "::warning::the app ran, but screencapture produced nothing"
+          fi
+
+      - name: Upload the app log even when the launch failed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-macos-${{ steps.ver.outputs.version }}-applog
+          path: |
+            app.log
+            shots/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Check the screenshot is a real window, not a blank frame
         run: |

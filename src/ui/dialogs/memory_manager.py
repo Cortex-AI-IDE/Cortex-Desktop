@@ -30,7 +30,7 @@ log = get_logger("memory_manager")
 
 # Import cross-project memory manager
 try:
-    from src.agent.src.memdir.crossProjectMemory import get_cross_project_manager
+    from src.agent.src.memdir.cross_project_memory import get_cross_project_manager
     HAS_CROSS_PROJECT = True
 except ImportError:
     HAS_CROSS_PROJECT = False
@@ -208,7 +208,7 @@ class MemoryManagerBridge(QObject):
     def _init_semantic_search(self):
         """Initialize semantic search for current project."""
         try:
-            from src.agent.src.memdir.semanticSearch import get_semantic_searcher
+            from src.agent.src.memdir.semantic_search import get_semantic_searcher
             self._semantic_searcher = get_semantic_searcher(self._project_memory_dir)
             log.info("[MemoryManager] Semantic search initialized")
         except Exception as e:
@@ -705,7 +705,7 @@ scope: project
             log.info(f"[MemoryManager] Running consolidation on {memory_dir} (auto_merge={auto_merge})")
             self.toast_requested.emit("info", "Starting memory consolidation...")
             
-            from src.agent.src.memdir.memoryConsolidation import MemoryConsolidator
+            from src.agent.src.memdir.memory_consolidation import MemoryConsolidator
             
             consolidator = MemoryConsolidator(memory_dir)
             report = consolidator.run_consolidation(auto_merge=auto_merge)
@@ -967,6 +967,8 @@ scope: project
                         pass
                 elif key == "layout.sidebar_position":
                     self._apply_sidebar_position(str(coerced))
+                elif key == "layout.chat_position":
+                    self._apply_chat_position(str(coerced))
                 elif key in ("terminal.font_family", "terminal.font_size"):
                     try:
                         from src.ui.fonts import notify_terminal_font_changed
@@ -1005,6 +1007,22 @@ scope: project
                     break
         except Exception as e:
             log.warning(f"[MemoryManager] sidebar position not applied: {e}")
+
+    def _apply_chat_position(self, position: str):
+        """Settings -> Interface -> Chat panel position: move it now.
+
+        Swaps the chat panel with the editor+terminal block. The main window
+        resolves this together with the sidebar edge (src/ui/layout_positions.py),
+        so the two settings cannot fight.
+        """
+        try:
+            from PyQt6.QtWidgets import QApplication as _App
+            for widget in _App.instance().topLevelWidgets():
+                if hasattr(widget, "_apply_chat_position"):
+                    widget._apply_chat_position(position)
+                    break
+        except Exception as e:
+            log.warning(f"[MemoryManager] chat position not applied: {e}")
 
     @pyqtSlot(result=str)
     def colorThemeNeedsRestart(self) -> str:

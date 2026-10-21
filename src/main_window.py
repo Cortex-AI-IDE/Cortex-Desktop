@@ -2033,12 +2033,14 @@ class CortexMainWindow(QMainWindow):
 
         # Store reference for later access
         self._main_splitter = main_splitter
-        # Settings -> Appearance -> Sidebar position (saved as layout.sidebar_position).
+        # Settings -> Appearance -> Interface: sidebar edge, chat panel edge
+        # and editor position. One call resolves all three saved values
+        # together, since a panel moved on its own would overwrite another
+        # one's position.
         try:
-            self._apply_sidebar_position(
-                self._settings.get('layout', 'sidebar_position', default='left'))
+            self._apply_panel_order()
         except Exception as e:
-            log.debug(f"[Layout] sidebar position not applied: {e}")
+            log.debug(f"[Layout] panel order not applied: {e}")
         self._sync_splitter_handles(main_splitter)
         self._sync_splitter_handles(self._editor_terminal_splitter)
         self._sync_splitter_handles(self._editor_preview_splitter)
@@ -3327,9 +3329,9 @@ class CortexMainWindow(QMainWindow):
             try:
                 import importlib as _il
                 try:
-                    _diff_ide_mod = _il.import_module("src.agent.src.hooks.useDiffInIDE")
+                    _diff_ide_mod = _il.import_module("src.agent.src.hooks.use_diff_in_ide")
                 except ImportError:
-                    _diff_ide_mod = _il.import_module("agent.src.hooks.useDiffInIDE")
+                    _diff_ide_mod = _il.import_module("agent.src.hooks.use_diff_in_ide")
                 _cdb = _diff_ide_mod.CortexDiffBridge.instance()
                 _cdb.register_accept_signal(self._ai_chat.accept_file_edit_requested)
                 _cdb.register_reject_signal(self._ai_chat.reject_file_edit_requested)
@@ -3965,14 +3967,19 @@ class CortexMainWindow(QMainWindow):
         """Open .pdf INSIDE the web editor (editor.html), like images/sheets.
 
         PROGRESSIVE rendering: shows a loading skeleton immediately, then
-        renders pages in batches off the GUI thread (PyMuPDF) and appends
-        them to the preview as they complete. First 3 pages appear in
+        renders pages in batches off the GUI thread (pypdfium2 / PDFium) and
+        appends them to the preview as they complete. First 3 pages appear in
         ~200-400ms instead of waiting for all 50 pages to rasterize.
 
-        FIX 2026-08-16: `import fitz` moved OFF the GUI thread.  The old
-        "probe on GUI thread so we can warn" caused a 38.7s freeze because
-        PyMuPDF's import chain (fitz → pymupdf → pymupdf/extra.py → native
-        .pyd) blocks on OneDrive-dehydrated files and frozen builds.
+        FIX 2026-08-16: the PDF engine import moved OFF the GUI thread.  The
+        old "probe on GUI thread so we can warn" caused a 38.7s freeze because
+        the native import blocks on OneDrive-dehydrated files and frozen
+        builds.
+
+        Engine swapped PyMuPDF -> pypdfium2 on 2026-10-21 for licensing:
+        PyMuPDF is AGPL-3.0, which would make every shipped binary AGPL.
+        pypdfium2 is Apache-2.0 / BSD-3-Clause and its PDFium renderer is
+        functional and licence-compatible with GPL v3.
         """
         import threading
         import json as _json
@@ -3981,13 +3988,18 @@ class CortexMainWindow(QMainWindow):
         #
         # 2026-09-21 15:23: one click on a 161 MB / 28-page PDF logged
         # "Opening file" TWICE two seconds apart, so two pdf-render threads
-        # rasterized it at once. PyMuPDF does NOT release the GIL while
-        # rendering (measured: 520 ms for one page, 395 ms of it with the
-        # GUI thread unable to run any Python at all), so the worker thread
-        # this was moved onto never protected the GUI - and two of them
-        # starved it outright. The window went Not Responding for 11.1 s and
-        # the stall stack landed inside Thread.start(), which only blocks
-        # waiting for the GIL.
+        # rasterized it at once. The engine then in use (PyMuPDF) did NOT
+        # release the GIL while rendering (measured: 520 ms for one page,
+        # 395 ms of it with the GUI thread unable to run any Python at all),
+        # so the worker thread this was moved onto never protected the GUI -
+        # and two of them starved it outright. The window went Not Responding
+        # for 11.1 s and the stall stack landed inside Thread.start(), which
+        # only blocks waiting for the GIL.
+        #
+        # The engine is now pypdfium2, which DOES release the GIL for the
+        # render itself, but the single-flight guard stays: rasterising the
+        # same 161 MB file twice is still pure waste, and the JPEG encode
+        # still holds the GIL.
         _gen = getattr(self, "_pdf_render_gen", 0) + 1
         if (getattr(self, "_pdf_render_active", False)
                 and getattr(self, "_pdf_render_path", None) == filepath):
@@ -4037,15 +4049,15 @@ class CortexMainWindow(QMainWindow):
 
             def _work():
                 try:
-                    # Import fitz OFF the GUI thread so the native .pyd load
-                    # never blocks the event loop (was 38.7s freeze).
-                    import fitz  # noqa: F401
+                    # Import pypdfium2 OFF the GUI thread so the native
+                    # library load never blocks the event loop.
+                    import pypdfium2  # noqa: F401
                     self._render_pdf_progressive(filepath, _bridge, _gen)
                 except ImportError:
                     _bridge.pages_ready.emit(
                         filepath,
-                        "<p style='color:#f66'>PyMuPDF not installed. "
-                        "Run: pip install PyMuPDF</p>", True)
+                        "<p style='color:#f66'>pypdfium2 not installed. "
+                        "Run: pip install pypdfium2</p>", True)
                 except Exception as _e:
                     _bridge.pages_ready.emit(
                         filepath,
@@ -4075,28 +4087,28 @@ class CortexMainWindow(QMainWindow):
         """
         import base64
         import html as _html_mod
+        import io as _io
         import time as _time
-        import fitz
+
+        import pypdfium2 as pdfium
 
         _MAX_PAGES = 50
         # Hand the GIL to the GUI thread between pages.
         #
-        # PyMuPDF holds it for the whole of get_pixmap (measured 2026-09-21 on
-        # KINGCHEF MENU.pdf: 312 ms per page, and a 3-page batch starved a
-        # heartbeat thread for 368 ms). Back-to-back pages therefore give the
-        # event loop no usable slice and the window goes Not Responding. A
-        # real sleep - not sleep(0) - drops the GIL for its whole duration,
-        # so the GUI gets a guaranteed turn after every page. Costs ~0.1 s
-        # over 28 pages against ~9 s of rendering.
+        # PDFium releases the GIL for the render itself (ctypes call), so it
+        # is already far gentler than PyMuPDF was, but to_pil() and the JPEG
+        # encode run in Python and hold it. Back-to-back pages can therefore
+        # still starve the event loop, so the yield stays. Costs ~0.1 s over
+        # 28 pages against ~9 s of rendering.
         _GIL_YIELD = 0.004
         _TARGET_W = 900
         _JPEG_QUALITY = 72
         _FIRST_BATCH = 3
         _BATCH_SIZE = 5
 
-        doc = fitz.open(filepath)
+        doc = pdfium.PdfDocument(filepath)
         try:
-            total = doc.page_count
+            total = len(doc)
             if total == 0:
                 bridge.pages_ready.emit(
                     filepath, "<p style='color:#f66'>PDF has no pages.</p>", True)
@@ -4119,13 +4131,19 @@ class CortexMainWindow(QMainWindow):
 
             def _render_page(page_num: int) -> str:
                 page = doc[page_num]
-                zoom = _TARGET_W / max(page.rect.width, 1)
-                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                page_w = page.get_size()[0]
+                zoom = _TARGET_W / max(page_w, 1)
+                bitmap = page.render(scale=zoom)
+                img = bitmap.to_pil()
                 try:
-                    data = pix.tobytes("jpeg", jpg_quality=_JPEG_QUALITY)
+                    buf = _io.BytesIO()
+                    img.save(buf, format="JPEG", quality=_JPEG_QUALITY)
+                    data = buf.getvalue()
                     mime = "image/jpeg"
                 except Exception:
-                    data = pix.tobytes("png")
+                    buf = _io.BytesIO()
+                    img.save(buf, format="PNG")
+                    data = buf.getvalue()
                     mime = "image/png"
                 b64 = base64.b64encode(data).decode("ascii")
                 _time.sleep(_GIL_YIELD)   # GUI thread's turn
@@ -8207,40 +8225,84 @@ class CortexMainWindow(QMainWindow):
         self._sync_splitter_handles(self._main_splitter)
         self._left_sidebar_hidden = not show
 
-    def _apply_sidebar_position(self, position: str):
-        """Put the sidebar first (left) or last (right) in the main splitter.
+    # Widths used when the splitter has not been laid out yet (see
+    # _apply_panel_order). Keyed by panel name, not by position.
+    _PANEL_DEFAULT_SIZES = {'sidebar': 300, 'chat': 500, 'editor': 500}
 
-        Settings -> Appearance -> Sidebar position saved the choice, but
-        nothing read it: the sidebar was always added first. Sizes move with
-        their panels and the sidebar keeps not stretching.
+    def _apply_panel_order(self, sidebar: str = None, chat: str = None):
+        """Put the three main panels in the order the settings ask for.
+
+        Settings -> Appearance -> Interface has two edge choices: the sidebar
+        side and the chat panel side. They are resolved together in
+        src/ui/layout_positions.py and applied in one pass, because separate
+        "move mine to the edge" handlers would undo each other: whichever ran
+        second would land at a fixed index and overwrite the first one's
+        position.
+
+        The editor+terminal block has no setting of its own; it fills whatever
+        space the two edges leave.
+
+        Existing widgets are MOVED, never recreated: three QWebEngineViews take
+        part, and a re-parented webview keeps its page, its Monaco state and
+        the running terminal.
         """
         sp = getattr(self, '_main_splitter', None)
         side = getattr(self, '_sidebar', None)
-        if sp is None or side is None:
+        chat_panel = getattr(self, '_chat_panel', None)
+        editor = getattr(self, '_editor_terminal_splitter', None)
+        if sp is None or side is None or chat_panel is None or editor is None:
             return
-        cur = sp.indexOf(side)
-        if cur < 0:
+
+        if sidebar is None:
+            sidebar = self._settings.get('layout', 'sidebar_position', default='left')
+        if chat is None:
+            chat = self._settings.get('layout', 'chat_position', default='left')
+
+        from src.ui.layout_positions import normalise_position, panel_order
+        order = panel_order(sidebar, chat)
+        widgets = {'sidebar': side, 'chat': chat_panel, 'editor': editor}
+
+        # The sidebar page mirrors itself: on the right its icon strip becomes
+        # the outer edge. Only on an actual sidebar change, otherwise moving
+        # the chat panel would flip the sidebar's mirrored edge as a side
+        # effect.
+        want_side = normalise_position(sidebar)
+        if getattr(self, '_sidebar_side_applied', 'left') != want_side:
+            if hasattr(side, 'set_side'):
+                side.set_side(want_side)
+            self._sidebar_side_applied = want_side
+
+        current = [sp.widget(i) for i in range(sp.count())]
+        target = [widgets[name] for name in order]
+        if current == target:
             return
-        want = sp.count() - 1 if str(position).lower() == 'right' else 0
-        # The page mirrors too: on the right its icon strip is the outer edge.
-        if hasattr(side, 'set_side'):
-            side.set_side('right' if want else 'left')
-        if cur == want:
-            return
+
         by_widget = {sp.widget(i): size for i, size in enumerate(sp.sizes())}
         if not sp.isVisible() or not any(by_widget.values()):
             # At startup the splitter is not laid out yet (640 px wide, the
             # sizes an even split like 209/210/209); copying those made the
             # sidebar end at its 225 px minimum, header buttons cut off. Use
-            # the default proportions instead (300 / 500 / 500).
-            by_widget = {sp.widget(i): (300 if sp.widget(i) is side else 500)
-                         for i in range(sp.count())}
-        sp.insertWidget(want, side)
+            # the default proportions instead.
+            by_widget = {widgets[name]: self._PANEL_DEFAULT_SIZES[name]
+                         for name in order}
+        for idx, widget in enumerate(target):
+            sp.insertWidget(idx, widget)
+        # Sizes travel with their panel, so a chat panel collapsed to width 0
+        # stays collapsed instead of springing back open.
         sp.setSizes([by_widget.get(sp.widget(i), 0) for i in range(sp.count())])
         for i in range(sp.count()):
+            # Sidebar stays fixed; chat and editor share the extra space.
             sp.setStretchFactor(i, 0 if sp.widget(i) is side else 1)
         self._sync_splitter_handles(sp)
-        log.info(f"[Layout] sidebar moved to the {'right' if want else 'left'}")
+        log.info(f"[Layout] panel order: {' | '.join(order)}")
+
+    def _apply_sidebar_position(self, position: str):
+        """Settings -> Appearance -> Sidebar position changed: re-order now."""
+        self._apply_panel_order(sidebar=position)
+
+    def _apply_chat_position(self, position: str):
+        """Settings -> Interface -> Chat panel position changed: re-order now."""
+        self._apply_panel_order(chat=position)
 
     def _toggle_sidebar(self):
         """Toggle left sidebar via splitter (Ctrl+B).

@@ -13,12 +13,12 @@ log = logging.getLogger("cortex.agent")
 
 # Defensive imports with fallback stubs
 try:
-    from ...tools.AgentTool.constants import AGENT_TOOL_NAME as _AGENT_TOOL_NAME
+    from ...tools.agent_tool.constants import AGENT_TOOL_NAME as _AGENT_TOOL_NAME
 except ImportError:
     _AGENT_TOOL_NAME = "Agent"
 
 try:
-    from ...skills.bundledSkills import register_bundled_skill as _register_bundled_skill
+    from ...skills.bundled_skills import register_bundled_skill as _register_bundled_skill
 except ImportError:
     def _register_bundled_skill(definition: Dict[str, Any]) -> None:
         """Fallback stub for skill registration."""

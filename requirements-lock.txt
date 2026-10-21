@@ -210,9 +210,8 @@ psutil==7.0.0
 pyinstaller==6.20.0
 pyinstaller-hooks-contrib==2026.5
 PyJWT==2.13.0
-PyMuPDF==1.27.2.3
 pypdf==6.12.2
-PyPDF2==3.0.1
+pypdfium2==5.14.0
 pyperclip==1.11.0
 PyQt6==6.11.0
 PyQt6-Qt6==6.11.1

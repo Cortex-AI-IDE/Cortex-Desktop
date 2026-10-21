@@ -67,16 +67,15 @@ psutil>=5.9
 send2trash>=1.8.2
 
 # --- Agent tools and skills ------------------------------------------------
-# These back the document and web tools the agent uses (PDF/Office reading,
-# HTML scraping for WebFetch, XML parsing inside the bundled docx/xlsx/pptx
-# skills).  The app degrades gracefully if one is missing: the matching tool
-# reports that it is unavailable instead of crashing.
+# These back the document and web tools the agent uses (PDF and Office
+# reading, HTML scraping for WebFetch, spreadsheet imports).  The app degrades
+# gracefully if one is missing: the matching tool reports that it is
+# unavailable instead of crashing.
 beautifulsoup4>=4.12
 lxml>=5.2
 defusedxml>=0.7.1
-PyMuPDF>=1.24
 pypdf>=4.2
-PyPDF2>=3.0
+pypdfium2>=4.30
 openpyxl>=3.1
 python-docx>=1.1
 xlrd>=2.0

@@ -11,12 +11,12 @@ from typing import Optional, List, Dict, Literal
 # ============================================================
 
 try:
-    from utils.permissions.PermissionMode import PermissionMode
+    from utils.permissions.permission_mode import PermissionMode
 except ImportError:
     PermissionMode = str
 
 try:
-    from utils.stringUtils import capitalize
+    from utils.string_utils import capitalize
 except ImportError:
     def capitalize(s: str) -> str:
         """Stub - capitalizes string"""

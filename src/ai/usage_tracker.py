@@ -248,6 +248,16 @@ class UsageTracker:
         # Skip tracking for test/placeholder model IDs
         if not self._is_valid_model(model):
             return
+
+        # Enforce the subset invariant. Every shipped provider reports
+        # OpenAI-style prompt_tokens (cache included), so `cached` must
+        # never exceed `input`. A gateway that reports cache OUTSIDE the
+        # prompt (Anthropic-native shape) would otherwise store
+        # cached > input and make uncached input go negative.
+        input_tokens = max(0, int(input_tokens or 0))
+        output_tokens = max(0, int(output_tokens or 0))
+        cached_tokens = min(max(0, int(cached_tokens or 0)), input_tokens)
+
         total = input_tokens + output_tokens
         today = date.today().isoformat()
 
@@ -410,8 +420,38 @@ class UsageTracker:
     # ── Query Methods ─────────────────────────────────────────────
 
     def get_usage_stats(self) -> dict:
-        """Return full usage.json contents."""
-        return self._usage
+        """Return usage.json contents plus the derived token breakdown.
+
+        A shallow copy is returned so the derived `breakdown` block is never
+        persisted back into usage.json; it is recomputed on every read.
+        """
+        stats = dict(self._usage)
+        stats["breakdown"] = self.get_token_breakdown()
+        return stats
+
+    def get_token_breakdown(self) -> dict:
+        """Resolved input / cached / uncached / output split.
+
+        `input_tokens` INCLUDES the cached portion (all providers here send
+        OpenAI-style prompt_tokens, where cached is a subset), so a consumer
+        must never add cached to input. The relationship is returned already
+        resolved so no caller has to re-derive it:
+
+            total_tokens = input_tokens + output_tokens   (cached not added)
+            uncached_input_tokens = input_tokens - cached
+        """
+        life = self._usage.get("lifetime", {})
+        inp = max(0, int(life.get("input_tokens", 0) or 0))
+        out = max(0, int(life.get("output_tokens", 0) or 0))
+        cached = min(max(0, int(life.get("cached_tokens", 0) or 0)), inp)
+        return {
+            "input_tokens": inp,
+            "cached_input_tokens": cached,
+            "uncached_input_tokens": inp - cached,
+            "output_tokens": out,
+            "total_tokens": inp + out,
+            "cache_hit_percent": round(cached / inp * 100.0, 1) if inp else 0.0,
+        }
 
     def get_current_limits(self) -> dict:
         """Return current period limits and usage."""

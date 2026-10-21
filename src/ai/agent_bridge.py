@@ -124,7 +124,7 @@ except ImportError:
 # COMPACT SYSTEM INTEGRATION (autoCompact + prompt)
 # ============================================================
 try:
-    from src.agent.src.services.compact.autoCompact import (
+    from src.agent.src.services.compact.auto_compact import (
         getAutoCompactThreshold,
         getEffectiveContextWindowSize,
         calculateTokenWarningState,
@@ -133,7 +133,7 @@ try:
     _HAS_AUTOCOMPACT = True
 except ImportError:
     try:
-        from agent.src.services.compact.autoCompact import (
+        from agent.src.services.compact.auto_compact import (
             getAutoCompactThreshold,
             getEffectiveContextWindowSize,
             calculateTokenWarningState,
@@ -610,12 +610,12 @@ def _load_agent_tool(module_path: str, class_name: str) -> Optional[type]:
     log.warning(f"[BRIDGE] {class_name} not available: tried {paths_to_try}")
     return None
 
-_REAL_FILE_READ_TOOL  = _load_agent_tool("agent.src.tools.FileReadTool.FileReadTool",  "FileReadTool")
-_REAL_FILE_EDIT_TOOL  = _load_agent_tool("agent.src.tools.FileEditTool.FileEditTool",  "FileEditTool")
-_REAL_FILE_WRITE_TOOL = _load_agent_tool("agent.src.tools.FileWriteTool.FileWriteTool", "FileWriteTool")
-_REAL_GLOB_TOOL       = _load_agent_tool("agent.src.tools.GlobTool.GlobTool",          "GlobTool")
-_REAL_GREP_TOOL            = _load_agent_tool("agent.src.tools.GrepTool.GrepTool",                     "GrepTool")
-_REAL_SEMANTIC_SEARCH_TOOL = _load_agent_tool("agent.src.tools.SementicSearch.SementicSearchTool", "SementicSearchTool")
+_REAL_FILE_READ_TOOL  = _load_agent_tool("agent.src.tools.file_read_tool.file_read_tool",  "FileReadTool")
+_REAL_FILE_EDIT_TOOL  = _load_agent_tool("agent.src.tools.file_edit_tool.file_edit_tool",  "FileEditTool")
+_REAL_FILE_WRITE_TOOL = _load_agent_tool("agent.src.tools.file_write_tool.file_write_tool", "FileWriteTool")
+_REAL_GLOB_TOOL       = _load_agent_tool("agent.src.tools.glob_tool.glob_tool",          "GlobTool")
+_REAL_GREP_TOOL            = _load_agent_tool("agent.src.tools.grep_tool.grep_tool",                     "GrepTool")
+_REAL_SEMANTIC_SEARCH_TOOL = _load_agent_tool("agent.src.tools.sementic_search.sementic_search_tool", "SementicSearchTool")
 
 
 # ============================================================
@@ -644,7 +644,7 @@ def _fallback_create_abort_controller(max_listeners: int = 50) -> _FallbackAbort
 
 
 try:
-    from src.agent.src.utils.abortController import ( 
+    from src.agent.src.utils.abort_controller import ( 
         AbortController as _RealAbortController, 
         create_abort_controller as _real_create_abort_controller,
     )
@@ -656,7 +656,7 @@ try:
     create_abort_controller = _real_create_abort_controller
 except ImportError:
     try:
-        from agent.src.utils.abortController import ( 
+        from agent.src.utils.abort_controller import ( 
             AbortController as _RealAbortController, 
             create_abort_controller as _real_create_abort_controller,
         )
@@ -678,7 +678,7 @@ except ImportError:
 
 def _load_diff_service():
     """Load DiffDataService singleton. Returns None if unavailable."""
-    for mod_path in ("src.agent.src.hooks.useDiffData", "agent.src.hooks.useDiffData"):
+    for mod_path in ("src.agent.src.hooks.use_diff_data", "agent.src.hooks.use_diff_data"):
         try:
             mod = _importlib.import_module(mod_path)
             return mod.get_diff_service()
@@ -689,7 +689,7 @@ def _load_diff_service():
 
 def _load_cortex_diff_bridge():
     """Load CortexDiffBridge singleton. Returns None if unavailable."""
-    for mod_path in ("src.agent.src.hooks.useDiffInIDE", "agent.src.hooks.useDiffInIDE"):
+    for mod_path in ("src.agent.src.hooks.use_diff_in_ide", "agent.src.hooks.use_diff_in_ide"):
         try:
             mod = _importlib.import_module(mod_path)
             return mod.CortexDiffBridge.instance()
@@ -1243,7 +1243,7 @@ _STUB_PARENT_MESSAGE = type("_Msg", (), {"uuid": None})()
 def _get_destructive_warning(command: str) -> 'Optional[str]':
     """Return a human-readable warning if the command is destructive, else None."""
     try:
-        from src.agent.src.tools.BashTool.destructiveCommandWarning import get_destructive_command_warning 
+        from src.agent.src.tools.bash_tool.destructive_command_warning import get_destructive_command_warning 
 
         return get_destructive_command_warning(command)
     except Exception:
@@ -3610,7 +3610,7 @@ class CortexAgentBridge(QObject):
         super().__init__()
         # Pre-warm ripgrep so Windows Defender caches trust on first launch
         try:
-            from src.agent.src.tools.GrepTool.GrepTool import prewarm_ripgrep
+            from src.agent.src.tools.grep_tool.grep_tool import prewarm_ripgrep
             prewarm_ripgrep()
         except Exception:
             pass
@@ -4612,7 +4612,7 @@ Required behavior:
         prompt += "\n" + PERSISTENT_DIRECTIVES + "\n"
         # Inject mandatory search strategy (from src/agent/src/utils/searchStrategy.py)
         try:
-            from src.agent.src.utils.searchStrategy import get_search_strategy_instruction
+            from src.agent.src.utils.search_strategy import get_search_strategy_instruction
             prompt += "\n" + get_search_strategy_instruction() + "\n"
         except Exception:
             pass  # Non-critical, strategy is guidance, not required
@@ -4830,13 +4830,13 @@ Required behavior:
         # --- Layer 2: Recent individual memory files ---
         memoryFreshnessNote: Callable[[float], str] = lambda mtime_ms: ""
 
-        _mage_spec = _importlib_util.find_spec("src.agent.src.memdir.memoryAge") or _importlib_util.find_spec("agent.src.memdir.memoryAge")
+        _mage_spec = _importlib_util.find_spec("src.agent.src.memdir.memory_age") or _importlib_util.find_spec("agent.src.memdir.memory_age")
         if _mage_spec:
             try:
                 try:
-                    from src.agent.src.memdir.memoryAge import memoryFreshnessNote as _mf
+                    from src.agent.src.memdir.memory_age import memoryFreshnessNote as _mf
                 except ImportError:
-                    from agent.src.memdir.memoryAge import memoryFreshnessNote as _mf
+                    from agent.src.memdir.memory_age import memoryFreshnessNote as _mf
                 memoryFreshnessNote = cast(Callable[[float], str], _mf)
             except Exception:
                 pass
@@ -11469,7 +11469,7 @@ Required behavior:
         else:
             # Try quote normalization (smart quotes, different apostrophes, etc.)
             try:
-                from src.agent.src.tools.FileEditTool.FileEditTool import find_actual_string
+                from src.agent.src.tools.file_edit_tool.file_edit_tool import find_actual_string
                 actual_old_found = find_actual_string(baseline, old_string)
                 if actual_old_found:
                     actual_old = actual_old_found
@@ -12958,13 +12958,13 @@ Required behavior:
 
         # Try to import and use the real WebFetchTool utils
         try:
-            _webfetch_spec = _importlib_util.find_spec("src.agent.src.tools.WebFetchTool.utils") or _importlib_util.find_spec("agent.src.tools.WebFetchTool.utils")
+            _webfetch_spec = _importlib_util.find_spec("src.agent.src.tools.web_fetch_tool.utils") or _importlib_util.find_spec("agent.src.tools.web_fetch_tool.utils")
             if _webfetch_spec:
                 try:
                     try:
-                        from src.agent.src.tools.WebFetchTool.utils import get_url_markdown_content
+                        from src.agent.src.tools.web_fetch_tool.utils import get_url_markdown_content
                     except ImportError:
-                        from agent.src.tools.WebFetchTool.utils import get_url_markdown_content
+                        from agent.src.tools.web_fetch_tool.utils import get_url_markdown_content
                     content = await get_url_markdown_content(url)
                     return ToolResult(tool_id=tool_id, result={
                         "url": url,
@@ -13814,7 +13814,7 @@ Required behavior:
         """
         try:
             import importlib
-            module = importlib.import_module('src.agent.src.tools.PlanBuildTool.PlanBuildTool')
+            module = importlib.import_module('src.agent.src.tools.plan_build_tool.plan_build_tool')
             plan_result = await module.call(args, None)
             if isinstance(plan_result, dict) and 'data' in plan_result:
                 return ToolResult(tool_id=tool_id, result=plan_result['data'])

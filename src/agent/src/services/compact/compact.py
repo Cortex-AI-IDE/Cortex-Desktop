@@ -66,7 +66,7 @@ except ImportError:
     COMPACT_MAX_OUTPUT_TOKENS = 20_000
 
 try:
-    from utils.contextAnalysis import analyzeContext, tokenStatsToStatsigMetrics
+    from utils.context_analysis import analyzeContext, tokenStatsToStatsigMetrics
 except ImportError:
     def analyzeContext(messages) -> Dict:
         """Stub - analyzes context"""
@@ -98,7 +98,7 @@ except ImportError:
         return {}
 
 try:
-    from utils.forkedAgent import runForkedAgent, CacheSafeParams
+    from utils.forked_agent import runForkedAgent, CacheSafeParams
 except ImportError:
     class CacheSafeParams:
         """Stub for cache-safe parameters"""
@@ -184,7 +184,7 @@ except ImportError:
         return None
 
 try:
-    from utils.sessionActivity import isSessionActivityTrackingActive, sendSessionActivitySignal
+    from utils.session_activity import isSessionActivityTrackingActive, sendSessionActivitySignal
 except ImportError:
     def isSessionActivityTrackingActive() -> bool:
         return False
@@ -200,7 +200,7 @@ except ImportError:
         return []
 
 try:
-    from utils.sessionStorage import getTranscriptPath, reAppendSessionMetadata
+    from utils.session_storage import getTranscriptPath, reAppendSessionMetadata
 except ImportError:
     def getTranscriptPath() -> str:
         return ''
@@ -215,20 +215,20 @@ except ImportError:
         await asyncio.sleep(seconds)
 
 try:
-    from utils.slowOperations import jsonStringify
+    from utils.slow_operations import jsonStringify
 except ImportError:
     import json
     def jsonStringify(obj, **kwargs) -> str:
         return json.dumps(obj, default=str, **kwargs)
 
 try:
-    from utils.systemPromptType import asSystemPrompt
+    from utils.system_prompt_type import asSystemPrompt
 except ImportError:
     def asSystemPrompt(text: str) -> str:
         return text
 
 try:
-    from utils.task.diskOutput import getTaskOutputPath
+    from utils.task.disk_output import getTaskOutputPath
 except ImportError:
     def getTaskOutputPath(taskId: str) -> Optional[str]:
         return None
@@ -246,7 +246,7 @@ except ImportError:
         return 0
 
 try:
-    from utils.toolSearch import extractDiscoveredToolNames, isToolSearchEnabled
+    from utils.tool_search import extractDiscoveredToolNames, isToolSearchEnabled
 except ImportError:
     def extractDiscoveredToolNames(messages) -> Set[str]:
         return set()
@@ -284,24 +284,24 @@ except ImportError:
         return []
 
 try:
-    from tools.FileReadTool.FileReadTool import FileReadTool
+    from tools.file_read_tool.file_read_tool import FileReadTool
 except ImportError:
     try:
-        from tools.FileReadTool.FileReadTool import FileReadTool
+        from tools.file_read_tool.file_read_tool import FileReadTool
     except ImportError:
         FileReadTool = {'name': 'file_read', 'description': 'Read a file'}
 
 try:
-    from tools.FileReadTool.prompt import FILE_READ_TOOL_NAME, FILE_UNCHANGED_STUB
+    from tools.file_read_tool.prompt import FILE_READ_TOOL_NAME, FILE_UNCHANGED_STUB
 except ImportError:
     FILE_READ_TOOL_NAME = 'file_read'
     FILE_UNCHANGED_STUB = '[File unchanged]'
 
 try:
-    from tools.ToolSearchTool.ToolSearchTool import ToolSearchTool
+    from tools.tool_search_tool.tool_search_tool import ToolSearchTool
 except ImportError:
     try:
-        from tools.ToolSearchTool.ToolSearchTool import ToolSearchTool
+        from tools.tool_search_tool.tool_search_tool import ToolSearchTool
     except ImportError:
         ToolSearchTool = {'name': 'tool_search', 'description': 'Search for tools'}
 
@@ -354,7 +354,7 @@ except ImportError:
         return text.startswith('API Error')
 
 try:
-    from api.promptCacheBreakDetection import notifyCompaction
+    from api.prompt_cache_break_detection import notifyCompaction
 except ImportError:
     def notifyCompaction(source: str, agentId: str) -> None:
         pass

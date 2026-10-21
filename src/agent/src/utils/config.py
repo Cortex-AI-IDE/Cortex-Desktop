@@ -33,7 +33,7 @@ except ImportError:
         height: int
 
 try:
-    from .model.modelOptions import ModelOption
+    from .model.model_options import ModelOption
 except ImportError:
     class ModelOption(dict):
         pass
@@ -44,7 +44,7 @@ except ImportError:
     ThemeSetting = str  # 'light' | 'dark' | 'system'
 
 try:
-    from .settings.managedPath import getManagedFilePath
+    from .settings.managed_path import getManagedFilePath
 except ImportError:
     def getManagedFilePath() -> str:
         return os.path.join(os.path.expanduser('~'), '.cortex')
@@ -1168,7 +1168,7 @@ def getMemoryPath(memoryType: str) -> str:
     try:
         from .bootstrap.state import getOriginalCwd
         from .envUtils import getCortexConfigHomeDir
-        from .settings.managedPath import getManagedFilePath
+        from .settings.managed_path import getManagedFilePath
     except ImportError:
         def getOriginalCwd():
             return os.getcwd()
@@ -1201,7 +1201,7 @@ def getMemoryPath(memoryType: str) -> str:
 
 def getManagedCortexRulesDir() -> str:
     try:
-        from .settings.managedPath import getManagedFilePath
+        from .settings.managed_path import getManagedFilePath
     except ImportError:
         def getManagedFilePath():
             return os.path.join(os.path.expanduser('~'), '.cortex')

@@ -917,29 +917,29 @@ def main():
     # Subsequent Grep calls skip the 5-20s Defender scan and complete in <100ms.
     # Works in BOTH dev and frozen builds. The daemon thread never blocks the UI.
     try:
-        from src.agent.src.tools.GrepTool.GrepTool import prewarm_ripgrep
+        from src.agent.src.tools.grep_tool.grep_tool import prewarm_ripgrep
         prewarm_ripgrep()
         log.info("[PRE-WARM] ripgrep pre-warm dispatched (daemon thread)")
     except Exception as e:
         log.debug(f"[PRE-WARM] Skipped: {e}")
 
-    # ── PRE-WARM: PyMuPDF (fitz) import ──────────────────────────────
-    # PyMuPDF's import chain (fitz → pymupdf → pymupdf/extra.py → native
-    # .pyd) takes 10-40s on OneDrive-dehydrated files and frozen builds.
+    # ── PRE-WARM: pypdfium2 (PDFium) import ──────────────────────────────
+    # The pypdfium2 import chain loads a native PDFium library, which takes
+    # 10-40s on OneDrive-dehydrated files and frozen builds.
     # Pre-importing in a daemon thread at startup means the module is
     # already cached in sys.modules by the time the user opens a PDF,
     # making the import instant (dict lookup only).
     try:
         import threading
-        def _prewarm_fitz():
+        def _prewarm_pdfium():
             try:
-                import fitz  # noqa: F401
-                log.info("[PRE-WARM] PyMuPDF (fitz) import cached")
+                import pypdfium2  # noqa: F401
+                log.info("[PRE-WARM] pypdfium2 (PDFium) import cached")
             except ImportError:
-                log.debug("[PRE-WARM] PyMuPDF not installed, skipping")
-        threading.Thread(target=_prewarm_fitz, daemon=True, name="prewarm-fitz").start()
+                log.debug("[PRE-WARM] pypdfium2 not installed, skipping")
+        threading.Thread(target=_prewarm_pdfium, daemon=True, name="prewarm-pdfium").start()
     except Exception as e:
-        log.debug(f"[PRE-WARM] fitz pre-warm skipped: {e}")
+        log.debug(f"[PRE-WARM] pypdfium2 pre-warm skipped: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # LOGIN GATE, Cortex requires an account

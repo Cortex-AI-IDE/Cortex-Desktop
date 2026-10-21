@@ -1,6 +1,6 @@
 # Third-Party Attribution — Bundled Skills
 
-Cortex ships 251 skills. Two are original Cortex work (`bug-triage`,
+Cortex ships 248 skills. Two are original Cortex work (`bug-triage`,
 `distinctive-frontend-design`); nine more are Cortex rewrites derived from
 the collections below; the remainder are included from their upstream
 sources with their SKILL.md and reference files intact.
@@ -36,13 +36,20 @@ is bundled.
   WebGL/three.js, layout and visual systems. SKILL.md and REFERENCES.md
   included intact; demo media omitted.
 
-- **skills (Anthropic)** — Anthropic's published skill collection. 17 skills
-  including frontend-design, skill-creator, theme-factory, mcp-builder,
-  webapp-testing, canvas-design and the document toolkits. Included as
-  published. Note that the document skills (docx, pptx, xlsx, pdf) and
-  webapp-testing expect Python libraries or Playwright that Cortex does not
-  bundle; their guidance is still useful, but the tooling they reference
-  must be installed separately.
+- **skills (Anthropic)** — Anthropic's published skill collection
+  (github.com/anthropics/skills), Apache License 2.0. 13 skills including
+  frontend-design, skill-creator, theme-factory, mcp-builder, webapp-testing,
+  canvas-design, brand-guidelines, algorithmic-art, claude-api, internal-comms,
+  slack-gif-creator, web-artifacts-builder and doc-coauthoring, included as
+  published with their LICENSE.txt files. Some of them (webapp-testing,
+  claude-api, web-artifacts-builder) expect Python libraries, a Node toolchain
+  or Playwright that Cortex does not bundle; their guidance is still useful,
+  but the tooling they reference must be installed separately.
+
+  Anthropic's document skills (docx, pptx, xlsx, pdf) are source-available
+  under a proprietary license that does not permit redistribution and are
+  **not** bundled with Cortex. The Skill tool does not offer them; install
+  Anthropic's own package if you want that functionality.
 
 - **taste-skill** (MIT License). 13 skills. `design-taste-frontend` and
   `image-to-code` are split (see below). The image-generation skills

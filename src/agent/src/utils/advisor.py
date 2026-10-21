@@ -24,7 +24,7 @@ except ImportError:
         return os.environ.get('CORTEX_CODE_INCLUDE_FIRST_PARTY_BETAS', '').lower() in ('1', 'true', 'yes')
 
 try:
-    from ..utils.envUtils import isEnvTruthy
+    from ..utils.env_utils import isEnvTruthy
 except ImportError:
     def isEnvTruthy(value: Optional[str]) -> bool:
         """Fallback: Check if environment variable value is truthy."""

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Plugin utilities package for Cortex AI IDE.
 
 This package provides core utilities for plugin management:
@@ -25,7 +25,7 @@ _agent_src = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname
 if _agent_src not in _sys.path:
     _sys.path.insert(0, _agent_src)
 
-from utils.plugins.marketplaceHelpers import (
+from utils.plugins.marketplace_helpers import (
     MarketplaceSource,
     GithubSource,
     GitSource,
@@ -43,7 +43,7 @@ from utils.plugins.marketplaceHelpers import (
     get_current_timestamp,
 )
 
-from utils.plugins.pluginInstallationHelpers import (
+from utils.plugins.plugin_installation_helpers import (
     InstallCoreResult,
     InstallSuccess,
     InstallLocalSourceError,
@@ -64,7 +64,7 @@ from utils.plugins.pluginInstallationHelpers import (
     format_dependency_count_suffix,
 )
 
-from utils.plugins.pluginAutoupdate import (
+from utils.plugins.plugin_autoupdate import (
     on_plugins_auto_updated,
     notify_plugins_updated,
     clear_pending_notification,
@@ -75,7 +75,7 @@ from utils.plugins.pluginAutoupdate import (
     is_update_available,
 )
 
-from utils.plugins.pluginStartupCheck import (
+from utils.plugins.plugin_startup_check import (
     PluginInstallResult,
     PluginScope,
     ExtendedPluginScope,
@@ -92,7 +92,7 @@ from utils.plugins.pluginStartupCheck import (
     format_install_result,
 )
 
-from utils.plugins.dependencyResolver import (
+from utils.plugins.dependency_resolver import (
     DependencyLookupResult,
     ResolutionResult,
     ResolutionSuccess,
@@ -109,7 +109,7 @@ from utils.plugins.dependencyResolver import (
     format_reverse_dependents_suffix,
 )
 
-from utils.plugins.installedPluginsManager import (
+from utils.plugins.installed_plugins_manager import (
     # Core functions
     get_installed_plugins_file_path,
     get_installed_plugins_v2_file_path,
@@ -153,7 +153,7 @@ from utils.plugins.installedPluginsManager import (
     PersistableScope,
 )
 
-from utils.plugins.loadPluginAgents import (
+from utils.plugins.load_plugin_agents import (
     AgentDefinition,
     load_plugin_agents,
     clear_plugin_agent_cache,
@@ -162,7 +162,7 @@ from utils.plugins.loadPluginAgents import (
     VALID_MEMORY_SCOPES,
 )
 
-from utils.plugins.loadPluginCommands import (
+from utils.plugins.load_plugin_commands import (
     Command,
     load_plugin_commands,
     clear_plugin_command_cache,

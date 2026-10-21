@@ -72,7 +72,7 @@ except ImportError:
         return {"hasReleaseNotes": False}
 
 try:
-    from .utils.Shell import set_cwd
+    from .utils.shell import set_cwd
 except ImportError:
     def set_cwd(cwd: str) -> None:
         os.chdir(cwd)
@@ -118,7 +118,7 @@ except ImportError:
         return []
 
 try:
-    from .services.SessionMemory.session_memory import init_session_memory
+    from .services.session_memory.session_memory import init_session_memory
 except ImportError:
     def init_session_memory() -> None:
         pass
@@ -264,7 +264,7 @@ except ImportError:
         pass
 
 try:
-    from .utils.permissions.PermissionMode import PermissionMode
+    from .utils.permissions.permission_mode import PermissionMode
 except ImportError:
     PermissionMode = str
 

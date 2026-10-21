@@ -464,10 +464,20 @@ def auto_fix_broken_code_fences(text: str) -> str:
        re.match(r'^(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|mindmap|timeline)\b', trimmed, re.IGNORECASE):
         fixed = f'```mermaid\n{trimmed}\n```'
 
+    # ── Fences only count where a fence can be ──────────────────────────
+    # The three rules below used to fire ANYWHERE in a line. An inline
+    # mention of a fence - "That stray ` ``` ` lands", a table cell
+    # "| A fenced ```json example |" - was split onto a line of its own and
+    # became a REAL fence, so the rest of the reply rendered as one code
+    # block, live and after a restart (2026-10-21 screenshots: 1,854 of
+    # 2,122 characters swallowed, headings and tables shown as raw text).
+    # Rules 1 and 2 now apply only to a fence that STARTS its line; rule 3
+    # skips a fence inside an inline code span or a table row.
+    #
     # Fix ```language async fn() → ```language\nasync fn()
     # [ \t]+ NOT \s+: \s matches newlines, so the old pattern also collapsed
     # a legitimate blank line after the fence opener into nothing.
-    fixed = re.sub(r'```([a-zA-Z0-9_#+-]+)[ \t]+(?=\S)', r'```\1\n', fixed)
+    fixed = re.sub(r'(?m)^([ \t]*```[a-zA-Z0-9_#+-]+)[ \t]+(?=\S)', r'\1\n', fixed)
     # Normalize ALL CRLF → LF inside code fence blocks (openings, content, closings)
     def _normalize_fence_crlf(m):
         return m.group(0).replace('\r\n', '\n')
@@ -479,12 +489,21 @@ def auto_fix_broken_code_fences(text: str) -> str:
     # messages and shifting downstream fence pairing (prose got swallowed
     # into code cards, commands were mangled, the "THREE card" bug).
     # [ \t]+ restricts it to actual same-line content.
-    fixed = re.sub(r'```[ \t]+(?=\S)', r'```\n', fixed)
+    fixed = re.sub(r'(?m)^([ \t]*```)[ \t]+(?=\S)', r'\1\n', fixed)
 
     # ── Move an opening fence that shares a line with preceding text onto its
     #    own line: "- **Web Browser**: ```bash" → "- **Web Browser**:\n```bash"
     #    so the markdown parser treats it as a block, not inline text.
-    fixed = re.sub(r'(\S)[ \t]+(```[a-zA-Z0-9_#+-]*[ \t]*(?:\n|$))', r'\1\n\2', fixed)
+    def _fence_to_own_line(line: str) -> str:
+        m = re.search(r'(\S)[ \t]+(```[a-zA-Z0-9_#+-]*[ \t]*)$', line)
+        if not m:
+            return line
+        if line.lstrip().startswith(('|', '```')):
+            return line                      # a table row, or already a fence
+        if m.group(1) == '`' or line[:m.start(2)].count('`') % 2:
+            return line                      # inside an inline code span
+        return line[:m.start(2)].rstrip() + '\n' + m.group(2)
+    fixed = '\n'.join(_fence_to_own_line(_l) for _l in fixed.split('\n'))
 
     # ── Balance fences so NO code ever leaks as plain text ──
     # A fence WITH a language tag (```bash) is always an OPENING. If we hit one
@@ -522,6 +541,156 @@ def auto_fix_broken_code_fences(text: str) -> str:
     # ChatPanel._merge_consecutive_code_blocks after parsing.
 
     return fixed
+
+
+# ── Prose markdown sanitising (save + restore) ──────────────────────────────
+# A table cell that itself contains a ``` fence is legal-looking input but
+# illegal markdown: the fence ends up alone on a line, inside the table body,
+# where mistune reads it as the START of a code block. Everything after it,
+# headings, tables, the task JSON, the rest of the answer, then renders as one
+# monospace blob. Measured on a real saved block: 4,660 of 4,564 characters
+# ended up inside a single <pre> (the 2026-10-21 screenshot).
+#
+# The stray fence is invisible to the tag stripper because it stashes
+# ```...``` regions as protected code, so the <task_summary> JSON riding inside
+# that fake block could never be removed either. Rejoin the row FIRST, and both
+# symptoms disappear together.
+_FENCE_LINE_RE = re.compile(r'^[ \t]*```')
+
+
+def _is_fence_line(line: str) -> bool:
+    return bool(_FENCE_LINE_RE.match(line))
+
+
+def _is_table_line(line: str) -> bool:
+    return line.lstrip().startswith('|')
+
+
+def _escape_fence_token(line: str) -> str:
+    """Neutralise the backticks of a fence that has to live inside a cell.
+
+    A markdown table cell cannot hold a fenced block. Leaving the raw ``` in
+    the rejoined row lets the next table pass split the row again, which is how
+    the original corruption was produced. Backslash-escaped backticks render as
+    literal ``` and can never open a block.
+    """
+    return _FENCE_LINE_RE.sub(lambda m: '\\`\\`\\`', line, count=1)
+
+
+def _rejoin_table_rows_split_by_fence(text: str, max_passes: int = 4) -> str:
+    """Fold a fence line stuck inside a table back into its table row.
+
+    Only acts when the fence is preceded by a table row AND the joined row can
+    be completed by the following lines (ending in ``|``). A fence that merely
+    follows a table, or sits inside real prose, is left untouched.
+    """
+    for _ in range(max_passes):
+        lines = text.split('\n')
+        changed = False
+        i = 0
+        while i < len(lines):
+            if not (_is_fence_line(lines[i]) and i > 0):
+                i += 1
+                continue
+            # Previous non-blank line must be a table row.
+            p = i - 1
+            while p >= 0 and lines[p].strip() == '':
+                p -= 1
+            if p < 0 or not _is_table_line(lines[p]):
+                i += 1
+                continue
+            merged = lines[p].rstrip() + ' ' + _escape_fence_token(lines[i].strip())
+            n = i + 1
+            while not merged.rstrip().endswith('|') and n < len(lines):
+                if lines[n].strip() == '':
+                    break
+                merged = merged.rstrip() + ' ' + lines[n].strip()
+                n += 1
+            if not merged.rstrip().endswith('|'):
+                # Could not complete the row; refuse to guess, leave it alone.
+                i += 1
+                continue
+            lines[p] = merged
+            del lines[i:n]
+            changed = True
+            # Resume just after the row we rewrote.
+            i = p + 1
+        text = '\n'.join(lines)
+        if not changed:
+            break
+    return text
+
+
+def _balance_fences(text: str) -> str:
+    """Ensure every fence is closed so the tail is never swallowed.
+
+    A trailing lone fence is dropped (it would open an empty code block);
+    an opening fence anywhere else gets a closing fence appended.
+    """
+    lines = text.split('\n')
+    fence_idx = [i for i, ln in enumerate(lines) if _is_fence_line(ln)]
+    if len(fence_idx) % 2 == 0:
+        return text
+    last_non_blank = max((i for i, ln in enumerate(lines) if ln.strip()), default=-1)
+    if last_non_blank >= 0 and _is_fence_line(lines[last_non_blank]):
+        del lines[last_non_blank]
+        return '\n'.join(lines)
+    return text.rstrip('\n') + '\n```\n'
+
+
+_CODE_SPAN_IN_ROW = re.compile(r'(`+)(.+?)(?<!`)\1(?!`)')
+
+
+def _repair_pipe_entity_scars(text: str) -> str:
+    """Undo " &#124; " the old table normaliser saved into table rows.
+
+    It split rows on every "|", including "\\|" and pipes inside `code`, and
+    glued the pieces back with " &#124; " (table_normalize before
+    2026-10-21). Saved replies keep that text, and a code span shows it
+    literally: `rpm2cpio \\ &#124; cpio`. In a row, "\\ &#124; " was "\\|", and
+    inside code " &#124; " was "|"; today's normaliser escapes that one again.
+    """
+    out = []
+    for line in text.split('\n'):
+        if line.lstrip().startswith('|') and '&#124;' in line:
+            line = line.replace('\\ &#124; ', '\\| ')
+            line = _CODE_SPAN_IN_ROW.sub(
+                lambda m: m.group(1) + m.group(2).replace(' &#124; ', ' | ') + m.group(1),
+                line)
+        out.append(line)
+    return '\n'.join(out)
+
+
+def sanitize_prose_markdown(text: str) -> str:
+    """Make saved assistant markdown safe to store and to re-render.
+
+    Runs, in this order (the order matters):
+      1. rejoin table rows broken by a stray fence (and escape its backticks),
+      2. close any unbalanced fence,
+      3. strip control tags (<task_summary> and friends).
+
+    Step 2 must precede step 3: the tag stripper protects everything between
+    two fences, so a closing fence left dangling at the end of an answer makes
+    it pair with an inline fence earlier on and hide the task JSON from the
+    stripper. Balancing first removes that accidental protection, which is also
+    what makes this function idempotent.
+
+    Idempotent: sanitising an already-clean block returns it unchanged.
+    """
+    if not text:
+        return text
+    # Undo the scar the old fence rules left on an INLINE mention: "` ``` `"
+    # was split into "`", "```", "`" on three lines (auto_fix_broken_code_
+    # fences before 2026-10-21). A line holding only ``` between a line that
+    # ends with a backtick and one that starts with one is never a real block.
+    text = re.sub(r'`[ \t]*\n([ \t]*```[a-zA-Z0-9_#+-]*)[ \t]*\n[ \t]*`',
+                  lambda m: '` ' + m.group(1).strip() + ' `', text)
+    if '&#124;' in text:
+        text = _repair_pipe_entity_scars(text)
+    text = _rejoin_table_rows_split_by_fence(text)
+    text = _balance_fences(text)
+    text = strip_all_control_tags(text)
+    return text
 
 
 def detect_content_type(text: str) -> str:

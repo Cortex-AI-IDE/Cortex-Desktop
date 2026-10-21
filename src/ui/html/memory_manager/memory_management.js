@@ -64,6 +64,7 @@
 
     /* Appearance, Interface */
     sidebarPosition: "layout.sidebar_position",
+    chatPosition: "layout.chat_position",
     chatActivity: "ui.chat_activity",
 
     /* Models & Providers */
@@ -1103,11 +1104,36 @@ Use f-strings instead of .format().</code></pre>
       if ($("longestTask")) $("longestTask").textContent = formatDuration(life.longest_task_seconds);
       if ($("currentStreak")) $("currentStreak").textContent = (streaks.current_streak_days || 0) + ' days';
       if ($("longestStreak")) $("longestStreak").textContent = (streaks.longest_streak_days || 0) + ' days';
-      /* Real provider-reported breakdown (recorded per API call). Older
-         usage.json files predate these keys, show 0 until data arrives. */
-      if ($("inputTokens")) $("inputTokens").textContent = formatTokens(life.input_tokens || 0);
-      if ($("outputTokens")) $("outputTokens").textContent = formatTokens(life.output_tokens || 0);
-      if ($("cachedTokens")) $("cachedTokens").textContent = formatTokens(life.cached_tokens || 0);
+      /* Token split. The server (usage_tracker.get_token_breakdown) resolves
+         the relationship because cached is a SUBSET of input: adding them
+         would double-count. Older payloads without `breakdown` get the same
+         math applied locally, clamped so cached can never exceed input. */
+      const bd = u.breakdown || (function () {
+        const inp = Math.max(0, life.input_tokens || 0);
+        const cached = Math.min(Math.max(0, life.cached_tokens || 0), inp);
+        return {
+          input_tokens: inp,
+          cached_input_tokens: cached,
+          uncached_input_tokens: inp - cached,
+          output_tokens: Math.max(0, life.output_tokens || 0),
+          cache_hit_percent: inp ? Math.round((cached / inp) * 1000) / 10 : 0,
+        };
+      })();
+      if ($("inputTokens")) $("inputTokens").textContent = formatTokens(bd.input_tokens);
+      if ($("cachedTokens")) $("cachedTokens").textContent = formatTokens(bd.cached_input_tokens);
+      if ($("outputTokens")) $("outputTokens").textContent = formatTokens(bd.output_tokens);
+      if ($("inputNote")) {
+        /* Just the fresh slice: the cached tile next to it carries the
+           cached count and its percentage, so repeating both here would
+           only crowd the card. */
+        $("inputNote").textContent = formatTokens(bd.uncached_input_tokens) + ' fresh';
+      }
+      if ($("cachedNote")) $("cachedNote").textContent = bd.cache_hit_percent + '% of input';
+      if ($("outputNote")) {
+        const grand = bd.input_tokens + bd.output_tokens;
+        const outPct = grand ? Math.round((bd.output_tokens / grand) * 1000) / 10 : 0;
+        $("outputNote").textContent = outPct + '% of total';
+      }
 
       /* Update usage meters, BYOK: no limit, show raw count only */
       const tokensUsed = period.tokens_used || 0;
@@ -1142,10 +1168,10 @@ Use f-strings instead of .format().</code></pre>
           const total = info.total_tokens || 0;
           const pct = Math.max(3, Math.round((total / topTokens) * 100));
           const color = getModelColor(name);
-          const bd = (info.input_tokens || info.output_tokens)
+          const split = (info.input_tokens || info.output_tokens)
             ? '<div class="bd">in ' + formatTokens(info.input_tokens || 0) +
+              ' (of which ' + formatTokens(info.cached_tokens || 0) + ' cached)' +
               ' · out ' + formatTokens(info.output_tokens || 0) +
-              (info.cached_tokens ? ' · cached ' + formatTokens(info.cached_tokens) : '') +
               '</div>'
             : '';
           return '<div class="mdl" style="color:' + color + '">' +
@@ -1153,7 +1179,7 @@ Use f-strings instead of .format().</code></pre>
             '<span class="nm" style="color:var(--text)">' + esc(getModelName(name)) + '</span>' +
             '<span class="tot">' + formatTokens(total) + '</span>' +
             '<span class="track"><span class="fill" style="width:' + pct + '%;background:' + color + '"></span></span>' +
-            bd +
+            split +
             '</div>';
         }).join('');
       }

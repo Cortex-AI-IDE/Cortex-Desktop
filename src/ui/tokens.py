@@ -1003,9 +1003,9 @@ def get_auto_compact_threshold(model_id: str) -> int:
     """
     try:
         try:
-            from src.agent.src.services.compact.autoCompact import getAutoCompactThreshold
+            from src.agent.src.services.compact.auto_compact import getAutoCompactThreshold
         except ImportError:
-            from agent.src.services.compact.autoCompact import getAutoCompactThreshold
+            from agent.src.services.compact.auto_compact import getAutoCompactThreshold
         return getAutoCompactThreshold(model_id)
     except ImportError:
         # Fallback: 85% of context window
