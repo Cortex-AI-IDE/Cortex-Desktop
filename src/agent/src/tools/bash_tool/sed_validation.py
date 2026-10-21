@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# sedValidation.py
+# sed_validation.py
 # 
 # Validates sed commands against allowlist patterns and blocks
 # dangerous operations (write/execute commands).

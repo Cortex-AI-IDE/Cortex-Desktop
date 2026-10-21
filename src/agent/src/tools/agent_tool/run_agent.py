@@ -1,4 +1,4 @@
-# runAgent.py
+# run_agent.py
 """
 Run agent functionality for Cortex IDE.
 

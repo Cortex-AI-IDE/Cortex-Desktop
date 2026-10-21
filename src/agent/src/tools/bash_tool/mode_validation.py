@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# modeValidation.py
+# mode_validation.py
 # 
 # Checks if commands should be handled differently based on 
 # the current permission mode (e.g., acceptEdits mode for 

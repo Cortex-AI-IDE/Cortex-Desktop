@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# systemPromptType.py
+# system_prompt_type.py
 #
 # Branded type for system prompt arrays.
 # In Python, this is simply Sequence[str] with the factory function

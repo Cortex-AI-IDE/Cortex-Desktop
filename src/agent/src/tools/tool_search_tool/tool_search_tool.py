@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# ToolSearchTool.py
+# tool_search_tool.py
 # 
 # A tool for searching and loading deferred tool schemas.
 # ------------------------------------------------------------

@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# GlobTool.py
+# glob_tool.py
 # 
 # A tool for finding files by name pattern using glob matching.
 # ------------------------------------------------------------

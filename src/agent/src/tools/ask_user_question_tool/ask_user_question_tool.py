@@ -1,4 +1,4 @@
-# AskUserQuestionTool.py
+# ask_user_question_tool.py
 """
 AskUserQuestionTool for Cortex IDE.
 

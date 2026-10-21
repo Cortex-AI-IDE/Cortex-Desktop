@@ -1,6 +1,6 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportRedeclaration=false, reportAssignmentType=false
 # ------------------------------------------------------------
-# loadSkillsDir.py
+# load_skills_dir.py
 #
 # Loads skills from /skills/ and legacy /commands/ directories,
 # handles dynamic skill discovery, conditional skills, and MCP integration.
@@ -1113,7 +1113,7 @@ def clearDynamicSkills() -> None:
 
 
 # Expose createSkillCommand + parseSkillFrontmatterFields to MCP skill
-# discovery via a leaf registry module. See mcpSkillBuilders.py for why this
+# discovery via a leaf registry module. See mcp_skill_builders.py for why this
 # indirection exists.
 try:
     from .mcp_skill_builders import registerMCPSkillBuilders

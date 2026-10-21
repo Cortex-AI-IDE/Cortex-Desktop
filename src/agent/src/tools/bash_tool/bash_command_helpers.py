@@ -1,4 +1,4 @@
-# bashCommandHelpers.py
+# bash_command_helpers.py
 """
 Bash command helpers for Cortex IDE.
 

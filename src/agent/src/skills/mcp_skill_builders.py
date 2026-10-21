@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# mcpSkillBuilders.py
+# mcp_skill_builders.py
 #
 # Write-once registry for loadSkillsDir functions needed by MCP skill
 # discovery. This module is a dependency-graph leaf.

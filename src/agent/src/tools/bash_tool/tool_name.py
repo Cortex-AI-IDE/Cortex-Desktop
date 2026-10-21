@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# toolName.py
+# tool_name.py
 # 
 # Bash tool name constant to break circular dependency from prompt.py.
 # ------------------------------------------------------------

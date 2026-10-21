@@ -1,4 +1,4 @@
-# FileReadTool.py
+# file_read_tool.py
 # 
 # Core file reading tool for Cortex IDE.
 # Handles text files, images, PDFs, and Jupyter notebooks.
@@ -931,7 +931,7 @@ async def suggest_path_under_cwd(file_path: str) -> Optional[str]:
 def resolve_nested_same_name_file(file_path: str) -> Optional[str]:
     """
     Resolve shorthand module file paths like:
-      .../tools/FileEditTool.py -> .../tools/FileEditTool/FileEditTool.py
+      .../tools/file_edit_tool.py -> .../tools/file_edit_tool/file_edit_tool.py
     """
     directory = os.path.dirname(file_path)
     basename = os.path.basename(file_path)

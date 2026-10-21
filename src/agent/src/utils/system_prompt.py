@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# systemPrompt.py
+# system_prompt.py
 #
 # System prompt assembly with priority-based layering:
 # - Override system prompt (replaces all others)

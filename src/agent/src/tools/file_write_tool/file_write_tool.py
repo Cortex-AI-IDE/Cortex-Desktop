@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# FileWriteTool.py
+# file_write_tool.py
 # 
 # A tool for writing files to the local filesystem.
 # ------------------------------------------------------------

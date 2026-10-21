@@ -1,4 +1,4 @@
-# agentToolUtils.py
+# agent_tool_utils.py
 """
 AgentTool utility functions for Cortex IDE.
 

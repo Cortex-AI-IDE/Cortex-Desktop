@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# FileEditTool.py
+# file_edit_tool.py
 # 
 # A tool for editing files by replacing strings in place.
 # ------------------------------------------------------------

@@ -1,4 +1,4 @@
-# forkSubagent.py
+# fork_subagent.py
 """
 Fork subagent functionality for Cortex IDE.
 

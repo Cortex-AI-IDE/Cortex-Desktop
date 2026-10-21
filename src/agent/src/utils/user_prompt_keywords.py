@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# userPromptKeywords.py
+# user_prompt_keywords.py
 #
 # Checks if user input matches negative or keep-going keyword patterns.
 # Used by processTextPrompt for analytics/event logging.

@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# destructiveCommandWarning.py
+# destructive_command_warning.py
 # 
 # Detects potentially destructive bash commands and returns 
 # warning strings for display in the permission dialog.

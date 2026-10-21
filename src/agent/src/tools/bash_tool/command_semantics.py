@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# commandSemantics.py
+# command_semantics.py
 # 
 # Command semantics configuration for interpreting exit codes.
 # Many commands use exit codes to convey information beyond success/failure.

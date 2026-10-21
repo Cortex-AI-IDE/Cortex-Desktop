@@ -1,4 +1,4 @@
-# resumeAgent.py
+# resume_agent.py
 """
 Resume background agent functionality for Cortex IDE.
 

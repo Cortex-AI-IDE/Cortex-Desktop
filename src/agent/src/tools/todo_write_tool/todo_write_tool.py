@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# TodoWriteTool.py
+# todo_write_tool.py
 # 
 # A tool for managing todo lists during coding sessions.
 # ------------------------------------------------------------

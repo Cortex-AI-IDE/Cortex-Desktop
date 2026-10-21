@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# powershellPermissions.py
+# powershell_permissions.py
 # 
 # PowerShell-specific permission checking, adapted from bashPermissions.py
 # for case-insensitive cmdlet matching.

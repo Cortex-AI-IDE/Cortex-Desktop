@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# GrepTool.py
+# grep_tool.py
 # 
 # A tool for searching file contents with regex using ripgrep.
 # ------------------------------------------------------------
@@ -709,7 +709,7 @@ def _find_ripgrep() -> Optional[str]:
                 return bundled_rg
     
     # Check in project bin/ folder (development mode)
-    # GrepTool.py is at src/agent/src/tools/GrepTool/, need 5 levels up to reach project root
+    # grep_tool.py is at src/agent/src/tools/grep_tool/, need 5 levels up to reach project root
     for levels in ('..', '..', '..', '..', '..'), ('..', '..', '..', '..'):
         project_bin = os.path.join(os.path.dirname(__file__), *levels, 'bin', 'rg.exe')
         project_bin = os.path.abspath(project_bin)

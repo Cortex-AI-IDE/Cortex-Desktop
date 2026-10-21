@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# powershellSecurity.py
+# powershell_security.py
 # 
 # PowerShell-specific security analysis for command validation.
 # 

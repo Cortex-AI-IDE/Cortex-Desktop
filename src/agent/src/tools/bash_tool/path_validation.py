@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# pathValidation.py
+# path_validation.py
 # 
 # Validates path constraints for bash commands to ensure filesystem
 # operations stay within allowed directories and blocks dangerous patterns.

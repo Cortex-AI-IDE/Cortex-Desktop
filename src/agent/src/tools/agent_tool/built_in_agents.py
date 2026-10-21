@@ -1,4 +1,4 @@
-# builtInAgents.py
+# built_in_agents.py
 """
 Built-in agent definitions for Cortex IDE.
 

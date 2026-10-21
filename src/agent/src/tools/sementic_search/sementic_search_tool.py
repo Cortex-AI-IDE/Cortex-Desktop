@@ -1,5 +1,5 @@
 # ------------------------------------------------------------
-# SementicSearchTool.py
+# sementic_search_tool.py
 # Semantic code search tool for Cortex IDE, handles large codebases
 # where traditional grep/regex search struggles.
 #

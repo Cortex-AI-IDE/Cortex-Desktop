@@ -1,6 +1,6 @@
 ﻿# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportRedeclaration=false, reportAssignmentType=false, reportAttributeAccessIssue=false, reportInvalidTypeForm=false, reportConstantRedefinition=false, reportUnusedImport=false
 # ------------------------------------------------------------
-# bundledSkills.py
+# bundled_skills.py
 #
 # Bundled skill registration and file extraction system for
 # the Cortex AI IDE.
