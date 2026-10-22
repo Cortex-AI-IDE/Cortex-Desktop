@@ -255,6 +255,16 @@
       }
 
       function showError(message, code) {
+        // The error box lives inside .content, which fitToView() scales down
+        // to fit an oversized "diagram". A prose paragraph has a huge
+        // bounding box, so the message itself got scaled to a few clipped
+        // characters per line and the canvas looked blank except for
+        // fragments down the left edge (2026-10-22 screenshot). Reset the
+        // view before injecting so the error is always readable.
+        scale = 1;
+        tx = 0;
+        ty = 0;
+        applyTransform();
         var escaped = (code || '').replace(/[&<>]/g, function(ch) {
           return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[ch];
         });

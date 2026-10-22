@@ -40,6 +40,28 @@ $CHANNEL = if ($Store) { "store" } else { "web" }
 Write-Host "  Version: $VERSION   Channel: $CHANNEL" -ForegroundColor Cyan
 Write-Host ""
 
+# Stamp package.json from the same value. npm and anyone scanning the repo read
+# that manifest, and it had drifted to 3.0.63 while the app reported 3.0.66.
+# Only the version line is rewritten, so the rest of the manifest stays
+# byte-identical - it pins monaco-editor to 0.52.x on purpose.
+# tests/test_version_single_source.py fails the moment these two disagree.
+$packageJsonPath = Join-Path $PROJECT_ROOT "package.json"
+if (Test-Path $packageJsonPath) {
+    $manifest = Get-Content -LiteralPath $packageJsonPath -Raw
+    $stamped = [regex]::Replace(
+        $manifest,
+        '(?m)^([ \t]*"version"[ \t]*:[ \t]*")[^"]*(")',
+        '${1}' + $VERSION + '${2}')
+    if ($stamped -ne $manifest) {
+        [System.IO.File]::WriteAllText($packageJsonPath, $stamped)
+        Write-Host "  [OK] package.json stamped to $VERSION" -ForegroundColor Green
+    } else {
+        Write-Host "  [OK] package.json already at $VERSION" -ForegroundColor Green
+    }
+} else {
+    Write-Host "  [WARN] package.json missing - npm install will not work" -ForegroundColor Yellow
+}
+
 # The generated build marker must not survive the build: left in the source
 # tree, a Store build would make a later `python src/main.py` report channel
 # "store" and silently disable the updater in development.

@@ -71,9 +71,13 @@ class CodeView(QFrame):
         # Responsive: never force wider than parent, horizontal scroll stays internal
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)  # allow shrinking below content width
+        # No `overflow:hidden` here: Qt Style Sheets do not support it, so it
+        # only produced a line of "Unknown property overflow" stderr noise per
+        # card (32 of them on a single session restore). QWidget clips children
+        # to its own geometry by default, so the property never did anything.
         self.setStyleSheet(
             f"#codeView {{ background:{T['md_code_bg']}; border:1px solid {T['border']};"
-            f" border-radius:6px; overflow:hidden; }}")
+            f" border-radius:6px; }}")
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         self.edit = QPlainTextEdit()

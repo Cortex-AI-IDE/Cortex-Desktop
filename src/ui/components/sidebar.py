@@ -227,13 +227,29 @@ class SidebarWidget(QWidget):
         self._pending_js_calls.clear()
 
     def _on_render_crash(self, status, code):
-        """Chromium render process died, the failure compatibility mode is for."""
-        log.error(f"[Sidebar] Chromium CRASHED: status={status} code={code}")
+        """Chromium render process died, reload the page to bring it back.
+
+        The sidebar is served by the same shared Chromium renderer as
+        editor.html and terminal.html (--renderer-process-limit=1), so when
+        it dies every panel goes blank at once. editor.html has reloaded
+        itself since 2.8; the sidebar only logged, which is why it stayed
+        blank for the rest of the session while the editor recovered. The
+        reload replays everything _on_page_loaded already re-applies: theme,
+        health-map flag, queued JS, the file tree.
+        """
+        from src.ui.webengine_recovery import schedule_reload, termination_status_name
+        name = termination_status_name(status)
+        log.error(f"[Sidebar] Chromium CRASHED: status={name} code={code}")
         try:
             from src.ui.render_health import record_render_failure
-            record_render_failure("sidebar.html", f"render process died (status {status}, code {code})")
+            record_render_failure("sidebar.html", f"render process {name} (exit {code})")
         except Exception:
             pass
+        try:
+            schedule_reload(self._web_view, "sidebar",
+                            reason=f"render process {name} (exit {code})")
+        except Exception:
+            log.error("[Sidebar] could not schedule the reload after the crash")
 
     def reveal_boot_hidden(self):
         """Tell the page to leave boot-hidden mode and show its content.
@@ -314,6 +330,12 @@ class SidebarWidget(QWidget):
         try:
             from src.ui.render_health import probe_page
             probe_page(self._web_view.page(), "sidebar")
+        except Exception:
+            pass
+        # The page loaded, so a later crash deserves a fresh retry budget.
+        try:
+            from src.ui.webengine_recovery import note_page_loaded
+            note_page_loaded("sidebar", self._web_view)
         except Exception:
             pass
         # Re-apply the theme now the page exists. _apply_initial_theme()

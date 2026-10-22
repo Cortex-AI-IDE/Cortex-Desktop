@@ -20,13 +20,19 @@ from src.utils.logger import get_logger
 
 log = get_logger("database")
 
-# Try to import numpy for vector operations
-try:
-    import numpy as np
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
-    log.warning("NumPy not installed. Vector search will be limited.")
+# Float32 embedding blobs are encoded with the stdlib `array` module, NOT numpy.
+# `import numpy` at module level cost a measured 5.9s on the GUI thread the
+# first time session restore touched this module (numpy pyc reads under memory
+# pressure), which is a visible freeze every cold start. array('f') is the same
+# native float32 layout numpy produced, so stored blobs stay byte-identical.
+from array import array as _f32array  # noqa: E402
+
+
+def _blob_to_floats(blob: bytes) -> List[float]:
+    """Decode a native float32 blob into a list of floats."""
+    buf = _f32array("f")
+    buf.frombytes(blob)
+    return buf.tolist()
 
 
 @dataclass
@@ -651,11 +657,7 @@ class CortexDatabase:
     
     def store_embedding(self, chunk_id: int, embedding: List[float], model_name: str = "all-MiniLM-L6-v2") -> int:
         """Store an embedding for a chunk."""
-        if HAS_NUMPY:
-            embedding_blob = np.array(embedding, dtype=np.float32).tobytes()
-        else:
-            import struct
-            embedding_blob = struct.pack(f'{len(embedding)}f', *embedding)
+        embedding_blob = _f32array("f", embedding).tobytes()
         
         dimensions = len(embedding)
         now = int(datetime.now().timestamp() * 1000)
@@ -691,12 +693,7 @@ class CortexDatabase:
                 return None
             
             blob = row['embedding']
-            if HAS_NUMPY:
-                return np.frombuffer(blob, dtype=np.float32).tolist()
-            else:
-                import struct
-                dimensions = len(blob) // 4
-                return list(struct.unpack(f'{dimensions}f', blob))
+            return _blob_to_floats(blob)
     
     def get_all_embeddings(self, project_path: str = None) -> List[Tuple[int, List[float], str]]:
         """Get all embeddings for a project."""
@@ -719,13 +716,7 @@ class CortexDatabase:
             
             results = []
             for row in cursor.fetchall():
-                if HAS_NUMPY:
-                    embedding = np.frombuffer(row['embedding'], dtype=np.float32).tolist()
-                else:
-                    import struct
-                    blob = row['embedding']
-                    dimensions = len(blob) // 4
-                    embedding = list(struct.unpack(f'{dimensions}f', blob))
+                embedding = _blob_to_floats(row['embedding'])
                 
                 results.append((row['chunk_id'], embedding, row['file_path']))
             

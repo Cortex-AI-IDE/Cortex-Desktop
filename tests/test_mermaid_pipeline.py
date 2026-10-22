@@ -67,6 +67,81 @@ def test_glue_repair_runs_inside_the_save_sanitizer():
     assert sanitize_prose_markdown(GLUED).startswith("```mermaid\n")
 
 
+# ------------------------------------------------------- auto-wrap prose gate
+# Regression target (2026-10-22 screenshot): the auto-wrap test used
+# re.IGNORECASE, so the ordinary word "Timeline" at the start of a sentence
+# matched the mermaid keyword `timeline\b`. A whole prose paragraph was
+# wrapped in a ```mermaid fence and routed to the Mermaid Diagram Viewer,
+# which drew a blank canvas with clipped text because a sentence is not a
+# diagram. The gate is now case-sensitive AND requires real diagram syntax.
+
+PROSE_TIMELINE = (
+    "Timeline is decisive: spec fixed 6:36 PM, exe built 7:16 PM, my edit 9:13 PM.\n"
+    "\n"
+    "So the packaged build is newer than the spec fix."
+)
+
+
+@pytest.mark.parametrize("prose", [
+    PROSE_TIMELINE,
+    "Pie charts are not diagrams: they are charts.\n\nUse them sparingly.",
+    "Journey map: the user lands, signs up, then leaves.\n\nThat is all.",
+    "Graph theory is a branch of mathematics.\n\nIt studies edges.",
+    "Mindmap this for me later.\n\nThanks.",
+    "Gantt charts take time to build.\n\nStart early.",
+])
+def test_prose_starting_with_a_mermaid_keyword_is_not_wrapped(prose):
+    out = auto_fix_broken_code_fences(prose)
+    assert "```mermaid" not in out, out
+    assert out == prose, out
+
+
+def test_save_sanitizer_does_not_wrap_prose_either():
+    out = sanitize_prose_markdown(PROSE_TIMELINE)
+    assert "```mermaid" not in out, out
+
+
+@pytest.mark.parametrize("diagram", [
+    "timeline\n    title Release\n    2026-10-22 : fix landed",
+    "pie title Bugs\n    \"mermaid\" : 3\n    \"prose\" : 7",
+    "journey\n    title Fix path\n    section Ship\n      Rebuild: 5: Me",
+    "gantt\n    title Plan\n    dateFormat YYYY-MM-DD\n    section Work\n    Task :a1, 2026-10-22, 3d",
+])
+def test_section_style_diagrams_are_still_wrapped(diagram):
+    out = auto_fix_broken_code_fences(diagram)
+    assert out.startswith("```mermaid\n"), out
+    assert out.rstrip().endswith("```"), out
+
+
+@pytest.mark.parametrize("diagram", [
+    "flowchart TB\n    A[Input] --> B[Process]",
+    "graph LR\n    A --> B",
+    "sequenceDiagram\n    A->>B: hello\n    B-->>A: hi",
+    "classDiagram\n    A <|-- B",
+    "erDiagram\n    CUSTOMER ||--o{ ORDER : places",
+])
+def test_lowercase_diagram_payloads_are_still_wrapped(diagram):
+    out = auto_fix_broken_code_fences(diagram)
+    assert out.startswith("```mermaid\n"), out
+
+
+@pytest.mark.parametrize("not_a_diagram", [
+    "graph\nthis has no direction token",
+    "timeline\nonly one keyword and a line with no structure",
+    "flowchart TB\nno edges anywhere in this payload at all",
+])
+def test_keyword_without_diagram_syntax_is_not_wrapped(not_a_diagram):
+    out = auto_fix_broken_code_fences(not_a_diagram)
+    assert "```mermaid" not in out, out
+
+
+def test_gate_helper_matches_the_reported_screenshot():
+    from src.ui.chat_text import looks_like_mermaid_payload
+
+    assert looks_like_mermaid_payload(PROSE_TIMELINE) is False
+    assert looks_like_mermaid_payload("flowchart TB\n    A --> B") is True
+
+
 # --------------------------------------------------------------- segmentation
 def test_normal_fence_segments_into_a_mermaid_code_block():
     from src.ui.chat_panel import ChatPanel
@@ -109,7 +184,7 @@ def test_turn_end_cleaning_then_segmentation_produces_a_card():
 def test_streaming_strip_removes_a_complete_block():
     from src.ui.chat_panel import _strip_mermaid_for_streaming
 
-    clean, had = _strip_mermaid_for_streaming("text " + FLOW + " tail")
+    clean, had = _strip_mermaid_for_streaming("text\n" + FLOW + "\ntail")
     assert had is True
     assert "```" not in clean
     assert "text" in clean and "tail" in clean
@@ -118,7 +193,7 @@ def test_streaming_strip_removes_a_complete_block():
 def test_streaming_strip_catches_the_glued_form():
     from src.ui.chat_panel import _strip_mermaid_for_streaming
 
-    _clean, had = _strip_mermaid_for_streaming("text " + GLUED)
+    _clean, had = _strip_mermaid_for_streaming("text\n" + GLUED)
     assert had is True
 
 
@@ -128,6 +203,131 @@ def test_streaming_strip_leaves_plain_prose_alone():
     clean, had = _strip_mermaid_for_streaming("  just prose  ")
     assert had is False
     assert clean == "just prose"
+
+
+# ------------------------------------------- line anchoring / false positives
+# Regression for the 2026-10-22 chat console flood:
+#   [Mermaid] Render error: UnknownDiagramError: No diagram type detected
+#   matching given configuration for text: fence and routed to the viewer.
+# The message *described* a ```mermaid fence, so the unanchored DOTALL pattern
+# treated the prose that followed as diagram source and built a real card.
+INLINE_MENTION = (
+    "A prose paragraph was being wrapped in a " + "```mermaid" +
+    " fence and routed to the viewer.\n\nSecond paragraph stays prose."
+)
+QUOTED_TOKEN = (
+    "Verified:\n\n```\nprose repro UNCHANGED (was ```mermaid\\n"
+    "Timeline is decisive: ...)\n```\n\nAll good."
+)
+
+
+def test_inline_mermaid_mention_is_not_a_fence():
+    from src.ui.chat_text import find_mermaid_spans
+
+    assert find_mermaid_spans(INLINE_MENTION) == []
+
+
+def test_mermaid_token_inside_a_plain_code_block_is_not_a_fence():
+    from src.ui.chat_text import find_mermaid_spans
+
+    assert find_mermaid_spans(QUOTED_TOKEN) == []
+
+
+def test_prose_body_inside_a_mermaid_fence_is_not_a_card():
+    """Defence in depth: a real fence holding prose stays a code block."""
+    from src.ui.chat_text import find_mermaid_spans
+
+    text = "x\n```mermaid\nThis is just a sentence about a timeline.\n```\ny"
+    assert find_mermaid_spans(text) == []
+
+
+def test_streaming_strip_keeps_prose_that_mentions_a_fence():
+    from src.ui.chat_panel import _strip_mermaid_for_streaming
+
+    clean, had = _strip_mermaid_for_streaming(INLINE_MENTION)
+    assert had is False
+    assert "fence and routed to the viewer." in clean
+    assert "Second paragraph stays prose." in clean
+
+
+def test_streaming_strip_keeps_a_quoted_token():
+    from src.ui.chat_panel import _strip_mermaid_for_streaming
+
+    clean, had = _strip_mermaid_for_streaming(QUOTED_TOKEN)
+    assert had is False
+    assert "Timeline is decisive" in clean
+    assert "All good." in clean
+
+
+def test_real_fence_is_still_found_with_exact_offsets():
+    from src.ui.chat_text import find_mermaid_spans
+
+    text = "before\n" + FLOW + "\nafter"
+    spans = find_mermaid_spans(text)
+    assert len(spans) == 1
+    start, end, code, complete = spans[0]
+    assert complete is True
+    assert code.startswith("flowchart TB")
+    assert text[start:end].startswith("```mermaid")
+    assert text[start:end].rstrip().endswith("```")
+
+
+def test_unterminated_fence_is_reported_as_incomplete():
+    from src.ui.chat_text import find_mermaid_spans
+
+    spans = find_mermaid_spans("text\n```mermaid\nflowchart LR\n    A --> B\n")
+    assert len(spans) == 1
+    assert spans[0][3] is False
+    assert "flowchart LR" in spans[0][2]
+
+
+def test_two_fences_in_one_message_are_both_found():
+    from src.ui.chat_text import find_mermaid_spans
+
+    text = (
+        "a\n```mermaid\ngraph TD\n    A --> B\n```\nm\n"
+        "```mermaid\nsequenceDiagram\n    A->>B: hi\n```\nz"
+    )
+    assert len(find_mermaid_spans(text)) == 2
+
+
+def test_fence_with_spaced_or_upper_case_head_is_accepted():
+    from src.ui.chat_text import find_mermaid_spans
+
+    spaced = "a\n```mermaid flowchart TD\n    A --> B\n```"
+    upper = "a\n```mermaid\nGraph TD\n    A --> B\n```"
+    assert len(find_mermaid_spans(spaced)) == 1
+    assert len(find_mermaid_spans(upper)) == 1
+
+
+@pytest.mark.parametrize("body", [
+    "flowchart TB\n    A[Start]\n    B[End]",       # edge-less is still valid
+    "mindmap\n  root((Cortex))\n    Chat\n    Tools",
+    "pie title Pets\n    \"Dogs\": 386",
+    "gantt\n    dateFormat YYYY-MM-DD",
+    "sequenceDiagram\n    A->>B: hi",
+    "stateDiagram-v2\n    [*] --> Idle",
+    "erDiagram\n    USER ||--o{ ORDER : places",
+    "timeline\n    title History",
+])
+def test_valid_diagrams_without_edges_are_still_accepted(body):
+    """A missing edge must never demote a real diagram to a code block."""
+    from src.ui.chat_text import find_mermaid_spans
+
+    text = "x\n```mermaid\n" + body + "\n```\ny"
+    assert len(find_mermaid_spans(text)) == 1
+
+
+@pytest.mark.parametrize("body", [
+    "timeline is decisive: spec fixed 6:36 PM",
+    "graph is a data structure, not a diagram",
+    "Process finished with exit code 0",
+])
+def test_ambiguous_heads_written_as_prose_are_rejected(body):
+    from src.ui.chat_text import find_mermaid_spans
+
+    text = "x\n```mermaid\n" + body + "\n```\ny"
+    assert find_mermaid_spans(text) == []
 
 
 # --------------------------------------------------------------- card

@@ -83,7 +83,9 @@ from src.utils.icons import make_icon
 # Live Server removed in AI-first mode - AI handles code execution
 # from src.core.live_server import LiveServer
 from src.utils.helpers import detect_language, shorten_path
+from src.utils.line_diff import cached_rows as _diff_rows, counts_from_rows as _diff_counts
 from src.utils.logger import get_logger
+from src.utils.silent import warn_once as _warn_once
 from src.utils.notifications import show_task_complete_notification, show_toast_notification, notify_input_needed, notify_permission_required
 
 log = get_logger("main_window")
@@ -881,13 +883,16 @@ class CortexMainWindow(QMainWindow):
                                     ctypes.windll.kernel32.TerminateProcess(h, 0)
                                     ctypes.windll.kernel32.CloseHandle(h)
                                     killed += 1
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                _warn_once("main_window.kill_orphaned.terminate",
+                                           f"could not terminate {pe.szExeFile} "
+                                           f"({pe.th32ProcessID}): {e}")
                         if not ctypes.windll.kernel32.Process32NextW(snapshot, ctypes.byref(pe)):
                             break
                 ctypes.windll.kernel32.CloseHandle(snapshot)
-        except Exception:
-            pass
+        except Exception as e:
+            _warn_once("main_window.kill_orphaned.sweep",
+                       f"orphaned Chromium sweep failed, stale renderers may survive: {e}")
 
         # --- Phase 3: Wait briefly for OS to release sockets/shared memory ---
         if killed > 0:
@@ -1303,15 +1308,16 @@ class CortexMainWindow(QMainWindow):
             app = QApplication.instance()
             if app:
                 app.removeEventFilter(self)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Startup] could not remove the boot event filter: {e}")
         # Boot is over BEFORE revealing the pages so any page load started
         # from now on never enters boot-hidden mode.
         try:
             from src.core import boot_state
             boot_state.mark_boot_complete()
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Startup] boot_state.mark_boot_complete failed, "
+                     f"next launch may start boot-hidden: {e}")
         # Reveal the web panels: they loaded boot-hidden (flat dark, content
         # invisible) because their native surfaces z-order above this overlay.
         # Now that the overlay goes away they may show their real content.
@@ -1320,8 +1326,9 @@ class CortexMainWindow(QMainWindow):
             try:
                 if _panel is not None:
                     _panel.reveal_boot_hidden()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"[Startup] could not reveal the boot-hidden panel, "
+                            f"it may stay collapsed: {e}")
         # Instant hide
         self._startup_overlay.hide()
         self._startup_overlay.deleteLater()
@@ -1341,8 +1348,8 @@ class CortexMainWindow(QMainWindow):
         try:
             QTimer.singleShot(8000, self._check_render_health)
             QTimer.singleShot(20000, self._check_render_health)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Startup] render-health checks not scheduled: {e}")
 
     def _check_render_health(self):
         """One-shot check that the WebEngine panels actually painted."""
@@ -1443,8 +1450,9 @@ class CortexMainWindow(QMainWindow):
             if e.type() == QEvent.Type.WinIdChange:
                 QTimer.singleShot(0, self._repair_window_placement)
                 QTimer.singleShot(500, self._repair_window_placement)
-        except Exception:
-            pass
+        except Exception as e:
+            _warn_once("main_window.event.winid_repair",
+                       f"placement repair not scheduled on WinIdChange: {e}")
         return super().event(e)
 
     def _repair_window_placement(self):
@@ -1508,8 +1516,9 @@ class CortexMainWindow(QMainWindow):
         super().showEvent(a0)
         try:
             self._apply_title_bar_theme(self._theme_manager.is_dark)
-        except Exception:
-            pass
+        except Exception as e:
+            _warn_once("main_window.show_event.title_bar",
+                       f"title bar theme not applied on show: {e}")
 
     def _apply_title_bar_theme(self, is_dark: bool):
         """Apply the native Windows title bar theme via DWM API.
@@ -1569,8 +1578,8 @@ class CortexMainWindow(QMainWindow):
                     hwnd, 0, 0, 0, 0, 0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
                 )
-            except Exception:
-                pass  # nudge is best-effort; attribute is already set
+            except Exception as e:
+                log.info(f"[TitleBar] frame nudge failed, attribute is still set: {e}")
 
             self._title_bar_is_dark = is_dark
             self._title_bar_hwnd = hwnd
@@ -1812,8 +1821,8 @@ class CortexMainWindow(QMainWindow):
         try:
             from src.ui.theme_remap import apply_tooltip_palette
             _QTimer.singleShot(0, apply_tooltip_palette)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Theme] tooltip palette not scheduled, tooltips keep the old palette: {e}")
 
         # ── BATCH 5 (150ms): the new theme's QSS for everything but the chat ──
         # NOT QApplication.setStyleSheet(): that re-matches the whole theme
@@ -1859,8 +1868,8 @@ class CortexMainWindow(QMainWindow):
             if sig is not None:
                 try:
                     sig.connect(_defer_inline_remap)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.info(f"[Theme] inline remap not connected, code colours may stay stale: {e}")
             # Fallback for a chat that never reports (superseded switch,
             # no chat panel): the remap is idempotent-safe either way.
             _QTimer.singleShot(20000, _defer_inline_remap)
@@ -1871,8 +1880,8 @@ class CortexMainWindow(QMainWindow):
             _remap_state["done"] = True
             try:
                 self._ai_chat.theme_settled.disconnect(_defer_inline_remap)
-            except Exception:
-                pass
+            except Exception as e:
+                log.info(f"[Theme] inline remap already detached: {e}")
             # The theme now in force: a quicker second switch may have
             # replaced this one, and remap_all() is a no-op when they match.
             theme_is_dark = self._theme_manager.is_dark
@@ -2931,8 +2940,10 @@ class CortexMainWindow(QMainWindow):
             for _refresh in getattr(self, '_toolbar_icon_refreshers', []):
                 try:
                     _refresh()
-                except RuntimeError:
-                    pass  # button was deleted with its parent panel
+                except RuntimeError as e:
+                    _warn_once("main_window.toolbar_icon_refresh",
+                               f"a toolbar icon refresher failed (button likely deleted "
+                               f"with its panel): {e}")
             self._apply_title_bar_theme(is_dark)
             self._apply_webview_menu_theme()
         except Exception as e:
@@ -3042,8 +3053,9 @@ class CortexMainWindow(QMainWindow):
                     widget._view.page().runJavaScript(js)
                     log.debug(f"[MainWindow] Queued theme '{theme}' update for memory manager")
                     return
-        except Exception:
-            pass  # Non-critical; dialog will pick up theme on next open
+        except Exception as e:
+            log.info(f"[Theme] memory manager did not receive '{theme}', "
+                     f"it picks the theme up on next open: {e}")
 
     def _apply_syntax_highlighting_fonts(self):
         """Apply Dracula-themed fonts and colors globally to code displays."""
@@ -3562,8 +3574,9 @@ class CortexMainWindow(QMainWindow):
             if hasattr(self, '_git_manager') and self._git_manager:
                 try:
                     self._git_manager.auto_commit_file(filepath, "modified")
-                except Exception:
-                    pass  # Non-critical
+                except Exception as e:
+                    log.warning(f"[Git] auto-commit failed for modified {filepath}, "
+                                f"the edit is on disk but not in history: {e}")
             # Invalidate file_manager cache so stale content is not returned
             try:
                 resolved = str(Path(filepath).resolve())
@@ -3572,8 +3585,8 @@ class CortexMainWindow(QMainWindow):
                         self._file_manager._file_cache.cache.pop(resolved, None)
                 if hasattr(self._file_manager, '_hash_cache'):
                     self._file_manager._hash_cache.pop(resolved, None)
-            except Exception:
-                pass
+            except Exception as e:
+                log.info(f"[Files] cache not invalidated for {filepath}, a stale read is possible: {e}")
             
             # Only touch the editor if the file is ALREADY open.
             # Otherwise, disk content is already updated, user sees it
@@ -3631,10 +3644,12 @@ class CortexMainWindow(QMainWindow):
             if hasattr(self, '_git_manager') and self._git_manager:
                 try:
                     self._git_manager.auto_commit_file(filepath, "created")
-                except Exception:
-                    pass  # Non-critical
-        except Exception:
-            pass
+                except Exception as e:
+                    log.warning(f"[Git] auto-commit failed for created {filepath}, "
+                                f"the file exists but is not in history: {e}")
+        except Exception as e:
+            log.warning(f"[Agent] file-generated handling failed for {filepath}, "
+                        f"the editor may not show it: {e}")
         
         # Only touch the editor if the file is ALREADY open.
         _is_open = filepath in self._webview_panel._open_files if hasattr(self, '_webview_panel') else False
@@ -3671,8 +3686,9 @@ class CortexMainWindow(QMainWindow):
                     if hasattr(self, '_ai_agent') and self._ai_agent:
                         try:
                             _deferred = self._ai_agent.get_deferred_edit(filepath)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            _warn_once("main_window.open_file.deferred_inner",
+                                       f"could not read the deferred edit for {filepath}: {e}")
                     if _deferred is not None:
                         log.info(f"[Deferred] Reload showing deferred edit: {filepath} "
                                  f"({len(_deferred)} chars)")
@@ -3693,8 +3709,10 @@ class CortexMainWindow(QMainWindow):
             if hasattr(self, '_ai_agent') and self._ai_agent:
                 try:
                     _deferred = self._ai_agent.get_deferred_edit(filepath)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _warn_once("main_window.open_file.deferred",
+                               f"could not read the deferred edit for {filepath}, "
+                               f"the staged diff will not be shown: {e}")
             if _deferred is not None:
                 log.info(f"File already open but has deferred edit, forcing reload: {filepath} "
                          f"({len(_deferred)} chars)")
@@ -3820,8 +3838,8 @@ class CortexMainWindow(QMainWindow):
                 _sb = getattr(getattr(self, "_sidebar", None), "_bridge", None)
                 if _sb:
                     _sb._call_js(f"window.showToast && showToast({_json.dumps(_msg)}, 4000)")
-            except Exception:
-                pass
+            except Exception as e:
+                log.info(f"[Sidebar] toast not delivered, the status bar still shows the message: {e}")
             return
             
         try:
@@ -3840,8 +3858,10 @@ class CortexMainWindow(QMainWindow):
             if hasattr(self, '_ai_agent') and self._ai_agent:
                 try:
                     _deferred_content = self._ai_agent.get_deferred_edit(filepath)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _warn_once("main_window.open_file.deferred_content",
+                               f"could not read the deferred content for {filepath}, "
+                               f"the editor opens the disk version: {e}")
             if _deferred_content is not None:
                 log.info(f"[Deferred] Showing deferred edit for: {filepath} "
                          f"(disk={len(content)} chars, deferred={len(_deferred_content)} chars)")
@@ -3910,8 +3930,9 @@ class CortexMainWindow(QMainWindow):
         if hasattr(self, '_ai_agent') and self._ai_agent:
             try:
                 _ai_active = getattr(self._ai_agent, '_agentic_turn_active', False)
-            except Exception:
-                pass
+            except Exception as e:
+                _warn_once("main_window.warmup.agentic_flag",
+                           f"agentic-turn flag unreadable, warmup assumes idle: {e}")
         if _ai_active:
             log.info(
                 f"[Warmup] Suppressed flush, AI is actively processing "
@@ -4242,8 +4263,8 @@ class CortexMainWindow(QMainWindow):
                         "td{padding:8px;border:1px solid #ddd;}"
                         "p{margin:10px 0;}"
                         "</style></head><body>" + _html + "</body></html>")
-                except RuntimeError:
-                    pass  # tab was closed before parsing finished
+                except RuntimeError as e:
+                    log.info(f"[PDF] view closed before parsing finished, nothing to draw: {e}")
 
             _bridge.ready.connect(_apply)
 
@@ -4481,8 +4502,8 @@ class CortexMainWindow(QMainWindow):
             root = getattr(pm, "root", None) if pm is not None else None
             if root and os.path.isdir(os.path.join(str(root), ".git")):
                 return str(root)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Changes] project root probe failed: {e}")
         try:
             cur = Path(file_path or "").resolve().parent
             for _ in range(12):
@@ -4491,8 +4512,8 @@ class CortexMainWindow(QMainWindow):
                 if cur.parent == cur:
                     break
                 cur = cur.parent
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Changes] could not walk up from {file_path} looking for .git: {e}")
         return None
 
     def _changes_open_root(self) -> str | None:
@@ -4507,7 +4528,9 @@ class CortexMainWindow(QMainWindow):
                 continue
             try:
                 return os.path.normcase(os.path.normpath(str(val)))
-            except Exception:
+            except Exception as e:
+                _warn_once("main_window.changes_open_root.normcase",
+                           f"path {val!r} could not be normalised, skipped: {e}")
                 continue
         return None
 
@@ -4593,7 +4616,7 @@ class CortexMainWindow(QMainWindow):
         except Exception as e:
             try:
                 log.debug(f"[Diff] git baseline failed for {file_path}: {e}")
-            except Exception:
+            except Exception:  # silent-ok: already reported the failure one line above
                 pass
             return None
 
@@ -4627,8 +4650,10 @@ class CortexMainWindow(QMainWindow):
                     try:
                         if self._git_baseline_content(path) is not None:
                             filled += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _warn_once("main_window.diff_prewarm.baseline",
+                                   f"baseline prewarm failed for {path}, "
+                                   f"the diff falls back to HEAD: {e}")
             finally:
                 self._git_baseline_worker_live = False
             if filled and getattr(self, "_changes_prefetch_gen", 0) == gen:
@@ -4692,7 +4717,7 @@ class CortexMainWindow(QMainWindow):
         except Exception as e:
             try:
                 log.debug(f"[Diff] git baseline failed for {file_path}: {e}")
-            except Exception:
+            except Exception:  # silent-ok: already reported the failure one line above
                 pass
             return None
 
@@ -4733,8 +4758,8 @@ class CortexMainWindow(QMainWindow):
                             parts = line.split()
                             if len(parts) == 2 and parts[1] == ref:
                                 return parts[0]
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Diff] HEAD token unreadable under {root}, diff caching is disabled: {e}")
         return None
 
     def _resolve_tracked_path_case(self, root: str, rel: str) -> str | None:
@@ -4768,7 +4793,7 @@ class CortexMainWindow(QMainWindow):
         except Exception as e:
             try:
                 log.debug(f"[Diff] resolve tracked case failed for {rel}: {e}")
-            except Exception:
+            except Exception:  # silent-ok: already reported the failure one line above
                 pass
         return None
 
@@ -5119,83 +5144,14 @@ class CortexMainWindow(QMainWindow):
     # ============================================================
 
     def _build_inline_diff_hunks(self, original: str, modified: str, context: int = 4):
-        """Build unified diff rows (hunks only).
+        """Build unified diff rows (hunks only) for editor.html.
 
-        Returns a list of row dicts ready for editor.html:
-          - ctx/del/add: {kind, old, new, text}
-          - skip:        {kind:'skip', count, lines:[{old,new,text}, ...]}
-        Only changed regions plus ``context`` lines around them are included.
-        Skipped middle lines are carried inside the skip row so expand works
-        without shipping the whole file to JS.
+        Row schema: ctx/del/add {kind, old, new, text}, skip {kind, count,
+        lines}. The algorithm and its cost notes live in ``src/utils/line_diff``;
+        this method exists so the Qt side has one seam to call and so the
+        memoised rows are reached from both the CHANGES panel and chat cards.
         """
-        import difflib
-        o = (original or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        m = (modified or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        ops = list(difflib.SequenceMatcher(None, o, m, autojunk=False).get_opcodes())
-        rows = []
-        ctx = max(0, int(context or 0))
-        for idx, (tag, i1, i2, j1, j2) in enumerate(ops):
-            if tag == "equal":
-                length = i2 - i1
-                if length <= 0:
-                    continue
-                first = idx == 0
-                last = idx == len(ops) - 1
-                if first and last:
-                    # Identical files: nothing to show.
-                    continue
-                after_take = 0 if first else min(ctx, length)
-                before_take = 0 if last else min(ctx, length - after_take)
-                middle = length - after_take - before_take
-                for p in range(after_take):
-                    rows.append({
-                        "kind": "ctx",
-                        "old": i1 + p + 1,
-                        "new": j1 + p + 1,
-                        "text": o[i1 + p],
-                    })
-                if middle > 0:
-                    skip_lines = []
-                    for p in range(middle):
-                        qi = i1 + after_take + p
-                        qj = j1 + after_take + p
-                        skip_lines.append({
-                            "old": qi + 1,
-                            "new": qj + 1,
-                            "text": o[qi],
-                        })
-                    rows.append({
-                        "kind": "skip",
-                        "count": middle,
-                        "lines": skip_lines,
-                    })
-                for p in range(before_take):
-                    qi = i1 + after_take + middle + p
-                    qj = j1 + after_take + middle + p
-                    rows.append({
-                        "kind": "ctx",
-                        "old": qi + 1,
-                        "new": qj + 1,
-                        "text": o[qi],
-                    })
-                continue
-            if tag in ("replace", "delete"):
-                for i in range(i1, i2):
-                    rows.append({
-                        "kind": "del",
-                        "old": i + 1,
-                        "new": None,
-                        "text": o[i],
-                    })
-            if tag in ("replace", "insert"):
-                for j in range(j1, j2):
-                    rows.append({
-                        "kind": "add",
-                        "old": None,
-                        "new": j + 1,
-                        "text": m[j],
-                    })
-        return rows
+        return _diff_rows(original, modified, context)
 
     def _compute_diff_counts(self, original: str, modified: str):
         """Return (additions, deletions) line counts between two file versions.
@@ -5334,8 +5290,9 @@ class CortexMainWindow(QMainWindow):
                     return          # another project was opened meanwhile
                 try:
                     self._git_baseline_content(p)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _warn_once("main_window.diff_prewarm.work",
+                               f"baseline prewarm failed for {p}: {e}")
             log.info(f"[CHANGES] git baselines for {len(missing)} file(s) ready in "
                      f"{(_t.perf_counter() - t0) * 1000:.0f} ms (off the GUI thread)")
             if getattr(self, "_changes_prefetch_gen", 0) == gen:
@@ -5469,6 +5426,16 @@ class CortexMainWindow(QMainWindow):
         """
         if not file_path:
             return
+        # Git Review rows carry repo-relative paths (git status --porcelain).
+        # Resolve before any os.stat/open below: those only worked while the
+        # process CWD happened to be the repo, which is true from the source
+        # tree and false in the packaged app, so the identical click produced
+        # original=HEAD with an empty worktree read and the diff painted the
+        # whole file as deleted (or returned as "no diff data" and showed
+        # nothing at all).
+        from src.utils import git_utils
+        _root = self._changes_project_root(file_path) or self._changes_open_root()
+        file_path = git_utils.abs_path(_root or "", file_path)
         if not self._changes_path_in_open_project(file_path):
             _log.info(f"[Diff] Ignoring CHANGES click outside open project: {file_path}")
             return
@@ -5491,7 +5458,9 @@ class CortexMainWindow(QMainWindow):
                         if os.path.normcase(os.path.normpath(k)) == norm and isinstance(v, dict):
                             entry = v
                             break
-                    except Exception:
+                    except Exception as e:
+                        _warn_once("main_window.view_diff.cache_key",
+                                   f"cache key {k!r} could not be compared, entry skipped: {e}")
                         continue
             if entry:
                 original = entry.get("original", "")
@@ -5525,20 +5494,35 @@ class CortexMainWindow(QMainWindow):
         and the Color theme, live. (The chat and inline paths used to build a
         hard-coded dark QTextBrowser tab in _editor_tabs, which is hidden.)
         """
-        additions, deletions = self._compute_diff_counts(original, modified)
+        additions, deletions = 0, 0
         language = self._guess_lang(file_path)
         # Hunk-only payload: never ship the full file to JS. The broken
         # Monaco tokenize path used to multiply each line; the renderer now
         # only paints these precomputed rows (one source line = one row).
+        #
+        # One diff pass, not three: the rows are built once and the header
+        # counts come out of them. This method used to run
+        # _compute_diff_counts (a whole-file SequenceMatcher) and then
+        # _build_inline_diff_hunks (another, with autojunk off) - 2.3 s of
+        # frozen GUI on agent_bridge.py for a single Open click.
+        _t0 = time.perf_counter()
         try:
             hunks = self._build_inline_diff_hunks(original, modified, context=4)
+            additions, deletions = _diff_counts(hunks)
         except Exception as _he:
             _log.debug(f"[Diff] hunk build failed for {file_path}: {_he}")
             hunks = []
+        _ms = (time.perf_counter() - _t0) * 1000
         _log.info(
             f"[Diff] Opening inline diff for {file_path} "
-            f"(+{additions}/-{deletions}, lang={language}, {len(hunks)} rows)"
+            f"(+{additions}/-{deletions}, lang={language}, {len(hunks)} rows, "
+            f"{_ms:.0f} ms)"
         )
+        if _ms >= 250:
+            _log.warning(
+                f"[Diff] row build for {file_path} took {_ms:.0f} ms on the "
+                f"GUI thread ({len(hunks)} rows)"
+            )
         self._webview_panel.show_diff(
             file_path, language, additions, deletions, hunks
         )
@@ -5572,8 +5556,9 @@ class CortexMainWindow(QMainWindow):
         # tells us which file it wrote - so the ambiguity never arises here.
         try:
             self.__dict__.get("_worktree_read_cache", {}).pop(file_path, None)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Diff] worktree cache not invalidated for {file_path}, "
+                     f"a stale read is possible: {e}")
 
         # Canonical key: one entry per real file (normcase + normpath).
         canon = os.path.normcase(os.path.normpath(file_path or ""))
@@ -5606,8 +5591,10 @@ class CortexMainWindow(QMainWindow):
             disk = self._read_worktree_content(file_path or canon, latest)
             if disk:
                 latest = disk
-        except Exception:
-            pass
+        except Exception as e:
+            _warn_once("main_window.diff.worktree_read",
+                       f"worktree read failed for {file_path or canon}, "
+                       f"the diff shows the streamed text: {e}")
 
         # Drop every path-variant key for this file, store once under canon.
         if existing_key is not None:
@@ -5634,8 +5621,9 @@ class CortexMainWindow(QMainWindow):
             try:
                 if os.path.normcase(os.path.normpath(k)) == canon and k != canon:
                     del cache[k]
-            except Exception:
-                pass
+            except Exception as e:
+                _warn_once("main_window.diff.cache_prune",
+                           f"stale cache key {k!r} not pruned, a duplicate card may appear: {e}")
         prev = cache.get(canon) if isinstance(cache.get(canon), dict) else None
         keep_original = true_original
         # If git baseline was unavailable, still prefer the earliest cached original.
@@ -5802,8 +5790,9 @@ class CortexMainWindow(QMainWindow):
                     editor.setCursorPosition(line_index, 0)
                     editor.ensureLineVisible(line_index)
                     log.info(f"Navigated to line {line_number} in {file_path}")
-            except Exception:
-                pass  # Old editor not available, webview panel handles it
+            except Exception as e:
+                log.info(f"[Editor] legacy editor navigation skipped, "
+                         f"the webview panel handles it: {e}")
         except Exception as e:
             log.error(f"[OpenAtLine] Failed to open {file_path} at line {line_number}: {e}")
             # Fallback: try opening without line navigation
@@ -5824,8 +5813,9 @@ class CortexMainWindow(QMainWindow):
         if hasattr(self, '_ai_agent') and self._ai_agent:
             try:
                 self._ai_agent.queue_accept_nudge(file_path)
-            except Exception:
-                pass
+            except Exception as e:
+                _warn_once("main_window.accept_edit.nudge",
+                           f"accept nudge not queued for {file_path}: {e}")
 
         # Clear stale snapshot so the next open stores the fresh disk content
         if hasattr(self, '_file_snapshots') and file_path in self._file_snapshots:
@@ -5839,8 +5829,8 @@ class CortexMainWindow(QMainWindow):
                     self._file_manager._file_cache.cache.pop(resolved, None)
             if hasattr(self._file_manager, '_hash_cache'):
                 self._file_manager._hash_cache.pop(resolved, None)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Files] cache not invalidated for {file_path}, a stale read is possible: {e}")
 
         # Open/refresh the file in the editor so the user sees the accepted state
         # Use force_reload_file to bypass throttle and guarantee content delivery
@@ -6122,8 +6112,8 @@ class CortexMainWindow(QMainWindow):
         try:
             self._ai_chat._spinner_overlay.show_overlay(message=message,
                                                         spinner_key='saving_memory')
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Save] memory-saving spinner not shown, the save still runs: {e}")
         agent = getattr(self, '_ai_agent', None)
         if agent is not None and getattr(agent, '_agentic_turn_active', False):
             log.info("[NewChat] stopping the running reply first")
@@ -6256,8 +6246,9 @@ class CortexMainWindow(QMainWindow):
                 log.warning(f"[History] could not open {conv_id}: {e}")
                 try:
                     self._ai_chat._spinner_overlay.hide_overlay()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.info(f"[History] spinner not hidden after a failed open, "
+                             f"it may stay visible: {e}")
             finally:
                 self._new_chat_saving = False
         self._run_after_reply_stopped(_go, "Opening chat\u2026")
@@ -6322,8 +6313,9 @@ class CortexMainWindow(QMainWindow):
             # Ensure the (empty) conversation exists so restart can resolve it.
             try:
                 history.create_conversation(project_path, conversation_id=conv_id)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"[History] conversation {conv_id} not created, "
+                            f"a restart cannot resolve it: {e}")
             # Persist the active-conversation pointer.
             if hasattr(self, '_settings') and self._settings:
                 self._settings.set('chat_active', self._active_conv_key(), conv_id)
@@ -6378,7 +6370,7 @@ class CortexMainWindow(QMainWindow):
         if sig is not None:
             try:
                 sig.disconnect(self._save_chat_after_recovery)
-            except (TypeError, RuntimeError):
+            except (TypeError, RuntimeError):  # silent-ok: disconnect() raises when the slot was never connected
                 pass      # not connected yet, first recovery
             sig.connect(self._save_chat_after_recovery)
         try:
@@ -6617,8 +6609,9 @@ class CortexMainWindow(QMainWindow):
                                             _t = _b.get("md") or _b.get("content") or ""
                                             if isinstance(_t, str) and _t:
                                                 _assistant_text.append(_t)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.warning(f"[History] timeline messages unreadable, "
+                                        f"restored text may duplicate: {e}")
                         _assistant_blob = "\n".join(_assistant_text)
 
                         def _already_shown(m):
@@ -6685,7 +6678,7 @@ class CortexMainWindow(QMainWindow):
                         if _restore_queued and _sig is not None:
                             try:
                                 _sig.disconnect(self._inject_pending_crash_recovery)
-                            except (TypeError, RuntimeError):
+                            except (TypeError, RuntimeError):  # silent-ok: disconnect() raises when the slot was never connected
                                 pass      # not connected yet, first recovery
                             _sig.connect(self._inject_pending_crash_recovery)
                             # restore_finished has its own 30s safety timeout,
@@ -6724,7 +6717,7 @@ class CortexMainWindow(QMainWindow):
                 if _has_tl and _rsig is not None:
                     try:
                         _rsig.disconnect(self._show_interrupted_run_card)
-                    except (TypeError, RuntimeError):
+                    except (TypeError, RuntimeError):  # silent-ok: disconnect() raises when the slot was never connected
                         pass
                     _rsig.connect(self._show_interrupted_run_card)
                     QTimer.singleShot(45000, self._show_interrupted_run_card)
@@ -6825,7 +6818,8 @@ class CortexMainWindow(QMainWindow):
                             try:
                                 self._ai_agent._auto_save_to_memory_light()
                             except Exception as _e:
-                                pass
+                                log.warning(f"[Memory] autosave failed, "
+                                            f"this turn is not in memory: {_e}")
                         _threading.Thread(
                             target=_do_memory_autosave, daemon=True,
                             name="MemoryAutoSave"
@@ -6843,7 +6837,7 @@ class CortexMainWindow(QMainWindow):
                 if _old_cb is not None:
                     try:
                         self._ai_agent.response_complete.disconnect(_old_cb)
-                    except (TypeError, RuntimeError):
+                    except (TypeError, RuntimeError):  # silent-ok: disconnect() raises when the slot was never connected
                         pass  # never connected / already gone
                 try:
                     self._ai_agent.response_complete.connect(self._chat_save_callback)
@@ -6925,8 +6919,9 @@ class CortexMainWindow(QMainWindow):
                     if hasattr(self, '_ai_agent') and self._ai_agent:
                         try:
                             self._ai_agent.queue_accept_nudge(norm)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            _warn_once("main_window.accept_all.nudge",
+                                       f"accept nudge not queued for {norm}: {e}")
                     self._open_file(norm, reload=True)
                     # Sync saved content to prevent false white dot
                     if hasattr(self, '_saved_content'):
@@ -7279,8 +7274,9 @@ class CortexMainWindow(QMainWindow):
                             self._status_file.setText(f"  Save failed, Monaco not ready  ")
                             QTimer.singleShot(3000, lambda: self._update_status_file(fp))
                             return
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"[Save] could not read {fp!r} from disk while Monaco "
+                                f"reported empty, the empty buffer is saved as-is: {e}")
             # Same lost-update guard as the Ctrl+S bridge path, this
             # fallback save must not silently overwrite agent edits either.
             if not self._confirm_overwrite_if_changed_on_disk(fp, content):
@@ -7291,8 +7287,9 @@ class CortexMainWindow(QMainWindow):
                 _info = self._webview_panel._open_files.get(fp)
                 if _info is not None:
                     _info["disk_baseline"] = content
-            except Exception:
-                pass
+            except Exception as e:
+                log.info(f"[Save] disk baseline not updated for {fp}, "
+                         f"the next diff may show a phantom change: {e}")
             # Track saved content to prevent post-save re-mark by debounced onContentChanged
             if not hasattr(self, '_saved_content'):
                 self._saved_content: dict = {}
@@ -7381,8 +7378,10 @@ class CortexMainWindow(QMainWindow):
                         _i2 = self._webview_panel._open_files.get(fp)
                         if _i2 is not None:
                             _i2["disk_baseline"] = content
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _warn_once("main_window.content.disk_baseline",
+                                   f"disk baseline not updated for {fp}, "
+                                   f"the next diff may show a phantom change: {e}")
                     self._webview_panel.mark_modified(fp, False)
                     self._saved_content[fp] = content
                 remaining -= 1
@@ -7666,7 +7665,9 @@ class CortexMainWindow(QMainWindow):
             try:
                 if w._session is not None and w._session.awaiting:
                     return w
-            except RuntimeError:
+            except RuntimeError as e:
+                _warn_once("main_window.ai_terminal_for.deleted_widget",
+                           f"a terminal widget was deleted mid-scan, skipped: {e}")
                 continue
         return getattr(self, "_ai_terminal_widget", None)
 
@@ -7683,8 +7684,8 @@ class CortexMainWindow(QMainWindow):
                 try:
                     if term is not None:
                         term._ai_access = None
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    log.info(f"[Terminal] widget gone while releasing AI access, nothing to release: {e}")
                 getattr(self, "_ai_terminal_widgets", {}).pop(session.id, None)
         if term is None:
             return
@@ -7698,8 +7699,8 @@ class CortexMainWindow(QMainWindow):
             if term._is_ready:
                 term._bridge.update_terminal_label.emit(name)
             self._sync_terminal_list()
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            log.info(f"[Terminal] tab label not updated, the title stays stale: {e}")
 
     def _on_user_ssh_login(self, term, dest: str):
         """The user logged into a server in a terminal tab: offer AI access."""
@@ -7838,8 +7839,9 @@ class CortexMainWindow(QMainWindow):
                             "login": "Sign-in needed in the terminal: "}.get(kind, "The terminal is asking: ")
                     msg = lead + (prompt or "")
                 notify_input_needed(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                log.info(f"[Terminal] input-needed notification not shown, "
+                         f"the terminal tab still shows it: {e}")
         try:
             self._ai_chat.show_terminal_input_needed(kind, prompt)
         except Exception as e:
@@ -7848,8 +7850,9 @@ class CortexMainWindow(QMainWindow):
     def _on_ai_terminal_input_done(self, session, how: str):
         try:
             self._ai_chat.terminal_input_done(how)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Terminal] chat did not record input completion ({how}), "
+                     f"its waiting state may stick: {e}")
 
     def _on_terminal_file_operation(self, operation_type: str, file_path: str, status: str):
         """Handle file operations from terminal and show in AI chat."""
@@ -8871,8 +8874,8 @@ class CortexMainWindow(QMainWindow):
                 if hasattr(self, '_git_manager') and self._git_manager:
                     try:
                         self._git_manager.auto_commit_file(p, "deleted")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning(f"[Git] auto-commit failed for deleted {p}: {e}")
             except Exception as e:
                 log.warning(f"[AGENT] Failed to close tab for deleted file {p}: {e}")
     
@@ -9760,8 +9763,9 @@ class CortexMainWindow(QMainWindow):
             log.warning("[PROJECT-SWITCH] AI is mid-turn, cancelling before switch")
             try:
                 self._ai_agent.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"[PROJECT-SWITCH] could not cancel the running turn, "
+                            f"it may keep writing after the switch: {e}")
             # Small delay to let cancel propagate
             from PyQt6.QtCore import QTimer as _QT
             _QT.singleShot(200, lambda: self._do_project_switch(folder_path))
@@ -10105,8 +10109,9 @@ class CortexMainWindow(QMainWindow):
         try:
             if hasattr(self, "_sidebar") and getattr(self._sidebar, "_bridge", None):
                 self._sidebar._bridge.updateChangesList("[]")
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Sidebar] changes list not cleared after project close, "
+                     f"the previous project's files may stay listed: {e}")
         if hasattr(self, '_file_tracker') and hasattr(self._file_tracker, '_edits'):
             self._file_tracker._edits.clear()
         if hasattr(self, '_search_results'):
@@ -10304,8 +10309,9 @@ class CortexMainWindow(QMainWindow):
         lang = ""
         try:
             lang = self._webview_panel._open_files.get(file_path, {}).get("language", "")
-        except Exception:
-            pass
+        except Exception as e:
+            _warn_once("main_window.reload.language",
+                       f"language unknown for {file_path}, highlighting is generic: {e}")
         self._webview_panel.force_reload_file(file_path, disk, lang)
         log.info(f"[Save] Reloaded {file_path} from disk after conflict")
 
@@ -10350,8 +10356,9 @@ class CortexMainWindow(QMainWindow):
                 _info = self._webview_panel._open_files.get(file_path)
                 if _info is not None:
                     _info["disk_baseline"] = content
-            except Exception:
-                pass
+            except Exception as e:
+                log.info(f"[Save] disk baseline not updated for {file_path}, "
+                         f"the next diff may show a phantom change: {e}")
             # Track saved content for race guard
             if not hasattr(self, '_saved_content'):
                 self._saved_content: dict = {}
@@ -10703,8 +10710,8 @@ class CortexMainWindow(QMainWindow):
         try:
             self.statusBar().showMessage(
                 "Opening the Microsoft Store\u2026 the update installs there", 6000)
-        except Exception:
-            pass
+        except Exception as e:
+            log.info(f"[Store] status message not shown: {e}")
 
     def _on_help_check_updates(self):
         """Help menu entry point, channel-aware.
@@ -10990,7 +10997,7 @@ class CortexMainWindow(QMainWindow):
                     if hasattr(self._ai_chat, 'save_finished'):
                         try:
                             self._ai_chat.save_finished.disconnect(_on_save_done)
-                        except Exception:
+                        except Exception:  # silent-ok: disconnecting a never-connected slot is normal
                             pass
 
                     if not save_confirmed[0]:
@@ -11065,8 +11072,9 @@ class CortexMainWindow(QMainWindow):
                         if item.get('path') and item['path'] != "untitled.py":
                             files[item['path']] = item.get('content') or ''
                     answered = True
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    log.info(f"[Shutdown] unsaved-files payload unreadable, "
+                             f"it is not offered for recovery: {e}")
             if not answered:
                 log.warning(f"[Close] editor did not report unsaved files ({str(raw)[:80]}), "
                             "using the files Cortex saw change")
@@ -11181,8 +11189,9 @@ class CortexMainWindow(QMainWindow):
             if conv_id:
                 from src.core.crash_persistence import get_crash_store
                 get_crash_store().mark_clean_shutdown(conv_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"[Shutdown] clean-shutdown mark failed, crash recovery "
+                        f"will fire on the next launch: {e}")
 
         # 0c. STOP AGENT WORKER, CRITICAL: Must happen BEFORE the Qt event
         # loop exits. The asyncio thread runs its own event loop (IOCP on
@@ -11203,14 +11212,14 @@ class CortexMainWindow(QMainWindow):
                     if _w_loop is not None and not _w_loop.is_closed():
                         try:
                             _w_loop.call_soon_threadsafe(_w_loop.stop)
-                        except Exception:
+                        except Exception:  # silent-ok: the process is ending, the loop dies with it
                             pass
                         try:
                             import time as _wt
                             _wt.sleep(0.1)  # Let loop settle
                             if not _w_loop.is_closed():
                                 _w_loop.close()
-                        except Exception:
+                        except Exception:  # silent-ok: the process is ending, nothing left to report to
                             pass
                     worker.wait(3000)  # Wait up to 3s for clean shutdown
                     if worker.isRunning():
@@ -11279,8 +11288,8 @@ class CortexMainWindow(QMainWindow):
                 if hasattr(self._ai_chat, '_spinner_overlay'):
                     self._ai_chat._spinner_overlay.force_hide()
                     log.info("[SHUTDOWN] Spinner overlay force-hidden")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"[SHUTDOWN] spinner overlay not hidden, it may stay on screen: {e}")
 
         event.accept()
 
@@ -11502,8 +11511,8 @@ class CortexMainWindow(QMainWindow):
             if dlg is not None and cached_root != project_root:
                 try:
                     dlg.deleteLater()
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    log.info(f"[Memory] dialog already deleted, nothing to release: {e}")
                 dlg = None
             if dlg is None:
                 dlg = MemoryManagerDialog(project_root, settings=settings, parent=self)
@@ -11516,8 +11525,8 @@ class CortexMainWindow(QMainWindow):
                 # Reopening the live page, push fresh memory state into it
                 try:
                     dlg._bridge._emit_refresh()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.info(f"[Memory] dialog did not refresh, it shows the previous project's state: {e}")
             dlg.exec()
         except Exception as exc:
             logging.getLogger("main_window").error(f"[MainWindow] Memory manager failed: {exc}", exc_info=True)
@@ -11562,8 +11571,8 @@ class CortexMainWindow(QMainWindow):
             if dlg is not None and cached_root != project_root:
                 try:
                     dlg.deleteLater()
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    log.info(f"[Health] dialog already deleted, nothing to release: {e}")
                 dlg = None
             if dlg is None:
                 dlg = HealthMapDialog(project_root, settings=settings, parent=self)
@@ -11574,8 +11583,8 @@ class CortexMainWindow(QMainWindow):
                 # look are reflected instead of showing a stale graph.
                 try:
                     dlg.refresh()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.info(f"[Health] graph not rescanned, the previous project's map is shown: {e}")
             dlg.exec()
         except Exception as exc:
             log.error(f"[MainWindow] Health map failed: {exc}", exc_info=True)
@@ -11656,8 +11665,10 @@ class CortexMainWindow(QMainWindow):
                     _sb_busy._pending_tree_refresh = True
                     try:
                         _sb_busy._arm_suppressed_retry()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _warn_once("main_window.sidebar_refresh.retry",
+                                   f"suppressed-refresh retry not armed, "
+                                   f"the explorer may stay stale: {e}")
                 return
             self._sidebar._ai_active = False
             _sb = getattr(self._sidebar, '_bridge', None)
@@ -11702,8 +11713,10 @@ class CortexMainWindow(QMainWindow):
                             # file written inside them goes unnoticed too.
                             try:
                                 _b._sync_watch_dirs()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                _warn_once("main_window.tree.watch_dirs",
+                                           f"explorer watch dirs out of sync, "
+                                           f"writes inside them go unnoticed: {e}")
                             # force* variant: plain refreshFileTree() silently
                             # returns if _suppress_watcher is still set (a
                             # context-menu op whose 500ms reset was missed),
@@ -11792,8 +11805,8 @@ class CortexMainWindow(QMainWindow):
                         try:
                             winsound.Beep(523, 120)
                             winsound.Beep(659, 150)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.info(f"[Beep] audio cue unavailable, the visual cue still fires: {e}")
                     _st.Thread(target=_beep, daemon=True, name="AlertSound").start()
                     log.info("[SOUND] Beep thread started")
             except Exception as _snd_err:

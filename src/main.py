@@ -29,6 +29,18 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 # it is recoverable: drop a bad value, let Python use its own search list, and
 # fall back to a folder of our own if even that fails.
 # ═══════════════════════════════════════════════════════════════════════════
+# The two reporting helpers live in src/utils/silent.py because
+# main_window.py needs them too. They are imported before get_logger("main")
+# is reached, which is safe: silent.py has no import-time dependencies, so
+# importing it costs nothing and cannot fail on a missing logger or Qt.
+# The underscore aliases are kept so the call sites below, and the detector in
+# tests/test_no_silent_failures.py, read the same as before the extraction.
+from src.utils.silent import (  # noqa: E402  (deliberately before Qt)
+    bootstrap_warn as _bootstrap_warn,
+    warn_once as _warn_once,
+)
+
+
 def _ensure_tempdir() -> None:
     import tempfile as _tf
 
@@ -47,8 +59,8 @@ def _ensure_tempdir() -> None:
     try:
         if _ok(_tf.gettempdir()):
             return
-    except Exception:
-        pass
+    except Exception as exc:
+        _bootstrap_warn("tempdir.probe", exc)
     # Nothing Python knows about works. Make our own, next to the user's data.
     for _cand in (_os.path.join(_os.environ.get("LOCALAPPDATA", ""), "Cortex", "tmp"),
                   _os.path.join(_os.path.expanduser("~"), ".cortex", "tmp")):
@@ -60,7 +72,8 @@ def _ensure_tempdir() -> None:
                 _os.environ["TEMP"] = _os.environ["TMP"] = _cand
                 _tf.tempdir = _cand
                 return
-        except Exception:
+        except Exception as exc:
+            _bootstrap_warn(f"tempdir.candidate:{_cand}", exc)
             continue
 
 
@@ -81,8 +94,10 @@ if _sys.platform == 'win32':
 if getattr(_sys, 'frozen', False):
     try:
         import src.utils.runtime_hook_noconsole as _hook
-    except Exception:
-        pass  # Hook not available
+    except Exception as exc:
+        # Without this hook, print(flush=True) raises OSError [Errno 22] in a
+        # --noconsole build, which surfaces as a startup traceback.
+        _bootstrap_warn("runtime_hook_noconsole", exc)
 
 # ── --register-file-types / --unregister-file-types ──
 # Adds Cortex to "Open with" and Default apps for this user, for a build run
@@ -117,8 +132,10 @@ if _sys.platform == 'win32' and not _os.environ.get('CORTEX_ALLOW_MULTI'):
                 try:
                     from src.core.instance_ipc import send_paths as _send_paths
                     _send_paths(_launch_paths, wait=20.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # The file just double-clicked will not reach the window
+                    # that was raised. A trace is the only way to know why.
+                    _bootstrap_warn("instance_ipc.send_paths", exc)
             # Find the existing Cortex window and bring it to front
             _EnumWindows = ctypes.windll.user32.EnumWindows
             _GetWindowTextW = ctypes.windll.user32.GetWindowTextW
@@ -159,8 +176,10 @@ if _sys.platform == 'win32' and not _os.environ.get('CORTEX_ALLOW_MULTI'):
                             if not ctypes.windll.kernel32.Process32NextW(snapshot, ctypes.byref(pe)):
                                 break
                     ctypes.windll.kernel32.CloseHandle(snapshot)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Without the PID the window lookup below cannot match, so the
+                # second launch exits without raising the first window.
+                _bootstrap_warn("instance.focus_pid", exc)
 
             from ctypes import CFUNCTYPE, c_int, c_void_p
             WNDENUMPROC = CFUNCTYPE(c_int, c_void_p, c_void_p)
@@ -187,8 +206,10 @@ if _sys.platform == 'win32' and not _os.environ.get('CORTEX_ALLOW_MULTI'):
                 _ShowWindow(_FOUND_HWND[0], SW_RESTORE)
                 _SetForegroundWindow(_FOUND_HWND[0])
             _sys.exit(0)
-    except Exception:
-        pass  # If mutex fails, continue with normal startup
+    except Exception as exc:
+        # The guard itself failed, so nothing stops a second instance from
+        # writing to the same SQLite file as the first.
+        _bootstrap_warn("single_instance", exc)
 
 import sys
 import os
@@ -241,8 +262,10 @@ if not getattr(sys, "frozen", False) and hasattr(sys.stderr, "fileno"):
         import io as _io
         _real_stderr_file = _io.FileIO(_real_stderr, mode="w", closefd=True)
         sys.stderr = _StderrFilter(_real_stderr_file)
-    except Exception:
-        pass  # Don't crash if stderr redirect fails
+    except Exception as exc:
+        # Cosmetic: Qt's C++ noise stays visible. Nothing functional is lost,
+        # so debug level is right, but it stays on the record.
+        log.debug("[stderr] Qt noise filter not installed: %s", exc)
 
 # Align the embedded agent's project memory base with Cortex's config home.
 # agent/src/project_memory/paths.py uses CLAUDE_CODE_REMOTE_MEMORY_DIR as the memory base.
@@ -252,8 +275,10 @@ if not os.environ.get("CLAUDE_CODE_REMOTE_MEMORY_DIR"):
 # Ensure global rules directory exists early so users can drop rules without manual setup.
 try:
     (Path.home() / ".cortex" / "rules").mkdir(parents=True, exist_ok=True)
-except Exception:
-    pass
+except Exception as exc:
+    # Users drop rule files here to steer the agent, so a missing directory
+    # means every rule they wrote silently stops applying.
+    log.debug("[startup] global rules dir not created: %s", exc)
 
 # CRITICAL: Load .env FIRST before ANY other imports, DEVELOPMENT ONLY.
 #
@@ -318,22 +343,26 @@ if sys.platform == 'win32':
                 if _d.exists():
                     import shutil
                     shutil.rmtree(_d, ignore_errors=True)
-            # Remove lock files that prevent new Chromium from starting
+            # Remove lock files that prevent new Chromium from starting.
+            # A lock that survives is the exact failure this block exists to
+            # prevent, so name the file instead of swallowing the error.
             for _f in _cortex_dir.glob("*.lock"):
                 try:
                     _f.unlink()
-                except OSError:
-                    pass
+                except OSError as exc:
+                    log.warning("[startup] could not remove lock file %s: %s",
+                                _f.name, exc)
             # Remove singleton lock files from QtWebEngine profile
             for _f in _cortex_dir.rglob("SingletonLock"):
                 try:
                     _f.unlink()
-                except OSError:
-                    pass
-        except Exception:
-            pass
-    except Exception:
-        pass  # Best effort, don't block startup
+                except OSError as exc:
+                    log.warning("[startup] could not remove singleton lock "
+                                "%s: %s", _f, exc)
+        except Exception as exc:
+            log.warning("[startup] stale Chromium data not cleaned: %s", exc)
+    except Exception as exc:
+        log.warning("[startup] orphaned Chromium sweep failed: %s", exc)
 
 # CRITICAL FIX: Hide console window on Windows (prevents subprocess popups)
 # This MUST come before QApplication initialization
@@ -342,8 +371,8 @@ if sys.platform == 'win32' and getattr(sys, 'frozen', False):
         import ctypes
         # SW_HIDE = 0
         ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-    except Exception:
-        pass  # Ignore if fails
+    except Exception as exc:
+        log.debug("[startup] console window not hidden: %s", exc)
 
 # HiDPI + Windows platform setup (BEFORE QApplication)
 os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '1'
@@ -389,8 +418,8 @@ if sys.platform == 'win32':
         _SEM_NOOPENFILEERRORBOX = 0x8000
         _ctypes.windll.kernel32.SetErrorMode(
             _SEM_FAILCRITICALERRORS | _SEM_NOOPENFILEERRORBOX)
-    except Exception:
-        pass   # cosmetic only, never block startup over it
+    except Exception as exc:
+        log.debug("[startup] error-mode not set: %s", exc)
 
 # ═══════════════════════════════════════════════════════════════
 # CHROMIUM MEMORY GOVERNANCE, Prevent OOM crashes
@@ -498,8 +527,8 @@ log.info("[RENDER] WebEngine mode: %s (%s)",
          _render_reason)
 try:
     log.info("[RENDER] GPU inventory: %s", gpu_inventory_summary())
-except Exception:
-    pass
+except Exception as exc:
+    log.debug("[RENDER] GPU inventory unavailable: %s", exc)
 # Limit HTTP disk cache to 50MB (default is unbounded)
 os.environ.setdefault('QTWEBENGINE_DISK_CACHE_SIZE', '52428800')
 
@@ -514,8 +543,9 @@ if sys.platform == 'win32':
     try:
         myappid = 'cortex.ai.agent.ide.v1'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Taskbar groups Cortex under python.exe instead of its own icon.
+        log.debug("[startup] AppUserModelID not set: %s", exc)
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QTimer
@@ -552,8 +582,8 @@ def main():
                 _crash_fp.seek(0)
                 _crash_fp.truncate()
                 _crash_fp.write(_old[-1_000_000:])
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("[CRASH] crash.log not truncated: %s", exc)
         # NOT `faulthandler.enable` - the module is imported under an alias
         # above and the bare name is never bound, so this raised NameError,
         # the surrounding except swallowed it, and BOTH this call and the
@@ -596,10 +626,12 @@ def main():
             if _arg == '--max-rss-mb' and _i + 1 < len(sys.argv):
                 try:
                     _max_rss_mb = int(sys.argv[_i + 1])
-                except ValueError:
-                    pass
-    except Exception:
-        pass
+                except ValueError as exc:
+                    # The flag was typed and then ignored, so say so instead of
+                    # running with a cap the user did not choose.
+                    log.warning("[RSS-MONITOR] --max-rss-mb value ignored: %s", exc)
+    except Exception as exc:
+        log.debug("[RSS-MONITOR] argv scan failed, using default: %s", exc)
 
     def _start_rss_monitor(max_mb: int) -> None:
         """Start a daemon thread that monitors process RSS and triggers
@@ -625,10 +657,10 @@ def main():
                         else:
                             _other_n += 1
                             _other_mb += _mb
-                    except Exception:
+                    except Exception:  # silent-ok: a child can exit mid-enumeration
                         continue
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("[MEM] child process census failed: %s", exc)
             _vm = _ps.virtual_memory()
             # Never get_agent_bridge() here: it CREATES the bridge when none
             # exists yet, and this is a background thread.
@@ -661,11 +693,15 @@ def main():
                     try:
                         _rss_mb = _proc.memory_info().rss / (1024 * 1024)
                     except Exception:
+                        # Retried in 300s, so one miss is not worth a line. A
+                        # persistent one is, and _warn_once says so exactly once.
+                        _warn_once("rss_monitor.read",
+                                   "[RSS-MONITOR] cannot read this process's RSS")
                         continue
                     _peak = max(_peak, _rss_mb)
                     try:
                         log.info(_memory_line(_ps, _proc, _rss_mb, _peak))
-                    except Exception:
+                    except Exception:  # silent-ok: never recurse inside the log call
                         pass
 
                     if _rss_mb > max_mb:
@@ -684,8 +720,9 @@ def main():
                             try:
                                 from src.core.stability_engine import get_stability_engine
                                 get_stability_engine().request_gc()
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                log.debug("[RSS-MONITOR] gc request not delivered: %s",
+                                          exc)
                     else:
                         if _warned:
                             log.info(
@@ -693,7 +730,10 @@ def main():
                             )
                         _warned = False
                 except Exception:
-                    pass
+                    # A tick that dies quietly is how the [MEM] line stops for
+                    # the rest of the session with nothing in the log to say so.
+                    _warn_once("rss_monitor.tick",
+                               "[RSS-MONITOR] monitoring tick failed")
 
         _t = _thr.Thread(target=_monitor, daemon=True, name="CortexRSSMonitor")
         _t.start()
@@ -903,8 +943,8 @@ def main():
             if _gpu_cache.exists():
                 _shutil.rmtree(_gpu_cache, ignore_errors=True)
                 log.info("[STARTUP] Cleaned stale Chromium GPU cache")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("[STARTUP] .QtWebEngine GPU cache not cleaned: %s", exc)
 
     # ═══════════════════════════════════════════════════════════════
     # PRE-WARM: Cache rg.exe to stable location before first Grep call
@@ -1035,8 +1075,11 @@ def main():
                         )
                         log.info(f"[SHUTDOWN] Chat persistence via JS (reason: {reason})")
                         _chat_saved = True
-                    except Exception:
-                        pass  # Chromium may be dead
+                    except Exception as exc:
+                        # Chromium may already be dead. The DB fallback below
+                        # covers it, so this is the reason it was needed.
+                        log.debug("[SHUTDOWN] JS chat save failed, using fallback: %s",
+                                  exc)
 
                 # Direct DB fallback, works even when Chromium is dead
                 if not _chat_saved:
@@ -1061,8 +1104,10 @@ def main():
             from src.core.stability_engine import get_stability_engine
             engine = get_stability_engine()
             engine.register_callback("emergency_save_main", lambda: _emergency_save("stability_engine"))
-        except Exception:
-            pass
+        except Exception as exc:
+            # Without this the stability engine cannot trigger an emergency
+            # save on memory pressure, which is the whole point of it.
+            log.warning("[SHUTDOWN] emergency-save callback not registered: %s", exc)
 
     def _auto_save_tick() -> None:
         """Periodic background save, fires every 30s when IDE is idle."""
@@ -1149,7 +1194,7 @@ def main():
                 _b = get_agent_bridge()
                 if _b is not None and getattr(_b, '_agentic_turn_active', False):
                     return
-            except Exception:
+            except Exception:  # silent-ok: the bridge may not exist this early
                 pass
 
             if _engine.consume_gc_request():
@@ -1179,7 +1224,10 @@ def main():
                 except Exception as _e:
                     log.debug(f"[STABILITY] Pressure snapshot skipped: {_e}")
         except Exception:
-            pass
+            # Runs on a 60s timer, so this is throttled: a pump that fails
+            # every tick would otherwise mean memory pressure is never acted
+            # on, with nothing in the log.
+            _warn_once("stability_pump", "[STABILITY] GUI-thread pump failed")
 
     _stability_pump_timer = QTimer()
     _stability_pump_timer.timeout.connect(_stability_pump)
@@ -1205,14 +1253,16 @@ def main():
         _heartbeat_path.write_text(str(time.time()))
         if _clean_shutdown_path.exists():
             _clean_shutdown_path.unlink()
-    except Exception:
-        pass
+    except Exception as exc:
+        # Without this write, an unclean shutdown is indistinguishable from a
+        # clean one and the recovery offer never appears.
+        log.debug("[HEARTBEAT] initial write failed, crash detection limited: %s", exc)
 
     def _heartbeat_tick() -> None:
         """Write heartbeat every 3 seconds to track liveness."""
         try:
             _heartbeat_path.write_text(str(time.time()))
-        except Exception:
+        except Exception:  # silent-ok: retried every 30s by its own timer
             pass
 
     _heartbeat_timer = QTimer()
@@ -1231,14 +1281,16 @@ def main():
             _h = ctypes.windll.kernel32.OpenMutexW(0x00100000, False, "Global\\CortexAIAgentIDE_v1")
             if _h:
                 ctypes.windll.kernel32.CloseHandle(_h)
-        except Exception:
+        except Exception:  # silent-ok: process is ending, the handle dies with it
             pass
         """Mark clean shutdown so next startup knows we didn't crash."""
         try:
             _heartbeat_path.unlink(missing_ok=True)
             _clean_shutdown_path.write_text("clean")
-        except Exception:
-            pass
+        except Exception as exc:
+            # The marker decides whether the next launch offers recovery, so a
+            # failure here produces a false "Cortex crashed" on every start.
+            log.debug("[SHUTDOWN] clean-shutdown marker not written: %s", exc)
     from src.utils.exit_hooks import register as _register_exit_hook
     _register_exit_hook(_atexit_clean_shutdown)
     log.info("[SHUTDOWN] atexit clean-shutdown handler registered")
@@ -1251,7 +1303,7 @@ def main():
         # Stop the timer to prevent re-entry
         try:
             _auto_save_timer.stop()
-        except Exception:
+        except Exception:  # silent-ok: sys.exit(0) follows on the next line
             pass
         # Give the save a moment to flush, then exit
         sys.exit(0)
@@ -1322,8 +1374,9 @@ def main():
             _fh.dump_traceback(file=_crash_fp, all_threads=True)
             _crash_fp.write("\n--- Pre-app.exec() dump (all threads alive) ---\n")
             _crash_fp.flush()
-        except Exception:
-            pass
+        except Exception as exc:
+            # A missing pre-exec dump means a native crash leaves no stack.
+            log.debug("[CRASH] pre-app.exec() dump skipped: %s", exc)
         # Debug: check if window is visible
         log.info(f"Window is visible: {window.isVisible()}")
         log.info(f"Window is active: {window.isActiveWindow()}")
@@ -1351,16 +1404,16 @@ def _exit_without_teardown(code: int) -> None:
     try:
         from src.utils.exit_hooks import run_all
         run_all()                      # Cortex's own hooks only, not PyQt's
-    except Exception:
+    except Exception:  # silent-ok: process is ending, logging may already be closed
         pass
     try:
         logging.shutdown()
-    except Exception:
+    except Exception:  # silent-ok: process is ending, nothing left to report to
         pass
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
-        except Exception:
+        except Exception:  # silent-ok: process is ending, os._exit follows
             pass
     os._exit(int(code) if isinstance(code, int) else 0)
 

@@ -548,6 +548,16 @@ class WebviewPanel(QWidget):
         except Exception:
             pass
 
+        # The editor came back. Reset its crash budget, which used to be
+        # permanent: three crashes anywhere in a session and the editor never
+        # auto-recovered again after a fourth.
+        self._crash_reload_count = 0
+        try:
+            from src.ui.webengine_recovery import note_page_loaded
+            note_page_loaded("editor", self._view)
+        except Exception:
+            pass
+
         # Replay JS issued before the page existed (see _safe_run_js).
         _queued = getattr(self, '_pending_js_calls', None)
         if _queued:

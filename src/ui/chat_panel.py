@@ -33,6 +33,7 @@ from src.utils.logger import get_logger as _get_cortex_logger
 # logging.getLogger(__name__) has no file handler, so every ChatPanel
 # routing decision was invisible when debugging streaming issues.
 log = _get_cortex_logger(__name__)
+from src.utils.silent import swallow as _swallow
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QSize, QEvent, QPoint, QRect as _QRect
 from PyQt6.QtGui import QTextOption, QAction, QKeyEvent, QColor, QKeySequence, QIcon, QTextCharFormat, QTextCursor, QTextFormat, QTextBlockFormat, QTextDocument, QBrush, QFont
 from PyQt6.sip import isdeleted as _sip_isdeleted
@@ -61,6 +62,7 @@ from src.ui.spinner import GridSpinner
 from src.ui.spinner_overlay import SpinnerOverlay
 from src.ui.edit_state_manager import EditStateManager
 from src.ui.chat_text import strip_all_control_tags, strip_todo_blocks, full_clean, streaming_clean
+from src.ui.chat_text import find_mermaid_spans
 from src.ui.table_normalize import normalize_table_markdown
 import uuid
 
@@ -200,29 +202,37 @@ from PyQt6.QtCore import QUrl
 _MERMAID_DIR = os.path.dirname(os.path.abspath(__file__))
 MERMAID_HTML_PATH = os.path.join(_MERMAID_DIR, "html", "ai_chat", "mermaid.html")
 
-# Pre-compiled patterns for stripping mermaid from streaming display.
-# The newline after the fence marker is OPTIONAL (\r?\n?): DeepSeek v4
-# generates the whole block linearized with NO newlines at all, literally
-# "```mermaidflowchart TB subgraph WEB[...] ... end```", verified from the
-# chunk stream in cortex.log. Requiring \n meant the fence never matched, so
-# no diagram card was created and the glued text leaked into prose rendering
-# (where its -->|Yes| pipes even got mis-parsed into a fake table).
-_RE_MERMAID_COMPLETE = re.compile(r'```mermaid[ \t]*\r?\n?.*?```', re.DOTALL | re.IGNORECASE)
-_RE_MERMAID_OPEN = re.compile(r'```mermaid[ \t]*\r?\n?.*$', re.DOTALL | re.IGNORECASE)
+# Mermaid fences are located by chat_text.find_mermaid_spans, the single source
+# of truth shared with the turn-end card builder. The two DOTALL patterns that
+# used to live here had no line anchor, so a message that merely MENTIONED a
+# ```mermaid fence in prose, or quoted that token inside a plain code block,
+# was treated as a diagram opener and the rest of the message was swallowed as
+# diagram code (chat console: UnknownDiagramError, 2026-10-22).
+
 
 def _strip_mermaid_for_streaming(text: str) -> tuple[str, bool]:
-    """Remove mermaid blocks from streaming display text.
-    Returns (cleaned_text, had_mermaid)."""
-    # PERF 2026-08-16: fast path. The two DOTALL regexes below scan the whole
-    # buffer every streaming tick; mermaid is rare, so a cheap case-insensitive
-    # substring probe skips both scans for the overwhelming majority of ticks.
-    # (.strip() matches the slow path's return so behavior is identical.)
+    """Remove mermaid fences from streaming display text.
+
+    Returns (cleaned_text, had_mermaid). Offsets come from
+    :func:`src.ui.chat_text.find_mermaid_spans`, which reports only real,
+    line-anchored fences whose body actually parses as a diagram, so prose is
+    never removed from the live view.
+    """
+    # PERF 2026-08-16: fast path. The scan is O(n) over the whole buffer every
+    # streaming tick; mermaid is rare, so a cheap substring probe skips it for
+    # the overwhelming majority of ticks. (.strip() keeps the return shape.)
     if 'mermaid' not in text.lower():
         return text.strip(), False
-    had = bool(_RE_MERMAID_COMPLETE.search(text) or _RE_MERMAID_OPEN.search(text))
-    text = _RE_MERMAID_COMPLETE.sub('', text)
-    text = _RE_MERMAID_OPEN.sub('', text)
-    return text.strip(), had
+    spans = find_mermaid_spans(text)
+    if not spans:
+        return text.strip(), False
+    kept = []
+    pos = 0
+    for start, end, _code, _complete in spans:
+        kept.append(text[pos:start])
+        pos = end
+    kept.append(text[pos:])
+    return ''.join(kept).strip(), True
 
 
 # Some models emit an invented "<questions>[{...}]</questions>" TEXT block
@@ -653,7 +663,7 @@ class MermaidStreamingCard(QFrame):
                 "border: none; background: transparent;"
             )
         except RuntimeError:
-            pass
+            _swallow("restyle the streaming mermaid label")
 
     def stop(self):
         self._spinner.stop()
@@ -721,7 +731,7 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
         try:
             elapsed_str = f' · {float(elapsed):.1f}s'
         except (ValueError, TypeError):
-            pass
+            _swallow("format a web tool's elapsed seconds")
 
     # ── Web Search results ──
     if is_search:
@@ -789,7 +799,7 @@ def _format_web_tool_result(tool_name: str, result_data) -> str | None:
                 kb = int(content_len) / 1024
                 meta_parts.append(f'{kb:.1f} KB')
             except (ValueError, TypeError):
-                pass
+                _swallow("format a web tool's content size")
         if elapsed_str:
             meta_parts.append(elapsed_str.lstrip(' · '))
         if meta_parts:
@@ -880,7 +890,9 @@ def _cross_fade_replace(old_widget, new_widget, container_layout, duration_ms=18
         old_widget.setParent(None)
         old_widget.deleteLater()
     except RuntimeError:
-        pass
+        # The widget is already gone, so there is nothing left to detach or
+        # schedule. Logging this would only repeat on every cross-fade.
+        pass  # silent-ok: old widget already deleted by Qt, nothing to remove
     if idx >= 0:
         container_layout.insertWidget(idx, new_widget)
     else:
@@ -1590,7 +1602,8 @@ def _preserve_scroll_on_toggle(widget, toggle_body_fn):
         try:
             bar.rangeChanged.disconnect(_reanchor)
         except (TypeError, RuntimeError):
-            pass
+            # Disconnecting a slot that was never connected raises by design.
+            pass  # silent-ok: cleanup disconnects a signal that may never have connected
         if panel is not None:
             panel._toggle_scroll_guard = False
         if _frozen and panel is not None and hasattr(panel, '_thaw_viewport'):
@@ -1619,7 +1632,7 @@ def _preserve_scroll_on_toggle(widget, toggle_body_fn):
                 try:
                     _reanchor()
                 except Exception:
-                    pass
+                    _swallow("re-anchor the scroll position after a card toggle")
                 _count[0] += 1
                 QTimer.singleShot(50, _tick)
             else:
@@ -1700,7 +1713,7 @@ class CollapsibleCard(QFrame):
             self.chev.setStyleSheet(f"color:{T['mono_muted']}; font-size:11px;")
             self.label.setStyleSheet(f"color:{T['text']}; font-size:13px; font-weight:500;")
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("restyle the collapsed card header")
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
         if a0 == self.header and a1 and a1.type() == QEvent.Type.MouseButtonPress:
@@ -2129,7 +2142,7 @@ class ThoughtsBlock(CollapsibleCard):
             try:
                 self._refresh_body_style()
             except Exception:
-                pass
+                _swallow("style a thought body when the card expands")
 
         if getattr(self, '_needs_lazy_fit', False):
             self._needs_lazy_fit = False
@@ -2154,7 +2167,8 @@ class ThoughtsBlock(CollapsibleCard):
         try:
             ThoughtsBlock._active_instances.remove(self)
         except ValueError:
-            pass
+            # The instance was already unregistered, e.g. freeze() twice.
+            pass  # silent-ok: instance already absent from the active set
         if not ThoughtsBlock._active_instances:
             ThoughtsBlock._stop_dots_timer()
         # Update label to show completion
@@ -2173,7 +2187,7 @@ class ThoughtsBlock(CollapsibleCard):
                 if cleaned and cleaned != self._lbl.toPlainText():
                     self._lbl.setPlainText(cleaned)
             except Exception:
-                pass
+                _swallow("fold a finished thought into its tidied text")
         # Dim the label to signal it's no longer active (use current theme)
         _t = chat_theme()
         self.label.setStyleSheet(
@@ -2188,7 +2202,10 @@ class ThoughtsBlock(CollapsibleCard):
         try:
             ThoughtsBlock._active_instances.remove(self)
         except (ValueError, RuntimeError, AttributeError):
-            pass
+            # __del__ can run during interpreter teardown, where the logger and
+            # even the class dict may already be gone. Logging from here raises
+            # a second, worse error inside garbage collection.
+            pass  # silent-ok: __del__ may run after the logging system is torn down
 
 
 # ============================================================
@@ -2296,7 +2313,7 @@ class ToolRow(QWidget):
                 f"padding:6px 10px;font-family:{T['font_mono']};font-size:12px;color:{T['text']};"
             )
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("restyle a tool row")
 
     def eventFilter(self, obj, event):
         if obj == self._header and event and event.type() == QEvent.Type.MouseButtonPress:
@@ -2480,7 +2497,7 @@ class ToolGroup(CollapsibleCard):
                     was_at_bottom = parent_panel._is_at_bottom(200)
                     saved_pos = bar.value()
                 except RuntimeError:
-                    pass
+                    _swallow("read the chat scroll position before a tool flush")
 
             for tool_id, name, arg, kind in self._pending_tools:
                 row = ToolRow(name, arg, kind, parent=self)
@@ -2499,7 +2516,7 @@ class ToolGroup(CollapsibleCard):
                     else:
                         bar.setValue(saved_pos)
                 except RuntimeError:
-                    pass
+                    _swallow("restore the chat scroll position after a tool flush")
         finally:
             if parent_panel and not already_frozen:
                 parent_panel._thaw_viewport()
@@ -2638,7 +2655,7 @@ class ToolGroup(CollapsibleCard):
             try:
                 card.set_badge(_badge)
             except RuntimeError:
-                pass
+                _swallow("set the result count badge on a tool card")
 
         # ── Phase 6: Web search/fetch structured result display ──
         # Try structured formatting first for web tools.
@@ -3039,7 +3056,7 @@ class ToolGroup(CollapsibleCard):
             self._status_mark = None
             self._update_status()
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("restyle the tool group header")
 
     def _update_status(self):
         """● running, ✓ all done, ✗ something failed. Restyles only on change."""
@@ -3303,7 +3320,7 @@ class DiffCard(CollapsibleCard):
             self._style_header()
             self.body.setStyleSheet(_diff_body_qss())
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("restyle a diff card")
 
     # Phase 3A: Hover glow on DiffCard, DISABLED (was causing visible border flicker on filename hover)
     # def enterEvent(self, event):
@@ -3673,7 +3690,7 @@ class ActivityGroup(CollapsibleCard):
                 f"color:{T['mono_muted']}; font-family:{T['font_ui']}; font-size:13px;")
             self.chev.setStyleSheet(f"color:{T['mono_muted']}; font-size:12px;")
         except RuntimeError:
-            pass
+            _swallow("style an activity group")
 
     def retheme(self):
         try:
@@ -3683,7 +3700,7 @@ class ActivityGroup(CollapsibleCard):
             self._style()
             self._refresh()
         except RuntimeError:
-            pass
+            _swallow("retheme an activity group")
 
     def eventFilter(self, a0, a1):
         if a0 == self.header and a1 is not None and a1.type() == QEvent.Type.KeyPress:
@@ -3892,15 +3909,15 @@ class ActivityGroup(CollapsibleCard):
                     try:
                         self._spin.start()
                     except Exception:
-                        pass
+                        _swallow("start the activity spinner")
                 else:
                     try:
                         self._spin.stop()
                     except Exception:
-                        pass
+                        _swallow("stop the activity spinner")
                     self._spin.hide()
         except RuntimeError:
-            pass
+            _swallow("refresh an activity group")
 
 
 class CreatingCard(QFrame):
@@ -4121,7 +4138,7 @@ class EditedFilesSection(QFrame):
             self._body_scroll.setMaximumHeight(max(1, min(need, cap)))
             self._body_scroll.setMinimumHeight(min(need, 130))
         except RuntimeError:
-            pass
+            _swallow("size the changed-files list to its content")
 
     def _toggle(self):
         """Expand/collapse the file list."""
@@ -4456,7 +4473,7 @@ class TableWidget(QFrame):
                 if item is not None:
                     item.setForeground(_bold_color)
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("re-colour bold table cells after a theme switch")
 
     def showEvent(self, a0):
         """Defer height calc to next event-loop tick so layout assigns final width first.
@@ -4751,9 +4768,9 @@ class CodeBlockWidget(QFrame):
                     from src.ui.syntax_highlight import highlight_code as _hl
                     self._code_browser.setHtml(_hl(self._code_text, self._lang))
                 except Exception:
-                    pass  # keep old highlighting rather than lose the body
+                    _swallow("re-highlight a code block for the new theme")
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("retheme a code block")
 
     def _do_copy(self):
         if self._code_text:
@@ -4901,7 +4918,7 @@ class MermaidDiagramCard(QFrame):
                 f"font-family: {T['font_ui']}; border: none; background: transparent;"
             )
         except RuntimeError:
-            pass  # C++ object deleted
+            _swallow("restyle a mermaid diagram card")
 
     def _do_copy(self):
         if self._code:
@@ -5336,7 +5353,7 @@ def make_body(streaming: bool = False) -> QTextBrowser:
                 if h < _old_min:
                     tb.updateGeometry()
         except RuntimeError:
-            pass  # widget destroyed by Qt
+            _swallow("fit a card body after the viewport resized")
 
     def _delayed_fit():
         import math
@@ -5350,7 +5367,7 @@ def make_body(streaming: bool = False) -> QTextBrowser:
                     tb.setMinimumHeight(h)
                     # Same: removed updateGeometry() to prevent double layout pass.
         except RuntimeError:
-            pass  # widget destroyed by Qt
+            _swallow("fit a card body on the delayed timer")
 
     tb._fit_timer = QTimer()
     tb._fit_timer.setSingleShot(True)
@@ -5507,7 +5524,7 @@ class MessageCopyButton(QToolButton):
         try:
             self.update()
         except RuntimeError:
-            pass  # message deleted while the feedback timer was pending
+            _swallow("reset the copy button after its feedback timer")
 
     # ── painting ──
     def paintEvent(self, e):
@@ -5757,6 +5774,7 @@ class MessageWidget(QWidget):
             try:
                 item = self._card_v.itemAt(i)
             except RuntimeError:
+                _swallow("read a card slot while collecting a message's copy text")
                 continue
             w = item.widget() if item else None
             if w is None:
@@ -5772,6 +5790,7 @@ class MessageWidget(QWidget):
                     parts.append(getattr(w, "_rendered_text", "") or w.toPlainText())
             except RuntimeError:
                 # widget deleted mid-iteration (collapse/retheme); skip it
+                _swallow("read a deleted card's text for a message copy")
                 continue
         return "\n\n".join(p.strip("\n") for p in parts if p and p.strip()).strip()
 
@@ -5856,7 +5875,7 @@ class MessageWidget(QWidget):
                 if w is not None:
                     return w
         except RuntimeError:
-            pass
+            _swallow("locate the last block of a reply")
         return None
 
     def edited_files_section(self) -> "EditedFilesSection":
@@ -5903,6 +5922,7 @@ class MessageWidget(QWidget):
                 try:
                     item = self._card_v.itemAt(i)
                 except RuntimeError:
+                    _swallow("read a card slot while serialising a message")
                     continue
                 w = item.widget() if item else None
                 if w is None:
@@ -5911,7 +5931,7 @@ class MessageWidget(QWidget):
                     try:
                         _flat.extend(w.blocks())
                     except RuntimeError:
-                        pass
+                        _swallow("fold an activity group's cards into the saved timeline")
                 else:
                     _flat.append(w)
             for w in _flat:
@@ -5919,6 +5939,7 @@ class MessageWidget(QWidget):
                     # Check if the C++ object is still alive
                     w.objectName()
                 except RuntimeError:
+                    _swallow("check whether a block survived long enough to be saved")
                     continue
                 try:
                     if isinstance(w, ThoughtsBlock):
@@ -6186,7 +6207,7 @@ class MessageWidget(QWidget):
                     if _looped:
                         log.info("[ChatRestore] hid a repetitive reasoning loop in a saved thought")
                 except Exception:
-                    pass
+                    _swallow("trim a saved repetition loop before restoring a thought")
                 # Cap a runaway thought before it reaches the widget.
                 #
                 # setPlainText lays out the whole string synchronously on the
@@ -6409,7 +6430,7 @@ class MessageWidget(QWidget):
                             _css = build_markdown_css().replace('<style>', '').replace('</style>', '').strip()
                             pb.setDefaultStyleSheet(_css)
                         except Exception:
-                            pass  # QTextBrowser limited CSS, graceful fallback
+                            _swallow("apply markdown CSS to a restored prose body")
                         pb.setHtml(content)
                     else:
                         pb.setPlainText(content)
@@ -6477,7 +6498,7 @@ class MessageWidget(QWidget):
                             # failed one must come back as failed, not spin.
                             _card.mark_done(bool(td.get("ok", True)))
                         except (RuntimeError, AttributeError):
-                            pass
+                            _swallow("settle a restored tool card's final state")
                         if _g is not None:
                             _g.note_tool_start(f"r{id(tg)}_{idx}", _name, _arg)
                     elif _name:
@@ -6573,7 +6594,7 @@ class _PaintAudit(QObject):
             widget.setProperty('_paintAudited', True)
             widget.installEventFilter(self)
         except RuntimeError:
-            pass  # widget destroyed by Qt
+            _swallow("mark a widget for paint auditing")
 
     def eventFilter(self, obj, ev):
         if self.armed and ev.type() == QEvent.Type.Paint:
@@ -6585,7 +6606,7 @@ class _PaintAudit(QObject):
                 if w > 0 and h > 0 and r.width() * r.height() >= 0.9 * w * h:
                     self.full[k] = self.full.get(k, 0) + 1
             except Exception:
-                pass
+                _swallow("classify a paint event as full-surface")
         return False
 
 
@@ -6660,7 +6681,7 @@ class StreamingCursor(QWidget):
             if ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0):
                 return bool(on.value)
         except Exception:
-            pass
+            _swallow("read the Windows 'show animations' setting")
         return True
 
     def _set_period(self, period: float) -> None:
@@ -7601,7 +7622,7 @@ class InputArea(QWidget):
             self.mic_btn.setIcon(self._mic_icon("working", T[fg],
                                                 angle=self._mic_spin_angle))
         except Exception:
-            pass
+            _swallow("draw the transcribing ring")
 
     def _apply_mic_style(self):
         fg, border, tip = self._MIC_LOOK[self._mic_state]
@@ -7674,8 +7695,9 @@ class InputArea(QWidget):
                     "server, so you can speak a prompt instead of typing it.")
                 return
         except Exception:
-            pass   # never block recording over a failed check; the server
-                   # still gates the transcription itself
+            # The server still gates transcription, so a failed pre-check
+            # must not stop the microphone.
+            _swallow("check the subscription before recording")
 
         try:
             from PyQt6.QtMultimedia import (QMediaCaptureSession, QAudioInput,
@@ -7705,7 +7727,7 @@ class InputArea(QWidget):
                             _dev = _d
                             break
             except Exception:
-                pass
+                _swallow("read the saved voice input device")
             if _dev is None:
                 _dev = QMediaDevices.defaultAudioInput()
             self._audio_in = QAudioInput(_dev) if _dev is not None else QAudioInput()
@@ -7713,7 +7735,7 @@ class InputArea(QWidget):
             try:
                 log.info("[Voice] input device: %s", _dev.description() if _dev else "(Qt default)")
             except Exception:
-                pass
+                _swallow("log the voice input device")
             self._capture.setAudioInput(self._audio_in)
             self._recorder = QMediaRecorder()
             self._capture.setRecorder(self._recorder)
@@ -7806,7 +7828,7 @@ class InputArea(QWidget):
                     try:
                         _os.remove(path)
                     except OSError:
-                        pass
+                        _swallow("delete the rejected silent recording")
                     # Plain words, no jargon. The old message quoted the raw
                     # rms number and told the user to open Windows Sound
                     # settings, which reads as an error report rather than
@@ -7817,14 +7839,15 @@ class InputArea(QWidget):
                         "your microphone is on.")
                     return
             except Exception:
-                pass      # unreadable wav is the server's problem to report
+                # An unreadable wav is the server's problem to report.
+                _swallow("measure the recording level before upload")
 
             def _done(text: str, error: str):
                 self._set_mic_state("idle")
                 try:
                     _os.remove(path)
                 except OSError:
-                    pass
+                    _swallow("delete the transcribed recording")
                 if error:
                     self._voice_error(error)
                     return
@@ -7850,7 +7873,7 @@ class InputArea(QWidget):
                     _auto = bool(get_settings().get("ui", "voice_auto_send",
                                                     default=True))
                 except Exception:
-                    pass
+                    _swallow("read the voice auto-send setting")
                 if _auto:
                     log.info("[Voice] sending transcription to the model")
                     self._emit_send()
@@ -7897,7 +7920,8 @@ class InputArea(QWidget):
                     if len(terms) > 60:
                         break
         except Exception:
-            pass
+            # Keyterms are an accuracy boost, not a requirement.
+            _swallow("collect keyterms from the project tree")
         return list(dict.fromkeys(terms))[:50]
 
     def _voice_error(self, message: str):
@@ -8211,7 +8235,7 @@ class InputArea(QWidget):
             # is clipped after the switch (reported 2026-10-20).
             self._autogrow()
         except RuntimeError:
-            pass  # widgets torn down mid-switch
+            _swallow("retheme the input row")
 
     def _set_mode(self, value):
         self.mode = value
@@ -8359,13 +8383,13 @@ class InputArea(QWidget):
                 from src.ai.agent_bridge import list_skills
                 typed_text = normalize_skill_tokens(typed_text, invocable_skill_names(list_skills()))
             except Exception:
-                pass
+                _swallow("normalise skill tokens in the prompt")
         if '@' in typed_text:
             try:
                 from src.ui.mcp_mentions import normalize_mcp_tokens, list_mcp_tools
                 typed_text = normalize_mcp_tokens(typed_text, [t['name'] for t in list_mcp_tools()])
             except Exception:
-                pass
+                _swallow("normalise MCP tokens in the prompt")
 
         # Only tokens and nothing to do with them: keep them and ask for the
         # request instead of sending. Clicking a menu row and then pressing
@@ -8388,7 +8412,7 @@ class InputArea(QWidget):
                     self.input.setTextCursor(_end)
                     return
             except Exception:
-                pass
+                _swallow("refuse to send a bare skill/MCP token")
 
         # Build the full message: pasted content + user typed text
         parts = []
@@ -8869,7 +8893,7 @@ class InputArea(QWidget):
                 ph = min(ph, max(80, anchor.y() - 16))
             popup.setGeometry(x, y, pw, ph)
         except Exception:
-            pass
+            _swallow("place the completion popup above the input")
 
     def _position_slash_popup(self):
         self._position_popup(self._slash_popup)
@@ -9004,7 +9028,7 @@ class InputArea(QWidget):
                      qt_img, qt_txt, fmts, win, len(getattr(self, '_chip_widgets', []) or []),
                      len(getattr(self, '_queue', None) or []))
         except Exception:
-            pass
+            _swallow("log the clipboard probe")
 
     def _handle_paste(self):
         """Intercept paste, handle images and large text as chips above input."""
@@ -9217,6 +9241,7 @@ class InputArea(QWidget):
                     rel = os.path.relpath(fpath, self._project_root)
                     return (rel, start_line, end_line)
                 except (OSError, UnicodeDecodeError):
+                    _swallow(f"scan {os.path.basename(fpath)} for the pasted text")
                     continue
         return ("", 0, 0)
 
@@ -9386,7 +9411,7 @@ class EmptyState(QWidget):
             self._title.setStyleSheet(f"color: {T['text']}; font-size: 18px; font-weight: 600;")
             self._sub.setStyleSheet(f"color: {T['muted']}; font-size: 13px;")
         except RuntimeError:
-            pass  # widget torn down mid-switch
+            _swallow("retheme the empty state")
 
 
 # ============================================================
@@ -10250,7 +10275,7 @@ class ChatPanel(QWidget):
                 self._empty_state.hide()
                 self._empty_state.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("remove the empty state when the first message arrives")
             self._empty_state = None
         # Remove the stretch that center-aligns the empty state -
         # without this, messages appear in the middle instead of top-aligned.
@@ -10287,7 +10312,7 @@ class ChatPanel(QWidget):
                          "restoring Stop button")
                 self.input_area.set_generating(True)
         except Exception:
-            pass
+            _swallow("restore the Stop button at the start of a turn")
 
         self._cur_msg = MessageWidget(role="assistant", parent=self)
         self._insert(self._cur_msg)
@@ -10342,7 +10367,7 @@ class ChatPanel(QWidget):
                     try:
                         self._open_block._fit()
                     except RuntimeError:
-                        pass
+                        _swallow("size the prose block before a kind switch")
                 self._prose_blocks.append((self._open_block, self._prose_buf))
                 self._prose_buf = ""
             # Before switching away from prose, stop and remove the streaming cursor
@@ -10381,7 +10406,7 @@ class ChatPanel(QWidget):
                         _w = self._open_block._get_effective_width()
                         self._open_block.document().setTextWidth(_w)
                     except RuntimeError:
-                        pass
+                        _swallow("pin the text width of a new streaming block")
                 self._prose_buf = ""
                 # A fresh block: no rendered content for the reveal to write
                 # after (the anchor belonged to the block just left).
@@ -10412,12 +10437,12 @@ class ChatPanel(QWidget):
                 try:
                     self._pin_bottom(bar)
                 except RuntimeError:
-                    pass
+                    _swallow("hold the view at the bottom across a kind switch")
             else:
                 try:
                     bar.setValue(saved_pos)
                 except RuntimeError:
-                    pass
+                    _swallow("restore the scroll offset across a kind switch")
             if not already_frozen:
                 self._thaw_viewport()
             # NOTE: No deferred _autoscroll(), synchronous scroll inside freeze
@@ -10449,12 +10474,12 @@ class ChatPanel(QWidget):
             if g is not None and self._cur_msg.last_block() is g:
                 return g
         except RuntimeError:
-            pass
+            _swallow("check whether the activity group is still the last block")
         if g is not None:
             try:
                 g.finish()
             except RuntimeError:
-                pass
+                _swallow("finish the activity group")
         self._activity = self._cur_msg.new_activity()
         return self._activity
 
@@ -10465,7 +10490,7 @@ class ChatPanel(QWidget):
             try:
                 g.finish()
             except RuntimeError:
-                pass
+                _swallow("finish the activity group when the AI talks again")
 
     def _stop_cursor(self):
         """Stop and remove the streaming cursor if active."""
@@ -10476,7 +10501,7 @@ class ChatPanel(QWidget):
                 # window on Windows (the "capsule"). deleteLater is enough.
                 self._cursor.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("remove the streaming cursor")
             self._cursor = None
 
     def _place_stream_cursor(self) -> None:
@@ -10522,7 +10547,7 @@ class ChatPanel(QWidget):
             if not cur.isVisible():
                 cur.show()
         except RuntimeError:
-            pass  # widget destroyed by Qt
+            _swallow("position the streaming cursor")
 
     def on_thinking(self, chunk: str):
         self._ensure("think")
@@ -10547,7 +10572,7 @@ class ChatPanel(QWidget):
             try:
                 self._open_block.append(self._think_buf)
             except RuntimeError:
-                pass  # card already deleted
+                _swallow("drain pending thinking into its own card")
         self._think_buf = ""
 
     def _flush_think(self):
@@ -10584,12 +10609,12 @@ class ChatPanel(QWidget):
                         bar = self.scroll.verticalScrollBar()
                         bar.setValue(bar.maximum())
                     except RuntimeError:
-                        pass
+                        _swallow("pin the view after a think flush")
             finally:
                 if not already_frozen:
                     self._thaw_viewport()
         except RuntimeError:
-            pass  # Block destroyed between guard check and append
+            _swallow("append thinking text to the open card")
 
     # Seal the live prose block once its buffer exceeds this many chars.
     # _flush_prose re-renders the ENTIRE live buffer (markdown → HTML →
@@ -11101,7 +11126,7 @@ class ChatPanel(QWidget):
                 prev = back
             self._fade_from = max(raw_start, end - span)
         except RuntimeError:
-            pass  # widget destroyed by Qt
+            _swallow("recolour the streaming frontier")
 
     # Markers the renderer is certain to delete. Showing them raw and then
     # deleting them re-flows the paragraph under the reader's eyes: measured
@@ -11577,7 +11602,7 @@ class ChatPanel(QWidget):
                 # coalesced by Qt into the frame it belongs to.
                 self._queue_block_repaint(block)
         except RuntimeError:
-            pass  # widget destroyed by Qt
+            _swallow("reveal newly appended streaming text")
         finally:
             # Resolve the scroll the frame captured, then release the paint
             # freeze: the restored position and every mutation above land in
@@ -11590,7 +11615,7 @@ class ChatPanel(QWidget):
                     else:
                         _bar.setValue(_saved_pos)
                 except RuntimeError:
-                    pass
+                    _swallow("restore the scroll offset after a stream append")
             if _froze_block:
                 self._thaw_block(block)
         # A block just completed: reconcile it now, while it is the frontier.
@@ -11801,7 +11826,7 @@ class ChatPanel(QWidget):
             try:
                 QApplication.instance().aboutToQuit.connect(th.stop)
             except Exception:
-                pass
+                _swallow("register the prose render thread for shutdown")
         return th
 
     def _on_prose_render(self, job):
@@ -11876,7 +11901,7 @@ class ChatPanel(QWidget):
                 else:
                     vp.update()
             except RuntimeError:
-                pass  # widget destroyed by Qt
+                _swallow("repaint the growth strip")
 
         QTimer.singleShot(0, _paint)
 
@@ -12074,7 +12099,7 @@ class ChatPanel(QWidget):
                     )
                 self._last_struct, self._last_render_h = _struct, _h_now
             except Exception:
-                pass
+                _swallow("log the render trace")
             self._render_ms_total = getattr(self, '_render_ms_total', 0.0) + _render_ms
             self._render_ms_max = max(getattr(self, '_render_ms_max', 0.0), _render_ms)
             if not getattr(self, '_t_first_render', 0.0):
@@ -12159,7 +12184,7 @@ class ChatPanel(QWidget):
                             self._queue_block_repaint(self._open_block,
                                                       _doc_h - _cur_h)
                 except RuntimeError:
-                    pass
+                    _swallow("repaint the slice a prose render exposed")
 
             # ── SCROLL: single pin-or-restore AFTER all mutations ──
             # This is the ONLY scroll operation in the entire flush cycle.
@@ -12169,12 +12194,12 @@ class ChatPanel(QWidget):
                 try:
                     self._pin_bottom(bar)
                 except RuntimeError:
-                    pass
+                    _swallow("hold the view at the bottom across a prose render")
             else:
                 try:
                     bar.setValue(saved_pos)
                 except RuntimeError:
-                    pass
+                    _swallow("restore the scroll offset after a prose render")
         finally:
             # ── SINGLE THAW: release the freeze → ONE paint frame for ALL
             # mutations. Block-scoped, so that frame repaints this block and
@@ -12215,7 +12240,7 @@ class ChatPanel(QWidget):
                 try:
                     _grp.note_tool_start(tool_id, name, arg)
                 except RuntimeError:
-                    pass
+                    _swallow("note a tool start on the activity group")
             # Normalize tool name for dispatch + spinner
             from src.ui.tool_cards import normalize_tool_name
             norm = normalize_tool_name(name)
@@ -12258,7 +12283,7 @@ class ChatPanel(QWidget):
                 try:
                     _grp.note_tool_end(tool_id, ok=(status == "ok"))
                 except RuntimeError:
-                    pass
+                    _swallow("note a tool end on the activity group")
             if self._open_kind == "tools" and self._open_block:
                 self._open_block.end_tool(tool_id, ok=(status == "ok"), result_data=result_data)
                 # Force new block on next text/thinking, but ONLY when a tool
@@ -12324,7 +12349,7 @@ class ChatPanel(QWidget):
                 creating_card.setParent(None)
                 creating_card.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("remove the creating card when the diff arrives")
 
         # Handle both 2-tuple (old) and 4-tuple (new) formats
         if hunk_lines and len(hunk_lines[0]) == 4:
@@ -12498,7 +12523,7 @@ class ChatPanel(QWidget):
                 self._creating[card_id].deleteLater()
                 del self._creating[card_id]
         except Exception:
-            pass
+            _swallow("dismiss a file operation card")
 
     def show_tool_activity(self, tool_id: str, name: str, status: str = ""):
         """Bridge: Show tool activity indicator."""
@@ -12530,7 +12555,7 @@ class ChatPanel(QWidget):
                 self._open_kind = None
                 self._open_block = None
         except Exception:
-            pass
+            _swallow("close the open thinking block")
 
     def show_directory_contents(self, path: str, contents: str):
         """Bridge: Show directory listing in chat."""
@@ -12614,7 +12639,7 @@ class ChatPanel(QWidget):
                 for _g in self._cur_msg.findChildren(ActivityGroup):
                     _g.finish()
         except RuntimeError:
-            pass
+            _swallow("finish every activity line at turn end")
         # Diagnostic: panel state at turn end. blocks=0 with empty buf means
         # nothing will render, the "summary missing / instant notification"
         # signature. Kept at INFO: one line per turn.
@@ -12638,7 +12663,7 @@ class ChatPanel(QWidget):
             if _audit_msg is not None:
                 QTimer.singleShot(250, lambda m=_audit_msg: self._audit_card_geometry(m))
         except Exception:
-            pass
+            _swallow("report per-turn stream stats and schedule the card audit")
         # Stream counters belong to one turn; the queued tail is superseded
         # by the final render below.
         # Cleared before the final renders below, so they are the ones allowed
@@ -12766,7 +12791,7 @@ class ChatPanel(QWidget):
                             _w.setHtml("")
                         _w.hide()
                     except RuntimeError:
-                        pass
+                        _swallow("clear a superseded prose block")
             else:
                 _coalesced.append((_tb, _buf, _extras))
             _i = _j + 1
@@ -12798,7 +12823,7 @@ class ChatPanel(QWidget):
                                 _ex.setHtml("")
                             _ex.hide()
                         except RuntimeError:
-                            pass
+                            _swallow("clear a superseded extra prose block")
                     try:
                         self._render_single_prose(tb, buf, highlight_code,
                                                   strip_all_control_tags, strip_todo_blocks,
@@ -12873,6 +12898,7 @@ class ChatPanel(QWidget):
                     if _text and _text.strip():
                         thinking_parts.append(_text.strip())
                 except RuntimeError:
+                    _swallow("read thinking text for the crash save")
                     continue
 
             full_response = "\n\n".join(prose_parts) if prose_parts else ""
@@ -12938,28 +12964,23 @@ class ChatPanel(QWidget):
                     if _al is not None:
                         _sc_layout, _sc_idx = _al, _al.indexOf(_anchor) + 1
                 except RuntimeError:
-                    pass
+                    _swallow("locate the prose block a mermaid card replaces")
         if _sc_layout is None or _sc_idx < 0:
             return
 
+        # find_mermaid_spans yields (start, end, code, complete) for real,
+        # line-anchored fences only, and already rejects a fence whose body is
+        # prose, so a message that merely mentions a diagram cannot reach the
+        # viewer as UnknownDiagramError.
         _spans = []  # (start, end, code) character spans in _joined
-        for _mm in _RE_MERMAID_COMPLETE.finditer(_joined):
-            _code = re.sub(r'^```mermaid[ \t]*\r?\n?', '', _mm.group(0), flags=re.IGNORECASE)
-            _code = re.sub(r'\n```\s*$', '', _code).strip()
-            if _code:
-                _spans.append((_mm.start(), _mm.end(), _code))
-
-        # FIX: If no complete mermaid blocks found, check for an OPEN
-        # (incomplete) mermaid block. The AI may have stopped mid-diagram
-        # (no closing ```). Extract whatever code is available and create a
-        # diagram card from it instead of silently losing it.
-        if not _spans:
-            _open_mm = _RE_MERMAID_OPEN.search(_joined)
-            if _open_mm:
-                _code = re.sub(r'^```mermaid[ \t]*\r?\n?', '', _open_mm.group(0), flags=re.IGNORECASE).strip()
-                if _code:
-                    log.warning(f"[Mermaid] Incomplete mermaid block detected ({len(_code)} chars), rendering partial diagram")
-                    _spans.append((_open_mm.start(), _open_mm.end(), _code))
+        for _s, _e, _code, _complete in find_mermaid_spans(_joined):
+            if not _complete:
+                # The AI stopped mid-diagram (no closing fence). Build the card
+                # from the partial source rather than silently losing it.
+                log.warning(
+                    f"[Mermaid] Incomplete mermaid block detected "
+                    f"({len(_code)} chars), rendering partial diagram")
+            _spans.append((_s, _e, _code))
 
         if not _spans:
             return
@@ -12996,7 +13017,7 @@ class ChatPanel(QWidget):
                 try:
                     _tb.hide()  # fence-only block, nothing left to render
                 except RuntimeError:
-                    pass
+                    _swallow("hide a block emptied by a mermaid card")
         self._prose_buf = _new_segs[-1].strip()
 
     def _collect_last_prose_block(self):
@@ -13383,7 +13404,7 @@ class ChatPanel(QWidget):
                 card.setParent(None)
                 card.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("stop an orphaned creating card at turn end")
         self._creating.clear()
 
     def _finalize_tool_group(self):
@@ -13503,7 +13524,7 @@ class ChatPanel(QWidget):
             deny.hide()
             stop.show()
         except RuntimeError:
-            pass
+            _swallow("settle the SSH access card as granted")
 
     def ssh_access_closed(self, token: str, text: Optional[str]):
         """Settle the card: `text` replaces the title, or None removes the card."""
@@ -13521,7 +13542,7 @@ class ChatPanel(QWidget):
             for b in (allow, deny, stop):
                 b.hide()
         except RuntimeError:
-            pass
+            _swallow("settle the SSH access card as closed")
 
     def show_terminal_input_needed(self, kind: str, prompt: str):
         """Card: a command in the Cortex AI terminal is waiting for the user."""
@@ -13597,7 +13618,7 @@ class ChatPanel(QWidget):
             note.hide()
             btn.hide()
         except RuntimeError:
-            pass  # card already deleted
+            _swallow("settle the terminal input card")
 
     def on_chat_error(self, error: str):
         """Display a clean error message in the chat when the AI request fails."""
@@ -13687,7 +13708,7 @@ class ChatPanel(QWidget):
                 if self._active_edit_permission_card.isVisible():
                     return
             except RuntimeError:
-                pass
+                _swallow("check whether the edit permission card is still pending")
             self._active_edit_permission_card = None
 
         import uuid
@@ -13724,7 +13745,7 @@ class ChatPanel(QWidget):
             from src.utils.notifications import notify_permission_required
             notify_permission_required('AI wants to edit a file. Allow Once, Always Allow, or Reject.')
         except Exception:
-            pass
+            _swallow("raise the Windows notification for a file edit request")
 
     def on_project_access_request(self):
         """Show initial project access permission card.
@@ -13735,7 +13756,7 @@ class ChatPanel(QWidget):
                 if self._active_project_access_card.isVisible():
                     return
             except RuntimeError:
-                pass
+                _swallow("check whether the project access card is still pending")
             self._active_project_access_card = None
 
         import uuid
@@ -13772,7 +13793,7 @@ class ChatPanel(QWidget):
             from src.utils.notifications import notify_permission_required
             notify_permission_required('AI wants to access project files. Allow Once, Always Allow, or Reject.')
         except Exception:
-            pass
+            _swallow("raise the Windows notification for a project access request")
 
     def _on_project_access_response(self, decision: str):
         """Handle project access permission response.
@@ -13879,7 +13900,7 @@ class ChatPanel(QWidget):
             from src.utils.notifications import notify_permission_required
             notify_permission_required(f'AI wants to run: {command[:80]}')
         except Exception:
-            pass
+            _swallow("raise the Windows notification for a command request")
 
     def _on_permission_response(self, request_id, response, command):
         """Send permission response back to agent bridge.
@@ -13907,7 +13928,7 @@ class ChatPanel(QWidget):
                 try:
                     self._bridge.set_always_allowed(True)
                 except Exception:
-                    pass
+                    _swallow("persist always-allow on the bridge")
         
         # Emit signal for main_window to forward to bridge
         self.permission_decided.emit(decision)
@@ -13944,7 +13965,7 @@ class ChatPanel(QWidget):
                     if isinstance(data, list):
                         found.extend(q for q in data if isinstance(q, dict) and q.get("question"))
                 except Exception:
-                    pass
+                    _swallow("parse an emitted questions block")
             if found:
                 buf = _RE_QUESTIONS_COMPLETE.sub('', buf).strip()
             return buf, found
@@ -13978,7 +13999,7 @@ class ChatPanel(QWidget):
                     _card.setVisible(False)
                     _card.setMaximumHeight(0)
                 except Exception:
-                    pass
+                    _swallow("collapse an answered question card")
                 # Continue the conversation as a normal user turn
                 self.input_area.send_requested.emit(
                     f"{_h}: {ans}" if _h else str(ans))
@@ -14007,7 +14028,7 @@ class ChatPanel(QWidget):
                 card.setMaximumHeight(0)
                 card.update()
         except Exception:
-            pass
+            _swallow("hide the answered question card")
         # Send answer back to bridge
         if hasattr(self, '_bridge') and self._bridge:
             try:
@@ -14205,7 +14226,7 @@ class ChatPanel(QWidget):
                 if vp_w > 0:
                     w.setMaximumWidth(vp_w - 24)
             except RuntimeError:
-                pass
+                _swallow("cap the card width while restoring")
             self.col.addWidget(w)
             self.col.addStretch()
             return
@@ -14240,7 +14261,7 @@ class ChatPanel(QWidget):
             if vp_w > 0:
                 w.setMaximumWidth(vp_w - 24)
         except RuntimeError:
-            pass
+            _swallow("cap a new card to the viewport width")
         self.col.addWidget(w)
         # Re-add bottom stretch so remaining viewport space is below messages
         self.col.addStretch()
@@ -14270,7 +14291,7 @@ class ChatPanel(QWidget):
         try:
             self._thaw_viewport()
         except Exception:
-            pass
+            _swallow("thaw the viewport at the end of a rapid batch")
         # Single smooth scroll after the entire batch
         self._autoscroll()
 
@@ -14409,7 +14430,7 @@ class ChatPanel(QWidget):
                     try:
                         self._open_block._fit()
                     except RuntimeError:
-                        pass
+                        _swallow("refit the open block when the scroll maximum moves")
                     finally:
                         self._unlock_fit_guard = False
             # During streaming, just unlock, _autoscroll will pin soon.
@@ -14596,7 +14617,7 @@ class ChatPanel(QWidget):
             if not block.updatesEnabled():
                 block.setUpdatesEnabled(True)
         except RuntimeError:
-            pass
+            _swallow("thaw a frozen block")
 
     def _stream_line_px(self) -> int:
         """Pixel height of one body-text line in the live block.
@@ -14669,7 +14690,7 @@ class ChatPanel(QWidget):
             try:
                 a.watch(self.scroll.viewport())
             except RuntimeError:
-                pass
+                _swallow("attach the paint audit to the chat viewport")
         return a
 
     def _report_paint_audit(self) -> None:
@@ -14686,7 +14707,7 @@ class ChatPanel(QWidget):
                      getattr(self, '_prose_renders', 0),
                      ", ".join(f"{k}={v}({f} full)" for k, v, f in top))
         except Exception:
-            pass
+            _swallow("report the per-turn paint audit")
 
     def _render_frame(self):
         """Legacy no-op. Previously deferred thaw via 80ms timer, removed.
@@ -14725,12 +14746,12 @@ class ChatPanel(QWidget):
                     try:
                         self._pin_bottom(bar)
                     except RuntimeError:
-                        pass
+                        _swallow("hold the view at the bottom after a stabilized block")
                 else:
                     try:
                         bar.setValue(saved_pos)
                     except RuntimeError:
-                        pass
+                        _swallow("restore the scroll offset after a stabilized block")
                 self._thaw_viewport()
 
         return _ctx()
@@ -14748,7 +14769,7 @@ class ChatPanel(QWidget):
             QApplication.processEvents()
             self.scroll.ensureWidgetVisible(widget, 10, 30)
         except (RuntimeError, AttributeError):
-            pass
+            _swallow("scroll a card into view")
 
     def _autoscroll(self):
         """Debounced autoscroll to bottom, coalesces rapid layout changes
@@ -14952,7 +14973,7 @@ class ChatPanel(QWidget):
                     if w != self.scroll and w != self._header:
                         w.setMaximumWidth(max_w)
         except RuntimeError:
-            pass
+            _swallow("resize every card to the new viewport width")
         # Refit only matters when the viewport WIDTH changed, that's when
         # QTextBrowser text reflows and heights change. Height-only resizes
         # (lazy-load prepending content, overlay hide growing the pane) don't
@@ -15029,6 +15050,7 @@ class ChatPanel(QWidget):
                     tb_center = tb_top + tb.height() // 2
                     candidates.append((abs(tb_center - viewport_center), tb))
             except RuntimeError:
+                _swallow("measure a block against the restore viewport")
                 continue  # Widget destroyed
 
         if candidates:
@@ -15331,7 +15353,7 @@ class ChatPanel(QWidget):
                 self._empty_state.hide()
                 self._empty_state.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("remove the empty state before crash recovery")
             self._empty_state = None
         self._remove_stretch()
 
@@ -15424,7 +15446,7 @@ class ChatPanel(QWidget):
                             if hasattr(child, "_fit"):
                                 _restored_bodies.append(child)
             except Exception:
-                pass
+                _swallow("build one recovered message widget")
 
             self._thaw_viewport()
 
@@ -15461,7 +15483,7 @@ class ChatPanel(QWidget):
             try:
                 self._spinner_overlay.hide_overlay()
             except Exception:
-                pass
+                _swallow("hide the restore progress overlay")
             self._emit_restore_finished()
         return True
 
@@ -15493,7 +15515,7 @@ class ChatPanel(QWidget):
             self._empty_state.hide()
             self._empty_state.deleteLater()
         except RuntimeError:
-            pass
+            _swallow("remove the empty state when a restore begins")
         self._empty_state = None
         self._remove_stretch()
         try:
@@ -15550,7 +15572,7 @@ class ChatPanel(QWidget):
             try:
                 _ft.stop()
             except RuntimeError:
-                pass
+                _swallow("stop the stream frame timer when clearing a chat")
         self._stream_pending = ''
         self._prose_buf = ""
         self._think_buf = ""
@@ -15627,6 +15649,7 @@ class ChatPanel(QWidget):
                 item = self.col.itemAt(i)
                 w = item.widget()
             except RuntimeError:
+                _swallow("read one item while serialising the timeline")
                 continue
             if w is None:
                 continue
@@ -15653,6 +15676,7 @@ class ChatPanel(QWidget):
                 elif isinstance(w, CollapsibleCard):
                     continue  # skip other collapsible cards
             except RuntimeError:
+                _swallow("serialise one timeline widget")
                 continue
         # Messages that were never built into widgets still belong to the
         # conversation.
@@ -15709,7 +15733,7 @@ class ChatPanel(QWidget):
                 self._empty_state.hide()
                 self._empty_state.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("remove the empty state before a timeline load")
             self._empty_state = None
         self._remove_stretch()  # remove centering stretch
         # Freeze viewport + skip virtualize during restore
@@ -15744,7 +15768,7 @@ class ChatPanel(QWidget):
             bar = self.scroll.verticalScrollBar()
             self._scroll_positions[conv_id] = (bar.value(), bar.maximum())
         except RuntimeError:
-            pass
+            _swallow("save the scroll position for a conversation switch")
 
     def _finalize_restore_scroll(self, tries: int = 0):
         """After a chat restore, pin the view to the NEWEST message (or the
@@ -15779,7 +15803,7 @@ class ChatPanel(QWidget):
             try:
                 bar.valueChanged.disconnect(self._on_scroll_load_more)
             except (RuntimeError, TypeError):
-                pass  # not connected yet, fine
+                _swallow("disconnect the lazy loader before arming it")
             bar.valueChanged.connect(self._on_scroll_load_more)
             self._show_load_more_indicator()
         self._lazy_load_armed = True
@@ -15823,7 +15847,7 @@ class ChatPanel(QWidget):
                 target = saved_value
             QTimer.singleShot(100, lambda: bar.setValue(target))
         except RuntimeError:
-            pass
+            _swallow("restore the saved scroll position after a switch")
 
     # ── Lazy Loading Helpers (scroll-up pagination) ──────────────────────
 
@@ -15850,7 +15874,7 @@ class ChatPanel(QWidget):
                 self.col.removeWidget(lbl)
                 lbl.deleteLater()
             except RuntimeError:
-                pass
+                _swallow("remove the load-older-messages label")
             self._load_more_label = None
 
     def _on_scroll_load_more(self, value: int):
@@ -16028,7 +16052,7 @@ class ChatPanel(QWidget):
         try:
             self.restore_finished.emit()
         except RuntimeError:
-            pass          # panel already destroyed (project closed mid-restore)
+            _swallow("emit restore_finished")
 
     def load_timeline_async(self, data: dict):
         """Restore chat asynchronously, shows spinner, processes in batches.
@@ -16160,7 +16184,7 @@ class ChatPanel(QWidget):
                     self._empty_state.hide()
                     self._empty_state.deleteLater()
                 except RuntimeError:
-                    pass
+                    _swallow("remove the empty state before an async restore")
                 self._empty_state = None
             self._remove_stretch()
             _RESTORING_ACTIVE = True
@@ -16415,21 +16439,21 @@ class ChatPanel(QWidget):
         try:
             ia._clear_queued_chip()
         except Exception:
-            pass
+            _swallow("clear the queued prompt chip on a new chat")
         # The old chat's task list and context meter.
         try:
             self.todo_section.update_todos([])
             self.todo_section.setVisible(False)
         except Exception:
-            pass
+            _swallow("reset the task list on a new chat")
         try:
             self.context_bar.update_budget(0, 1)
         except Exception:
-            pass
+            _swallow("reset the context meter on a new chat")
         try:
             self._spinner_overlay.hide_overlay()
         except Exception:
-            pass
+            _swallow("hide the spinner overlay on a new chat")
         self._reset_scroll_intent()
 
     def _emit_theme_settled(self):
@@ -16515,7 +16539,7 @@ class ChatPanel(QWidget):
             if getattr(self, '_empty_state', None) is not None:
                 self._empty_state.retheme()
         except RuntimeError:
-            pass  # widgets torn down mid-switch
+            _swallow("retheme the empty state on a theme switch")
 
         # Snapshot the list, findChildren traverses the live tree which can
         # change mid-iteration if a block is destroyed by layout.
@@ -16600,7 +16624,7 @@ class ChatPanel(QWidget):
                     # Broad by design: ANY uncaught exception here escapes the
                     # QTimer slot and kills the whole batched chain, every
                     # card after this one would stay in the old theme forever.
-                    pass
+                    _swallow("retheme one card in the batched chain")
             if end < len(_cards):
                 QTimer.singleShot(0, lambda: _retheme_cards(end))
             else:
@@ -16701,7 +16725,7 @@ class ChatPanel(QWidget):
                     # escape the QTimer slot and strand the remaining
                     # browsers AND the whole cards phase (tables/code/mermaid
                     # would keep the old theme until restart).
-                    pass
+                    _swallow("re-adapt one browser's HTML to the new theme")
             dt_batch = (_time.perf_counter() - t_batch) * 1000
             log.info(
                 f"[THEME-AUDIT] chat_panel  html-readapt {start}-{end-1}/{len(_browsers)}  "
@@ -16835,7 +16859,7 @@ class ChatPanel(QWidget):
             lbl.hide()
             self.col.removeWidget(lbl)
         except (RuntimeError, Exception):
-            pass
+            _swallow("remove the semantic indexing status label")
 
     def set_input_text(self, text: str):
         self.input_area.input.setText(text)

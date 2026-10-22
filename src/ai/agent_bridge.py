@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import hashlib
+import inspect
 import contextlib
 import re
 import time
@@ -188,6 +189,7 @@ def update_project_memory(project_root: str = None, entry_type: str = "decisions
     return False
 
 log = get_logger("agent_bridge")
+from src.utils.silent import swallow as _swallow
 
 
 # ── Environment handed to child processes (Bash tool) ──────────────────────
@@ -290,7 +292,7 @@ def _get_default_read_chunk_lines() -> int:
             if parsed > 0:
                 return parsed
         except (TypeError, ValueError):
-            pass
+            _swallow("read the configured read-chunk size")
     return DEFAULT_READ_CHUNK_LINES_FALLBACK
 
 
@@ -725,6 +727,7 @@ def _load_diff_service():
             mod = _importlib.import_module(mod_path)
             return mod.get_diff_service()
         except Exception:
+            _swallow("load an optional capability")
             continue
     log.warning("[BRIDGE] DiffDataService not available")
     return None
@@ -736,6 +739,7 @@ def _load_cortex_diff_bridge():
             mod = _importlib.import_module(mod_path)
             return mod.CortexDiffBridge.instance()
         except Exception:
+            _swallow("load an optional capability")
             continue
     log.warning("[BRIDGE] CortexDiffBridge not available")
     return None
@@ -926,7 +930,7 @@ class _ContextBudgetTracker:
             if parsed > 0:
                 return parsed
         except Exception:
-            pass
+            _swallow()
         return 1_000_000
 
     def _effective_budget_tokens(self) -> int:
@@ -1289,7 +1293,7 @@ def _get_destructive_warning(command: str) -> 'Optional[str]':
 
         return get_destructive_command_warning(command)
     except Exception:
-        pass
+        _swallow("ask the safety module for a destructive-command warning")
     # Inline fallback: simple regex for the most common dangerous patterns
     import re as _re
     PATTERNS = [
@@ -1663,7 +1667,7 @@ class BridgeBashTool:
             from src.core.terminal_session import get_terminal_sessions
             _remote_now = get_terminal_sessions().remote_host()
         except Exception:
-            pass
+            _swallow()
         if warning and _is_delete_command(command) and not _remote_now:
             _affected = _extract_affected_paths(command)
             for _p in _affected:
@@ -1764,12 +1768,12 @@ class BridgeBashTool:
                                 sink.append(chunk)
                                 _last[0] = _time_mod.monotonic()
                         except Exception:
-                            pass
+                            _swallow()
                         finally:
                             try:
                                 stream.close()
                             except Exception:
-                                pass
+                                _swallow()
 
                     _t_out = _thr.Thread(target=_drain, args=(p.stdout, _out), daemon=True)
                     _t_err = _thr.Thread(target=_drain, args=(p.stderr, _err), daemon=True)
@@ -1799,7 +1803,7 @@ class BridgeBashTool:
                                         capture_output=True, timeout=5,
                                         creationflags=_sp.CREATE_NO_WINDOW)
                             except Exception:
-                                pass
+                                _swallow()
                         else:
                             # POSIX: the child runs in its own session
                             # (start_new_session above), so the group kill takes
@@ -1853,7 +1857,7 @@ class BridgeBashTool:
                     elif not waiting and _hw_open:
                         _hw_open.pop().__exit__(None, None, None)
                 except Exception:
-                    pass
+                    _swallow()
 
             try:
                 from src.core.terminal_session import get_terminal_sessions
@@ -3077,7 +3081,7 @@ def _mcp_prompt_section(mcp_names: List[str], deferred: bool,
         from src.ai.mcp_guidance import render as _render_guides
         how += _render_guides(guides or [])
     except Exception:
-        pass
+        _swallow("render the MCP tool guides into the prompt")
     return (
         "\n\n## MCP TOOLS (user-connected)\n" + how + waiting +
         "- Use the exact parameter names from the definition. Never guess: an "
@@ -3229,7 +3233,7 @@ class AgentWorker(QThread):
             log.error(f"[WORKER] Thread error: {exc}")
             self.error_occurred.emit(str(exc))
         except SystemExit:
-            pass  # interpreter shutting down
+            _swallow("exit the agent worker loop")
         finally:
             # Cancel all pending tasks WITHOUT gathering (run_until_complete
             # in the finally block triggers Python 3.14 Windows _poll crash).
@@ -3238,7 +3242,7 @@ class AgentWorker(QThread):
                 for task in pending:
                     task.cancel()
             except Exception:
-                pass
+                _swallow()
             # Close loop directly, cancelled tasks will be garbage collected.
             # Do NOT call run_until_complete here, it can segfault on Windows
             # when the event loop's internal _poll references destroyed sockets.
@@ -3249,12 +3253,12 @@ class AgentWorker(QThread):
                 import time
                 time.sleep(0.05)
             except Exception:
-                pass
+                _swallow()
             try:
                 if self._loop is not None and not self._loop.is_closed():
                     self._loop.close()
             except Exception:
-                pass
+                _swallow()
             self._loop = None
             self._is_running = False
 
@@ -3280,6 +3284,7 @@ class AgentWorker(QThread):
             try:
                 msg: WorkerMessage = await asyncio.wait_for(self._queue.get(), timeout=0.1)
             except asyncio.TimeoutError:
+                _swallow("poll the worker queue")
                 continue
             except Exception as exc:
                 log.error(f"[WORKER] Queue error: {exc}")
@@ -3332,6 +3337,7 @@ class AgentWorker(QThread):
                     try:
                         next_msg: WorkerMessage = get_fut.result()
                     except Exception:
+                        _swallow("collect a completed worker future")
                         continue
 
                     if next_msg.get("type") == "stop":
@@ -3361,7 +3367,7 @@ class AgentWorker(QThread):
                 try:
                     await self._current_chat_task
                 except (asyncio.CancelledError, Exception):
-                    pass
+                    _swallow()
             self._current_chat_task = None
 
     async def _cancel_active_task(self) -> None:
@@ -3375,7 +3381,7 @@ class AgentWorker(QThread):
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
         except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-            pass
+            _swallow("cancel the active chat task")
         self._current_chat_task = None
         log.info("[WORKER] Active chat task cancelled")
 
@@ -3523,7 +3529,7 @@ class AgentWorker(QThread):
             try:
                 self.response_ready.emit("")
             except Exception:
-                pass
+                _swallow()
             raise  # Re-raise so asyncio correctly marks the task as cancelled
         except Exception as exc:
             if not self.bridge.stop_requested:
@@ -3684,7 +3690,7 @@ class CortexAgentBridge(QObject):
             from src.agent.src.tools.grep_tool.grep_tool import prewarm_ripgrep
             prewarm_ripgrep()
         except Exception:
-            pass
+            _swallow()
         self._project_root: Optional[str] = None
         # What the agent may touch outside the project (src/ai/path_access.py)
         from src.ai.path_access import PathAccess as _PathAccess
@@ -3905,7 +3911,7 @@ class CortexAgentBridge(QObject):
                 if isinstance(_provider, str) and _provider:
                     self._enhancement_data["provider"] = _provider
         except Exception:
-            pass
+            _swallow()
         self._tool_ctx = CortexToolContext(self, _initial_model)
         self._current_model_id: str = _initial_model
 
@@ -4337,7 +4343,7 @@ class CortexAgentBridge(QObject):
                 if isinstance(_candidate, bool):
                     _mem_enabled = _candidate
         except Exception:
-            pass
+            _swallow()
         if _mem_enabled:
             memory_dir = self._get_memory_dir()
             self._ensure_memory_dir(memory_dir)
@@ -4654,7 +4660,7 @@ Required behavior:
             if _local_only:
                 prompt += "\n## Local-Only Mode\nUse only local models. No data should leave the machine. Do not call cloud-based APIs.\n"
         except Exception:
-            pass  # Non-critical
+            _swallow()  # Non-critical
 
         # ── Inject rules + skills + project context ──
         try:
@@ -4662,7 +4668,7 @@ Required behavior:
             if _extras:
                 prompt += "\n" + _extras + "\n"
         except Exception:
-            pass
+            _swallow()
 
         # ── Skill router: names + one-liners only; bodies load on demand ──
         # The full pack would cost ~25k chars per turn if injected whole;
@@ -4675,7 +4681,7 @@ Required behavior:
             if prompt_router:
                 prompt += "\n" + prompt_router + "\n"
         except Exception:
-            pass
+            _swallow()
 
         # P0 + P7: Append persistent directives (survive compaction)
         # These contain reading protocol, banned phrases, token budget,
@@ -4686,7 +4692,7 @@ Required behavior:
             from src.agent.src.utils.search_strategy import get_search_strategy_instruction
             prompt += "\n" + get_search_strategy_instruction() + "\n"
         except Exception:
-            pass  # Non-critical, strategy is guidance, not required
+            _swallow()  # Non-critical, strategy is guidance, not required
 
         # ── MCP tools: the model must KNOW they exist AND actually call them ──
         # Bug history #1: with a connected Tavily server the tool schemas WERE
@@ -4726,7 +4732,7 @@ Required behavior:
                     guides=_mgr.get_server_guides() if _mcp_defs else None,
                 )
         except Exception:
-            pass  # MCP is optional, prompt works without it
+            _swallow()  # MCP is optional, prompt works without it
         # Last on purpose: a one-line hint in the middle of a long prompt was
         # outweighed by the many sections after it.
         prompt += personalization_prompt()
@@ -4895,7 +4901,7 @@ Required behavior:
                     '', 'Your MEMORY.md is currently empty. When you save new memories, they will appear here.',
                 ]
             except Exception:
-                pass
+                _swallow()
             parts.append('\n'.join(fallback_lines))
 
         # --- Layer 2: Recent individual memory files ---
@@ -4910,7 +4916,7 @@ Required behavior:
                     from agent.src.project_memory.memory_age import memoryFreshnessNote as _mf
                 memoryFreshnessNote = cast(Callable[[float], str], _mf)
             except Exception:
-                pass
+                _swallow()
 
         try:
             mem_files: List[Tuple[float, str]] = []
@@ -4922,7 +4928,7 @@ Required behavior:
                             mtime = os.path.getmtime(fp)
                             mem_files.append((mtime, fp))
                         except OSError:
-                            pass
+                            _swallow()
             # Sort newest-first; load up to 10
             mem_files.sort(key=lambda x: x[0], reverse=True)
             loaded_files: List[str] = []
@@ -4938,7 +4944,7 @@ Required behavior:
                     else:
                         loaded_files.append(f'{header}\n{content}')
                 except Exception:
-                    pass
+                    _swallow()
             if loaded_files:
                 parts.append(
                     '## Other Memories\n\n'
@@ -4972,7 +4978,7 @@ Required behavior:
                     # Keep memory section lean by tail-inserting
                     parts.append(semantic_section)
         except ImportError:
-            pass
+            _swallow()
         except Exception as exc:
             log.debug('[BRIDGE] Semantic memory search skipped: %s', exc)
 
@@ -5036,13 +5042,13 @@ Required behavior:
                                 top_level.append(f"    ... (+more)")
                                 entry_count += 1
                         except OSError:
-                            pass
+                            _swallow()
 
                 if top_level:
                     lines.append("Project structure:")
                     lines.extend(top_level)
             except OSError:
-                pass
+                _swallow("list the project's top-level entries")
         except Exception:
             lines.append("(could not auto-detect project info)")
         result = "\n".join(lines) if lines else "(unknown project)"
@@ -5067,7 +5073,7 @@ Required behavior:
                 self._cached_git_summary = summary
                 return summary
         except Exception:
-            pass
+            _swallow()
         self._cached_git_summary = ''
         return ''
 
@@ -5124,7 +5130,7 @@ Required behavior:
                          len(messages), _substance)
                 return ""
         except Exception:
-            pass   # never lose a real checkpoint over this check
+            _swallow()   # never lose a real checkpoint over this check
 
         parts: List[str] = []
 
@@ -5329,7 +5335,7 @@ Required behavior:
                         },
                     )
             except (_SkipSemantic, ImportError):
-                pass
+                _swallow("update semantic memory for the checkpoint")
             except Exception as exc:
                 log.debug(f"[BRIDGE] Semantic memory update skipped: {exc}")
 
@@ -5352,9 +5358,9 @@ Required behavior:
                     os.remove(fpath)
                     log.debug(f"[BRIDGE] Removed old checkpoint: {os.path.basename(fpath)}")
                 except OSError:
-                    pass
+                    _swallow("delete one expired checkpoint")
         except Exception:
-            pass
+            _swallow()
 
     def _estimate_message_tokens(self, messages: List[Any]) -> int:
         """
@@ -5418,7 +5424,7 @@ Required behavior:
             try:
                 self._safe_emit(self.agent_status_update, 'ready', '')
             except Exception:
-                pass
+                _swallow()
 
     def _compact_messages_inner(self, messages: List[Any], PCM: Type[Any]) -> List[Any]:
         """
@@ -5444,7 +5450,7 @@ Required behavior:
                 'Compacting conversation, saving summary to memory...'
             )
         except Exception:
-            pass
+            _swallow()
 
         # Keep more tail messages to preserve recent editing context.
         # With 1M token context windows, 10 messages was absurdly conservative -
@@ -5502,7 +5508,7 @@ Required behavior:
                 'Saving conversation summary to a checkpoint...'
             )
         except Exception:
-            pass
+            _swallow()
         checkpoint_text = self._create_context_checkpoint(messages)
 
         # ── Use existing compact prompt system for summary formatting ──
@@ -5563,7 +5569,7 @@ Required behavior:
                 f'Conversation compacted, {dropped_count} messages summarized to a checkpoint'
             )
         except Exception:
-            pass
+            _swallow()
 
         return compacted
 
@@ -5630,6 +5636,7 @@ Required behavior:
                 if _prov.validate_api_key():
                     return pt
             except Exception:
+                _swallow("advance to the next queue item")
                 continue
         return None
 
@@ -5736,7 +5743,7 @@ Required behavior:
                         model_id = _settings_model
                         log.info(f"[BRIDGE] Model resolved from settings fallback: {model_id}")
                 except Exception:
-                    pass
+                    _swallow()
             model_lower = model_id.lower() if model_id else ""
             
             # Update tool context with current model (for model-aware file limits)
@@ -5948,7 +5955,7 @@ Required behavior:
                     if _max_turns_env > 0:
                         max_turns = min(max_turns, _max_turns_env)
                 except Exception:
-                    pass
+                    _swallow()
             elif _simple_query:
                 system_prompt = (
                     "You are Cortex AI Chat inside a coding IDE. "
@@ -6107,7 +6114,7 @@ Required behavior:
                     if _max_turns_env > 0:
                         max_turns = min(max_turns, _max_turns_env)
                 except Exception:
-                    pass
+                    _swallow()
 
             full_response = ""
 
@@ -6145,7 +6152,7 @@ Required behavior:
                 from src.ai.conversation_compactor import AutoCompactState
                 _auto_compact_state = AutoCompactState()
             except ImportError:
-                pass
+                _swallow()
 
             # ── PRESSURE: Throttle-only, NEVER abort ──
             # HIGH:     Standard throttle (GC + compact to 4 msgs + 2.5s sleep)
@@ -6243,7 +6250,7 @@ Required behavior:
                 try:
                     self._safe_emit(self.context_budget_update, int(_est_tokens), int(_budget), _prov_label)
                 except Exception:
-                    pass  # UI signal failures must never break the loop
+                    _swallow()  # UI signal failures must never break the loop
 
                 # ── Pre-overflow detection ──────────────────────────────────
                 # Estimate current context usage before sending to LLM.
@@ -6507,7 +6514,7 @@ Required behavior:
                                 else:
                                     max_tokens = calculated_tokens
                         except Exception as _mult_err:
-                            pass  # Use base max_tokens if multiplier not available
+                            _swallow("apply the model's max-tokens multiplier")
                         
                         _chat_kwargs: Dict[str, Any] = {
                             "retry_callback": _retry_notify
@@ -6849,7 +6856,7 @@ Required behavior:
                                 if isinstance(_tc_reset, dict):
                                     _tc_reset.update({"input": 0, "output": 0, "cached": 0})
                             except Exception:
-                                pass
+                                _swallow()
                             # chat_stream() is a blocking generator built on
                             # requests. Iterating it directly ran session.post()
                             # and iter_lines() inside an event-loop callback, so
@@ -6907,7 +6914,7 @@ Required behavior:
                                         try:
                                             self._safe_emit(self.exploreStart)
                                         except Exception:
-                                            pass
+                                            _swallow()
                                     for td in delta_list:
                                         idx = td.get("index", 0)
                                         if idx not in tool_acc:
@@ -6934,7 +6941,7 @@ Required behavior:
                                                 if _fp_match:
                                                     _fp = _fp_match.group(1)
                                             except Exception:
-                                                pass
+                                                _swallow()
                                             _activity_type = "write_file_streaming" if _tname == "Write" else "edit_file_streaming"
                                             _info = json.dumps({
                                                 "file_path": _fp or "(streaming)",
@@ -6944,7 +6951,7 @@ Required behavior:
                                             try:
                                                 self._safe_emit(self.tool_activity, _activity_type, _info, "streaming")
                                             except Exception:
-                                                pass
+                                                _swallow()
                                             _streaming_last_size[idx] = len(_partial_args)
                                             log.info(
                                                 f"[STREAM-WRITE] Started streaming card for {_tname}: "
@@ -6963,7 +6970,7 @@ Required behavior:
                                                     if _fp_match:
                                                         _fp = _fp_match.group(1)
                                                 except Exception:
-                                                    pass
+                                                    _swallow()
                                                 _activity_type = "write_file_streaming" if _tname == "Write" else "edit_file_streaming"
                                                 _info = json.dumps({
                                                     "file_path": _fp or "(streaming)",
@@ -6974,7 +6981,7 @@ Required behavior:
                                                 try:
                                                     self._safe_emit(self.tool_activity, _activity_type, _info, "streaming")
                                                 except Exception:
-                                                    pass
+                                                    _swallow()
                                 elif isinstance(chunk, str) and chunk.startswith("__REASONING_DELTA__:"):
                                     _reason_chunk = chunk[len("__REASONING_DELTA__:"):]
                                     if _reasoning_loop.tripped:
@@ -6993,7 +7000,7 @@ Required behavior:
                                         try:
                                             self._safe_emit(self.response_chunk, '<cortex_thought_start>')
                                         except Exception:
-                                            pass
+                                            _swallow()
                                     # ── Repetition loop: the same few lines over and over ──
                                     # The token budget below cannot see this; see reasoning_loop.py.
                                     if _reasoning_loop.feed(_reason_chunk):
@@ -7007,7 +7014,7 @@ Required behavior:
                                                 f'<cortex_thought_delta>{LOOP_NOTE}</cortex_thought_delta>')
                                             self._safe_emit(self.response_chunk, '<cortex_thought_end>')
                                         except Exception:
-                                            pass
+                                            _swallow()
                                         _thought_started = False
                                         continue
                                     # ── Thinking budget: detect infinite reasoning loops ──
@@ -7025,7 +7032,7 @@ Required behavior:
                                         try:
                                             self._safe_emit(self.response_chunk, '<cortex_thought_end>')
                                         except Exception:
-                                            pass
+                                            _swallow()
                                         _thought_started = False
                                         continue  # SKIP emitting this thinking chunk, stop the stream
                                     if _thinking_budget_exceeded:
@@ -7034,7 +7041,7 @@ Required behavior:
                                         self._safe_emit(self.response_chunk,
                                             f'<cortex_thought_delta>{_reason_chunk}</cortex_thought_delta>')
                                     except Exception:
-                                        pass
+                                        _swallow()
                                 # NOTE: Do NOT also emit tool_activity for reasoning chunks.
                                 # The response_chunk path (above) already routes thinking text
                                 # via native_chat_bridge -> thinking_delta -> chat_panel.
@@ -7049,7 +7056,7 @@ Required behavior:
                                         try:
                                             self._safe_emit(self.response_chunk, '<cortex_thought_end>')
                                         except Exception:
-                                            pass
+                                            _swallow()
                                     # Normal text content, stream via response_chunk
                                     # so native_chat_bridge routes it as text_delta in real-time.
                                     # First text of a later turn: break the
@@ -7066,14 +7073,14 @@ Required behavior:
                                     try:
                                         self._safe_emit(self.response_chunk, chunk)
                                     except Exception:
-                                        pass
+                                        _swallow()
                                     # Emit exploreEnd when response text starts (all tools resolved)
                                     if _explore_started:
                                         _explore_started = False
                                         try:
                                             self._safe_emit(self.exploreEnd)
                                         except Exception:
-                                            pass
+                                            _swallow()
                                     # Clean thought/reasoning content from stored text
                                     _clean = re.sub(r'<think[^>]*>.*?</think>', '', chunk, flags=re.DOTALL)
                                     _clean = re.sub(r'<thinking[^>]*>.*?</thinking>', '', _clean, flags=re.DOTALL)
@@ -7156,7 +7163,7 @@ Required behavior:
                                 messages.append(PCM(role="system", content=PERSISTENT_DIRECTIVES))
                                 log.info("[SAFETY] Persistent directives re-injected after compaction")
                             except Exception:
-                                pass
+                                _swallow()
                             continue   # retry with compacted history
                         elif (_is_rate_err or _is_timeout_err) and not getattr(self, '_failover_exhausted', False):
                             # Mistral-only recovery: on timeout with large model, downgrade model tier once.
@@ -7336,7 +7343,7 @@ Required behavior:
                         self._safe_emit(self.response_chunk, _err_recovery_msg)
                         break
                 except Exception:
-                    pass
+                    _swallow()
 
                 # If stop was requested, abort the entire agentic loop immediately
                 if self._stop_requested:
@@ -7942,7 +7949,7 @@ Required behavior:
                                         self._safe_emit(self.todos_updated,
                                                         list(self._current_todos), "")
                                     except Exception:
-                                        pass    # panel refresh is best-effort
+                                        _swallow("refresh the task panel")
                                     break
                 
                 # ── Post-mutation tracking (no forcing, AI decides workflow) ──
@@ -8059,7 +8066,7 @@ Required behavior:
                         try:
                             self.todos_updated.emit(list(self._current_todos), "")
                         except Exception:
-                            pass
+                            _swallow()
                         try:
                             _total = len(self._current_todos)
                             _completed = sum(
@@ -8071,7 +8078,7 @@ Required behavior:
                                 _completed, _total, _pct, f"{_completed}/{_total} tasks complete ({_pct}%)"
                             )
                         except Exception:
-                            pass
+                            _swallow()
                         
                         self._continue_cycle_count = 0
                         self._last_pending_ids = set()
@@ -8149,7 +8156,7 @@ Required behavior:
                                         f'Continuing task (cycle {self._auto_continue_cycle}/{self._MAX_AUTO_CONTINUE_CYCLES})...'
                                     )
                                 except Exception:
-                                    pass
+                                    _swallow("store the compacted message list")
                             # Store compacted messages for next _call_llm entry
                             self._auto_continue_compacted = list(messages)
                             self._auto_continue_requested = True
@@ -8350,7 +8357,7 @@ Required behavior:
                     try:
                         batched_signal.emit(*batched_args)
                     except Exception:
-                        pass
+                        _swallow()
                 self._signal_batch.clear()
             # Reset window
             self._signal_rate_window_start = _now
@@ -8362,20 +8369,20 @@ Required behavior:
             if _isdeleted(self):
                 return  # Object destroyed, silently drop
         except ImportError:
-            pass
+            _swallow()
         except Exception:
-            pass  # If sip check itself fails, try emit anyway
+            _swallow()  # If sip check itself fails, try emit anyway
         try:
             signal.emit(*args)
         except AttributeError:
             # Signal is still the class-level pyqtSignal descriptor
             # (not yet bound to a QObject instance). Expected during
-            # startup/shutdown transitions, silently skip.
-            pass
+            # startup/shutdown transitions.
+            _swallow("emit a signal that is not bound to an instance yet")
         except RuntimeError:
-            pass  # C++ object destroyed mid-emit, non-recoverable, skip
+            _swallow()  # C++ object destroyed mid-emit, non-recoverable, skip
         except Exception:
-            pass  # Any other emit failure, catch and survive
+            _swallow()  # Any other emit failure, catch and survive
 
     def _build_activity_info(
         self, activity: str, tool_name: str, args: Dict[str, Any],
@@ -8399,7 +8406,7 @@ Required behavior:
                     if not rel.startswith('..'):
                         fp = rel.replace('\\', '/')
                 except ValueError:
-                    pass
+                    _swallow("build the relative path for an activity row")
 
             if activity == "read_file":
                 info["file_path"] = fp
@@ -8530,7 +8537,7 @@ Required behavior:
                         if isinstance(_parsed, dict):
                             info["all_done"] = bool(cast(Dict[str, Any], _parsed).get("allDone"))
                     except Exception:
-                        pass
+                        _swallow()
 
             elif activity in ("write_file", "create_file"):
                 info["file_path"] = fp
@@ -8605,7 +8612,7 @@ Required behavior:
                             info["numResults"] = parsed.get("numResults", len(results))
                             info["searchTimeMs"] = parsed.get("searchTimeMs", 0)
                     except Exception:
-                        pass
+                        _swallow()
 
             elif activity == "run_command":
                 cmd = args.get("command", "")
@@ -8642,7 +8649,7 @@ Required behavior:
                             info["team_id"] = parsed_map.get("teamId", "")
                             info["message"] = parsed_map.get("message", "")
                     except Exception:
-                        pass
+                        _swallow()
 
             elif activity in ("task_create", "task_update", "task_list", "task_get", "task_stop"):
                 info["task_id"] = args.get("taskId", "")
@@ -8655,7 +8662,7 @@ Required behavior:
                             info["message"] = parsed_map.get("message", "")
                             info["task_id"] = parsed_map.get("taskId", info["task_id"])
                     except Exception:
-                        pass
+                        _swallow()
 
             elif activity == "web_search":
                 info["query"] = args.get("query", "")
@@ -8888,14 +8895,14 @@ Required behavior:
                 import traceback as _tb
                 log.debug(f"[TOOL-SHIELD] {tool_name} traceback:\n{''.join(_tb.format_exception(type(exc), exc, exc.__traceback__))}")
             except Exception:
-                pass
+                _swallow()
             # Emit error activity card so the UI shows the failure
             activity = _TOOL_TO_ACTIVITY_NAME.get(tool_name, tool_name.lower())
             error_info = self._build_activity_info(activity, tool_name, args, f"Tool crashed: {exc}", "error")
             try:
                 self._safe_emit(self.tool_activity, activity, error_info, "error")
             except Exception:
-                pass
+                _swallow()
             # Feed error result back to LLM so it can try a different approach
             messages.append(
                 PCM(role="tool", content=f"Tool crashed: {type(exc).__name__}: {exc}", tool_call_id=tool_id)
@@ -9032,7 +9039,7 @@ Required behavior:
         try:
             self._tool_call_success[tool_id] = bool(result.success)
         except Exception:
-            pass
+            _swallow()
 
         # ── Usage Tracker: record tool call ────────────────────────
         # Duration excludes time a human spent on a permission card -
@@ -9046,7 +9053,7 @@ Required behavior:
                              - _human_wait_before)
                 _ut.record_tool_call(tool_name, max(0.0, _elapsed))
         except Exception:
-            pass
+            _swallow()
 
         # ── Record in circuit breaker ────────────────────────────────
         _error_text = str(result.error) if not result.success and result.error else ""
@@ -9099,7 +9106,7 @@ Required behavior:
                             _action = "Created" if activity == "create_file" else "Modified"
                             update_cortex_project_memory("decisions", f"{_action}: {_mp}")
                     except Exception:
-                        pass
+                        _swallow()
             result_payload: Any = result.result
             if isinstance(result_payload, dict):
                 result_str = json.dumps(cast(Dict[str, Any], result_payload))
@@ -9127,7 +9134,7 @@ Required behavior:
                             })
                             self._safe_emit(self.exploreFile, _explore_json)
                         except Exception:
-                            pass
+                            _swallow()
             # ── PlanBuild hook: emit plan_created when a plan is successfully created ──
             if tool_name == "PlanBuild" and 'plan_id' in (result_payload if isinstance(result_payload, dict) else {}):
                 try:
@@ -9158,7 +9165,7 @@ Required behavior:
                             _exit_code = _payload[_key]  # pyright: ignore[reportUnknownMemberType]
                             break
             except Exception:
-                pass
+                _swallow()
         self._recent_tool_results.append((tool_name, bool(result.success), result_str[:200], _exit_code))
         if len(self._recent_tool_results) > self._max_recent_results:
             self._recent_tool_results = self._recent_tool_results[-self._max_recent_results:]
@@ -9178,7 +9185,7 @@ Required behavior:
             if len(self._run_steps) > 25:
                 self._run_steps = self._run_steps[-25:]
         except Exception:
-            pass
+            _swallow()
 
         # Feed result back to LLM, persist large results to disk instead of truncating.
         # Results exceeding
@@ -9308,7 +9315,7 @@ Required behavior:
                                 self._test_framework = "jest"
                                 return "jest"
                         except Exception:
-                            pass
+                            _swallow()
         except Exception as exc:
             log.warning(f"[VERIFY] Error detecting test framework: {exc}")
 
@@ -9447,9 +9454,9 @@ Required behavior:
                                 if ext.lower() in _web_exts:
                                     return True
                     except OSError:
-                        pass
+                        _swallow("stat a project entry while detecting web projects")
         except OSError:
-            pass
+            _swallow()
 
         # Fallback: no framework detected at all, likely web/static
         return framework is None
@@ -9594,7 +9601,7 @@ Required behavior:
             try:
                 self._tool_circuit_breaker._disabled_tools.clear()
             except Exception:
-                pass
+                _swallow()
 
         tool_fails: Dict[str, int] = cast(Dict[str, int], snapshot.get("tool_fail_counts", {}))
         if tool_fails:
@@ -9757,8 +9764,99 @@ Required behavior:
                 try:
                     await task
                 except (asyncio.CancelledError, Exception):
-                    pass
+                    _swallow()
                 raise asyncio.TimeoutError()
+
+    # ── Tool dispatch: one table, one path ───────────────────────────────
+    # There were two mechanisms here: this table, and a five-branch `elif` chain
+    # on the tool name that ran after it for every name the table missed.
+    # Nothing failed when a tool was added to one and forgotten in the other, so
+    # the chain quietly accumulated the bridge-native tools and nine entries
+    # that no schema has ever offered. A model that calls an unhandled name gets
+    # "Unknown tool", which reads like a transient error and gets retried.
+    #
+    # Adding a tool now means adding four things, and the drift test in
+    # tests/test_tool_dispatch.py fails if any two of them disagree:
+    #   1. a schema in _TOOL_SCHEMAS (or a prefix family, for MCP)
+    #   2. an entry here
+    #   3. the handler method, with signature (self, tool_id, args)
+    #   4. a prefix rule, only for a family whose names cannot be listed
+    _TOOL_HANDLERS: Dict[str, str] = {
+        "Read": "_dispatch_read",
+        "Write": "_dispatch_write",
+        "Edit": "_dispatch_edit",
+        "Glob": "_dispatch_glob",
+        "Grep": "_dispatch_grep",
+        "SementicSearch": "_dispatch_semantic_search",
+        "TodoWrite": "_dispatch_todo_write",
+        "AskUserQuestion": "_dispatch_ask_user_question",
+        "WebFetch": "_dispatch_web_fetch",
+        "WebSearch": "_dispatch_web_search",
+        "Bash": "_dispatch_bash",
+        "LS": "_dispatch_ls",
+        "BashOutput": "_dispatch_bash_output",
+        "KillShell": "_dispatch_kill_shell",
+        "LivePreview": "_dispatch_live_preview",
+        "Loop": "_dispatch_loop",
+        "Skill": "_dispatch_skill",
+        "SecurityScan": "_dispatch_security_scan",
+        MCP_SEARCH_TOOL: "_dispatch_mcp_search",
+    }
+
+    #: Accepted spellings that are deliberately not offered. `PowerShell` is
+    #: the platform name for the same behaviour as `Bash`; models emit it, and
+    #: refusing it would be a correctness bug dressed as strictness. The
+    #: correctly-spelled `SemanticSearch` is in PLAN_ALLOWED_TOOLS for the same
+    #: reason: the registered name is misspelled, so both must resolve.
+    _TOOL_ALIASES: Dict[str, str] = {
+        "PowerShell": "_dispatch_bash",
+        "SemanticSearch": "_dispatch_semantic_search",
+    }
+
+    #: Dynamic families. A user's MCP servers are arbitrary, so these names
+    #: cannot be listed: `mcp__<server>__<tool>`.
+    _TOOL_PREFIX_HANDLERS: Tuple[Tuple[str, str], ...] = (
+        ("mcp__", "_dispatch_mcp_external"),
+    )
+
+    #: Handlers whose tool is in no schema, so it can never be called. These are
+    #: a half-built task/team/plan feature plus one pre-`mcp__` stub. They are
+    #: quarantined rather than deleted: deleting is a product decision, and the
+    #: bodies are the only implementation that exists. The point of listing them
+    #: is that the set is exact, so a tenth unreachable handler fails the drift
+    #: test instead of joining them silently.
+    _UNOFFERED_TOOL_HANDLERS: Dict[str, str] = {
+        "TaskCreate": "_dispatch_task_create",
+        "TaskUpdate": "_dispatch_task_update",
+        "TaskList": "_dispatch_task_list",
+        "TaskGet": "_dispatch_task_get",
+        "TaskStop": "_dispatch_task_stop",
+        "TeamCreate": "_dispatch_team_create",
+        "TeamDelete": "_dispatch_team_delete",
+        "PlanBuild": "_dispatch_plan_build",
+        "MCP": "_dispatch_mcp",
+    }
+
+    @staticmethod
+    def resolve_tool_handler(tool_name: str) -> Optional[str]:
+        """Name of the method that handles `tool_name`, or None.
+
+        Static and side-effect free on purpose: the drift test resolves every
+        offered name without constructing a bridge or a QApplication.
+
+        Order is exact table, then alias, then prefix family. Alias before
+        prefix so a concrete name always wins over a broad rule.
+        """
+        handler = CortexAgentBridge._TOOL_HANDLERS.get(tool_name)
+        if handler is not None:
+            return handler
+        handler = CortexAgentBridge._TOOL_ALIASES.get(tool_name)
+        if handler is not None:
+            return handler
+        for prefix, prefix_handler in CortexAgentBridge._TOOL_PREFIX_HANDLERS:
+            if tool_name.startswith(prefix):
+                return prefix_handler
+        return None
 
     async def _dispatch_tool(
         self, tool_name: str, tool_id: str, args: Dict[str, Any]
@@ -9810,7 +9908,7 @@ Required behavior:
                                 ),
                             )
             except ImportError:
-                pass
+                _swallow()
             except Exception as exc:
                 log.debug(f"[AUTONOMY] Gate check skipped: {exc}")
 
@@ -9875,7 +9973,7 @@ Required behavior:
                         from src.utils.notifications import notify_permission_required
                         notify_permission_required("File creation blocked by safety settings")
                     except Exception:
-                        pass
+                        _swallow()
                     return ToolResult(
                         tool_id=tool_id, result=None, success=False,
                         error=_msg
@@ -9889,7 +9987,7 @@ Required behavior:
                         from src.utils.notifications import notify_permission_required
                         notify_permission_required("Terminal commands blocked by safety settings")
                     except Exception:
-                        pass
+                        _swallow()
                     return ToolResult(
                         tool_id=tool_id, result=None, success=False,
                         error=_msg
@@ -9906,7 +10004,7 @@ Required behavior:
                             from src.utils.notifications import notify_permission_required
                             notify_permission_required("File deletion blocked by safety settings")
                         except Exception:
-                            pass
+                            _swallow()
                         return ToolResult(
                             tool_id=tool_id, result=None, success=False,
                             error=_msg
@@ -9927,13 +10025,13 @@ Required behavior:
                             from src.utils.notifications import notify_permission_required
                             notify_permission_required("Destructive command blocked, approval required")
                         except Exception:
-                            pass
+                            _swallow()
                         return ToolResult(
                             tool_id=tool_id, result=None, success=False,
                             error=_msg
                         )
             except Exception:
-                pass  # Non-critical, settings read failure shouldn't block tools
+                _swallow()  # Non-critical, settings read failure shouldn't block tools
 
             # Track TodoWrite streaks so we can short-circuit planning loops.
             if tool_name == "TodoWrite":
@@ -9987,191 +10085,26 @@ Required behavior:
                                 self._build_activity_info(activity, tool_name, args, _msg, "error"), "error")
                             return ToolResult(tool_id=tool_id, result=None, success=False, error=_msg)
                 except Exception:
-                    pass  # If check fails, let the tool try (it has its own fallback)
+                    _swallow()  # If check fails, let the tool try (it has its own fallback)
 
-            # ---- Dispatch via registry map (Phase B) ----
-            _TOOL_DISPATCH_MAP = {
-                "Read":            self._dispatch_read,
-                "Write":           self._dispatch_write,
-                "Edit":            self._dispatch_edit,
-                "Glob":            self._dispatch_glob,
-                "Grep":            self._dispatch_grep,
-                "SementicSearch":  self._dispatch_semantic_search,
-                "TodoWrite":       self._dispatch_todo_write,
-                "AskUserQuestion": self._dispatch_ask_user_question,
-                "WebFetch":        self._dispatch_web_fetch,
-                "WebSearch":       self._dispatch_web_search,
-                "TaskCreate":      self._dispatch_task_create,
-                "TaskUpdate":      self._dispatch_task_update,
-                "TaskList":        self._dispatch_task_list,
-                "TaskGet":         self._dispatch_task_get,
-                "TaskStop":        self._dispatch_task_stop,
-                "MCP":             self._dispatch_mcp,
-                "TeamCreate":      self._dispatch_team_create,
-                "TeamDelete":      self._dispatch_team_delete,
-                "PlanBuild":       self._dispatch_plan_build,
-                "Loop":            self._dispatch_loop,
-                "Skill":           self._dispatch_skill,
-                "SecurityScan":    self._dispatch_security_scan,
-            }
-
-            handler = _TOOL_DISPATCH_MAP.get(tool_name)
-            if handler is not None:
-                return await handler(tool_id, args)
-
-            # ---- Bridge-native tools with special pre-processing ----
-            if tool_name in ("Bash", "PowerShell"):
-                command = args.get("command", "")
-                # Check sandbox policy if enabled (lazy init)
-                if self._sandbox_manager is None:
-                    try:
-                        from src.core.sandbox_manager import get_sandbox_manager
-                        self._sandbox_manager = get_sandbox_manager()
-                    except Exception:
-                        pass
-                if self._sandbox_manager and self._sandbox_manager.is_enabled():
-                    allowed, reason = self._sandbox_manager.is_command_allowed(command)
-                    if not allowed:
-                        result = ToolResult(
-                            tool_id=tool_id,
-                            result=None,
-                            success=False,
-                            error=f"[Sandbox] Command blocked: {reason}",
-                        )
-                        return result
-                result = await self._bash_tool.execute(args)
-                result.tool_id = tool_id
-                # Refresh file tree after shell commands, covers file create/delete/move
-                # that the AI makes via Bash/PowerShell (not tracked by Write/Edit tools)
-                # Only refresh for commands that actually modify the filesystem
-                _READ_ONLY_PREFIXES = (
-                    'git status', 'git log', 'git diff', 'git show', 'git branch',
-                    'git remote', 'git stash list', 'git tag', 'git rev-parse',
-                    'ls', 'dir', 'cat', 'type', 'head', 'tail', 'wc', 'find',
-                    'grep', 'rg', 'select-string', 'echo', 'pwd', 'whoami',
-                    'node -v', 'python --version', 'pip list', 'npm list',
-                    'test-path', 'test -f', 'test -d',
-                )
-                _cmd_stripped = command.strip().lower()
-                _is_read_only = any(_cmd_stripped.startswith(p) for p in _READ_ONLY_PREFIXES)
-                if result.success and self._project_root and not _is_read_only:
-                    try:
-                        log.debug(f"[BRIDGE] File tree refresh triggered by Bash: {command[:80]}")
-                        self.file_tree_refresh_needed.emit(self._project_root)
-                    except Exception:
-                        pass
-                elif _is_read_only:
-                    log.debug(f"[BRIDGE] File tree refresh SKIPPED (read-only): {command[:80]}")
-                # Close editor tabs for files the agent moved to the Recycle Bin.
-                try:
-                    _recycled = (result.result or {}).get("recycled_paths") if isinstance(result.result, dict) else None
-                    if _recycled:
-                        self.files_deleted_by_agent.emit(list(_recycled))
-                except Exception:
-                    pass
-                return result
-            elif tool_name == "LS":
-                _ls_path = str(args.get("path", "") or "")
-                if _ls_path:
-                    if not os.path.isabs(_ls_path) and self._project_root:
-                        _ls_path = os.path.join(self._project_root, _ls_path)
-                    _deny = self._access.check(_ls_path, "search")
-                    if _deny:
-                        log.warning(f"[ACCESS] LS blocked: {_ls_path}")
-                        return ToolResult(tool_id=tool_id, result=None, success=False, error=_deny)
-                result = await self._ls_tool.execute(args)
-                result.tool_id = tool_id
-                return result
-            elif tool_name == "BashOutput":
-                result = await self._bash_output_tool.execute(args)
-                result.tool_id = tool_id
-                return result
-            elif tool_name == "KillShell":
-                result = await self._kill_shell_tool.execute(args)
-                result.tool_id = tool_id
-                return result
-            elif tool_name == "LivePreview":
-                # UI tool: render/test HTML in the Live Preview panel. All Qt
-                # widget access must happen on the UI thread, so the request
-                # is shipped over a queued signal and this (agent) thread
-                # waits on an Event the UI slot sets when done. Executor keeps
-                # the event loop free while waiting; 15s timeout so a stuck UI
-                # can never deadlock the agent.
-                import threading as _threading
-                _action = str(args.get("action", "")).strip().lower()
-                _path = str(args.get("path", "") or "")
-                if _action not in ("open", "read", "console", "close"):
-                    return ToolResult(tool_id=tool_id, result=None, success=False,
-                                      error=f"LivePreview: unknown action {_action!r} "
-                                            f"(use open/read/console/close)")
-                if _action == "open":
-                    if not _path:
-                        return ToolResult(tool_id=tool_id, result=None, success=False,
-                                          error="LivePreview open: 'path' is required")
-                    if not os.path.isabs(_path) and self._project_root:
-                        _path = os.path.join(self._project_root, _path)
-                    _deny = self._access.check(_path, "read")
-                    if _deny:
-                        return ToolResult(tool_id=tool_id, result=None, success=False, error=_deny)
-                    if not os.path.isfile(_path):
-                        return ToolResult(tool_id=tool_id, result=None, success=False,
-                                          error=f"LivePreview open: file not found: {_path}")
-                _resp: Dict[str, Any] = {"event": _threading.Event(), "result": None, "error": None}
-                self._safe_emit(self.live_preview_tool_request, _action, _path, _resp)
-                _done = await asyncio.get_event_loop().run_in_executor(
-                    None, _resp["event"].wait, 15)
-                if not _done:
-                    return ToolResult(tool_id=tool_id, result=None, success=False,
-                                      error="LivePreview: UI did not respond within 15s "
-                                            "(panel unavailable?)")
-                if _resp["error"]:
-                    return ToolResult(tool_id=tool_id, result=None, success=False,
-                                      error=str(_resp["error"]))
-                return ToolResult(tool_id=tool_id, result=_resp["result"], success=True)
-            elif tool_name == MCP_SEARCH_TOOL:
-                return self._dispatch_mcp_search(tool_id, args or {})
-            elif tool_name.startswith("mcp__"):
-                # External MCP tool (mcp__<server>__<tool>), routed to the
-                # MCP manager, which owns the server connections on its own
-                # thread. Runs in an executor so a slow external server can
-                # never stall this event loop. Permission/autonomy gates
-                # above already applied to this call like any other tool.
-                from src.services.mcp_manager import get_mcp_manager
-                _mgr = get_mcp_manager()
-
-                # Load-first rule (deferred mode only): a tool whose definition
-                # the model has not loaded is refused, not run on guessed
-                # parameters. This is the check that would have turned the
-                # `selector`-instead-of-`target` screenshot into a one-step fix.
-                if (getattr(self, "_mcp_deferred", False)
-                        and tool_name not in getattr(self, "_mcp_offered", set())
-                        and tool_name not in self._mcp_loaded_tools_set()):
-                    return ToolResult(tool_id=tool_id, result=None, success=False, error=(
-                        f"{tool_name}'s definition is not loaded, so its parameter "
-                        f"names would be a guess. Call {MCP_SEARCH_TOOL} with query "
-                        f"\"select:{tool_name}\" first, then call it again with "
-                        f"the exact parameters it shows."))
-
-                # Same affordance as the skill badge: show which server the
-                # agent reached, from the server part of the tool name.
-                _announce_mcp = getattr(self, "_announce_mcp_in_use", None)
-                if _announce_mcp is not None:
-                    _announce_mcp(tool_name)
-                _ok, _text, _images = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: _mgr.call_tool_full(tool_name, args or {}))
-
-                # Images (screenshots) go to the model itself. They used to be
-                # replaced by a sentence saying an image existed, so the agent
-                # went looking for the file - which Read refused, because the
-                # server wrote it outside the project.
-                if _images:
-                    _text = self._attach_mcp_images(tool_name, _images, _text)
-                if _ok:
-                    return ToolResult(tool_id=tool_id, result=_text, success=True)
-                return ToolResult(tool_id=tool_id, result=None, success=False, error=_text)
-            else:
+            # ---- Dispatch: the table is the only path ----
+            _handler_name = self.resolve_tool_handler(tool_name)
+            if _handler_name is None:
                 return ToolResult(tool_id=tool_id, result=None, success=False,
                                   error=f"Unknown tool: {tool_name!r}")
+            _handler = getattr(self, _handler_name)
+            # A prefix family is the one shape that needs the name itself: the
+            # handler cannot know which unlistable MCP tool it was called for.
+            if any(tool_name.startswith(p) for p, _ in self._TOOL_PREFIX_HANDLERS):
+                _handler_result = _handler(tool_id, args or {}, tool_name)
+            else:
+                _handler_result = _handler(tool_id, args or {})
+            # Most handlers are coroutines; _dispatch_mcp_search is not, and a
+            # table that can hold only one shape would force it to lie about it.
+            if inspect.isawaitable(_handler_result):
+                _handler_result = await _handler_result
+            return _handler_result
+
         except Exception as exc:
             log.error(f"[BRIDGE] Tool {tool_name!r} raised: {exc}")
             return ToolResult(tool_id=tool_id, result=None, success=False, error=str(exc))
@@ -10179,104 +10112,26 @@ Required behavior:
     # ---- Real tool dispatchers ----------------------------------------
 
     # ── Smart Chunk Boundary Snapping ──────────────────────────────────
-    # When the AI reads a file with offset/limit, the chunk end may fall
-    # in the middle of a function/class. This snaps the boundary to the
-    # nearest structural break (next function/class definition) within a
-    # small window, so the LLM always gets complete logical units.
-    #
-    # Chunking snaps to structural breaks, using regex instead of full
-    # AST parsing for speed and broad language support.
-
-    _RE_BOUNDARY_PYTHON = re.compile(
-        r'^(\s*)(async\s+)?(def|class)\s+\w+', re.MULTILINE
-    )
-    _RE_BOUNDARY_JS_TS = re.compile(
-        r'^(\s*)(export\s+)?(default\s+)?(async\s+)?(function|class|const\s+\w+\s*=\s*(async\s+)?\()|'
-        r'^(\s*)(async\s+)?(\w+)\s*\([^)]*\)\s*\{', re.MULTILINE
-    )
-    _RE_BOUNDARY_JAVA = re.compile(
-        r'^\s*(public|private|protected)?\s*(static\s+)?(class|interface|enum|\w+\s+\w+\s*\()', re.MULTILINE
-    )
-    _RE_BOUNDARY_GO = re.compile(
-        r'^(func\s+|type\s+\w+\s+struct)', re.MULTILINE
-    )
-    _RE_BOUNDARY_RUST = re.compile(
-        r'^\s*(pub\s+)?(fn|struct|enum|trait|impl|mod)\s+', re.MULTILINE
-    )
-    _RE_BOUNDARY_C_CPP = re.compile(
-        r'^\s*(class|struct|enum)\s+\w+|^\w[\w\s*:&<>]+\s+\w+\s*\([^)]*\)\s*\{', re.MULTILINE
-    )
-
-    _BOUNDARY_PATTERNS = {
-        '.py':   _RE_BOUNDARY_PYTHON,
-        '.pyw':  _RE_BOUNDARY_PYTHON,
-        '.js':   _RE_BOUNDARY_JS_TS,
-        '.mjs':  _RE_BOUNDARY_JS_TS,
-        '.jsx':  _RE_BOUNDARY_JS_TS,
-        '.ts':   _RE_BOUNDARY_JS_TS,
-        '.tsx':  _RE_BOUNDARY_JS_TS,
-        '.java': _RE_BOUNDARY_JAVA,
-        '.go':   _RE_BOUNDARY_GO,
-        '.rs':   _RE_BOUNDARY_RUST,
-        '.c':    _RE_BOUNDARY_C_CPP,
-        '.cpp':  _RE_BOUNDARY_C_CPP,
-        '.cc':   _RE_BOUNDARY_C_CPP,
-        '.cxx':  _RE_BOUNDARY_C_CPP,
-        '.h':    _RE_BOUNDARY_C_CPP,
-        '.hpp':  _RE_BOUNDARY_C_CPP,
-    }
+    # The patterns and the snapping logic live in src/ai/chunk_boundary.py (W1):
+    # pure functions, testable without Qt. They were duplicated here, and the
+    # copy looked its table up through a class name this module has never
+    # defined (the class is CortexAgentBridge), so every call raised NameError
+    # and the snapping never ran. Nothing reported it, because the tool wrapper
+    # turns any exception into an error result.
 
     @staticmethod
     def _snap_chunk_boundary(
         lines: List[str], target_end: int, file_ext: str, window: int = 15
     ) -> int:
+        """Delegate to src/ai/chunk_boundary.py, which is pure and tested.
+
+        Keeping a thin wrapper rather than switching the call site means the
+        Read path still reads the same in this file, and the logic has exactly
+        one home.
         """
-        Snap a chunk end boundary to the nearest function/class definition.
+        from src.ai.chunk_boundary import snap_chunk_end
 
-        If target_end falls inside a function body, find the next structural
-        definition within `window` lines and cut just before it. This ensures
-        the LLM always receives complete logical units instead of fragments.
-
-        Args:
-            lines: All lines of the file.
-            target_end: The raw chunk end (0-based exclusive).
-            file_ext: File extension (e.g. '.py', '.js').
-            window: Max lines to search forward/backward for a boundary.
-
-        Returns:
-            Adjusted chunk end (0-based exclusive).
-        """
-        pattern = AgentBridge._BOUNDARY_PATTERNS.get(file_ext)
-        if pattern is None:
-            return target_end  # Unsupported language, no snapping
-
-        total = len(lines)
-        if target_end >= total:
-            return total  # Already at end of file
-
-        # Search FORWARD from target_end for the next definition line.
-        # We snap to just before that line so the current chunk doesn't
-        # include the start of the next function/class.
-        search_start = target_end
-        search_end_line = min(total, target_end + window)
-        for i in range(search_start, search_end_line):
-            if pattern.match(lines[i]):
-                # Found next definition, cut right before it
-                adjusted = i
-                # Don't snap backward by more than a few lines
-                if adjusted < target_end:
-                    adjusted = target_end
-                return adjusted
-
-        # No definition in forward window, extend backward to find
-        # the start of the function we're inside
-        if target_end < total:
-            search_back = max(0, target_end - window // 2)
-            for i in range(target_end - 1, search_back - 1, -1):
-                if pattern.match(lines[i]):
-                    return i  # Snap to start of current function
-
-        return target_end  # No boundary found, use raw chunk end
+        return snap_chunk_end(lines, target_end, file_ext, window)
 
     def _dispatch_mcp_search(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """MCPToolSearch: load MCP tool definitions into this conversation."""
@@ -10325,6 +10180,181 @@ Required behavior:
             note = (f"[{tool_name} returned {len(images)} image(s), but the current "
                     f"model cannot view images. Switch to a vision model to see them.]")
         return f"{text}\n{note}" if text else note
+
+    async def _dispatch_bash(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """Shell execution, plus telling the UI what the command changed.
+
+        One handler for Bash and PowerShell because they are one behaviour: the
+        platform name is an alias, not a second implementation. The extra work
+        over ``self._bash_tool.execute`` is the file tree refresh and closing
+        tabs for files the command moved to the Recycle Bin, which Write/Edit
+        already do for themselves.
+        """
+        command = args.get("command", "")
+        # Check sandbox policy if enabled (lazy init)
+        if self._sandbox_manager is None:
+            try:
+                from src.core.sandbox_manager import get_sandbox_manager
+                self._sandbox_manager = get_sandbox_manager()
+            except Exception:
+                _swallow()
+        if self._sandbox_manager and self._sandbox_manager.is_enabled():
+            allowed, reason = self._sandbox_manager.is_command_allowed(command)
+            if not allowed:
+                return ToolResult(
+                    tool_id=tool_id,
+                    result=None,
+                    success=False,
+                    error=f"[Sandbox] Command blocked: {reason}",
+                )
+        result = await self._bash_tool.execute(args)
+        result.tool_id = tool_id
+        # Refresh file tree after shell commands, covers file create/delete/move
+        # that the AI makes via Bash/PowerShell (not tracked by Write/Edit tools)
+        # Only refresh for commands that actually modify the filesystem
+        _READ_ONLY_PREFIXES = (
+            'git status', 'git log', 'git diff', 'git show', 'git branch',
+            'git remote', 'git stash list', 'git tag', 'git rev-parse',
+            'ls', 'dir', 'cat', 'type', 'head', 'tail', 'wc', 'find',
+            'grep', 'rg', 'select-string', 'echo', 'pwd', 'whoami',
+            'node -v', 'python --version', 'pip list', 'npm list',
+            'test-path', 'test -f', 'test -d',
+        )
+        _cmd_stripped = command.strip().lower()
+        _is_read_only = any(_cmd_stripped.startswith(p) for p in _READ_ONLY_PREFIXES)
+        if result.success and self._project_root and not _is_read_only:
+            try:
+                log.debug(f"[BRIDGE] File tree refresh triggered by Bash: {command[:80]}")
+                self.file_tree_refresh_needed.emit(self._project_root)
+            except Exception:
+                _swallow()
+        elif _is_read_only:
+            log.debug(f"[BRIDGE] File tree refresh SKIPPED (read-only): {command[:80]}")
+        # Close editor tabs for files the agent moved to the Recycle Bin.
+        try:
+            _recycled = (result.result or {}).get("recycled_paths") if isinstance(result.result, dict) else None
+            if _recycled:
+                self.files_deleted_by_agent.emit(list(_recycled))
+        except Exception:
+            _swallow()
+        return result
+
+    async def _dispatch_ls(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """Directory listing, with the same path-access rule as Read/Grep."""
+        _ls_path = str(args.get("path", "") or "")
+        if _ls_path:
+            if not os.path.isabs(_ls_path) and self._project_root:
+                _ls_path = os.path.join(self._project_root, _ls_path)
+            _deny = self._access.check(_ls_path, "search")
+            if _deny:
+                log.warning(f"[ACCESS] LS blocked: {_ls_path}")
+                return ToolResult(tool_id=tool_id, result=None, success=False, error=_deny)
+        result = await self._ls_tool.execute(args)
+        result.tool_id = tool_id
+        return result
+
+    async def _dispatch_bash_output(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """Read new output from a background shell."""
+        result = await self._bash_output_tool.execute(args)
+        result.tool_id = tool_id
+        return result
+
+    async def _dispatch_kill_shell(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """Stop a background shell."""
+        result = await self._kill_shell_tool.execute(args)
+        result.tool_id = tool_id
+        return result
+
+    async def _dispatch_live_preview(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """Render/test HTML in the Live Preview panel.
+
+        UI tool: render/test HTML in the Live Preview panel. All Qt widget
+        access must happen on the UI thread, so the request is shipped over a
+        queued signal and this (agent) thread waits on an Event the UI slot sets
+        when done. Executor keeps the event loop free while waiting; 15s timeout
+        so a stuck UI can never deadlock the agent.
+        """
+        import threading as _threading
+        _action = str(args.get("action", "")).strip().lower()
+        _path = str(args.get("path", "") or "")
+        if _action not in ("open", "read", "console", "close"):
+            return ToolResult(tool_id=tool_id, result=None, success=False,
+                              error=f"LivePreview: unknown action {_action!r} "
+                                    f"(use open/read/console/close)")
+        if _action == "open":
+            if not _path:
+                return ToolResult(tool_id=tool_id, result=None, success=False,
+                                  error="LivePreview open: 'path' is required")
+            if not os.path.isabs(_path) and self._project_root:
+                _path = os.path.join(self._project_root, _path)
+            _deny = self._access.check(_path, "read")
+            if _deny:
+                return ToolResult(tool_id=tool_id, result=None, success=False, error=_deny)
+            if not os.path.isfile(_path):
+                return ToolResult(tool_id=tool_id, result=None, success=False,
+                                  error=f"LivePreview open: file not found: {_path}")
+        _resp: Dict[str, Any] = {"event": _threading.Event(), "result": None, "error": None}
+        self._safe_emit(self.live_preview_tool_request, _action, _path, _resp)
+        _done = await asyncio.get_event_loop().run_in_executor(
+            None, _resp["event"].wait, 15)
+        if not _done:
+            return ToolResult(tool_id=tool_id, result=None, success=False,
+                              error="LivePreview: UI did not respond within 15s "
+                                    "(panel unavailable?)")
+        if _resp["error"]:
+            return ToolResult(tool_id=tool_id, result=None, success=False,
+                              error=str(_resp["error"]))
+        return ToolResult(tool_id=tool_id, result=_resp["result"], success=True)
+
+    async def _dispatch_mcp_external(
+        self, tool_id: str, args: Dict[str, Any], tool_name: str
+    ) -> ToolResult:
+        """External MCP tool (`mcp__<server>__<tool>`), via the MCP manager.
+
+        Takes the name as a fourth argument, unlike the table handlers: a
+        prefix family exists precisely because its names cannot be listed, so
+        the handler is the only place that knows which one was called. The
+        dispatcher passes it, and tests/test_tool_dispatch.py asserts both
+        signatures so the difference stays deliberate.
+
+        The manager owns the server connections on its own thread. Runs in an
+        executor so a slow external server can never stall this event loop.
+        Permission/autonomy gates already applied to this call like any other
+        tool.
+        """
+        from src.services.mcp_manager import get_mcp_manager
+        _mgr = get_mcp_manager()
+
+        # Load-first rule (deferred mode only): a tool whose definition
+        # the model has not loaded is refused, not run on guessed
+        # parameters. This is the check that would have turned the
+        # `selector`-instead-of-`target` screenshot into a one-step fix.
+        if (getattr(self, "_mcp_deferred", False)
+                and tool_name not in getattr(self, "_mcp_offered", set())
+                and tool_name not in self._mcp_loaded_tools_set()):
+            return ToolResult(tool_id=tool_id, result=None, success=False, error=(
+                f"{tool_name}'s definition is not loaded, so its parameter "
+                f"names would be a guess. Call {MCP_SEARCH_TOOL} with query "
+                f"\"select:{tool_name}\" first, then call it again with "
+                f"the exact parameters it shows."))
+
+        # Same affordance as the skill badge: show which server the
+        # agent reached, from the server part of the tool name.
+        _announce_mcp = getattr(self, "_announce_mcp_in_use", None)
+        if _announce_mcp is not None:
+            _announce_mcp(tool_name)
+        _ok, _text, _images = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _mgr.call_tool_full(tool_name, args or {}))
+
+        # Images (screenshots) go to the model itself. They used to be
+        # replaced by a sentence saying an image existed, so the agent
+        # went looking for the file - which Read refused, because the
+        # server wrote it outside the project.
+        if _images:
+            _text = self._attach_mcp_images(tool_name, _images, _text)
+        if _ok:
+            return ToolResult(tool_id=tool_id, result=_text, success=True)
+        return ToolResult(tool_id=tool_id, result=None, success=False, error=_text)
 
     async def _dispatch_read(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Dispatch to real FileReadTool or bridge-native fallback."""
@@ -10398,7 +10428,7 @@ Required behavior:
                         ),
                     )
             except OSError:
-                pass  # File may have been deleted between check and read, let the tool handle it
+                _swallow("read the file the model asked for")
 
         # ── IMAGE FILE DETECTION: Auto-fallback to Mistral for vision ─────
         # ONLY raster formats the vision APIs actually decode. Two extensions
@@ -10456,7 +10486,7 @@ Required behavior:
                     _api = get_api_client()
                     _has_vision_access = _api.has_subscription()
                 except Exception:
-                    pass
+                    _swallow()
 
                 if not _has_vision_access:
                     self._emit_subscription_required(
@@ -10527,7 +10557,7 @@ Required behavior:
                             from src.ai.usage_tracker import get_usage_tracker
                             get_usage_tracker().record_ocr_pages(1)
                         except Exception:
-                            pass
+                            _swallow()
                         return ToolResult(tool_id=tool_id, result={
                             "path": _fpath_img,
                             "content": f"[Image: {os.path.basename(_fpath_img)}]\n\n{_vision_response}",
@@ -10674,7 +10704,7 @@ Required behavior:
                         start_line, effective_limit
                     )
                 except Exception:
-                    pass
+                    _swallow()
                 result_payload: Dict[str, Any] = {
                     "path": args["file_path"],
                     "content": content,
@@ -10803,7 +10833,7 @@ Required behavior:
                     )
                 )
         except OSError:
-            pass
+            _swallow()
         # ────────────────────────────────────────────────────────────────────────
 
         # ── SMART CHUNK-BASED READING ─────
@@ -10856,7 +10886,10 @@ Required behavior:
             # This uses AST-aware chunking.
             _raw_end = offset + limit
             _file_ext = os.path.splitext(fpath)[1].lower()
-            _snapped_end = AgentBridge._snap_chunk_boundary(lines, _raw_end, _file_ext)
+            # This used to go through a class name that does not exist in this
+            # module, so every offset/limit read raised NameError and the
+            # snapping never ran. Calling through `self` cannot drift that way.
+            _snapped_end = self._snap_chunk_boundary(lines, _raw_end, _file_ext)
             if _snapped_end != _raw_end:
                 _old_limit = limit
                 limit = max(limit, _snapped_end - offset)
@@ -10907,7 +10940,7 @@ Required behavior:
                     int(_lim_raw) if _lim_raw is not None else None,
                 )
             except Exception:
-                pass
+                _swallow()
             return ToolResult(tool_id=tool_id, result={
                 "path": fpath,
                 "content": content,
@@ -11034,7 +11067,7 @@ Required behavior:
                 raw = fh.read()
             crlf = raw.count(b"\r\n") * 2 > raw.count(b"\n") > 0
         except OSError:
-            pass
+            _swallow()
         text = cls._normalize_eol(text)
         if crlf:
             text = text.replace("\n", "\r\n")
@@ -11253,7 +11286,7 @@ Required behavior:
                             ),
                         )
             except OSError:
-                pass  # File stat failed, proceed with write
+                _swallow("stat an existing file before writing it")
 
         # ── Project access permission gate for Write on existing files ────────
         # Single initial permission: once granted, all operations proceed without asking.
@@ -11369,22 +11402,22 @@ Required behavior:
                     try:
                         self.file_generated.emit(full_path, content)
                     except Exception:
-                        pass
+                        _swallow()
                 if _is_deferred:
                     try:
                         self.file_edited_diff.emit(full_path, original_content, content)
                     except Exception:
-                        pass
+                        _swallow()
                 # Emit completion signal for card animation
                 if card_id:
                     try:
                         self.file_operation_completed.emit(card_id, full_path, content, ui_op_type)
                     except Exception:
-                        pass
+                        _swallow()
                 try:
                     self.file_tree_refresh_needed.emit(full_path)
                 except Exception:
-                    pass
+                    _swallow()
                 self._tool_ctx.mark_file_modified(full_path)
                 # For deferred writes (existing files), indicate the edit is
                 # pending user approval, the file hasn't been changed yet.
@@ -11475,22 +11508,22 @@ Required behavior:
                 try:
                     self.file_generated.emit(full_path, content)
                 except Exception:
-                    pass
+                    _swallow()
             if _is_deferred:
                 try:
                     self.file_edited_diff.emit(full_path, original_content, content)
                 except Exception:
-                    pass
+                    _swallow()
             # Emit completion signal for card animation
             if card_id:
                 try:
                     self.file_operation_completed.emit(card_id, full_path, content, ui_op_type)
                 except Exception:
-                    pass
+                    _swallow()
             try:
                 self.file_tree_refresh_needed.emit(full_path)
             except Exception:
-                pass
+                _swallow()
             self._tool_ctx.mark_file_modified(full_path)
             # For deferred writes (existing files), indicate the edit is
             # pending user approval, the file hasn't been changed yet.
@@ -11632,7 +11665,7 @@ Required behavior:
                 with open(full_path, "r", encoding="utf-8") as f:
                     original_content = f.read()
             except Exception:
-                pass
+                _swallow()
             self.file_editing_started.emit(full_path)
         except Exception as e:
             log.debug(f"[BRIDGE] Failed to emit file_editing_started: {e}")
@@ -11679,7 +11712,7 @@ Required behavior:
                     log.info(f"[BRIDGE] Edit: quote-normalized match in "
                              f"{'deferred' if previous_deferred is not None else 'disk'}")
             except Exception:
-                pass
+                _swallow()
 
         # ── Parallel edit detection ──
         # When multiple edits target the same file in one turn, both are based on
@@ -11718,7 +11751,7 @@ Required behavior:
                     full_new = fresh_content.replace(old_string, new_string, 1)
                     log.info(f"[BRIDGE] Edit: found in fresh disk read after initial miss")
             except Exception:
-                pass
+                _swallow()
             
             if full_new is None:
                 snippet = baseline[:200] if baseline else "(empty)"
@@ -11784,18 +11817,18 @@ Required behavior:
                     "limit": None,
                 }
         except Exception:
-            pass
+            _swallow()
 
         # Emit UI signals for diff card and animation
         try:
             self.file_edited_diff.emit(full_path, disk_content, full_new)
         except Exception:
-            pass
+            _swallow()
         if card_id:
             try:
                 self.file_operation_completed.emit(card_id, full_path, full_new, "edit")
             except Exception:
-                pass
+                _swallow()
         self._tool_ctx.mark_file_modified(full_path)
         self._safe_emit(self.file_edit_notification, full_path, "edit", "complete")
         await self._refresh_git_diff_stats(full_path)
@@ -11803,7 +11836,7 @@ Required behavior:
         try:
             self.file_tree_refresh_needed.emit(full_path)
         except Exception:
-            pass
+            _swallow()
         # Snapshot permission before reset so _has_perm is computed correctly
         _perm_snapshot = self._file_edit_permission
         # "once" → reset so the card appears again for the next edit
@@ -11967,7 +12000,7 @@ Required behavior:
                 self._skills_in_use = []
                 self.skills_cleared.emit()
         except Exception:
-            pass
+            _swallow()
 
     def _announce_mcp_in_use(self, tool_name: str) -> None:
         """Tell the UI which MCP server the agent reached by itself.
@@ -12000,7 +12033,7 @@ Required behavior:
                 self._mcp_in_use = []
                 self.mcp_cleared.emit()
         except Exception:
-            pass
+            _swallow()
 
     async def _dispatch_security_scan(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """
@@ -12134,7 +12167,7 @@ Required behavior:
                             if _os.path.isdir(_fallback):
                                 ref_dir = _fallback
                     except Exception:
-                        pass
+                        _swallow()
                 if skill_dir and _os.path.isdir(ref_dir):
                     refs = sorted(f for f in _os.listdir(ref_dir) if f.endswith(".md"))
                     if refs:
@@ -12172,7 +12205,7 @@ Required behavior:
                         if _cand and _has_support(_cand):
                             _support_dir = _cand
                     except Exception:
-                        pass
+                        _swallow()
                 if _support_dir:
                     _ref_note += (
                         f"\n\nSkill folder (any other support files the method "
@@ -12181,7 +12214,7 @@ Required behavior:
                         f"  {_support_dir}"
                     )
             except Exception:
-                pass
+                _swallow()
 
             # Looked up rather than called directly: telling the UI is a
             # side channel, and skill loading must not depend on it being
@@ -12373,7 +12406,7 @@ Required behavior:
                     try:
                         self._worker.signals.loop_debug.emit(outcome)
                     except Exception:
-                        pass
+                        _swallow()
             return result
         except Exception as exc:
             log.error(f"[BRIDGE] Loop dispatch failed: {exc}")
@@ -12607,6 +12640,7 @@ Required behavior:
                             text = raw_bytes.decode(enc)
                             break
                         except (UnicodeDecodeError, ValueError):
+                            _swallow("decode a file while running the grep fallback")
                             continue
                     if text is None:
                         continue
@@ -12616,7 +12650,7 @@ Required behavior:
                             if len(results) >= _FALLBACK_MATCH_LIMIT:
                                 break
                 except (OSError, PermissionError):
-                    pass
+                    _swallow("walk one directory in the grep fallback")
                 if len(results) >= _FALLBACK_MATCH_LIMIT:
                     break
             if len(results) >= _FALLBACK_MATCH_LIMIT:
@@ -13347,7 +13381,7 @@ Required behavior:
                             from src.ai.usage_tracker import get_usage_tracker
                             get_usage_tracker().record_web_searches(1)
                         except Exception:
-                            pass
+                            _swallow()
                         return ToolResult(
                             tool_id=tool_id,
                             result=json.dumps({"results": results, "query": query, "source": "serpapi_proxy"}),
@@ -13645,7 +13679,7 @@ Required behavior:
                 _api = get_api_client()
                 _has_sub = _api.has_subscription()
             except Exception:
-                pass
+                _swallow()
 
             error_detail = "; ".join(error_msgs) if error_msgs else ""
 
@@ -13717,7 +13751,7 @@ Required behavior:
             from src.ai.usage_tracker import get_usage_tracker
             get_usage_tracker().record_web_searches(1)
         except Exception:
-            pass
+            _swallow()
 
         return ToolResult(tool_id=tool_id, result={
             "query": query,
@@ -13798,7 +13832,7 @@ Required behavior:
             bus = get_event_bus()
             bus.publish(EventType.TASK_GRAPH_UPDATED, EventData(source_component="agent_bridge"))
         except Exception:
-            pass
+            _swallow()
 
         log.info(f"[TASK] Created task {task_id}: {subject}" +
                  f"{' parent=' + parent_id if parent_id else ''}" +
@@ -13874,7 +13908,7 @@ Required behavior:
             bus = get_event_bus()
             bus.publish(EventType.TASK_GRAPH_UPDATED, EventData(source_component="agent_bridge"))
         except Exception:
-            pass
+            _swallow()
 
         log.info(f"[TASK] Updated task {task_id}: status={status or 'unchanged'}")
 
@@ -14143,7 +14177,7 @@ Required behavior:
                 try:
                     batched_signal.emit(*batched_args)
                 except Exception:
-                    pass
+                    _swallow()
             batch.clear()
         self._signal_rate_window_start = time.monotonic()
         self._signal_rate_count = 0
@@ -14175,7 +14209,7 @@ Required behavior:
                 try:
                     self._streaming.emit_llm_complete(response)
                 except Exception:
-                    pass
+                    _swallow()
             # Save assistant turn to history, PRESERVE reasoning_content
             # for MiMo/DeepSeek thinking mode. Without this, the next
             # request to MiMo returns HTTP 400: "reasoning_content must be
@@ -14192,7 +14226,7 @@ Required behavior:
             try:
                 self._save_message_immediate('assistant', response or '')
             except Exception:
-                pass
+                _swallow()
 
             # ── IMMEDIATE PERSISTENCE: Save chat to DB after every response ──
             # This ensures chats survive ANY crash (Chromium crash, power loss, etc.)
@@ -14200,14 +14234,14 @@ Required behavior:
             try:
                 self._persist_chat_async()
             except Exception:
-                pass  # Never let persistence failure break the response flow
+                _swallow()  # Never let persistence failure break the response flow
 
             # ── PROACTIVE CONTEXT WINDOW MONITORING ──────────────────────
             # Check if we're approaching the context limit and trigger compact
             try:
                 self._check_context_window_pressure()
             except Exception:
-                pass
+                _swallow()
         except Exception as exc:
             log.error(
                 "[BRIDGE] _on_response_ready CRASH: %s\nFULL TRACEBACK:",
@@ -14413,7 +14447,7 @@ Required behavior:
             _cm.images = [base64_data]
             _cm._read_image = True
         except Exception:
-            pass
+            _swallow()
         with self._history_lock:
             self._conversation_history.append(_cm)
         log.info(f"[BRIDGE] Read-tool image injected into history for native vision: {filename}")
@@ -15262,7 +15296,7 @@ Required behavior:
                 f"Do not redo that work from scratch, check the files first."
             )
         except Exception:
-            pass
+            _swallow()
 
     def note_edits_applied(self, count: int) -> None:
         """Record that staged edits have actually reached disk.
@@ -15283,7 +15317,7 @@ Required behavior:
                 f"re-apply them. Read the file if you need the current content."
             )
         except Exception:
-            pass
+            _swallow()
 
     def consume_applied_edits_note(self) -> Optional[str]:
         """Return and clear the pending 'edits applied' note, if any."""
@@ -15395,7 +15429,7 @@ Required behavior:
         try:
             _agent_set_project_root(path)
         except Exception:
-            pass
+            _swallow()
 
     def _restore_latest_conversation(self, project_path: str) -> None:
         """Restore the most recent conversation from DB into _conversation_history.
@@ -15535,7 +15569,7 @@ Required behavior:
             try:
                 self._tool_ctx.set_model(_new_model)
             except Exception:
-                pass
+                _swallow()
             log.info("[BRIDGE] _current_model_id synced on settings update: %s", _new_model)
 
     def set_terminal(self, terminal: Any) -> None:
@@ -15563,7 +15597,7 @@ Required behavior:
         try:
             self.always_allowed_changed.emit(self._always_allowed)
         except RuntimeError:
-            pass
+            _swallow()
 
     def _remember_always_allowed(self):
         """Keep "Allow always" for the open project, across restarts. Not in
@@ -15689,7 +15723,7 @@ Required behavior:
         try:
             self.request_started.emit()
         except RuntimeError:
-            pass
+            _swallow("announce the start of a chat request")
         # Include any pending images from paste
         images = None
         if hasattr(self, '_pending_images') and self._pending_images:
@@ -15779,7 +15813,7 @@ Required behavior:
                 if api.has_subscription():
                     return "subscription"
             except Exception:
-                pass
+                _swallow("read the Mistral access type")
             
             return None
 
@@ -15929,7 +15963,7 @@ Required behavior:
                     from src.ai.usage_tracker import get_usage_tracker
                     get_usage_tracker().record_ocr_pages(len(all_vision_results))
                 except Exception:
-                    pass
+                    _swallow()
 
                 # Emit combined OCR results
                 if img_count == 1:
@@ -16140,7 +16174,7 @@ Required behavior:
                         self._safe_emit(self.agent_status_update,
                                         'ready', 'No messages to save - starting fresh chat')
                     except RuntimeError:
-                        pass  # C++ object destroyed during shutdown
+                        _swallow("touch the panel after a session save")
                     ok = False
                 else:
                     # 1. Save the full checkpoint FILE (+ semantic index) for recovery,
@@ -16158,7 +16192,7 @@ Required behavior:
                         self._safe_emit(self.agent_status_update,
                                         'ready', 'Saved "what was done" to MEMORY.md')
                     except RuntimeError:
-                        pass  # C++ object destroyed during shutdown
+                        _swallow("touch the panel after a session save")
                     log.info(f"[BRIDGE] Concise 'what was done' summary saved to a checkpoint "
                              f"({len(_hist)} messages condensed, New Chat)")
                     ok = True
@@ -16167,13 +16201,13 @@ Required behavior:
                 try:
                     self._safe_emit(self.agent_status_update, 'ready', f'Memory save failed: {e}')
                 except RuntimeError:
-                    pass  # C++ object destroyed during shutdown
+                    _swallow("touch the panel after a session save")
                 ok = False
             finally:
                 try:
                     self._safe_emit(self.session_saved_to_memory, ok)
                 except RuntimeError:
-                    pass  # C++ object destroyed during shutdown
+                    _swallow("touch the panel after a session save")
 
         _th.Thread(target=_work, daemon=True, name='SaveSessionMemory').start()
 
@@ -16221,14 +16255,14 @@ Required behavior:
                 with open(idx, encoding='utf-8', errors='replace') as f:
                     parts.append("### MEMORY.md (index)\n" + f.read()[:3500])
         except OSError:
-            pass
+            _swallow()
         try:
             mj = os.path.join(os.path.dirname(mem_dir), 'memory.json')
             if os.path.isfile(mj):
                 with open(mj, encoding='utf-8', errors='replace') as f:
                     parts.append("### memory.json (decisions, bugs, preferences)\n" + f.read()[:2500])
         except OSError:
-            pass
+            _swallow()
         try:
             notes = [os.path.join(mem_dir, n) for n in os.listdir(mem_dir)
                      if n.endswith('.md') and n != 'MEMORY.md']
@@ -16237,7 +16271,7 @@ Required behavior:
                 with open(p, encoding='utf-8', errors='replace') as f:
                     parts.append(f"### {os.path.basename(p)}\n" + f.read()[:1200])
         except OSError:
-            pass
+            _swallow()
         text = "\n\n".join(parts)
         return text[:limit]
 
@@ -16752,7 +16786,7 @@ Required behavior:
                 try:
                     self._cleanup_old_checkpoints(memory_dir, keep=5)
                 except Exception:
-                    pass
+                    _swallow()
             except Exception as _ck_err:
                 log.warning(f"[Memory] checkpoint save failed: {_ck_err}")
             return
@@ -16782,7 +16816,7 @@ Required behavior:
             self._last_todo_mutation_count = -1
             self._todos_auto_cancelled = False
         except Exception:
-            pass
+            _swallow()
         log.info(f"[BRIDGE] Fresh session started (conv_id={self._current_conversation_id})")
         return self._current_conversation_id
 
@@ -16989,7 +17023,7 @@ Required behavior:
                 try:
                     _hist.clear_conversation_messages(_conv_id)
                 except Exception:
-                    pass
+                    _swallow()
             for msg in _msgs:
                 _hist.add_message(
                     conversation_id=_conv_id,

@@ -348,7 +348,7 @@ _LIST_ITEM_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\S')
 # ── Glued fence openers: "```mermaidflowchart TB ..." ─────────────────────
 # DeepSeek v4 emits the language and the first statement on ONE line, with no
 # newline between them (verified from the chunk stream in cortex.log). The
-# streaming stripper copes (_RE_MERMAID_OPEN makes the newline optional), but
+# streaming stripper copes (find_mermaid_spans accepts the glued form), but
 # turn-end segmentation requires a real newline, so the diagram card shown
 # while streaming was thrown away at turn end and the raw fence text leaked
 # into prose (where "-->|Yes|" even got parsed as a fake table).
@@ -403,6 +403,202 @@ def split_glued_fence_languages(text: str) -> str:
         return m.group(0)
 
     return _GLUED_FENCE_RE.sub(_split, text)
+
+
+# ── Mermaid auto-wrap gate ────────────────────────────────────────────────
+# Only an unfenced payload that is unambiguously a diagram may be wrapped.
+# `timeline`, `journey`, `gantt`, `pie` and `mindmap` are ordinary English
+# words, so the old re.IGNORECASE test turned prose into a diagram:
+# "Timeline is decisive: spec fixed 6:36 PM..." matched `timeline\b` and the
+# entire paragraph was routed to the Mermaid viewer, which drew a blank
+# canvas because a sentence is not a diagram (2026-10-22 screenshot).
+# Two guards: the head must match CASE-SENSITIVELY (a real payload starts
+# with the lowercase keyword), and the body must carry that family's syntax.
+_RE_MERMAID_HEAD = re.compile(
+    r'^(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?'
+    r'|erDiagram|journey|gantt|pie|mindmap|timeline|quadrantChart'
+    r'|requirementDiagram|gitGraph|sankey-beta)\b'
+)
+# "graph" and "flowchart" are only valid with a direction token.
+_RE_MERMAID_DIRECTION = re.compile(r'^(?:TD|TB|LR|RL|BT)\b', re.IGNORECASE)
+# Edges and message arrows. Deliberately excludes loose tokens such as "--"
+# or "-x", which appear in prose ("the -x flag"). The trailing alternatives
+# are ER cardinality joins ("||--o{"), which have no three-dash run.
+_RE_MERMAID_EDGE = re.compile(
+    r'-->|->>|-->>|->|--x|-.->|--->|==>|---|<\|--|\.\.>|:::'
+    r'|\|\|--|--o\{|--\{|--\|'
+)
+# Section-style families have no edges; they are keywords plus "key: value".
+_RE_MERMAID_SECTION = re.compile(
+    r'(?m)^\s*(?:title|section|dateFormat|axisFormat|accTitle|accDescr)\b'
+    r'|:\s*\S'
+)
+_FLOW_HEADS = frozenset({'graph', 'flowchart'})
+_SECTION_HEADS = frozenset({'timeline', 'gantt', 'pie', 'journey', 'mindmap'})
+
+
+def looks_like_mermaid_payload(text: str) -> bool:
+    """Return True only when ``text`` is an unfenced mermaid diagram.
+
+    Prose that merely starts with a word also used as a diagram keyword
+    ("Timeline is decisive: ...") returns False, so it stays prose.
+    """
+    if not text:
+        return False
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return False
+    head_line = lines[0]
+    if not _RE_MERMAID_HEAD.match(head_line):
+        return False
+    keyword = head_line.split()[0]
+    if keyword in _FLOW_HEADS:
+        rest = head_line[len(keyword):].strip()
+        if not _RE_MERMAID_DIRECTION.match(rest):
+            return False
+        return bool(_RE_MERMAID_EDGE.search(text))
+    if keyword in _SECTION_HEADS:
+        return bool(_RE_MERMAID_SECTION.search('\n'.join(lines[1:])))
+    return bool(_RE_MERMAID_EDGE.search(text))
+
+
+# ── Real mermaid fences: a line-anchored scanner ────────────────────────────
+# A fence opener must START A LINE (CommonMark allows up to three leading
+# spaces). The streaming stripper and the turn-end card builder used DOTALL
+# patterns with no anchor, so an inline "```mermaid" written inside a sentence
+# and the same literal token quoted inside a plain code block both matched and
+# swallowed the REST OF THE MESSAGE as diagram code. A MermaidDiagramCard was
+# then built out of prose and the viewer raised
+#   UnknownDiagramError: No diagram type detected ... for text: fence and
+#   routed to the viewer.
+# (chat console, 2026-10-22). Every caller now asks this scanner instead of
+# carrying its own regex, so the two paths can never disagree again.
+_FENCE_OPEN_RE = re.compile(r'^([ \t]{0,3})(`{3,})([^\s`]*)(.*)$')
+_FENCE_CLOSE_RE = re.compile(r'^[ \t]{0,3}`{3,}[ \t]*$')
+
+# Case-insensitive keyword set for FENCED bodies only. An author who writes
+# "```mermaid" has already declared the language, so "Graph TD" is accepted
+# here; the unfenced gate above stays case-sensitive on purpose, because that
+# one exists to keep the English word "Timeline" out of the viewer.
+_FENCE_HEAD_KEYWORDS = frozenset({
+    'graph', 'flowchart', 'sequencediagram', 'classdiagram', 'statediagram',
+    'statediagram-v2', 'erdiagram', 'journey', 'gantt', 'pie', 'mindmap',
+    'timeline', 'quadrantchart', 'requirementdiagram', 'gitgraph',
+    'sankey-beta',
+})
+
+
+def _mermaid_fence_body_ok(code: str) -> bool:
+    """Return True when a fenced body is diagram syntax rather than prose.
+
+    Defence in depth: even inside a genuine ```mermaid fence, prose stays a
+    code block. Showing the author's text is right; drawing it is not.
+
+    Deliberately permissive about body shape, because an edge-less flowchart
+    and a mindmap are both valid mermaid. Only the ambiguous heads are checked,
+    and only for syntax mermaid itself requires:
+
+    * ``graph`` / ``flowchart`` must carry a direction token, which mermaid
+      requires anyway. "graph is a data structure" is rejected.
+    * ``timeline`` / ``gantt`` / ``pie`` / ``journey`` / ``mindmap`` are also
+      ordinary English words, so anything after them must be empty or ``title``.
+      "timeline is decisive: spec fixed" is rejected, ``pie title Pets`` is not.
+    * every other declared diagram type is trusted as written.
+    """
+    lines = [ln.strip() for ln in code.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    keyword, _, rest = lines[0].partition(' ')
+    keyword = keyword.lower()
+    if keyword not in _FENCE_HEAD_KEYWORDS:
+        return False
+    rest = rest.strip()
+    if keyword in _FLOW_HEADS:
+        return bool(_RE_MERMAID_DIRECTION.match(rest))
+    if keyword in _SECTION_HEADS:
+        return not rest or rest.lower().startswith('title')
+    return True
+
+
+def find_mermaid_spans(text: str) -> list[tuple[int, int, str, bool]]:
+    """Return ``(start, end, code, complete)`` for every real mermaid fence.
+
+    ``start``/``end`` are offsets into ``text`` covering the whole fence (opener
+    through closing fence, or through the end of the text when the stream
+    stopped mid-diagram). Inline backtick mentions and the literal token inside
+    another code block are never returned, and a fence whose body is prose is
+    skipped so it renders as the code block the author wrote.
+
+    Handles the glued form this project's providers emit
+    ("```mermaidflowchart TB ... end```") in both directions: language glued to
+    the first statement, and the closing fence glued to the last line.
+    """
+    if not text or 'mermaid' not in text.lower():
+        return []
+
+    spans: list[tuple[int, int, str, bool]] = []
+    offset = 0
+    open_start = -1
+    body: list[str] = []
+    in_other_fence = False
+
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip('\r\n')
+
+        if open_start >= 0:
+            if _FENCE_CLOSE_RE.match(stripped):
+                code = '\n'.join(body).strip()
+                if _mermaid_fence_body_ok(code):
+                    spans.append((open_start, offset + len(line), code, True))
+                open_start, body = -1, []
+            elif '```' in stripped:
+                # Closing fence glued to the last statement ("... end```").
+                body.append(stripped.split('```', 1)[0])
+                code = '\n'.join(body).strip()
+                if _mermaid_fence_body_ok(code):
+                    spans.append((open_start, offset + len(line), code, True))
+                open_start, body = -1, []
+            else:
+                body.append(stripped)
+            offset += len(line)
+            continue
+
+        if in_other_fence:
+            if _FENCE_CLOSE_RE.match(stripped):
+                in_other_fence = False
+            offset += len(line)
+            continue
+
+        match = _FENCE_OPEN_RE.match(stripped)
+        if not match:
+            offset += len(line)
+            continue
+
+        token = match.group(3)
+        if not token.lower().startswith('mermaid'):
+            in_other_fence = True
+            offset += len(line)
+            continue
+
+        # The opener may carry the first statement on the same line: either
+        # glued ("```mermaidflowchart TB") or spaced ("```mermaid flowchart TB").
+        first = (token[7:] + match.group(4)).strip()
+        open_start = offset
+        if first and '```' in first:
+            body = [first.split('```', 1)[0]]
+            code = '\n'.join(body).strip()
+            if _mermaid_fence_body_ok(code):
+                spans.append((open_start, offset + len(line), code, True))
+            open_start, body = -1, []
+        else:
+            body = [first] if first else []
+        offset += len(line)
+
+    if open_start >= 0:
+        code = '\n'.join(body).strip()
+        if _mermaid_fence_body_ok(code):
+            spans.append((open_start, len(text), code, False))
+    return spans
 
 
 def auto_fix_broken_code_fences(text: str) -> str:
@@ -543,7 +739,7 @@ def auto_fix_broken_code_fences(text: str) -> str:
 
     # Auto-wrap plain Mermaid payloads
     if not re.search(r'```mermaid', fixed, re.IGNORECASE) and \
-       re.match(r'^(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|mindmap|timeline)\b', trimmed, re.IGNORECASE):
+       looks_like_mermaid_payload(trimmed):
         fixed = f'```mermaid\n{trimmed}\n```'
 
     # ── Fences only count where a fence can be ──────────────────────────

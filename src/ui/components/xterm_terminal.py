@@ -296,12 +296,7 @@ class XTermWidget(QWidget):
         self._webview.loadFinished.connect(self._on_page_load_finished)
         try:
             self._webview.page().renderProcessTerminated.connect(
-                lambda status, code: log.error(
-                    "[XTerm] RENDER PROCESS TERMINATED status=%s exit=%s. The "
-                    "terminal will be blank. Usually a GPU/driver failure: try "
-                    "software rendering (set CORTEX_SOFTWARE_RENDERING=1, or "
-                    "\"software_rendering\": true under \"ui\" in settings.json).",
-                    status, code))
+                self._on_render_crash)
         except Exception:
             pass
 
@@ -426,6 +421,12 @@ class XTermWidget(QWidget):
         if self._output_buffer:
             self._bridge.send_output.emit(self._output_buffer)
             self._output_buffer = ""
+
+        # Reloaded after a render-process crash: the PTY kept running, so
+        # replay recent output or the recovered terminal still looks empty.
+        if getattr(self, "_restore_scrollback_on_ready", False):
+            self._restore_scrollback_on_ready = False
+            self._restore_scrollback()
 
         # Settings -> Appearance -> Color theme: same pattern as the font.
         self._apply_color_theme()
@@ -739,6 +740,50 @@ class XTermWidget(QWidget):
         # signal stays declared for API compatibility but is no longer driven.
         # If a consumer is ever added, emit in BATCHES, never per line.
 
+    def _on_render_crash(self, status, code):
+        """Chromium's render process died, reload so the panel comes back.
+
+        Every internal page shares one Chromium renderer
+        (``--renderer-process-limit=1`` in src/main.py), so this fires for the
+        sidebar and the editor at the same moment: that is the "everything
+        blank" report. The PTY sessions live in Python and survive; only
+        xterm.js, which draws them, is gone. A reload rebuilds xterm and
+        _on_js_ready re-attaches theme, font and buffered output.
+        """
+        from src.ui.webengine_recovery import (schedule_reload,
+                                               termination_status_name)
+        name = termination_status_name(status)
+        log.error(f"[XTerm] RENDER PROCESS {name.upper()} exit={code}. Usually "
+                  "a GPU/driver failure or the shared renderer running out of "
+                  "memory; reloading the page to recover.")
+        try:
+            from src.ui.render_health import record_render_failure
+            record_render_failure("terminal.html",
+                                  f"render process {name} (exit {code})")
+        except Exception:
+            pass
+        self._is_ready = False
+        # Replay recent scrollback into the fresh xterm. The PTY is alive but
+        # its output was already consumed, so without this the recovered
+        # terminal still looks blank while working fine again.
+        self._restore_scrollback_on_ready = True
+        try:
+            schedule_reload(self._webview, "terminal",
+                            reason=f"render process {name} (exit {code})")
+        except Exception:
+            log.error("[XTerm] could not schedule the reload after the crash")
+
+    def _restore_scrollback(self, lines: int = 200) -> None:
+        """Replay the most recent output into a reloaded xterm.js."""
+        try:
+            recent = (getattr(self, "_terminal_buffer", None) or [])[-lines:]
+            if not recent:
+                return
+            self._bridge.send_output.emit("\r\n".join(recent) + "\r\n")
+            log.info(f"[XTerm] restored {len(recent)} line(s) after reload")
+        except Exception as exc:
+            log.debug(f"[XTerm] scrollback restore skipped: {exc}")
+
     def _on_page_load_finished(self, ok: bool):
         """Log the outcome of loading terminal.html.
 
@@ -756,6 +801,12 @@ class XTermWidget(QWidget):
             try:
                 from src.ui.render_health import probe_page
                 probe_page(self._webview.page(), "terminal")
+            except Exception:
+                pass
+            # The page loaded, so a later crash deserves a fresh retry budget.
+            try:
+                from src.ui.webengine_recovery import note_page_loaded
+                note_page_loaded("terminal", self._webview)
             except Exception:
                 pass
             return

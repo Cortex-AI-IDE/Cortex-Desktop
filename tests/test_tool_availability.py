@@ -39,10 +39,6 @@ from src.ai.agent_bridge import (  # noqa: E402
 DECLARED = [_tool_def_name(d) for d in _TOOL_SCHEMAS]
 
 
-def _dispatch_source() -> str:
-    return inspect.getsource(CortexAgentBridge._dispatch_tool)
-
-
 def test_declared_tool_list_is_not_empty() -> None:
     """Sanity: an empty schema list would make every test below vacuous."""
     assert len(DECLARED) >= 15, DECLARED
@@ -51,13 +47,17 @@ def test_declared_tool_list_is_not_empty() -> None:
 
 @pytest.mark.parametrize("tool_name", DECLARED)
 def test_every_declared_tool_has_a_handler(tool_name: str) -> None:
-    """A declared tool with no handler is 'Unknown tool' at runtime."""
-    src = _dispatch_source()
-    mapped = f'"{tool_name}":'
-    literal = f'tool_name == "{tool_name}"'
-    assert mapped in src or literal in src, (
-        f"{tool_name} is offered to the model but _dispatch_tool has no "
-        f"handler for it, so every call returns 'Unknown tool'."
+    """A declared tool with no handler is 'Unknown tool' at runtime.
+
+    This used to grep ``_dispatch_tool``'s source for ``"Name":`` or
+    ``tool_name == "Name"``. That pinned the *shape* of the dispatch code: when
+    the redundant second path was collapsed into one table (W4), the wiring was
+    intact and this failed anyway. It now asks the resolver, which is the
+    actual contract.
+    """
+    assert CortexAgentBridge.resolve_tool_handler(tool_name) is not None, (
+        f"{tool_name} is offered to the model but resolves to no handler, "
+        f"so every call returns 'Unknown tool'."
     )
 
 

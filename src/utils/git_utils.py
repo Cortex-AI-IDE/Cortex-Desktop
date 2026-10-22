@@ -31,6 +31,29 @@ def is_git_repo(repo_dir: str) -> bool:
     return _run_git(repo_dir, ["rev-parse", "--is-inside-work-tree"]) == "true"
 
 
+def abs_path(repo_dir: str, path: str) -> str:
+    """Resolve a path reported by git to an absolute filesystem path.
+
+    `git status --porcelain` reports paths relative to the repo root, so a
+    consumer that hands one to os.stat()/open() only works when the process
+    CWD happens to be the repo. That holds when running from the source tree
+    and fails in the packaged app, where CWD is the install directory: the
+    same click then resolved to nothing and the diff came out as a whole-file
+    delete instead of the real change.
+
+    Absolute input is normalized and returned unchanged. An empty repo_dir
+    means the caller has no root to resolve against, so the input passes
+    through untouched rather than being guessed at.
+    """
+    if not path:
+        return path
+    if os.path.isabs(path):
+        return os.path.normpath(path)
+    if not repo_dir:
+        return path
+    return os.path.normpath(os.path.join(str(repo_dir), path))
+
+
 def get_branch(repo_dir: str) -> str:
     """Get current branch name."""
     return _run_git(repo_dir, ["branch", "--show-current"]) or "detached"
