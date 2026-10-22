@@ -116,6 +116,42 @@ def test_from_dot_import_sibling_is_an_edge(project: Path):
     assert "pkg/sub/a.py" not in _unimported(payload)
 
 
+def test_import_from_a_subdirectory_on_sys_path_is_an_edge(project: Path):
+    """``src/agent/src`` is put on sys.path, so its files import ``utils.x``."""
+    _write(project / "app" / "inner" / "utils" / "__init__.py", "")
+    _write(project / "app" / "inner" / "utils" / "tokens.py", "def count():\n    return 1\n")
+    _write(
+        project / "app" / "inner" / "services" / "compact.py",
+        "from utils.tokens import count\n",
+    )
+
+    payload = ProjectHealthScanner(project).scan(force=True)
+
+    assert "app/inner/utils/tokens.py" not in _unimported(payload)
+
+
+def test_from_subdirectory_root_import_module_is_an_edge(project: Path):
+    _write(project / "app" / "inner" / "utils" / "memory" / "kinds.py", "K = 1\n")
+    _write(
+        project / "app" / "inner" / "services" / "use.py",
+        "from utils.memory import kinds\n",
+    )
+
+    payload = ProjectHealthScanner(project).scan(force=True)
+
+    assert "app/inner/utils/memory/kinds.py" not in _unimported(payload)
+
+
+def test_bare_stdlib_name_never_links_to_a_same_named_project_file(project: Path):
+    """``import types`` is the stdlib, even beside a project ``types.py``."""
+    _write(project / "pkg" / "sub" / "types.py", "T = 1\n")
+    _write(project / "pkg" / "sub" / "user.py", "import types\n")
+
+    payload = ProjectHealthScanner(project).scan(force=True)
+
+    assert "pkg/sub/types.py" in _unimported(payload)
+
+
 def test_submodule_guess_never_becomes_a_false_warning(project: Path):
     """A name imported from a package may be an attribute, not a module."""
     _write(project / "pkg" / "__init__.py", "CONST = 1\n")

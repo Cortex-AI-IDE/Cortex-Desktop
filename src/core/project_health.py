@@ -294,8 +294,11 @@ _CENSUS_EXCLUDED_DIRS: Set[str] = {
 # dead-code census (a v5 verdict can still be the report-poisoned one), to 8
 # when relative imports started producing edges, and to 9 when per-file
 # ``submodule_imports`` was added - older entries carry none, so
-# ``from pkg import helper`` would keep leaving helper.py unimported.
-_CACHE_VERSION = 9
+# ``from pkg import helper`` would keep leaving helper.py unimported, and to
+# 10 when imports from a subdirectory on sys.path (``from utils.x import``
+# under src/agent/src) started resolving - the cached whole-project dead-code
+# verdict is reused when no file changed, so it must not survive this.
+_CACHE_VERSION = 10
 _CACHE_RELATIVE = Path(".cortex") / "health_map.json"
 
 
@@ -1082,10 +1085,18 @@ class ProjectHealthScanner:
             if not fh.imports and not fh.submodule_imports:
                 continue
             src_id = _stable_id("file", fh.rel)
-            targets = [self._resolve_module(dotted, known) for dotted, _line, _guarded in fh.imports]
+            roots = self._ancestor_roots(fh)
+            targets = [
+                self._resolve_module(dotted, known)
+                or self._resolve_under_roots(dotted, roots, known, exact=False)
+                for dotted, _line, _guarded in fh.imports
+            ]
             # Exact match only: a longest-prefix match would just repeat the
             # package edge, and a non-module name must not resolve at all.
-            targets += [known.get(sub) for sub in fh.submodule_imports]
+            targets += [
+                known.get(sub) or self._resolve_under_roots(sub, roots, known, exact=True)
+                for sub in fh.submodule_imports
+            ]
             for target in targets:
                 if not target or target == fh.rel:
                     continue
@@ -1096,6 +1107,47 @@ class ProjectHealthScanner:
                 self._edges.append(
                     {"from": src_id, "to": _stable_id("file", target), "kind": "imports"}
                 )
+
+    @staticmethod
+    def _ancestor_roots(fh: "FileHealth") -> List[str]:
+        """Dotted names of the packages enclosing ``fh``, innermost first.
+
+        A project that puts one of its own subdirectories on ``sys.path``
+        (this one adds ``src/agent/src``, see runtime_hook_agent_path.py)
+        imports from it as top level: ``from utils.tokens import x``. Such a
+        root is always an ancestor of the importing file, so these are the
+        candidate roots. ``fh.module`` is the package itself for an
+        ``__init__.py`` and the module otherwise.
+        """
+        parts = fh.module.split(".") if fh.module else []
+        if not fh.rel.endswith("__init__.py"):
+            parts = parts[:-1]
+        return [".".join(parts[:k]) for k in range(len(parts), 0, -1)]
+
+    @staticmethod
+    def _resolve_under_roots(
+        dotted: str, roots: List[str], modules: Dict[str, str], exact: bool
+    ) -> Optional[str]:
+        """Resolve an import that missed from the project root against ``roots``.
+
+        Only names of two or more segments qualify. A single segment is where
+        a stdlib name meets a project file of the same name - ``import types``
+        next to ``utils/memory/types.py`` - and Python 3 never resolves that
+        to the sibling, so matching it would invent an edge. Two segments
+        (``utils.tokens``) name a package and a module inside it, which a
+        stdlib collision essentially never does. The nearest root wins, as
+        it would on a ``sys.path`` searched innermost-first.
+        """
+        parts = dotted.split(".")
+        if len(parts) < 2:
+            return None
+        shortest = len(parts) if exact else 2
+        for root in roots:
+            for i in range(len(parts), shortest - 1, -1):
+                target = modules.get(f"{root}.{'.'.join(parts[:i])}")
+                if target:
+                    return target
+        return None
 
     @staticmethod
     def _resolve_module(dotted: str, modules: Dict[str, str]) -> Optional[str]:
