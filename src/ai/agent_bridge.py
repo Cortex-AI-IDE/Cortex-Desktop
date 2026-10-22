@@ -2030,10 +2030,25 @@ class BridgeBashTool:
                     f"(recoverable), not permanently deleted."
                 )
 
+            # success stays True here: the TOOL ran, the COMMAND is what
+            # failed. Reporting a non-zero exit as success=False would trip the
+            # circuit breaker (3 consecutive failures disable Bash) on ordinary
+            # exits, `grep` with no match returns 1 and `git diff --exit-code`
+            # returns 1 by design, and the failure branch of the caller
+            # forwards only `error`, throwing away stdout and stderr. So the
+            # failure is made unmissable instead: an explicit flag and code in
+            # the payload, and a marker on the first line of the output the
+            # model reads.
+            _ok = (returncode == 0)
+            if not _ok:
+                output = (f"[EXIT CODE {returncode}] The command failed.\n"
+                          + (output or "(no output)"))
             return ToolResult(
                 tool_id="",
                 result={
                     "command": command,
+                    "ok": _ok,
+                    "exit_code": returncode,
                     "stdout": stdout,
                     "stderr": stderr,
                     "returncode": returncode,
@@ -2075,6 +2090,11 @@ class BridgeLSTool:
         dirpath: str = args.get("path", ".")
         if not os.path.isabs(dirpath) and self._bridge.project_root:
             dirpath = os.path.join(self._bridge.project_root, dirpath)
+        # Canonical BEFORE it reaches the payload or the directory_contents
+        # signal. The default path is ".", so a bare join handed out
+        # "...\cortex_opensource\." and every consumer comparing against the
+        # plain root saw a path that did not match.
+        dirpath = os.path.normpath(dirpath)
         try:
             entries: List[str] = []
             for entry in sorted(os.scandir(dirpath), key=lambda e: (not e.is_dir(), e.name)):
@@ -3091,6 +3111,12 @@ def _mcp_prompt_section(mcp_names: List[str], deferred: bool,
 # string at 64KB and slices its TAIL, so an oversized payload loses the
 # leading '{' and stops parsing as JSON at all.
 _EDIT_DIFF_MAX_CHARS = 4000
+
+# Characters of the written body kept in the activity payload so WriteCard can
+# draw the file. Same 64KB budget as the Edit diff above, and same failure mode
+# if it is exceeded. Truncation is marked so a clipped preview never reads as
+# the whole file.
+_WRITE_CONTENT_MAX_CHARS = 4000
 
 _TOOL_TO_ACTIVITY_NAME: Dict[str, str] = {
     "Read":      "read_file",
@@ -8479,11 +8505,49 @@ Required behavior:
                     info["questions"] = compact
                 info["description"] = "Waiting for an answer"
 
+            elif activity == "todo_write":
+                # TodoWrite. Without this branch the row fell through to the
+                # generic {"raw": ...} fallback, which the card cannot read,
+                # so a plan the agent just wrote rendered as a bare label.
+                # Content is capped: a 20-task plan at 400 chars each would
+                # otherwise ride the whole activity payload.
+                raw_todos = args.get("todos")
+                compact_todos: List[Dict[str, Any]] = []
+                if isinstance(raw_todos, list):
+                    for t in raw_todos[:12]:
+                        if not isinstance(t, dict):
+                            continue
+                        t_map = cast(Dict[str, Any], t)
+                        compact_todos.append({
+                            "content": str(t_map.get("content") or t_map.get("activeForm") or "")[:300],
+                            "status": str(t_map.get("status", ""))[:24],
+                        })
+                if compact_todos:
+                    info["todos"] = compact_todos
+                if isinstance(result_str, str) and result_str and status == "complete":
+                    try:
+                        _parsed = json.loads(result_str)
+                        if isinstance(_parsed, dict):
+                            info["all_done"] = bool(cast(Dict[str, Any], _parsed).get("allDone"))
+                    except Exception:
+                        pass
+
             elif activity in ("write_file", "create_file"):
                 info["file_path"] = fp
                 content = args.get("content", "")
                 info["lines"] = content.count('\n') + 1 if content else 0
                 info["description"] = "Creating" if activity == "create_file" else "Writing"
+                # WriteCard draws the body from "content"; it reads no other key.
+                # Without it the card fell back to has_body=False, so a file the
+                # agent just created rendered as a single header row with nothing
+                # to expand, the same empty-shell bug the Edit diff had.
+                if isinstance(content, str) and content:
+                    if len(content) > _WRITE_CONTENT_MAX_CHARS:
+                        info["content"] = content[:_WRITE_CONTENT_MAX_CHARS]
+                        info["truncated"] = True
+                        info["total_chars"] = len(content)
+                    else:
+                        info["content"] = content
 
             elif activity in ("search", "grep"):
                 # Grep tool
@@ -9005,7 +9069,17 @@ Required behavior:
                 if is_mcp_action(tool_name):
                     self._mcp_action_count += 1
                     self._session_progress_count += 1
-            if tool_name in ("Write", "Edit", "Bash", "PowerShell"):
+            # A shell command that exited non-zero changed nothing, so it must
+            # not count as a mutation. The false-claim detector compares what
+            # the agent SAID it changed against this count, so a failed
+            # command inflating it hides a run that reported work it never did.
+            _mutation_payload = result.result if isinstance(result.result, dict) else {}
+            _failed_shell = (
+                tool_name in ("Bash", "PowerShell")
+                and isinstance(_mutation_payload.get("exit_code"), int)
+                and _mutation_payload["exit_code"] != 0
+            )
+            if tool_name in ("Write", "Edit", "Bash", "PowerShell") and not _failed_shell:
                 self._mutation_success_count += 1
                 self._session_mutation_count += 1  # Persistent session counter
                 # Reset TodoWrite streak, real progress was made,
@@ -9072,10 +9146,17 @@ Required behavior:
         _exit_code: Optional[int] = None
         if tool_name in ("Bash", "PowerShell", "LS"):
             try:
-                _raw = result.result if hasattr(result, 'result') else None
-                if isinstance(_raw, dict):
-                    _raw = cast(Dict[str, Any], _raw)
-                    _exit_code = _raw.get("exit_code") or _raw.get("exitCode")  # pyright: ignore[reportUnknownMemberType]
+                _payload = result.result if hasattr(result, 'result') else None
+                if isinstance(_payload, dict):
+                    _payload = cast(Dict[str, Any], _payload)
+                    # "returncode" is the key BridgeBashTool actually sets. The
+                    # old lookup knew only exit_code/exitCode, so the run-step
+                    # line could never show rc=N and verification enforcement
+                    # saw None for every shell command.
+                    for _key in ("exit_code", "exitCode", "returncode"):
+                        if isinstance(_payload.get(_key), int):
+                            _exit_code = _payload[_key]  # pyright: ignore[reportUnknownMemberType]
+                            break
             except Exception:
                 pass
         self._recent_tool_results.append((tool_name, bool(result.success), result_str[:200], _exit_code))
@@ -12422,7 +12503,17 @@ Required behavior:
                 # or data.content (line-by-line string) depending on output_mode.
                 results_list = data.get("results", [])
                 content_str = data.get("content", "")
-                match_count = data.get("numResults", 0) or len(results_list)
+                # files_with_matches mode answers with NAMES, not lines: the
+                # engine returns filenames/numFiles and no results or content
+                # at all. Reading only results and content turned a successful
+                # file search into "0 matches", so "which files contain X"
+                # answered "none" while the engine had found them.
+                files_list = [str(f) for f in (data.get("filenames") or []) if f]
+                match_count = (
+                    data.get("numResults", 0)
+                    or data.get("numFiles", 0)
+                    or len(results_list)
+                )
 
                 # Convert results list to match objects for UI
                 matches = []
@@ -12446,19 +12537,22 @@ Required behavior:
                                 })
                 # Content mode has no numResults and no results list, so the
                 # count was 0 next to a non-empty matches list.
-                match_count = match_count or len(matches)
+                match_count = match_count or len(matches) or len(files_list)
 
                 # Outcome MUST be logged: three rounds of "grep came back
                 # empty" reports were undiagnosable because only the
                 # "Searching..." line existed, success and silent failure
                 # looked identical in the log.
                 log.info(f"[GREP] done: {match_count or len(matches)} match(es), "
-                         f"content_len={len(content_str)}")
+                         f"content_len={len(content_str)}, files={len(files_list)}")
                 return ToolResult(tool_id=tool_id, result={
                     "pattern": args.get("pattern", ""),
                     "matches": matches,
+                    "files": files_list,
                     "match_count": match_count,
-                    "content": content_str,  # Also include raw content for LLM
+                    # files mode has no content, so hand the model the names it
+                    # asked for instead of an empty string.
+                    "content": content_str or "\n".join(files_list),
                 })
             except Exception as exc:
                 log.warning(f"[BRIDGE] Real GrepTool failed, using fallback: {exc}")
@@ -12535,8 +12629,27 @@ Required behavior:
             # needed it - the rg branch only runs on paths known to exist.
             log.info(f"[GREP] done (fallback): {len(results)} match(es), "
                      f"content_len={len(output)}, scanned={len(files_to_scan)} file(s)")
+            # Same payload shape as the rg branch. This used to return a bare
+            # "file:line:text" string under "matches", so every consumer that
+            # expected the list the other branch produces silently saw nothing.
+            _fb_matches: List[Dict[str, Any]] = []
+            _fb_files: List[str] = []
+            for _line in results:
+                _parts = _line.split(':', 2)
+                if len(_parts) >= 2:
+                    _fb_matches.append({
+                        "file": _parts[0],
+                        "line": _parts[1],
+                        "text": _parts[2] if len(_parts) > 2 else "",
+                    })
+                    if _parts[0] not in _fb_files:
+                        _fb_files.append(_parts[0])
             return ToolResult(tool_id=tool_id, result={
-                "pattern": pattern, "matches": output or "(no matches)",
+                "pattern": pattern,
+                "matches": _fb_matches,
+                "files": _fb_files,
+                "match_count": len(_fb_matches),
+                "content": output,
             })
         except _re.error as exc:
             return ToolResult(tool_id=tool_id, result=None, success=False,

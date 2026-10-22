@@ -323,16 +323,39 @@ def _extract_code_fences_for_streaming(text: str) -> tuple[str, dict[str, str]]:
         # (full pygments pass only every +400 chars) instead of
         # re-highlighting the entire growing body on every tick.
         code_html = _highlight_for_stream(code, lang, is_open=_open_flag[0])
-        # Theme-aware pre style, was hardcoded dark (#1e1e1e bg, #d9d9d9
-        # text), which clashed with the light page AND with the light
-        # highlight palette baked into code_html.
-        lang_label = f'<span style="color:{T["muted"]};font-size:11px;">{_html.escape(lang)}</span><br/>' if lang else ''
-        styled = (f'<pre style="margin:8px 0;padding:10px 14px;background:{T["bg_card"]};'
-                  f'border:1px solid {T["border"]};'
-                  f'border-radius:6px;white-space:pre;overflow-x:auto;'
+        # Live markup draws the SAME card CodeBlockWidget draws at turn end:
+        # header strip (lang left, chevron + Copy right) above the code body.
+        # The old bare <pre> made a fence look like a plain coloured box for
+        # the whole turn, then snap into a card once _render_prose_batched
+        # replaced it ("code block must be inside a card in live too").
+        # This is markup only: Copy/chevron become real controls when
+        # _render_single_prose swaps the block for a CodeBlockWidget.
+        lang_label = (
+            f'<span style="color:{T["muted"]};font-family:{T["font_mono"]};'
+            f'font-size:10px;font-weight:600;">{_html.escape(lang.upper())}</span>'
+            if lang else '')
+        header = (
+            f'<table width="100%" cellspacing="0" cellpadding="0">'
+            f'<tr>'
+            f'<td align="left" style="padding:4px 8px;background:{T["bg_raised"]};'
+            f'border:1px solid {T["border"]};'
+            f'border-bottom:1px solid {T["border_dim"]};">{lang_label}</td>'
+            f'<td align="right" style="padding:4px 6px;background:{T["bg_raised"]};'
+            f'border:1px solid {T["border"]};border-left:none;'
+            f'border-bottom:1px solid {T["border_dim"]};">'
+            f'<span style="color:{T["text_dim"]};font-size:12px;">\u25be</span>'
+            f'<span style="color:{T["text_dim"]};font-size:10px;'
+            f'font-family:{T["font_ui"]};'
+            f'border:1px solid {T["border_dim"]};background:{T["bg"]};">'
+            f'&nbsp;Copy&nbsp;</span></td>'
+            f'</tr></table>')
+        styled = (header +
+                  f'<pre style="margin:0 0 8px 0;padding:10px 14px 12px 14px;'
+                  f'background:{T["bg"]};border:1px solid {T["border"]};border-top:none;'
+                  f'white-space:pre;'
                   f'font-family:{T["font_mono"]};font-size:12px;'
                   f'color:{T["text"]};">'
-                  f'{lang_label}{code_html}</pre>')
+                  f'{code_html}</pre>')
         key = f'«FENCE{idx}»'
         _map[key] = styled
         return key
@@ -3125,6 +3148,44 @@ def _counts_label(added: int, removed: int) -> QLabel:
     lbl = QLabel(" ".join(parts))
     lbl.setStyleSheet(f"font-family:{T['font_mono']};font-size:12px;")
     return lbl
+
+
+def _diff_body_qss() -> str:
+    # One stylesheet for a whole diff body, selected by the dl property. Rows are
+    # tagged row-add/row-del/row-ctx and their labels ln-*, pfx-*, code-*, so a
+    # 300-row diff costs one CSS parse instead of ~1,400 per-widget parses.
+    # Must stay defined: a missing def raises NameError inside DiffCard.__init__
+    # and takes the whole chat message with it.
+    mono = T['font_mono']
+    return f"""
+QWidget[dl="row-add"] {{ background:rgba(63,185,80,0.12); border:none; }}
+QWidget[dl="row-del"] {{ background:rgba(248,81,73,0.12); border:none; }}
+QWidget[dl="row-ctx"] {{ background:transparent; border:none; }}
+
+QLabel[dl="ln-add"], QLabel[dl="ln-del"], QLabel[dl="ln-ctx"] {{
+    color:{T['muted']}; font-family:{mono}; font-size:11px;
+    padding-right:10px; border:none;
+}}
+QLabel[dl="ln-add"] {{ background:rgba(63,185,80,0.06); }}
+QLabel[dl="ln-del"] {{ background:rgba(248,81,73,0.06); }}
+QLabel[dl="ln-ctx"] {{ background:{T['bg_card']}; }}
+
+QLabel[dl="pfx-add"], QLabel[dl="pfx-del"], QLabel[dl="pfx-ctx"] {{
+    font-family:{mono}; font-size:12px; font-weight:600;
+    background:transparent; border:none;
+}}
+QLabel[dl="pfx-add"] {{ color:{T['green']}; }}
+QLabel[dl="pfx-del"] {{ color:{T['red']}; }}
+QLabel[dl="pfx-ctx"] {{ color:transparent; }}
+
+QLabel[dl="code-add"], QLabel[dl="code-del"], QLabel[dl="code-ctx"] {{
+    font-family:{mono}; font-size:12px; padding:0 12px 0 4px;
+    background:transparent; border:none;
+}}
+QLabel[dl="code-add"] {{ color:{T['green']}; }}
+QLabel[dl="code-del"] {{ color:{T['red']}; }}
+QLabel[dl="code-ctx"] {{ color:{T['text']}; }}
+"""
 
 
 class DiffCard(CollapsibleCard):
@@ -6263,6 +6324,41 @@ class MessageWidget(QWidget):
                     # the rest of the reply into a code block after restart.
                     from src.ui.chat_text import sanitize_prose_markdown
                     _md_src = sanitize_prose_markdown(_md_src)
+
+                    # A fenced block must land as a real CodeBlockWidget here,
+                    # exactly as it does at turn end. Rendering the whole
+                    # message as one HTML body (_fix_prose_code_blocks) drew a
+                    # plain <pre> box instead, so the same reply showed a code
+                    # CARD while live and a bare coloured block after every
+                    # restart ("code block must be inside a card after reopen
+                    # too"). Segment splitting is pure string work, so it costs
+                    # nothing on the messages that have no fence at all.
+                    _segs = None
+                    if '```' in _md_src:
+                        try:
+                            _segs = ChatPanel._merge_consecutive_code_blocks(
+                                ChatPanel._split_prose_segments(
+                                    normalize_table_markdown(_md_src)))
+                        except Exception as _seg_err:
+                            log.warning(f"[ChatRestore] segment split failed, "
+                                        f"falling back to one html body: {_seg_err}")
+                            _segs = None
+                    if _segs and any(s[0] in ("code", "table") for s in _segs):
+                        def _restore_hl(code, lang=""):
+                            # restoring=True never reaches this, and the
+                            # `highlight_code` local below is only bound once
+                            # the "code" block branch has run, so import here
+                            # rather than reference a possibly-unbound name.
+                            from src.ui.syntax_highlight import highlight_code as _hc
+                            return _hc(code, lang)
+                        try:
+                            ChatPanel._render_prose_segments_into(
+                                msg._card_v, msg._card_v.count(), _segs,
+                                _restore_hl, restoring=_restoring)
+                            continue
+                        except Exception as _seg_err:
+                            log.warning(f"[ChatRestore] widget render failed, "
+                                        f"falling back to one html body: {_seg_err}")
                     pb = msg.new_prose(streaming=False)
                     try:
                         # table_normalized=True, or the text is normalized
@@ -13101,6 +13197,31 @@ class ChatPanel(QWidget):
             return
         insert_idx = card_v.indexOf(tb) + 1
 
+        self._render_prose_segments_into(card_v, insert_idx, segments, highlight_code)
+
+        tb.setMinimumHeight(0)
+        tb.setMaximumHeight(0)
+        card_v.removeWidget(tb)
+        tb.setParent(None)
+        tb.deleteLater()
+
+    @staticmethod
+    def _render_prose_segments_into(card_v, insert_idx, segments, highlight_code,
+                                    restoring=False):
+        """Insert one widget per segment into ``card_v`` starting at ``insert_idx``.
+
+        Shared by the turn-end renderer (``_render_single_prose``) and history
+        restore. Both MUST go through here: a fenced block has to land as a real
+        ``CodeBlockWidget`` card. The restore path used to render the whole
+        message with ``_fix_prose_code_blocks`` and a plain ``<pre>``, so the
+        identical message was a card while live and a bare coloured box after
+        every restart ("code block must be inside a card after reopen too").
+
+        ``restoring=True`` skips pygments (plain escaped text, colour arrives
+        if the block is ever re-rendered) and keeps per-widget fit timers from
+        firing during the restore batch, the same trade the ``bt == "code"``
+        restore branch already makes.
+        """
         for seg_type, *seg_data in segments:
             if seg_type == "text":
                 text_content = seg_data[0].strip()
@@ -13123,7 +13244,7 @@ class ChatPanel(QWidget):
                 insert_idx += 1
                 # Defer fit to next event-loop tick so layout assigns
                 # the real viewport width before we measure height.
-                if hasattr(sub_tb, '_fit'):
+                if hasattr(sub_tb, '_fit') and not restoring:
                     QTimer.singleShot(0, sub_tb._fit)
             elif seg_type == "code":
                 lang, code = seg_data
@@ -13133,7 +13254,11 @@ class ChatPanel(QWidget):
                     card_v.insertWidget(insert_idx, diagram_card)
                     insert_idx += 1
                 else:
-                    highlighted = highlight_code(code, lang)
+                    if restoring:
+                        import html as _html
+                        highlighted = _html.escape(code)
+                    else:
+                        highlighted = highlight_code(code, lang)
                     highlighted = (
                         f'<pre style="margin:0;padding:0;white-space:pre;'
                         f'font-family:{T["font_mono"]};font-size:{T["font_size_xxs"]};'
@@ -13152,13 +13277,12 @@ class ChatPanel(QWidget):
                 card_v.insertWidget(insert_idx, table_widget)
                 insert_idx += 1
 
-        tb.setMinimumHeight(0)
-        tb.setMaximumHeight(0)
-        card_v.removeWidget(tb)
-        tb.setParent(None)
-        tb.deleteLater()
-
-    def _split_prose_segments(self, cleaned):
+    @staticmethod
+    def _split_prose_segments(cleaned):
+        # staticmethod, not a method: history restore (MessageWidget.
+        # from_serialized, a staticmethod) has to run the SAME segmentation, and
+        # an instance-shim there would break silently the day this helper starts
+        # touching self. It only ever used the static table parser.
         segments = []
         last_end = 0
         all_matches = []
@@ -13204,7 +13328,7 @@ class ChatPanel(QWidget):
             if match_type == 'code':
                 segments.append(("code", m.group(1) or "", m.group(2)))
             elif match_type == 'table':
-                headers, rows = self._parse_markdown_table(m.group(0))
+                headers, rows = ChatPanel._parse_markdown_table(m.group(0))
                 if headers and rows:
                     segments.append(("table", headers, rows))
                 else:

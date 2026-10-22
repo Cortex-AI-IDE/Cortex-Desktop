@@ -511,6 +511,20 @@ class WriteCard(ToolCardBase):
             from src.ui.syntax_highlight import guess_language_from_filename
             lang = guess_language_from_filename(path)
             self.body_layout.addWidget(_code_view(content, lang, added=True))
+            # The bridge caps the body at _WRITE_CONTENT_MAX_CHARS. Say so, or a
+            # clipped preview reads as the whole file.
+            if data.get("truncated"):
+                total = data.get("total_chars")
+                shown = len(content)
+                note = (f"showing first {shown:,} of {total:,} chars"
+                        if isinstance(total, int) and total > shown
+                        else "preview truncated")
+                foot = QLabel(note)
+                foot.setStyleSheet(
+                    f"color:{T['mono_muted']};font-family:{T['font_ui']};"
+                    f"font-size:{T['font_size_xxs']};background:transparent;")
+                _contain_label(foot)
+                self.body_layout.addWidget(foot)
 
 
 class GrepCard(ToolCardBase):
@@ -909,6 +923,130 @@ def _first_question(data: dict) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+class TodoCard(ToolCardBase):
+    """Tasks, the plan a TodoWrite call just wrote.
+
+    Field report 2026-10-22: a TodoWrite row drew nothing usable. Three links
+    in the chain were missing at once, not one:
+
+    1. the activity name the bridge emits is "todo_write"
+       (agent_bridge._TOOL_TO_ACTIVITY_NAME), absent from _TOOL_NAME_MAP;
+    2. no TodoCard existed in TOOL_CARDS, so the key fell to GenericCard;
+    3. _build_activity_info had no "todo_write" branch, so the payload was the
+       generic {"raw": ...} fallback, and GenericCard reads only
+       path/query/command/url. Result: the bare string "todo_write".
+
+    This card is the per-call record of the plan. The live Tasks panel above
+    the input is a different widget (secondary_ui.TodoSection) fed by the
+    todos_updated signal, so a broken row here did NOT stop the panel working.
+    """
+
+    _MAX_ROWS = 12
+    _DONE = ("complete", "completed", "done", "cancelled", "canceled")
+    _ACTIVE = ("in_progress", "inprogress", "running", "active")
+
+    def __init__(self, data: dict, parent=None):
+        todos = data.get("todos")
+        if not isinstance(todos, list):
+            # tool_end merges the dispatch result into the card data, and that
+            # result is {"oldTodos", "newTodos", "allDone"}.
+            todos = data.get("newTodos")
+        rows = [t for t in todos if isinstance(t, dict)] if isinstance(todos, list) else []
+        done = sum(1 for t in rows if self._status(t) in self._DONE)
+        main_task = str(data.get("main_task") or "").strip()
+
+        super().__init__("Tasks", main_task[:60], tool_type="todo",
+                         has_body=bool(rows), parent=parent)
+        self._todo_rows = len(rows)
+        self._row_labels: list = []
+        if not rows:
+            return
+        self.set_badge(f"{done}/{len(rows)}")
+        self._build_rows(rows)
+        # Other cards open collapsed because their body is incidental output.
+        # Here the plan IS the row, so it opens expanded; the 12-row cap above
+        # keeps the height bounded.
+        self._toggle()
+
+    @classmethod
+    def _status(cls, todo: dict) -> str:
+        return str(todo.get("status", "")).strip().lower().replace("-", "_")
+
+    def _build_rows(self, rows: list):
+        for todo in rows[:self._MAX_ROWS]:
+            status = self._status(todo)
+            kind = "done" if status in self._DONE else (
+                "active" if status in self._ACTIVE else "pending")
+            text = str(todo.get("content") or todo.get("activeForm")
+                       or todo.get("text") or "").strip()
+
+            row_w = QWidget()
+            row_w.setStyleSheet("background:transparent;")
+            rl = QHBoxLayout(row_w)
+            rl.setContentsMargins(0, 1, 0, 1)
+            rl.setSpacing(8)
+
+            glyph = QLabel({"done": "\u2713", "active": "\u25cf"}.get(kind, "\u25cb"))
+            glyph.setFixedWidth(12)
+            glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            rl.addWidget(glyph)
+
+            lbl = QLabel(text)
+            lbl.setTextFormat(Qt.TextFormat.PlainText)
+            _contain_label(lbl)
+            rl.addWidget(lbl, 1)
+
+            self._row_labels.append((glyph, lbl, kind))
+            self.body_layout.addWidget(row_w)
+
+        rest = len(rows) - self._MAX_ROWS
+        if rest > 0:
+            more = QLabel(f"+{rest} more")
+            more.setTextFormat(Qt.TextFormat.PlainText)
+            _contain_label(more)
+            more.setContentsMargins(20, 0, 0, 0)
+            self._row_labels.append((None, more, "more"))
+            self.body_layout.addWidget(more)
+
+        self._style_rows()
+
+    def _style_rows(self):
+        for glyph, lbl, kind in self._row_labels:
+            if kind == "more":
+                lbl.setStyleSheet(
+                    f"color:{T['mono_muted']};font-family:{T['font_ui']};"
+                    f"font-size:{T['font_size_xs']};background:transparent;")
+                continue
+            if kind == "done":
+                g_color = T["green"]
+                l_style = (f"color:{T['muted']};text-decoration:line-through;")
+            elif kind == "active":
+                g_color = T.get("think_label", T["text"])
+                l_style = f"color:{T['text']};font-weight:600;"
+            else:
+                g_color = T["mono_muted"]
+                l_style = f"color:{T['text_dim']};"
+            if glyph is not None:
+                glyph.setStyleSheet(
+                    f"color:{g_color};font-size:11px;background:transparent;border:none;")
+            lbl.setStyleSheet(
+                f"{l_style}font-family:{T['font_ui']};"
+                f"font-size:{T['font_size_xs']};background:transparent;border:none;")
+
+    def _style_labels(self):
+        super()._style_labels()
+        self._name_lbl.setStyleSheet(
+            f"color:{T['text']};background:transparent;font-family:{T['font_ui']};"
+            f"font-size:12px;font-weight:600;")
+
+    def retheme(self):
+        super().retheme()
+        try:
+            self._style_rows()
+        except RuntimeError:
+            pass  # C++ object deleted
+
+
 class GenericCard(ToolCardBase):
     """● Generic, fallback for unknown tool types."""
     def __init__(self, data: dict, parent=None):
@@ -950,6 +1088,10 @@ _TOOL_NAME_MAP = {
     # bridge emits is "ask_user"; map both plus the aliases in use.
     "ask_user": "ask_user", "askuserquestion": "ask_user",
     "ask_user_question": "ask_user", "askuserquestiontool": "ask_user",
+    # TodoWrite normalizes to "todowrite", but the activity name the bridge
+    # emits is "todo_write" (agent_bridge._TOOL_TO_ACTIVITY_NAME). Both missed
+    # every key, so the row fell to GenericCard and drew the bare name.
+    "todo": "todo", "todo_write": "todo", "todowrite": "todo",
 }
 
 TOOL_CARDS = {
@@ -959,6 +1101,7 @@ TOOL_CARDS = {
     "thought": GenericCard, "task": TaskCard, "team": TeamCard,
     "web_search": WebSearchCard, "web_fetch": WebFetchCard,
     "ask_user": QuestionSummaryCard,
+    "todo": TodoCard,
 }
 
 

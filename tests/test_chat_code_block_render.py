@@ -113,7 +113,11 @@ def test_fence_without_a_blank_line_before_it_is_still_split_out(  ):
 
     assert "<pre" in html
     assert "<p><pre" not in html
-    assert re.search(r"<p>See:</p>\s*<pre", html)
+    # The card header (a table row: language left, chevron + Copy right) now
+    # sits between the closed paragraph and the <pre>, so adjacency is
+    # `<p>See:</p>` -> header -> code body. What still has to hold: the
+    # paragraph is CLOSED before the block and nothing is nested in it.
+    assert re.search(r"<p>See:</p>\s*(?:<table[^>]*>.*?</table>\s*)?<pre", html, re.S)
     assert re.search(r"</pre>\s*<p>after</p>", html)
 
 

@@ -58,6 +58,7 @@ TOOL_ICON_MAP = {
     "web_search":     ("globe",          "tool_web"),
     "web_fetch":      ("download-cloud", "tool_web"),
     "task":           ("list-checks",    "tool_task"),
+    "todo":           ("list-checks",    "tool_task"),
     "ask_user":       ("help",           "tool_team"),
     "team":           ("users",          "tool_team"),
     "thought":        ("brain",          "tool_thought"),
