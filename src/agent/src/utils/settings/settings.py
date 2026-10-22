@@ -4,6 +4,7 @@ Settings.
 """
 
 import os
+import sys
 import json
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple, Set
@@ -139,11 +140,10 @@ except ImportError:
     def getUseCoworkPlugins():
         return False
 
-try:
-    from ..services.remote_managed_settings.sync_cache_state import getRemoteManagedSettingsSyncFromCache
-except ImportError:
-    def getRemoteManagedSettingsSyncFromCache():
-        return None
+# services/remote_managed_settings/sync_cache_state.py is an empty generated
+# stub, so there is no remote settings cache to read.
+def getRemoteManagedSettingsSyncFromCache():
+    return None
 
 try:
     from .internalWrites import markInternalWrite
@@ -496,12 +496,9 @@ def getPolicySettingsOrigin() -> Optional[str]:
     # 2. Admin-only MDM (HKLM / macOS plist)
     mdm_result = getMdmSettings()
     if len(mdm_result.get('settings', {})) > 0:
-        try:
-            from ..utils.platform import getPlatform
-            platform = getPlatform()
-            return 'plist' if platform == 'macos' else 'hklm'
-        except:
-            return 'hklm'
+        # utils/platform.py is an empty generated stub; the import always
+        # failed, so macOS was labelled 'hklm' too.
+        return 'plist' if sys.platform == 'darwin' else 'hklm'
     
     # 3. managed-settings.json + managed-settings.d/ (file-based)
     file_result = loadManagedFileSettings()

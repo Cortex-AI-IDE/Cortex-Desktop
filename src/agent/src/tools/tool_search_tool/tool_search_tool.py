@@ -41,35 +41,34 @@ except ImportError:
     class ToolDef:
         pass
 
+# This file lives two packages below src/agent/src, so the shared utils and
+# services are three dots up. These imports used two dots and asked for
+# snake_case names, so both always fell through to the local fallbacks.
 try:
-    from ..utils.debug import log_for_debugging
+    from ...utils.debug import logForDebugging as log_for_debugging
 except ImportError:
     def log_for_debugging(msg: str) -> None:
         log.debug(f"{msg}")
 
 try:
-    from ..utils.lazy_schema import lazy_schema
-except ImportError:
-    def lazy_schema(func):
-        return func
-
-try:
-    from ..utils.string_utils import escape_regexp
-except ImportError:
-    def escape_regexp(s: str) -> str:
-        return re.escape(s)
-
-try:
-    from ..utils.tool_search import is_tool_search_enabled_optimistic
-except ImportError:
-    def is_tool_search_enabled_optimistic() -> bool:
-        return True
-
-try:
-    from ..services.analytics import log_event
+    from ...services.analytics import logEvent as log_event
 except ImportError:
     def log_event(event_name: str, metadata: Dict[str, Any]) -> None:
         pass
+
+
+# utils/lazy_schema.py, utils/string_utils.py and utils/tool_search.py are
+# empty generated stubs, so these local definitions are the implementation.
+def lazy_schema(func):
+    return func
+
+
+def escape_regexp(s: str) -> str:
+    return re.escape(s)
+
+
+def is_tool_search_enabled_optimistic() -> bool:
+    return True
 
 
 # ============================================================
