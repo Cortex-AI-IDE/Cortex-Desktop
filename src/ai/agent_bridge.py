@@ -610,12 +610,46 @@ def _load_agent_tool(module_path: str, class_name: str) -> Optional[type]:
     log.warning(f"[BRIDGE] {class_name} not available: tried {paths_to_try}")
     return None
 
-_REAL_FILE_READ_TOOL  = _load_agent_tool("agent.src.tools.file_read_tool.file_read_tool",  "FileReadTool")
-_REAL_FILE_EDIT_TOOL  = _load_agent_tool("agent.src.tools.file_edit_tool.file_edit_tool",  "FileEditTool")
-_REAL_FILE_WRITE_TOOL = _load_agent_tool("agent.src.tools.file_write_tool.file_write_tool", "FileWriteTool")
-_REAL_GLOB_TOOL       = _load_agent_tool("agent.src.tools.glob_tool.glob_tool",          "GlobTool")
-_REAL_GREP_TOOL            = _load_agent_tool("agent.src.tools.grep_tool.grep_tool",                     "GrepTool")
-_REAL_SEMANTIC_SEARCH_TOOL = _load_agent_tool("agent.src.tools.sementic_search.sementic_search_tool", "SementicSearchTool")
+
+# ============================================================
+# Clean-room engine switch (Phase 2)
+# Each flag moves ONE tool to src/engine. Flip a flag only after
+# tests/engine/ passes for that tool. All False = old engine in use.
+# ============================================================
+
+USE_NEW_ENGINE: Dict[str, bool] = {
+    "read_file": False,
+    "write_file": False,
+    "edit_file": False,
+    "glob": False,
+    "grep": False,
+    "semantic_search": False,
+}
+
+
+def _load_engine_tool(name: str) -> Optional[type]:
+    """Return the new-engine class for a tool when its switch is on."""
+    if not USE_NEW_ENGINE.get(name, False):
+        return None
+    try:
+        from src.engine import registry
+        cls = registry.resolve(name)
+    except Exception as _e:
+        log.warning(f"[BRIDGE] engine import failed for {name}: {_e}")
+        return None
+    if cls is None:
+        log.warning(f"[BRIDGE] engine has no tool registered as {name}")
+        return None
+    log.info(f"[BRIDGE] new engine tool active: {name}")
+    return cls
+
+
+_REAL_FILE_READ_TOOL  = _load_engine_tool("read_file") or _load_agent_tool("agent.src.tools.file_read_tool.file_read_tool",  "FileReadTool")
+_REAL_FILE_EDIT_TOOL  = _load_engine_tool("edit_file") or _load_agent_tool("agent.src.tools.file_edit_tool.file_edit_tool",  "FileEditTool")
+_REAL_FILE_WRITE_TOOL = _load_engine_tool("write_file") or _load_agent_tool("agent.src.tools.file_write_tool.file_write_tool", "FileWriteTool")
+_REAL_GLOB_TOOL       = _load_engine_tool("glob") or _load_agent_tool("agent.src.tools.glob_tool.glob_tool",          "GlobTool")
+_REAL_GREP_TOOL            = _load_engine_tool("grep") or _load_agent_tool("agent.src.tools.grep_tool.grep_tool",                     "GrepTool")
+_REAL_SEMANTIC_SEARCH_TOOL = _load_engine_tool("semantic_search") or _load_agent_tool("agent.src.tools.sementic_search.sementic_search_tool", "SementicSearchTool")
 
 
 # ============================================================
