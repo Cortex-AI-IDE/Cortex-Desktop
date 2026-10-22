@@ -120,3 +120,7 @@ AGENT_AUDIT.md
 tmp_*.py
 _*_check.py
 _*_sync.py
+
+# --- Internal docs ---------------------------------------------------------
+# Clean-room engine notes stay local; they are not part of the shipped source.
+Docs/
