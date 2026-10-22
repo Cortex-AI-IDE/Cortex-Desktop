@@ -291,8 +291,11 @@ _CENSUS_EXCLUDED_DIRS: Set[str] = {
 # unused - v4 cache entries carry no bases, so reusing them would silently
 # reintroduce those false positives on incremental scans, and to 6 when the
 # generated health report and PyInstaller hooks were excluded from the
-# dead-code census (a v5 verdict can still be the report-poisoned one).
-_CACHE_VERSION = 6
+# dead-code census (a v5 verdict can still be the report-poisoned one), to 8
+# when relative imports started producing edges, and to 9 when per-file
+# ``submodule_imports`` was added - older entries carry none, so
+# ``from pkg import helper`` would keep leaving helper.py unimported.
+_CACHE_VERSION = 9
 _CACHE_RELATIVE = Path(".cortex") / "health_map.json"
 
 
@@ -345,6 +348,8 @@ class FileHealth:
     # ``NodeVisitor`` and ``ast.NodeVisitor`` reduce to ``NodeVisitor``.
     class_bases: Dict[str, List[str]] = field(default_factory=dict)
     imports: List[Tuple[str, int, bool]] = field(default_factory=list)  # (dotted, line, guarded)
+    # ``X.name`` for each ``from X import name``; edge candidates only.
+    submodule_imports: List[str] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
     deep: bool = False  # did we actually parse it?
 
@@ -525,22 +530,67 @@ def _guarded_import_lines(tree: ast.AST) -> Set[int]:
     return guarded
 
 
-def _collect_imports(tree: ast.AST, guarded_lines: Set[int]) -> List[Tuple[str, int, bool]]:
-    """Return [(dotted_name, lineno, is_guarded)] for every import in the tree."""
+def _collect_imports(
+    tree: ast.AST, guarded_lines: Set[int], package: str = ""
+) -> List[Tuple[str, int, bool]]:
+    """Return [(dotted_name, lineno, is_guarded)] for every import in the tree.
+
+    Relative imports are resolved against ``package`` - the package of the
+    importing module - exactly as Python does, so ``from ..base import T`` in
+    ``pkg/sub/use.py`` becomes ``pkg.base``. They used to be dropped outright,
+    which silently emptied the import graph for every relatively-imported
+    module: no edge was drawn, so the module looked imported by nothing, and a
+    broken relative import could never be reported.
+    """
     out: List[Tuple[str, int, bool]] = []
+    pkg_parts = package.split(".") if package else []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name:
                     out.append((alias.name, node.lineno, node.lineno in guarded_lines))
         elif isinstance(node, ast.ImportFrom):
-            # Relative imports (from . import x) resolve within the package and
-            # are not worth flagging at file granularity.
-            if node.level:
-                continue
-            mod = node.module or ""
-            if mod:
-                out.append((mod, node.lineno, node.lineno in guarded_lines))
+            dotted = _from_import_target(node, pkg_parts)
+            if dotted:
+                out.append((dotted, node.lineno, node.lineno in guarded_lines))
+    return out
+
+
+def _from_import_target(node: ast.ImportFrom, pkg_parts: List[str]) -> str:
+    """The absolute dotted module a ``from X import ...`` reads from, or ""."""
+    if not node.level:
+        return node.module or ""
+    # ``level`` 1 anchors at the importing package, 2 at its parent.
+    up = node.level - 1
+    if up > len(pkg_parts):
+        return ""  # climbs above the project root
+    base = pkg_parts[: len(pkg_parts) - up]
+    tail = node.module.split(".") if node.module else []
+    return ".".join([*base, *tail])
+
+
+def _collect_submodule_imports(tree: ast.AST, package: str = "") -> List[str]:
+    """Return ``X.name`` for every ``from X import name``.
+
+    ``from pkg import helper`` and ``from . import a`` import *modules*, but
+    ``_collect_imports`` records only ``pkg``, so the edge landed on
+    ``pkg/__init__.py`` and ``helper.py`` looked imported by nothing. Whether a
+    name is a submodule or an attribute (``from pkg import CONST``) is unknown
+    here, so these are candidates: ``_resolve_edges`` draws an edge only when
+    one is exactly a project module, and the missing-import check never sees
+    them, so a guess that is really an attribute cannot become a warning.
+    """
+    out: List[str] = []
+    pkg_parts = package.split(".") if package else []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        dotted = _from_import_target(node, pkg_parts)
+        if not dotted:
+            continue
+        for alias in node.names:
+            if alias.name and alias.name != "*":
+                out.append(f"{dotted}.{alias.name}")
     return out
 
 
@@ -747,7 +797,13 @@ class ProjectHealthScanner:
             return
 
         guarded = _guarded_import_lines(tree)
-        fh.imports = _collect_imports(tree, guarded)
+        # ``fh.module`` is already the package for an ``__init__.py``; for a
+        # plain module it is the module itself, so drop the last segment.
+        package = fh.module
+        if not fh.rel.endswith("__init__.py"):
+            package = fh.module.rsplit(".", 1)[0] if "." in fh.module else ""
+        fh.imports = _collect_imports(tree, guarded, package)
+        fh.submodule_imports = _collect_submodule_imports(tree, package)
 
         if _HAS_EXTRACTOR:
             try:
@@ -1000,6 +1056,9 @@ class ProjectHealthScanner:
         for imp in cached.get("imports", []) or []:
             if isinstance(imp, (list, tuple)) and len(imp) >= 2:
                 fh.imports.append((imp[0], imp[1], bool(imp[2]) if len(imp) > 2 else False))
+        fh.submodule_imports = [
+            s for s in cached.get("submodule_imports", []) or [] if isinstance(s, str)
+        ]
         for pr in cached.get("problems", []) or []:
             fh.problems.append(
                 Problem(
@@ -1020,11 +1079,14 @@ class ProjectHealthScanner:
         known = self._modules
         seen: Set[Tuple[str, str]] = set()
         for fh in self._files:
-            if not fh.imports:
+            if not fh.imports and not fh.submodule_imports:
                 continue
             src_id = _stable_id("file", fh.rel)
-            for dotted, _line, _guarded in fh.imports:
-                target = self._resolve_module(dotted, known)
+            targets = [self._resolve_module(dotted, known) for dotted, _line, _guarded in fh.imports]
+            # Exact match only: a longest-prefix match would just repeat the
+            # package edge, and a non-module name must not resolve at all.
+            targets += [known.get(sub) for sub in fh.submodule_imports]
+            for target in targets:
                 if not target or target == fh.rel:
                     continue
                 key = (src_id, target)
@@ -1351,14 +1413,40 @@ class ProjectHealthScanner:
         orphans.sort(key=lambda d: d["file"])
         orphans_capped = total_orphans > len(orphans)
 
+        # 6. Unimported modules - the raw fact, without the stem rescue.
+        #    ``orphans`` above asserts "dead" and is therefore deliberately
+        #    conservative: a module whose stem appears in ANY project text is
+        #    rescued, because that is where a dynamic reference would show up.
+        #    The cost is that the rule can never fire for a module named after
+        #    an ordinary word - every project says "context", "security",
+        #    "errors" - so a tree full of unimported modules still exported as
+        #    "Orphan files: 0". Reporting only the rescued set conflated
+        #    "provably unreferenced" with "nothing imports this". Both facts
+        #    are now exported, and the unproven one is labelled as such.
+        unimported: List[Dict[str, Any]] = []
+        total_unimported = 0
+        for fh in orphan_candidates:
+            if fh.rel in has_main_guard:
+                continue
+            stem = Path(fh.rel).stem
+            named_elsewhere = stem_hits.get(stem, 0) - stem_self.get(stem, 0) > 0
+            total_unimported += 1
+            if len(unimported) < _MAX_ORPHAN_FILES:
+                unimported.append({"file": fh.rel, "named_elsewhere": named_elsewhere})
+        unimported.sort(key=lambda d: d["file"])
+        unimported_capped = total_unimported > len(unimported)
+
         return {
             "unused_symbols": unused,
             "orphan_files": orphans,
+            "unimported_files": unimported,
             "counts": {
                 "unused_symbols": total_unused,
                 "orphan_files": total_orphans,
+                "unimported_files": total_unimported,
                 "unused_capped": unused_capped,
                 "orphans_capped": orphans_capped,
+                "unimported_capped": unimported_capped,
                 "python_files": len(py),
             },
         }
@@ -1545,6 +1633,7 @@ class ProjectHealthScanner:
                 "languages": langs,
                 "unused_symbols": dc_counts.get("unused_symbols", 0),
                 "orphan_files": dc_counts.get("orphan_files", 0),
+                "unimported_files": dc_counts.get("unimported_files", 0),
             },
             "nodes": nodes,
             "symbols": symbols_out,
@@ -1632,6 +1721,7 @@ class ProjectHealthScanner:
                     "module_vars": fh.module_vars[:_MAX_MODULE_VARS_PER_FILE],
                     "class_bases": fh.class_bases,
                     "imports": [[d, ln, g] for d, ln, g in fh.imports],
+                    "submodule_imports": fh.submodule_imports,
                     "problems": [p.to_dict() for p in fh.problems],
                 }
             blob = {
@@ -1718,6 +1808,7 @@ def _report_md(payload: Dict[str, Any]) -> str:
     add(f"| Healthy | {s.get('healthy', 0)} |")
     add(f"| Unused symbols | {s.get('unused_symbols', 0)} |")
     add(f"| Orphan files | {s.get('orphan_files', 0)} |")
+    add(f"| Unimported modules | {s.get('unimported_files', 0)} |")
     add("")
 
     broken = _report_grouped_problems(payload, STATUS_BROKEN)
@@ -1804,6 +1895,29 @@ def _report_md(payload: Dict[str, Any]) -> str:
     for o in orphans:
         add(f"- `{o.get('file', '?')}` - {o.get('reason', '')}")
     if orphans:
+        add("")
+
+    unimported = dc.get("unimported_files", []) or []
+    unimported_total = dc_counts.get("unimported_files", len(unimported))
+    add(f"### Unimported modules ({unimported_total} listed)")
+    add("")
+    add(
+        "No other file imports these. This is **not** a claim that they are "
+        "dead: tools, providers and skills are loaded by dotted-path string, "
+        "and a module named after an ordinary word is mentioned everywhere. "
+        "`named elsewhere` means the module's name occurs in other project "
+        "text, which is where a dynamic reference would appear. `not named "
+        "anywhere` is the subset also reported above as orphan files. Review "
+        "before deleting."
+    )
+    add("")
+    if not unimported:
+        add("None found.")
+        add("")
+    for u in unimported:
+        mark = "named elsewhere" if u.get("named_elsewhere") else "not named anywhere"
+        add(f"- `{u.get('file', '?')}` - {mark}")
+    if unimported:
         add("")
 
     notes = payload.get("notes", []) or []
