@@ -342,6 +342,10 @@ def clean_markdown_urls(text: str) -> str:
     return text
 
 
+# A markdown list item at any indent: "- x", "* x", "+ x", "1. x", "2) x".
+_LIST_ITEM_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\S')
+
+
 def auto_fix_broken_code_fences(text: str) -> str:
     """Repair malformed markdown code fences."""
     if not text:
@@ -410,7 +414,24 @@ def auto_fix_broken_code_fences(text: str) -> str:
     # blind spot but the catastrophic backtracking masked it; the linear
     # scan exposed the bug because it actually runs fast enough to corrupt
     # every mermaid block that has 3+ indented lines.
+    # FIX 2026-10-22 (nested lists shown as code): the "not in a list" rule
+    # above was never implemented. A nested bullet sits 4+ spaces in, so a
+    # run of three of them followed by a blank line - or by the end of the
+    # buffer, which is every streaming tick - was fenced and drawn as one
+    # grey code block of raw "- ..." lines. Indentation under a list item is
+    # list content (CommonMark), so such a run is left for mistune.
     _ind_lines = fixed.split('\n')
+
+    def _run_is_list_content(start: int, end: int) -> bool:
+        if any(_LIST_ITEM_RE.match(_l) for _l in _ind_lines[start:end]):
+            return True
+        # Nearest line above that is not indented 4+: the block owning the run.
+        _k = start - 1
+        while _k >= 0 and (not _ind_lines[_k].strip()
+                           or _ind_lines[_k].startswith(('    ', '\t'))):
+            _k -= 1
+        return _k >= 0 and bool(_LIST_ITEM_RE.match(_ind_lines[_k]))
+
     _ind_out: list[str] = []
     _i = 0
     _n = len(_ind_lines)
@@ -436,7 +457,8 @@ def auto_fix_broken_code_fences(text: str) -> str:
             while _j < _n and (_ind_lines[_j].startswith('    ')
                                or _ind_lines[_j].startswith('\t')):
                 _j += 1
-            if (_j - _i) >= 3 and (_j == _n or not _ind_lines[_j].strip()):
+            if ((_j - _i) >= 3 and (_j == _n or not _ind_lines[_j].strip())
+                    and not _run_is_list_content(_i, _j)):
                 _run = _ind_lines[_i:_j]
                 # 2026-09-18: an indented run of <task_summary> "files"
                 # entries is leaked JSON, not code. Fencing it here hides it

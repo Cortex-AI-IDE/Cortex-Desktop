@@ -519,20 +519,63 @@ _LANG_PATTERNS: dict[str, dict[str, re.Pattern]] = {
 }
 
 
+# One left-to-right alternation, in priority order.  A single finditer gives
+# correct tokenizer semantics: the leftmost match wins, so `x = 'a # b'` is a
+# string (the quote starts first) while `x = 1  # "note"` is a comment (the
+# `#` starts first).  Running the patterns as separate sequential re.sub
+# passes over generated HTML is what caused the bug below.
+_GENERIC_TOKEN_RE = re.compile(
+    r'(?P<comment>//.*?)(?=\n|$)'
+    r'|(?P<hash>#.*?)(?=\n|$)'
+    r"|(?P<string>\"[^\"\\]*(?:\\.[^\"\\]*)*\"|'[^'\\]*(?:\\.[^'\\]*)*')")
+
+
 def _highlight_generic(code: str) -> str:
-    """Generic highlighting: strings and comments only."""
+    """Generic highlighting: strings and comments only.
+
+    ``code`` is already HTML-escaped by ``highlight_code``.  Tokens are
+    collected over that escaped text and emitted in ONE pass, the same way the
+    language-specific path works.
+
+    Bug history (fixed 2026-10-22): this used to escape, wrap quoted strings,
+    then run the ``#`` comment regex over the HTML it had just produced.  The
+    ``#`` of the hex colour in ``style="color:#00ceb9"`` started a bogus
+    comment span, so EVERY language-less fenced block containing a quoted
+    string rendered visible garbage on screen::
+
+        NAME = #00ceb9">'v'
+
+    and the doubled escaping turned ``&``/``<`` into ``&amp;amp;``/``&amp;lt;``.
+    """
     _sync_palette()  # colors must come from the ACTIVE theme
-    code = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-    code = re.sub(
-        r'("[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*(?:\\.[^\'\\]*)*\')',
-        lambda m: _wrap(C_STRING, m.group(1)), code)
-    code = re.sub(
-        r'(//.*?)(?=\n|$)',
-        lambda m: _wrap_italic(C_COMMENT, m.group(1)), code)
-    code = re.sub(
-        r'(#.*?)(?=\n|$)',
-        lambda m: _wrap_italic(C_COMMENT, m.group(1)), code)
-    return code
+    if not code:
+        return code
+
+    tokens: list[tuple[int, int, str, str]] = []
+    for m in _GENERIC_TOKEN_RE.finditer(code):
+        text = m.group(0)
+        if not text:
+            continue
+        if m.lastgroup == 'string':
+            tokens.append((m.start(), m.end(), C_STRING, ''))
+        else:
+            tokens.append((m.start(), m.end(), C_COMMENT, 'font-style:italic'))
+
+    if not tokens:
+        return code
+
+    result: list[str] = []
+    pos = 0
+    for start, end, color, style in tokens:
+        if start < pos:  # defensive: never emit overlapping spans
+            continue
+        if start > pos:
+            result.append(code[pos:start])
+        result.append(_wrap(color, code[start:end], style))
+        pos = end
+    if pos < len(code):
+        result.append(code[pos:])
+    return ''.join(result)
 
 
 def highlight_code(code: str, lang: str = "") -> str:

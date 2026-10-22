@@ -1126,42 +1126,63 @@
       display: flex;
       align-items: center;
       height: 28px;
-      padding: 0 12px;
+      padding: 0 12px 0 10px;
       cursor: pointer;
       gap: 6px;
+      border-left: 2px solid transparent;
+      transition: background 0.12s ease, border-color 0.12s ease;
     }
 
     .git-file:hover {
       background: var(--bg-hover);
     }
 
+    .git-file.selected {
+      background: var(--bg-selected);
+      border-left-color: var(--border-accent);
+    }
+
+    .git-file.selected:hover {
+      background: var(--bg-selected-hover);
+    }
+
+    .git-file.selected .fname {
+      color: var(--text-white);
+      font-weight: 600;
+    }
+
     .git-badge {
       font-size: 9px;
-      padding: 1px 4px;
-      border-radius: 2px;
-      font-weight: bold;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-weight: 700;
       min-width: 20px;
       text-align: center;
+      border: 1px solid transparent;
     }
 
     .git-badge.added {
-      background: #14532d;
-      color: #4ade80;
+      background: color-mix(in srgb, var(--git-added, #4ade80) 18%, transparent);
+      color: var(--git-added, #4ade80);
+      border-color: color-mix(in srgb, var(--git-added, #4ade80) 32%, transparent);
     }
 
     .git-badge.modified {
-      background: #1e3a5f;
-      color: #60a5fa;
+      background: color-mix(in srgb, var(--border-accent, #60a5fa) 18%, transparent);
+      color: var(--border-accent, #60a5fa);
+      border-color: color-mix(in srgb, var(--border-accent, #60a5fa) 32%, transparent);
     }
 
     .git-badge.deleted {
-      background: #5f1e1e;
-      color: #f87171;
+      background: color-mix(in srgb, var(--git-deleted, #f87171) 18%, transparent);
+      color: var(--git-deleted, #f87171);
+      border-color: color-mix(in srgb, var(--git-deleted, #f87171) 32%, transparent);
     }
 
     .git-badge.untracked {
-      background: #3b3314;
-      color: #facc15;
+      background: color-mix(in srgb, var(--git-modified, #facc15) 18%, transparent);
+      color: var(--git-modified, #facc15);
+      border-color: color-mix(in srgb, var(--git-modified, #facc15) 32%, transparent);
     }
 
     .git-file .fname {
@@ -1181,12 +1202,12 @@
     }
 
     .git-file .git-add {
-      color: #4caf50;
+      color: var(--git-added, #4caf50);
       margin-right: 4px;
     }
 
     .git-file .git-del {
-      color: #f44336;
+      color: var(--git-deleted, #f44336);
     }
 
     .git-bulk-bar {
@@ -1389,136 +1410,6 @@
     .git-file .line-del {
       color: #f87171;
     }
-
-    /* ================================================
-   CHANGES PANEL (AI-edited files)
-   ================================================ */
-    .changes-list {
-      flex: 1 1 0;
-      min-height: 0;
-      overflow-y: auto;
-      overflow-x: hidden;
-      padding: 4px 0;
-    }
-
-    .change-file {
-      display: flex;
-      align-items: center;
-      height: 30px;
-      padding: 0 12px;
-      cursor: pointer;
-      gap: 6px;
-    }
-
-    .change-file:hover {
-      background: var(--bg-hover);
-    }
-
-    .change-file .chg-chevron {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 14px;
-      height: 14px;
-      color: var(--chevron-color, var(--text-muted, #969696));
-      transition: transform .15s ease;
-      flex-shrink: 0;
-    }
-
-    .change-file .chg-chevron svg {
-      width: 14px;
-      height: 14px;
-      display: block;
-    }
-
-    .change-file.open .chg-chevron {
-      transform: rotate(90deg);
-    }
-
-    .change-badge {
-      font-size: 9px;
-      padding: 1px 4px;
-      border-radius: 2px;
-      font-weight: bold;
-      min-width: 20px;
-      text-align: center;
-      flex-shrink: 0;
-    }
-
-    .change-badge.added {
-      background: #14532d;
-      color: #4ade80;
-    }
-
-    .change-badge.modified {
-      background: #1e3a5f;
-      color: #60a5fa;
-    }
-
-    .change-badge.deleted {
-      background: #5f1e1e;
-      color: #f87171;
-    }
-
-    .change-file .fname {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--text-primary, #e0e0e0);
-    }
-
-    .change-file .chg-counts {
-      margin-left: 8px;
-      font-size: 11px;
-      font-weight: 600;
-      font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
-      flex-shrink: 0;
-    }
-
-    .change-file .chg-add {
-      color: #4caf50;
-      margin-right: 4px;
-    }
-
-    .change-file .chg-del {
-      color: #f44336;
-    }
-
-    .change-hunk {
-      display: none;
-      padding: 6px 12px 8px 28px;
-      font-size: 11px;
-      line-height: 1.6;
-      color: var(--text-secondary, #bbbbbb);
-      border-top: 1px solid var(--menu-border);
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 220px;
-      overflow-y: auto;
-    }
-
-    .change-file.open + .change-hunk {
-      display: block;
-    }
-
-    .changes-empty {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 30px 20px;
-      color: #555;
-      text-align: center;
-      font-size: 12px;
-    }
-
-    .changes-empty-hint {
-      font-size: 11px;
-      color: #777;
-      margin-top: 4px;
-    }
-
 
     /* ================================================
    CONTEXT MENU (custom)
@@ -1727,9 +1618,6 @@
       <button class="icon-btn" data-panel="1" title="Search" id="btnSearch">
       <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
     </button>
-      <button class="icon-btn" data-panel="2" title="Changes" id="btnChanges">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-    </button>
       <button class="icon-btn" data-panel="3" title="Git Review" id="btnGitReview">
       <svg viewBox="0 0 24 24"><path d="M12 1C5.93 1 1 5.93 1 12s4.93 11 11 11 11-4.93 11-11S18.07 1 12 1zm0 20c-4.97 0-9-4.03-9-9s4.03-9 9-9 9 4.03 9 9-4.03 9-9 9zm-1-14h2v6h-2zm0 8h2v2h-2z"/></svg>
     </button>
@@ -1823,29 +1711,6 @@
           <div class="search-status" id="searchStatus">
             <span class="status-dot"></span>
             Type to search files in project...
-          </div>
-        </div>
-      </div>
-
-      <!-- ======== PANEL 2: Changes (AI-edited files) ======== -->
-      <div class="panel" data-panel="2" data-testid="changes-panel">
-        <div class="section-header">
-          <span class="section-title">CHANGES</span>
-          <span class="section-count" id="changesCount">(0)</span>
-          <div class="header-spacer"></div>
-          <button class="header-btn" id="btnRefreshChanges" title="Refresh">⟳</button>
-        </div>
-        <div class="changes-list" id="changesList">
-          <div class="changes-empty" id="changesEmpty">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:8px;opacity:.6">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="9" y1="13" x2="15" y2="13"/>
-              <line x1="9" y1="17" x2="15" y2="17"/>
-              <line x1="9" y1="9" x2="10" y2="9"/>
-            </svg>
-            <div>No AI edits yet</div>
-            <div class="changes-empty-hint">Files the AI rewrites will land here</div>
           </div>
         </div>
       </div>
@@ -2301,10 +2166,6 @@ function switchPanel(index) {
     startGitAutoRefresh();
   } else {
     stopGitAutoRefresh();
-  }
-  // Opening the CHANGES panel pulls the up-to-date edited-file list
-  if (index === 2) {
-    loadChanges();
   }
 }
 
@@ -4404,106 +4265,15 @@ function setOpenedFiles(filePaths) {
 }
 
 // ========================================================
-// 3. CHANGES PANEL (AI-edited files)
+// 3. CHANGES PANEL, removed
 // ========================================================
-
-// Python pushes the changed-file list via SidebarBridge.updateChangesList
+// The CHANGES panel was dropped from the activity bar: Git Review (panel 3)
+// already lists AI and manual edits and opens the same read-only diff in
+// editor.html. main_window keeps rebuilding its change list on every AI edit
+// and pushes it here, so this shim stops that push raising a ReferenceError.
 function updateChanges(jsonData) {
-  try {
-    var data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-    var listEl = document.getElementById('changesList');
-    var emptyEl = document.getElementById('changesEmpty');
-    var countEl = document.getElementById('changesCount');
-    var files = Array.isArray(data) ? data : [];
-
-    if (countEl) countEl.textContent = '(' + files.length + ')';
-
-    if (!files.length) {
-      listEl.innerHTML = '';
-      if (emptyEl) { emptyEl.style.display = 'flex'; }
-      listEl.appendChild(emptyEl || document.createElement('div'));
-      return;
-    }
-
-    if (emptyEl) emptyEl.style.display = 'none';
-    listEl.innerHTML = '';
-
-    files.forEach(function(f) {
-      var row = document.createElement('div');
-      row.className = 'change-file';
-      row.dataset.testid = 'change-file';
-      row.dataset.path = f.path || '';
-      row.title = f.path || '';
-
-      var chevron = document.createElement('span');
-      chevron.className = 'chg-chevron';
-      chevron.innerHTML = _CHEVRON_SVG;
-      row.appendChild(chevron);
-
-      var badge = document.createElement('span');
-      var kind = f.edit_type === 'A' ? 'added' : (f.edit_type === 'D' ? 'deleted' : 'modified');
-      badge.className = 'change-badge ' + kind;
-      badge.textContent = f.edit_type === 'A' ? 'A' : (f.edit_type === 'D' ? 'D' : 'M');
-      row.appendChild(badge);
-
-      var name = document.createElement('span');
-      name.className = 'fname';
-      name.textContent = f.name || (f.path || '').split(/[\\/]/).pop();
-      row.appendChild(name);
-
-      var counts = document.createElement('span');
-      counts.className = 'chg-counts';
-      if (f.additions > 0) {
-        var addSpan = document.createElement('span');
-        addSpan.className = 'chg-add';
-        addSpan.textContent = '+' + f.additions;
-        counts.appendChild(addSpan);
-      }
-      if (f.deletions > 0) {
-        var delSpan = document.createElement('span');
-        delSpan.className = 'chg-del';
-        delSpan.textContent = '-' + f.deletions;
-        counts.appendChild(delSpan);
-      }
-      row.appendChild(counts);
-
-      // Click the row body -> open a read-only diff in the editor
-      row.addEventListener('click', function() {
-        callBridge('onViewDiff', row.dataset.path);
-      });
-
-      // Click the chevron -> expand inline hunk summary (no navigation)
-      chevron.addEventListener('click', function(ev) {
-        ev.stopPropagation();
-        var isOpen = row.classList.toggle('open');
-        var hunk = row.nextElementSibling;
-        if (hunk && !hunk.dataset.loaded) {
-          hunk.dataset.loaded = '1';
-          hunk.textContent = 'Changed: ' + (row.dataset.path || '') +
-            ' (+' + (f.additions || 0) + ' / -' + (f.deletions || 0) + ')\nClick the row to view the full diff.';
-        }
-      });
-
-      listEl.appendChild(row);
-
-      // Inline hunk-summary row (appears when the chevron is opened)
-      var hunk = document.createElement('div');
-      hunk.className = 'change-hunk';
-      listEl.appendChild(hunk);
-    });
-  } catch(e) {
-    console.error('[Sidebar] updateChanges error:', e);
-  }
+  void jsonData;
 }
-
-// Manual refresh (refresh button calls this)
-function loadChanges() {
-  callBridge('refreshChanges');
-}
-
-document.getElementById('btnRefreshChanges').addEventListener('click', function() {
-  loadChanges();
-});
 
 // ========================================================
 // 4. GIT REVIEW PANEL
@@ -4520,6 +4290,10 @@ function loadGitStatus() {
 // (refreshGitStatus already calls updateGitFiles directly via _call_js)
 
 let gitFileCount = 0;
+
+// Path of the row highlighted in GIT REVIEW. Drives the .selected style so the
+// file whose diff is open in editor.html stays visibly marked.
+let selectedGitPath = null;
 
 // CHAT HISTORY PANEL, removed (chat history now lives in native chat_panel.py)
 
@@ -4595,7 +4369,11 @@ function updateGitFiles(jsonData) {
     files.forEach(function(f) {
       var div = document.createElement('div');
       div.className = 'git-file';
+      if (selectedGitPath && f.path === selectedGitPath) {
+        div.classList.add('selected');
+      }
       div.dataset.testid = 'git-file';
+      div.dataset.path = f.path || '';
       var badge = f.status === 'untracked' ? 'U' : f.status === 'modified' ? 'M' : f.status === 'deleted' ? 'D' : f.status === 'added' ? 'A' : 'R';
       var badgeClass = f.status;
 
@@ -4630,6 +4408,14 @@ function updateGitFiles(jsonData) {
         }
         div.appendChild(countsSpan);
       }
+
+      div.addEventListener('click', function() {
+        selectedGitPath = div.dataset.path || null;
+        document.querySelectorAll('#gitChanges .git-file').forEach(function(el) {
+          el.classList.toggle('selected', !!selectedGitPath && el.dataset.path === selectedGitPath);
+        });
+        callBridge('onViewDiff', div.dataset.path);
+      });
 
       changesEl.appendChild(div);
     });
@@ -4683,7 +4469,7 @@ var SidebarBridge = {
   refreshDirs: function(paths) { refreshDirs(paths); },
   // Alias: Python refreshGitStatus calls this name
   updateGitStatus: function(jsonData) { updateGitFiles(jsonData); },
-  // Python SidebarBridge.updateChangesList calls this to render the CHANGES list
+  // Kept so SidebarBridge.updateChangesList keeps working; the panel is gone.
   updateChanges: function(jsonData) { updateChanges(jsonData); },
   // Called by Python loadDirectoryTree → pushes tree data
   // rootDir (optional): the project/directory root, sets global rootPath if provided

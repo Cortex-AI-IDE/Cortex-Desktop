@@ -690,7 +690,7 @@ class SidebarWidget(QWidget):
 
     def get_expanded_paths(self): return []
     def switch_panel(self, idx: int):
-        """Move the sidebar to a panel (0 Explorer, 2 Changes, 3 Git Review).
+        """Move the sidebar to a panel (0 Explorer, 1 Search, 3 Git Review).
 
         Bug history: this called ``self._bridge.onPanelSwitched(idx)``, which
         is the pyqtSlot JS calls to ANNOUNCE a switch the user already made -

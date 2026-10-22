@@ -3354,6 +3354,8 @@ class CortexMainWindow(QMainWindow):
                 # Wire header "+ New Chat" button → summarize to MEMORY.md + fresh chat
                 self._ai_chat.new_chat_requested.connect(self._on_new_chat_requested)
                 self._ai_chat.conversation_selected.connect(self._switch_to_conversation)
+                # Diff card "Open" button → the themed diff in the editor
+                self._ai_chat.show_diff_requested.connect(self._on_show_diff)
                 self._ai_chat.history_provider = self._chat_history_items
                 # CHANGES panel: fill _diff_data_store on every AI edit so the
                 # sidebar change list populates in native-chat mode too.
@@ -4887,7 +4889,7 @@ class CortexMainWindow(QMainWindow):
             log.debug(f'[MainWindow] Suppressed error: {e}')
 
     def _on_show_diff(self, file_path: str):
-        """Show diff in Qt dialog window, triggered by Diff button click in chat."""
+        """Open the diff for a chat diff card (its Open button) in the editor."""
         log.info(f"[Diff] _on_show_diff called with: {file_path}")
         original, modified = '', ''
 
@@ -4995,9 +4997,11 @@ class CortexMainWindow(QMainWindow):
                 self._ai_chat.add_system_message(f"⚠️ No diff data available for {filename}. It was not edited in this session.")
             return
 
-        log.info(f"[Diff] Opening diff tab for {file_path} (+{len(modified)} chars)")
-        is_dark = self._theme_manager.is_dark
-        self._editor_tabs.open_diff_tab(file_path, original, modified, is_dark)
+        if original == modified:
+            log.info(f"[Diff] No changes to show for: {file_path}")
+            return
+        log.info(f"[Diff] Opening editor diff for {file_path} (+{len(modified)} chars)")
+        self._show_editor_diff(file_path, original, modified)
 
     def _on_inline_edit_submitted(self, prompt: str, selection_text: str, line_range: tuple):
         editor = self._editor_tabs.currentWidget()
@@ -5068,8 +5072,7 @@ class CortexMainWindow(QMainWindow):
         diff_pair = context.get("diff")
         if diff_pair:
             original, modified = diff_pair
-            is_dark = self._theme_manager.is_dark
-            self._editor_tabs.open_diff_tab(file_path, original, modified, is_dark)
+            self._show_editor_diff(file_path, original, modified)
             return
 
         self._on_show_diff(file_path)
@@ -5496,17 +5499,32 @@ class CortexMainWindow(QMainWindow):
         # Industry baseline: git HEAD vs worktree (same span as Source Control).
         # Falls back to the AI-edit chain when git is unavailable.
         try:
-            original, modified = self._resolve_changes_pair(
-                file_path, original, modified
-            )
+            if not os.path.exists(file_path) and not self._has_deferred_edit(file_path):
+                original = self._git_baseline_content(file_path) or original
+                modified = ""
+            else:
+                original, modified = self._resolve_changes_pair(
+                    file_path, original, modified
+                )
         except Exception as _re:
             _log.debug(f"[Diff] resolve pair on click failed: {_re}")
-        if not modified:
+        if not original and not modified:
             _log.warning(f"[Diff] No AI-edit diff data for: {file_path}")
             return
         if original == modified:
             _log.info(f"[Diff] No pending changes vs baseline for: {file_path}")
             return
+        self._show_editor_diff(file_path, original, modified)
+
+    def _show_editor_diff(self, file_path: str, original: str, modified: str):
+        """Open the read-only diff in the editor (editor.html showDiff).
+
+        The one diff view for every entry point: the CHANGES panel, a chat
+        diff card's Open button and the inline-edit Diff button. It draws with
+        the editor page's --diff-* theme variables, so it follows Dark / Light
+        and the Color theme, live. (The chat and inline paths used to build a
+        hard-coded dark QTextBrowser tab in _editor_tabs, which is hidden.)
+        """
         additions, deletions = self._compute_diff_counts(original, modified)
         language = self._guess_lang(file_path)
         # Hunk-only payload: never ship the full file to JS. The broken

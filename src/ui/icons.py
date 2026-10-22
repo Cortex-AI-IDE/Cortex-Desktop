@@ -32,6 +32,7 @@ UNICODE_ICONS = {
     "brain":          "\u2622",  # ☢
     "sparkles":       "\u2726",  # ✦
     "circle-dot":     "\u25CF",  # ●
+    "help":           "?",       # ASCII, renders everywhere
     "check":          "\u2713",  # ✓
     "x":              "\u2717",  # ✗
 }
@@ -57,6 +58,7 @@ TOOL_ICON_MAP = {
     "web_search":     ("globe",          "tool_web"),
     "web_fetch":      ("download-cloud", "tool_web"),
     "task":           ("list-checks",    "tool_task"),
+    "ask_user":       ("help",           "tool_team"),
     "team":           ("users",          "tool_team"),
     "thought":        ("brain",          "tool_thought"),
     "thinking":       ("brain",          "tool_thought"),

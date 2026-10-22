@@ -343,9 +343,50 @@ def _extract_code_fences_for_streaming(text: str) -> tuple[str, dict[str, str]]:
     return text, _map
 
 def _restore_code_fences(html: str, fence_map: dict[str, str]) -> str:
-    """Splice styled <pre> blocks back into HTML, replacing sentinels."""
+    """Splice styled <pre> blocks back into HTML, replacing sentinels.
+
+    A fenced block is BLOCK-level, but the sentinel is a bare text token: when
+    it sits alone on its line mistune wraps it in ``<p>«FENCE0»</p>``, and a
+    plain string replace produced ``<p><pre>…</pre></p>``.  Qt's rich text
+    engine cannot nest a block inside a paragraph, so it flattened the code
+    block into the surrounding prose: the fence rendered as inline text with
+    no card, border or scroll area ("the code block displays like plan
+    instead of a pre card", reported 2026-10-22).  A fence that shares a
+    paragraph with prose (``` right after a sentence, no blank line) flattened
+    the same way.
+
+    Paragraphs holding a sentinel are therefore rebuilt: the paragraph is
+    closed before the block, and any prose after it is reopened in its own
+    paragraph.  Sentinels outside a paragraph still get the plain replace.
+    """
+    if not html or not fence_map:
+        return html
+
+    keys = tuple(fence_map)
+    if not any(k in html for k in keys):
+        return html
+
+    def _rebuild_para(m: "re.Match") -> str:
+        inner = m.group(1)
+        if not any(k in inner for k in keys):
+            return m.group(0)
+        parts = re.split('(' + '|'.join(re.escape(k) for k in keys) + ')', inner)
+        out: list[str] = []
+        for part in parts:
+            if not part or not part.strip():
+                continue
+            if part in fence_map:
+                out.append(fence_map[part])
+            else:
+                out.append('<p>' + part.strip() + '</p>')
+        return '\n'.join(out)
+
+    html = re.sub(r'<p>([\s\S]*?)</p>', _rebuild_para, html)
+
+    # Sentinels that never landed inside a paragraph (list items, table cells).
     for key, styled in fence_map.items():
-        html = html.replace(key, styled)
+        if key in html:
+            html = html.replace(key, styled)
     return html
 
 
@@ -3068,12 +3109,6 @@ LANG_BADGE = {  # extension -> (label, bg color)
     "css": ("css", "#563d7c"), "json": ("json", "#5b5b5b"), "md": ("md", "#3a3a3a"),
 }
 
-LANG_ICON = {  # extension -> emoji icon (v2 design)
-    "py": "\U0001f40d", "js": "\U0001f7e8", "ts": "\U0001f537", "tsx": "\u269b\ufe0f",
-    "jsx": "\u269b\ufe0f", "html": "\U0001f310", "css": "\U0001f3a8",
-    "json": "\U0001f4cb", "md": "\U0001f4dd",
-}
-
 def _badge(filename: str) -> QLabel:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     label, _color = LANG_BADGE.get(ext, (ext or "txt", None))
@@ -3108,7 +3143,10 @@ class DiffCard(CollapsibleCard):
         self._removed = removed
         self._edit_state = edit_state
 
-        # Override card-frame stylesheet: subtle border + near-transparent background (matches spec)
+        # Override card-frame stylesheet: subtle border + near-transparent
+        # background. Also the builder retheme() re-applies, so a live switch
+        # keeps the subtle frame instead of falling back to the default one.
+        self._frame_qss = _CARD_FRAME_SUBTLE
         self.setStyleSheet(
             _CARD_FRAME_SUBTLE()
         )
@@ -3118,21 +3156,40 @@ class DiffCard(CollapsibleCard):
         self.setMinimumWidth(0)
         self.setMaximumWidth(_QWIDGETSIZE_MAX)
 
-        # ── Header: badge + filename + counts + Accept/Reject ──
-        display = self.filename.split("\\")[-1].split("/")[-1]
-        self.add_header_widget(_badge(display))
-        
-        name = QLabel(display)
-        name.setMinimumWidth(0)
-        name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        name.setContentsMargins(0, 0, 2, 0)
-        name.setStyleSheet(f"font-family:{T['font_mono']};font-size:13px;color:{T['text']};font-weight:500;")
-        self.add_header_widget(name)
-        
-        counts = _counts_label(self._added, self._removed)
-        counts.setContentsMargins(0, 0, 0, 0)
-        self.add_header_widget(counts)
+        # ── Header: language badge, file name, folder, counts, Open ──
+        parts = [p for p in self.filename.replace("\\", "/").split("/") if p]
+        display = parts[-1] if parts else self.filename
+        self._badge_lbl = _badge(display)
+        self.add_header_widget(self._badge_lbl)
+
+        self._name_lbl = QLabel(display)
+        self._name_lbl.setMinimumWidth(0)
+        self._name_lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self._name_lbl.setContentsMargins(0, 0, 2, 0)
+        self._name_lbl.setToolTip(self.filename)
+        self.add_header_widget(self._name_lbl)
+
+        # The folder, dimmed: two levels are enough to tell same-named files
+        # apart without crowding a narrow chat.
+        self._dir_lbl = QLabel("/".join(parts[-3:-1]))
+        self._dir_lbl.setMinimumWidth(0)
+        self._dir_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._dir_lbl.setToolTip(self.filename)
+        self.add_header_widget(self._dir_lbl)
+
+        self._counts_lbl = _counts_label(self._added, self._removed)
+        self._counts_lbl.setContentsMargins(0, 0, 0, 0)
+        self.add_header_widget(self._counts_lbl, before_stretch=False)
+
+        # Opens the full themed diff in the editor (main_window._on_show_diff).
+        # A child button takes its own click, so it never toggles the card.
+        self._open_btn = QPushButton("Open")
+        self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._open_btn.setToolTip("Open this diff in the editor")
+        self._open_btn.clicked.connect(self._request_open)
+        self.add_header_widget(self._open_btn, before_stretch=False)
         self.label.hide()
+        self._style_header()
 
         # ── Diff body: proper diff view with context lines ──
         self.body_layout.setSpacing(0)
@@ -3150,6 +3207,42 @@ class DiffCard(CollapsibleCard):
         # Register with state manager
         if self._edit_state:
             self._edit_state.register_diff_card(self.filename, self._added, self._removed, self._hunk_lines, self)
+
+    def _style_header(self):
+        """Header colours from the live tokens (construction and retheme)."""
+        self._badge_lbl.setStyleSheet(
+            f"background:{T['bg_hover']};color:{T['text_secondary']};font-size:10px;"
+            f"font-weight:600;padding:1px 6px;border-radius:4px;font-family:{T['font_mono']};")
+        self._name_lbl.setStyleSheet(
+            f"font-family:{T['font_mono']};font-size:13px;color:{T['text']};font-weight:600;")
+        self._dir_lbl.setStyleSheet(f"font-size:12px;color:{T['muted']};")
+        parts = []
+        if self._added:
+            parts.append(f"<span style='color:{T['green']};'>+{self._added}</span>")
+        if self._removed:
+            parts.append(f"<span style='color:{T['red']};'>−{self._removed}</span>")
+        self._counts_lbl.setText(" ".join(parts))
+        self._open_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{T['text_secondary']};"
+            f"border:1px solid {T['border']};border-radius:5px;padding:1px 9px;"
+            f"font-size:11px;}}"
+            f"QPushButton:hover{{background:{T['bg_hover']};color:{T['text']};}}")
+
+    def _request_open(self):
+        """Ask the chat panel (an ancestor) to open this diff in the editor."""
+        w = self.parentWidget()
+        while w is not None and not hasattr(w, "show_diff_requested"):
+            w = w.parentWidget()
+        if w is not None:
+            w.show_diff_requested.emit(self.filename)
+
+    def retheme(self):
+        super().retheme()
+        try:
+            self._style_header()
+            self.body.setStyleSheet(_diff_body_qss())
+        except RuntimeError:
+            pass  # C++ object deleted
 
     # Phase 3A: Hover glow on DiffCard, DISABLED (was causing visible border flicker on filename hover)
     # def enterEvent(self, event):
@@ -3261,29 +3354,7 @@ class DiffCard(CollapsibleCard):
         if _diff_host is not None and not _diff_host.property("_dl_styled"):
             _diff_host.setProperty("_dl_styled", True)
             _mono = T['font_mono']
-            _diff_host.setStyleSheet(
-                f"QWidget[dl=\"row-add\"]{{background:rgba(63,185,80,0.12);border:none;}}"
-                f"QWidget[dl=\"row-del\"]{{background:rgba(248,81,73,0.12);border:none;}}"
-                f"QWidget[dl=\"row-ctx\"]{{background:transparent;border:none;}}"
-                f"QLabel[dl=\"ln-ctx\"]{{color:{T['muted']};font-family:{_mono};"
-                f"font-size:11px;padding-right:10px;background:{T['bg_card']};}}"
-                f"QLabel[dl=\"ln-add\"]{{color:{T['muted']};font-family:{_mono};"
-                f"font-size:11px;padding-right:10px;background:rgba(63,185,80,0.06);}}"
-                f"QLabel[dl=\"ln-del\"]{{color:{T['muted']};font-family:{_mono};"
-                f"font-size:11px;padding-right:10px;background:rgba(248,81,73,0.06);}}"
-                f"QLabel[dl=\"pfx-add\"]{{color:{T['green']};font-family:{_mono};"
-                f"font-size:12px;font-weight:600;}}"
-                f"QLabel[dl=\"pfx-del\"]{{color:{T['red']};font-family:{_mono};"
-                f"font-size:12px;font-weight:600;}}"
-                f"QLabel[dl=\"pfx-ctx\"]{{color:transparent;font-family:{_mono};"
-                f"font-size:12px;font-weight:600;}}"
-                f"QLabel[dl=\"code-add\"]{{font-family:{_mono};font-size:12px;"
-                f"color:{T['green']};padding:0 12px 0 4px;}}"
-                f"QLabel[dl=\"code-del\"]{{font-family:{_mono};font-size:12px;"
-                f"color:{T['red']};padding:0 12px 0 4px;}}"
-                f"QLabel[dl=\"code-ctx\"]{{font-family:{_mono};font-size:12px;"
-                f"color:{T['text']};padding:0 12px 0 4px;}}"
-            )
+            _diff_host.setStyleSheet(_diff_body_qss())
         # Rows fall back to their own stylesheet only if the container is
         # missing (defensive: a diff rendered into a detached layout).
         _dl_shared = _diff_host is not None
@@ -9808,6 +9879,7 @@ class ChatPanel(QWidget):
     # Signals for file open/line navigation
     open_file_requested = pyqtSignal(str)  # file_path
     open_file_at_line_requested = pyqtSignal(str, int)  # file_path, line
+    show_diff_requested = pyqtSignal(str)  # file_path: a DiffCard's Open button
     # Signal for plan generation
     generate_plan_requested = pyqtSignal(str)  # plan prompt
     # Signal for chat context switching

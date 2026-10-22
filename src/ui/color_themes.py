@@ -249,16 +249,6 @@ THEMES.update({
     },
 })
 
-# Order shown in Settings: Cortex, the colour themes, then the accessibility
-# themes (an "Accessibility" group in the dropdown).
-COLOR_THEME_CHOICES = (("cortex", "Cortex (Dark / Light / System)"),) + tuple(
-    (tid, THEMES[tid]["label"]) for tid in (
-        "dark-plus", "light-plus", "one-dark-pro", "dracula", "monokai", "github-dark",
-        "github-light", "night-owl", "tokyo-night", "catppuccin-mocha", "nord",
-        "solarized-light",
-        "high-contrast-dark", "high-contrast-light", "distinct-colors-dark", "distinct-colors-light"))
-ACCESSIBILITY_THEMES = tuple(t for t, v in THEMES.items() if v.get("a11y"))
-
 _listeners: list = []
 _active_at_start = DEFAULT_COLOR_THEME     # the theme the native palettes hold now
 _web_installed = False
@@ -503,6 +493,32 @@ def apply_at_startup() -> str:
 
 # ── web pages ───────────────────────────────────────────────────────────────
 
+def diff_vars(tid: str) -> list:
+    """(--diff-* variable, colour) pairs for the editor's read-only diff.
+
+    Changed lines are tinted, not recoloured: the text keeps the theme's
+    foreground, the row a faint wash of its green / red and the line-number
+    gutter a stronger one. Light themes need a little more tint to show on
+    a pale background.
+    """
+    c = THEMES[tid]["ui"]
+    light = THEMES[tid]["base"] == "light"
+    row, gutter = (0.11, 0.20) if light else (0.09, 0.18)
+    return [
+        ("--diff-bg", c["bg"]), ("--diff-surface", c["surface"]),
+        ("--diff-border", c["border"]), ("--diff-fg", c["fg"]),
+        ("--diff-fg-strong", c["fg"]), ("--diff-fg-dim", c["fg_dim"]),
+        ("--diff-gutter-fg", c["muted"]), ("--diff-hover", _rgba(c["fg"], 0.04)),
+        ("--diff-btn-hover", _rgba(c["fg"], 0.08)), ("--diff-accent", c["accent"]),
+        ("--diff-accent-bg", _rgba(c["accent"], 0.16)),
+        ("--diff-green", c["green"]), ("--diff-red", c["red"]),
+        ("--diff-add-bg", _rgba(c["green"], row)), ("--diff-add-gutter", _rgba(c["green"], gutter)),
+        ("--diff-del-bg", _rgba(c["red"], row)), ("--diff-del-gutter", _rgba(c["red"], gutter)),
+        ("--diff-skip-bg", _rgba(c["fg"], 0.03)),
+        ("--diff-scroll", _rgba(c["muted"], 0.45)), ("--diff-scroll-hover", _rgba(c["fg_dim"], 0.55)),
+    ]
+
+
 def _page_css(tid: str) -> dict:
     """page key -> CSS for theme `tid`. Keys match the page's file name."""
     c = THEMES[tid]["ui"]
@@ -577,7 +593,9 @@ def _page_css(tid: str) -> dict:
         ("--grid", _rgba(c["fg"], 0.03)),
     ])
 
-    editor = (
+    # The read-only diff (Source Control -> Changes) draws only with these
+    # variables; editor.html holds Cortex's own dark / light values.
+    editor = vars_(diff_vars(tid)) + (
         f"body,#app{{background:{c['bg']}{imp};color:{c['fg']}{imp}}}"
         f"#tab-bar{{background:{c['surface']}{imp};border-bottom-color:{c['border']}{imp}}}"
         f".tab{{background:{c['surface2']}{imp};color:{c['fg_dim']}{imp};"

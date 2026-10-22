@@ -402,36 +402,101 @@ class EditCard(ToolCardBase):
         path = data.get("path") or data.get("file_path") or "file"
         if '\\' in path or '/' in path:
             path = path.split('\\')[-1].split('/')[-1]
-        added = data.get("added", 0)
-        removed = data.get("removed", 0)
+        rows = self._rows_from(data)
+        added = data.get("added") or sum(1 for r in rows if r[0] == "add")
+        removed = data.get("removed") or sum(1 for r in rows if r[0] == "del")
         badge_parts = []
         if added:
             badge_parts.append(f"<span style='color:{T['green']}'>+{added}</span>")
         if removed:
             badge_parts.append(f"<span style='color:{T['red']}'>\u2212{removed}</span>")
-        super().__init__("Edit", path, tool_type="edit", has_body=bool(data.get("hunk_lines")), parent=parent)
+        super().__init__("Edit", path, tool_type="edit", has_body=bool(rows), parent=parent)
         if badge_parts:
             self._badge_lbl.setText(" ".join(badge_parts))
             self._badge_lbl.setStyleSheet(f"font-family:{T['font_mono']};font-size:{T['font_size_xxs']};")
-        if data.get("hunk_lines") and self._has_body:
+        if rows and self._has_body:
             cv = CodeView()
-            # Convert 2-tuple to 4-tuple if needed for backwards compatibility
-            hunk = data["hunk_lines"]
-            if hunk and len(hunk[0]) == 2:
-                rows = []
-                for i, (kind, text) in enumerate(hunk):
-                    if kind == "add":
-                        rows.append(("add", None, i + 1, text))
-                    elif kind == "del":
-                        rows.append(("del", i + 1, None, text))
-                    elif kind == "hunk":
-                        rows.append(("hunk", None, None, text))
-                    else:
-                        rows.append(("ctx", i + 1, i + 1, text))
-                cv.set_lines(rows)
-            else:
-                cv.set_lines(hunk)
+            cv.set_lines(rows)
             self.body_layout.addWidget(cv)
+            # Show the change, do not hide it behind a second click. The
+            # parent activity group is already collapsed; the diff IS the
+            # content of an Edit row, so it starts open (CodeView caps its
+            # own height at 18 lines).
+            self._collapsed = False
+            self.body.setVisible(True)
+            if self._chev:
+                self._chev.setText("\u2304")
+
+    # ── diff rows ────────────────────────────────────────────────────
+    # Field report 2026-10-22: "the edited diff is not showing inside the
+    # tool section". The card only ever rendered data["hunk_lines"], and
+    # the only producer of hunk_lines is native_chat_bridge, which feeds
+    # the SEPARATE DiffCard. Nothing ever put hunk_lines on a tool card,
+    # so the Edit row was an empty shell whose diff lived elsewhere (and
+    # was gone entirely when that signal did not reach the panel).
+    # agent_bridge now also sends the edit's old_string/new_string (it
+    # read them and threw them away), so the card diffs them itself.
+    _MAX_DIFF_ROWS = 400     # past this the card is unreadable and costly
+    _CONTEXT_LINES = 3       # unchanged lines kept around each change
+
+    @classmethod
+    def _rows_from(cls, data: dict) -> list:
+        hunk = data.get("hunk_lines")
+        if hunk:
+            return cls._normalize_rows(hunk)
+        old = data.get("old_string")
+        new = data.get("new_string")
+        old_s = old if isinstance(old, str) else ""
+        new_s = new if isinstance(new, str) else ""
+        if old_s or new_s:
+            return cls._rows_from_strings(old_s, new_s)
+        return []
+
+    @classmethod
+    def _normalize_rows(cls, hunk: list) -> list:
+        """Convert 2-tuple hunk rows to 4-tuple (kind, old_no, new_no, text)."""
+        if hunk and len(hunk[0]) == 2:
+            rows = []
+            for i, (kind, text) in enumerate(hunk):
+                if kind == "add":
+                    rows.append(("add", None, i + 1, text))
+                elif kind == "del":
+                    rows.append(("del", i + 1, None, text))
+                elif kind == "hunk":
+                    rows.append(("hunk", None, None, text))
+                else:
+                    rows.append(("ctx", i + 1, i + 1, text))
+            return rows
+        return hunk
+
+    @classmethod
+    def _rows_from_strings(cls, old: str, new: str) -> list:
+        """Diff two edit strings into CodeView rows, trimmed to context."""
+        import difflib
+
+        a = old.splitlines()
+        b = new.splitlines()
+        ops = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+        rows = []
+        ctx = cls._CONTEXT_LINES
+        last = len(ops) - 1
+        for idx, (tag, i1, i2, j1, j2) in enumerate(ops):
+            if tag == "equal":
+                span = i2 - i1
+                first = i1 if idx == 0 else i1 + max(0, span - ctx)
+                stop = i2 if idx == last else i1 + min(span, ctx)
+                for k in range(first, stop):
+                    rows.append(("ctx", k + 1, j1 + (k - i1) + 1, a[k]))
+                continue
+            for k in range(i1, i2):
+                rows.append(("del", k + 1, None, a[k]))
+            for k in range(j1, j2):
+                rows.append(("add", None, k + 1, b[k]))
+        if len(rows) > cls._MAX_DIFF_ROWS:
+            cut = cls._MAX_DIFF_ROWS - 1
+            rows = rows[:cut] + [("ctx", None, None,
+                                 f"... {len(rows) - cut} more lines not shown")]
+        return rows
 
 
 class WriteCard(ToolCardBase):
@@ -781,6 +846,69 @@ class WebFetchCard(ToolCardBase):
                 self.body_layout.addWidget(out)
 
 
+class QuestionSummaryCard(ToolCardBase):
+    """? AskUserQuestion, the question and the options the agent asked.
+
+    Field report 2026-10-22: "the ask question prompt card is broken".
+    AskUserQuestion was missing from _TOOL_NAME_MAP and TOOL_CARDS, so the
+    row fell through to GenericCard, which reads path/query/command/url and
+    therefore rendered the bare tool name and nothing else. The interactive
+    answer card is secondary_ui.QuestionCard; this one is the record of what
+    was asked, and it stays in the chat after the answer is given.
+    """
+
+    def __init__(self, data: dict, parent=None):
+        first = _first_question(data)
+        text = str(first.get("question") or first.get("text") or "").strip()
+        header = str(first.get("header") or "").strip()
+        options = [o for o in (first.get("options") or first.get("choices") or [])
+                   if isinstance(o, dict)]
+        super().__init__("Question", header or text, tool_type="ask_user",
+                         has_body=bool(text or options), parent=parent)
+        if not self._has_body:
+            return
+        if text:
+            q = QLabel(text)
+            q.setTextFormat(Qt.TextFormat.PlainText)
+            _contain_label(q)
+            q.setStyleSheet(
+                f"color:{T['text']};font-family:{T['font_ui']};"
+                f"font-size:{T['font_size_sm']};background:transparent;")
+            self.body_layout.addWidget(q)
+        for i, opt in enumerate(options[:8], 1):
+            label = str(opt.get("label", opt.get("value", ""))).strip()
+            desc = str(opt.get("description", "") or "").strip()
+            row = QLabel()
+            row.setTextFormat(Qt.TextFormat.PlainText)
+            row.setText(f"{i}.  {label}" + (f"   {desc}" if desc else ""))
+            _contain_label(row)
+            row.setStyleSheet(
+                f"color:{T['mono_muted'] if desc else T['text']};"
+                f"font-family:{T['font_ui']};font-size:{T['font_size_xs']};"
+                f"background:transparent;")
+            self.body_layout.addWidget(row)
+
+    def _style_labels(self):
+        super()._style_labels()
+        self._name_lbl.setStyleSheet(
+            f"color:{T['text']};background:transparent;font-family:{T['font_ui']};"
+            f"font-size:12px;font-weight:600;")
+
+
+def _first_question(data: dict) -> dict:
+    """The question dict a card renders, from either payload shape.
+
+    agent_bridge sends {"questions": [...]} (tool args) and the question
+    signal sends one flat {"text"/"question", "options"/"choices"}.
+    """
+    qs = data.get("questions")
+    if isinstance(qs, list):
+        for q in qs:
+            if isinstance(q, dict) and (q.get("question") or q.get("text")):
+                return q
+    return data if isinstance(data, dict) else {}
+
+
 class GenericCard(ToolCardBase):
     """● Generic, fallback for unknown tool types."""
     def __init__(self, data: dict, parent=None):
@@ -817,6 +945,11 @@ _TOOL_NAME_MAP = {
     "team": "team",
     "websearch": "web_search", "web_search": "web_search",
     "webfetch": "web_fetch", "web_fetch": "web_fetch",
+    # AskUserQuestion has no underscore in the tool name, so it normalizes to
+    # "askuserquestion" and missed every key below. The activity name the
+    # bridge emits is "ask_user"; map both plus the aliases in use.
+    "ask_user": "ask_user", "askuserquestion": "ask_user",
+    "ask_user_question": "ask_user", "askuserquestiontool": "ask_user",
 }
 
 TOOL_CARDS = {
@@ -825,6 +958,7 @@ TOOL_CARDS = {
     "list_dir": ListDirCard, "terminal": TerminalCard,
     "thought": GenericCard, "task": TaskCard, "team": TeamCard,
     "web_search": WebSearchCard, "web_fetch": WebFetchCard,
+    "ask_user": QuestionSummaryCard,
 }
 
 

@@ -811,7 +811,6 @@
             flex: 1;
             display: none;
             flex-direction: column;
-            background: #1e1e1e;
             overflow: hidden;
         }
         #diff-view.visible {
@@ -835,76 +834,161 @@
         #app:has(> #diff-view.visible) > #sheet-preview {
             display: none !important;
         }
-        /* Toolbar: file identity + change counts */
+        /* Diff colours. Cortex's own dark values here and its light values
+           under body.light-theme; a named Color theme (Dracula, One Dark
+           Pro, ...) overrides every --diff-* variable from
+           src/ui/color_themes.py (_page_css "editor"), so the diff follows
+           Settings -> Appearance live like the rest of the page. Rules below
+           use only these variables - no colour of their own. */
+        :root {
+            --diff-bg: #1e1e1e;
+            --diff-surface: #252526;
+            --diff-border: #333333;
+            --diff-fg: #d4d4d4;
+            --diff-fg-strong: #e8e8e8;
+            --diff-fg-dim: #8b949e;
+            --diff-gutter-fg: #6e7681;
+            --diff-hover: rgba(255, 255, 255, 0.04);
+            --diff-btn-hover: rgba(255, 255, 255, 0.08);
+            --diff-accent: #0078d4;
+            --diff-accent-bg: rgba(0, 120, 212, 0.18);
+            --diff-green: #3fb950;
+            --diff-red: #f85149;
+            --diff-add-bg: rgba(63, 185, 80, 0.09);
+            --diff-add-gutter: rgba(63, 185, 80, 0.18);
+            --diff-del-bg: rgba(248, 81, 73, 0.09);
+            --diff-del-gutter: rgba(248, 81, 73, 0.18);
+            --diff-skip-bg: rgba(255, 255, 255, 0.025);
+            --diff-scroll: rgba(121, 121, 121, 0.4);
+            --diff-scroll-hover: rgba(191, 191, 191, 0.55);
+        }
+        body.light-theme {
+            --diff-bg: #ECE9E0;
+            --diff-surface: #E4E1D8;
+            --diff-border: #CCC9C0;
+            --diff-fg: #1A1814;
+            --diff-fg-strong: #1A1814;
+            --diff-fg-dim: #6B6860;
+            --diff-gutter-fg: #8A877E;
+            --diff-hover: rgba(26, 24, 20, 0.04);
+            --diff-btn-hover: rgba(26, 24, 20, 0.08);
+            --diff-accent: #C96A3E;
+            --diff-accent-bg: rgba(201, 106, 62, 0.16);
+            --diff-green: #2f8132;
+            --diff-red: #c0392b;
+            --diff-add-bg: rgba(47, 129, 50, 0.11);
+            --diff-add-gutter: rgba(47, 129, 50, 0.20);
+            --diff-del-bg: rgba(192, 57, 43, 0.09);
+            --diff-del-gutter: rgba(192, 57, 43, 0.18);
+            --diff-skip-bg: rgba(26, 24, 20, 0.035);
+            --diff-scroll: rgba(107, 104, 96, 0.4);
+            --diff-scroll-hover: rgba(107, 104, 96, 0.6);
+        }
+        #diff-view {
+            background: var(--diff-bg);
+            color: var(--diff-fg);
+        }
+        /* Header: badge, file name, folder, change counts, Close */
         .diff-toolbar {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 7px 12px;
-            background: #252526;
-            border-bottom: 1px solid #333333;
+            gap: 10px;
+            min-height: 40px;
+            padding: 6px 10px 6px 14px;
+            background: var(--diff-surface);
+            border-bottom: 1px solid var(--diff-border);
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             flex-shrink: 0;
-        }
-        .diff-toolbar .diff-chevron {
-            color: #98a1ab;
-            font-size: 11px;
-            flex-shrink: 0;
-            user-select: none;
         }
         .diff-toolbar .diff-badge {
             font-size: 10px;
-            font-weight: 700;
-            letter-spacing: .5px;
+            font-weight: 600;
+            letter-spacing: .6px;
+            text-transform: uppercase;
             padding: 2px 7px;
-            border-radius: 3px;
-            color: #fff;
-            background: #0078d4;
+            border-radius: 4px;
+            color: var(--diff-accent);
+            background: var(--diff-accent-bg);
             flex-shrink: 0;
+        }
+        .diff-toolbar .diff-title {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
         }
         .diff-toolbar .diff-filename {
             font-size: 13px;
             font-weight: 600;
-            color: #e8e8e8;
-            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
+            color: var(--diff-fg-strong);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            flex-shrink: 0;
+            max-width: 60%;
         }
         .diff-toolbar .diff-dirname {
             font-size: 12px;
-            color: #8b949e;
-            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
+            color: var(--diff-fg-dim);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            flex: 1;
             min-width: 0;
         }
         .diff-toolbar .diff-counts {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             font-size: 12px;
             font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
             font-weight: 600;
             flex-shrink: 0;
         }
-        .diff-toolbar .diff-counts .diff-add { color: #56d364; }
-        .diff-toolbar .diff-counts .diff-del { color: #f85149; }
+        .diff-toolbar .diff-counts .diff-add { color: var(--diff-green); }
+        .diff-toolbar .diff-counts .diff-del { color: var(--diff-red); }
+        /* Five-block bar: the share of added vs removed lines */
+        .diff-toolbar .diff-stat {
+            display: flex;
+            gap: 2px;
+        }
+        .diff-toolbar .diff-stat i {
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            background: var(--diff-border);
+        }
+        .diff-toolbar .diff-stat i.a { background: var(--diff-green); }
+        .diff-toolbar .diff-stat i.d { background: var(--diff-red); }
         .diff-toolbar .diff-close-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
             background: transparent;
-            border: 1px solid #3c3c3c;
-            color: #cccccc;
-            border-radius: 4px;
-            padding: 3px 12px;
+            border: 1px solid var(--diff-border);
+            color: var(--diff-fg-dim);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font: inherit;
             font-size: 12px;
             cursor: pointer;
             flex-shrink: 0;
         }
         .diff-toolbar .diff-close-btn:hover {
-            background: #3c3c3c;
-            color: #ffffff;
+            background: var(--diff-btn-hover);
+            color: var(--diff-fg-strong);
         }
         .diff-toolbar .diff-close-btn:focus-visible {
-            outline: 1px solid #0078d4;
+            outline: 1px solid var(--diff-accent);
             outline-offset: 1px;
+        }
+        .diff-toolbar .diff-close-btn kbd {
+            font: inherit;
+            font-size: 10px;
+            padding: 0 4px;
+            border-radius: 3px;
+            border: 1px solid var(--diff-border);
+            color: var(--diff-gutter-fg);
         }
         #diff-container {
             flex: 1;
@@ -913,9 +997,11 @@
             overflow-x: auto;
             overflow-y: auto;
             min-width: 0;
+            padding: 12px 14px 18px;
+            background: var(--diff-bg);
             /* Monaco overlay scrollbar: thin translucent thumb, no Windows chrome. */
             scrollbar-width: thin;
-            scrollbar-color: rgba(121, 121, 121, 0.4) transparent;
+            scrollbar-color: var(--diff-scroll) transparent;
         }
         #diff-container::-webkit-scrollbar {
             width: 10px;
@@ -925,19 +1011,16 @@
             background: transparent;
         }
         #diff-container::-webkit-scrollbar-thumb {
-            background: rgba(121, 121, 121, 0.4);
+            background: var(--diff-scroll);
             border-radius: 6px;
             border: 2px solid transparent;
             background-clip: padding-box;
             min-height: 24px;
             min-width: 24px;
         }
-        #diff-container::-webkit-scrollbar-thumb:hover {
-            background: rgba(191, 191, 191, 0.55);
-            background-clip: padding-box;
-        }
+        #diff-container::-webkit-scrollbar-thumb:hover,
         #diff-container::-webkit-scrollbar-thumb:active {
-            background: rgba(191, 191, 191, 0.7);
+            background: var(--diff-scroll-hover);
             background-clip: padding-box;
         }
         #diff-container::-webkit-scrollbar-corner {
@@ -948,86 +1031,108 @@
             width: 0;
             height: 0;
         }
-        /* Inline unified diff: single gutter, sign column, and no wrapping.
-           One source line = one visual row (Monaco editor behaviour); long
-           lines are revealed by a horizontal scrollbar, not broken onto a
-           second line. */
+        /* Inline unified diff card: old and new line numbers, a sign column,
+           and editor-matched font / tab-size / word-wrap. A column with no
+           numbers at all (a new or a deleted file) is dropped by showDiff
+           (--dcol-old/new: 0). */
         .diff-body {
-            font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
-            font-size: 13px;
-            line-height: 20px;
-            padding: 4px 0 12px;
+            font-family: var(--ed-font-family, var(--font-mono, 'Consolas', 'Monaco', monospace));
+            font-size: var(--ed-font-size, 13px);
+            line-height: var(--ed-line-height, 20px);
+            padding: 4px 0;
             width: max-content;
             min-width: 100%;
+            background: var(--diff-bg);
+            border: 1px solid var(--diff-border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #diff-view.wrap-lines .diff-body,
+        #diff-view.wrap-lines .drow {
+            width: 100%;
+            min-width: 0;
         }
         .drow {
             display: grid;
-            grid-template-columns: 56px 16px auto;
-            align-items: start;
+            grid-template-columns: var(--dcol-old, 48px) var(--dcol-new, 48px) 24px minmax(0, 1fr);
+            /* stretch, not start: an empty number cell (the old side of an
+               added line) would collapse to 0px and lose its gutter tint. */
+            align-items: stretch;
             width: max-content;
             min-width: 100%;
         }
         .dnum {
-            color: #6e7681;
+            color: var(--diff-gutter-fg);
             text-align: right;
             padding: 0 8px 0 0;
+            overflow: hidden;
             user-select: none;
-            font-size: 12px;
-            line-height: 20px;
+            font-size: var(--ed-num-size, 12px);
+            line-height: var(--ed-line-height, 20px);
+        }
+        .dnum:nth-child(2) {
+            border-right: 1px solid var(--diff-border);
         }
         .dsign {
             text-align: center;
             user-select: none;
-            font-size: 12px;
-            line-height: 20px;
+            line-height: var(--ed-line-height, 20px);
+            font-weight: 600;
         }
         .dtext {
-            /* One source line = one visual row. No wrapping: long lines are
-               revealed by the horizontal scrollbar, exactly like the editor. */
+            /* Follows Editor -> Word wrap & Tab size settings live. */
             display: block;
             white-space: pre;
-            tab-size: 4;
-            -moz-tab-size: 4;
+            tab-size: var(--ed-tab-size, 4);
+            -moz-tab-size: var(--ed-tab-size, 4);
             word-break: normal;
             overflow-wrap: normal;
-            padding-right: 16px;
-            color: #d4d4d4;
+            padding: 0 16px 0 6px;
+            color: var(--diff-fg);
             min-width: 0;
         }
-        .drow.ctx:hover { background: rgba(255, 255, 255, 0.04); }
-        .drow.del { background: rgba(248, 81, 73, 0.16); }
-        .drow.del .dnum { color: #f0a9a4; }
-        .drow.del .dsign { color: #f85149; }
-        .drow.del .dtext { color: #ffd7d5; }
-        .drow.add { background: rgba(63, 185, 80, 0.16); }
-        .drow.add .dnum { color: #a4d6ab; }
-        .drow.add .dsign { color: #56d364; }
-        .drow.add .dtext { color: #d2f5d8; }
+        #diff-view.wrap-lines .dtext {
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+        }
+        .drow.ctx:hover { background: var(--diff-hover); }
+        /* Changed lines keep the normal text colour: the tint and the bar on
+           the left mark them, so long added blocks stay easy to read. */
+        .drow.add { background: var(--diff-add-bg); }
+        .drow.add .dnum { background: var(--diff-add-gutter); }
+        .drow.add .dnum:first-child { box-shadow: inset 3px 0 0 var(--diff-green); }
+        .drow.add .dsign { color: var(--diff-green); }
+        .drow.del { background: var(--diff-del-bg); }
+        .drow.del .dnum { background: var(--diff-del-gutter); }
+        .drow.del .dnum:first-child { box-shadow: inset 3px 0 0 var(--diff-red); }
+        .drow.del .dsign { color: var(--diff-red); }
         /* Collapsed unchanged region between hunks */
         .dskip {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 4px 12px;
-            margin: 2px 0;
-            color: #8b949e;
-            background: #212223;
-            border-top: 1px solid #2d2d2d;
-            border-bottom: 1px solid #2d2d2d;
+            gap: 8px;
+            padding: 5px 14px;
+            color: var(--diff-fg-dim);
+            background: var(--diff-skip-bg);
+            border-top: 1px solid var(--diff-border);
+            border-bottom: 1px solid var(--diff-border);
             cursor: pointer;
             font-size: 12px;
+            font-weight: 500;
             font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             user-select: none;
         }
-        .dskip:hover { background: #2a2b2c; color: #c9d1d9; }
-        .dskip:focus-visible { outline: 1px solid #0078d4; outline-offset: -1px; }
+        .dskip:hover { background: var(--diff-hover); color: var(--diff-fg-strong); }
+        .dskip:focus-visible { outline: 1px solid var(--diff-accent); outline-offset: -1px; }
         .dskip .dskip-chevron {
             font-size: 10px;
-            color: #6e7681;
+            color: var(--diff-gutter-fg);
         }
         .dnodata {
             padding: 24px 16px;
-            color: #98a1ab;
+            color: var(--diff-fg-dim);
+            font-family: var(--font-ui, 'Segoe UI', system-ui, sans-serif);
             font-size: 13px;
         }
         /* Right-click menu of the read-only views (diff, spreadsheet). The
@@ -1066,42 +1171,6 @@
         body.light-theme .ro-menu-item:hover:not(:disabled),
         body.light-theme .ro-menu-item:focus-visible { background: #E4E1D8; color: #1A1814; }
         body.light-theme .ro-menu-item:disabled { color: #9a968c; }
-        body.light-theme #diff-view { background: #ECE9E0; }
-        body.light-theme .diff-toolbar { background: #E4E1D8; border-bottom-color: #CCC9C0; }
-        body.light-theme .diff-toolbar .diff-chevron { color: #6B6860; }
-        body.light-theme .diff-toolbar .diff-badge { background: #C96A3E; }
-        body.light-theme .diff-toolbar .diff-filename { color: #1A1814; }
-        body.light-theme .diff-toolbar .diff-dirname { color: #6B6860; }
-        body.light-theme .diff-toolbar .diff-counts .diff-add { color: #2f8132; }
-        body.light-theme .diff-toolbar .diff-counts .diff-del { color: #c0392b; }
-        body.light-theme .diff-toolbar .diff-close-btn { border-color: #CCC9C0; color: #6B6860; }
-        body.light-theme .diff-toolbar .diff-close-btn:hover { background: rgba(26, 24, 20, 0.08); color: #1A1814; }
-        body.light-theme #diff-container {
-            scrollbar-color: rgba(107, 104, 96, 0.4) transparent;
-        }
-        body.light-theme #diff-container::-webkit-scrollbar-thumb {
-            background: rgba(107, 104, 96, 0.4);
-            background-clip: padding-box;
-        }
-        body.light-theme #diff-container::-webkit-scrollbar-thumb:hover {
-            background: rgba(107, 104, 96, 0.6);
-            background-clip: padding-box;
-        }
-        body.light-theme .dtext { color: #1A1814; }
-        body.light-theme .dnum { color: #6B6860; }
-        body.light-theme .drow.ctx:hover { background: rgba(26, 24, 20, 0.05); }
-        body.light-theme .drow.del { background: #ffebe9; }
-        body.light-theme .drow.del .dnum { color: #822727; }
-        body.light-theme .drow.del .dsign { color: #c0392b; }
-        body.light-theme .drow.del .dtext { color: #5c2223; }
-        body.light-theme .drow.add { background: #e6ffec; }
-        body.light-theme .drow.add .dnum { color: #22623a; }
-        body.light-theme .drow.add .dsign { color: #2f8132; }
-        body.light-theme .drow.add .dtext { color: #1c4532; }
-        body.light-theme .dskip { background: #E4E1D8; border-color: #CCC9C0; color: #6B6860; }
-        body.light-theme .dskip:hover { background: #DDD9CF; color: #1A1814; }
-        body.light-theme .dskip .dskip-chevron { color: #8A877E; }
-        body.light-theme .dnodata { color: #6B6860; }
     </style>
 </head>
 
@@ -1123,12 +1192,13 @@
         <div id="editor-container" class="hidden"></div>
         <div id="diff-view" role="region" aria-label="Read-only diff">
             <div class="diff-toolbar">
-                <span class="diff-chevron" aria-hidden="true">&#9662;</span>
-                <span class="diff-badge">DIFF</span>
-                <span class="diff-filename" id="diff-filename"></span>
-                <span class="diff-dirname" id="diff-dirname"></span>
+                <span class="diff-badge" title="Read-only diff">Diff</span>
+                <div class="diff-title">
+                    <span class="diff-filename" id="diff-filename"></span>
+                    <span class="diff-dirname" id="diff-dirname"></span>
+                </div>
                 <span class="diff-counts" id="diff-counts"></span>
-                <button class="diff-close-btn" id="diff-close-btn" title="Close diff (Esc)">Close</button>
+                <button class="diff-close-btn" id="diff-close-btn" title="Close diff (Esc)">Close <kbd>Esc</kbd></button>
             </div>
             <div id="diff-container"></div>
         </div>
@@ -1486,6 +1556,7 @@ if (typeof require !== 'undefined') {
     window.__cortexSetEditorFont = function (stack, size, family) {
         try {
             window.__cortexEditorFont = { stack: stack, size: size, family: family };
+            if (typeof _syncDiffEditorPrefs === 'function') _syncDiffEditorPrefs();
             var eds = (monaco.editor.getEditors && monaco.editor.getEditors()) || (editor ? [editor] : []);
             eds.forEach(function (ed) { ed.updateOptions({ fontFamily: stack, fontSize: size }); });
             if (document.fonts && document.fonts.load && family) {
@@ -1509,6 +1580,7 @@ if (typeof require !== 'undefined') {
     window.__cortexSetEditorPrefs = function (prefs) {
         try {
             window.__cortexEditorPrefs = prefs;
+            if (typeof _syncDiffEditorPrefs === 'function') _syncDiffEditorPrefs();
             var eds = (monaco.editor.getEditors && monaco.editor.getEditors()) || (editor ? [editor] : []);
             eds.forEach(function (ed) {
                 ed.updateOptions({ wordWrap: prefs.wordWrap ? 'on' : 'off',
@@ -3979,23 +4051,63 @@ function _disposeDiffModels() {
 }
 
 // One source line = one row. No tokenizer. textContent only.
-function _diffRowEl(kind, num, text) {
+// Two gutters: the line's number before (old) and after (new) the change.
+function _diffTabSpaces() {
+    var n = (window.__cortexEditorPrefs && window.__cortexEditorPrefs.tabSize) || 4;
+    n = Math.min(Math.max(parseInt(n, 10) || 4, 1), 16);
+    return new Array(n + 1).join(' ');
+}
+
+function _syncDiffEditorPrefs() {
+    var root = document.documentElement;
+    var f = window.__cortexEditorFont || {};
+    var p = window.__cortexEditorPrefs || {};
+    if (f.stack) {
+        root.style.setProperty('--ed-font-family', f.stack);
+    }
+    var sz = parseInt(f.size, 10) || 13;
+    var lh = Math.max(18, Math.round(sz * 1.55));
+    root.style.setProperty('--ed-font-size', sz + 'px');
+    root.style.setProperty('--ed-num-size', Math.max(10, sz - 1) + 'px');
+    root.style.setProperty('--ed-line-height', lh + 'px');
+    var tabSz = Math.min(Math.max(parseInt(p.tabSize, 10) || 4, 1), 16);
+    root.style.setProperty('--ed-tab-size', String(tabSz));
+    var dv = document.getElementById('diff-view');
+    if (dv) {
+        dv.classList.toggle('wrap-lines', !!p.wordWrap);
+    }
+    var pad = _diffTabSpaces();
+    var cells = document.querySelectorAll('#diff-container .dtext');
+    for (var i = 0; i < cells.length; i++) {
+        var c = cells[i];
+        if (typeof c._rawText === 'string') {
+            c.textContent = c._rawText.replace(/\t/g, pad);
+        }
+    }
+}
+
+function _diffRowEl(kind, oldNum, newNum, text) {
     var row = document.createElement('div');
     row.className = 'drow ' + kind;
-    var sign = kind === 'del' ? '-' : (kind === 'add' ? '+' : '\u00a0');
-    var numEl = document.createElement('span');
-    numEl.className = 'dnum';
-    numEl.textContent = (num == null || num === undefined) ? '' : String(num);
+    var sign = kind === 'del' ? '\u2212' : (kind === 'add' ? '+' : '\u00a0');
+    var oldEl = document.createElement('span');
+    oldEl.className = 'dnum';
+    oldEl.textContent = (oldNum == null || kind === 'add') ? '' : String(oldNum);
+    var newEl = document.createElement('span');
+    newEl.className = 'dnum';
+    newEl.textContent = (newNum == null || kind === 'del') ? '' : String(newNum);
     var signEl = document.createElement('span');
     signEl.className = 'dsign';
     signEl.textContent = sign;
     var textEl = document.createElement('span');
     textEl.className = 'dtext';
     // textContent (not innerHTML) so nothing can multiply or inject markup.
-    // Expand tabs to 4 spaces so indent is visible even if tab-size is ignored.
+    // Expand tabs using Editor -> Tab size so indent matches the code editor.
     var raw = (text == null) ? '' : String(text);
-    textEl.textContent = raw.replace(/\t/g, '    ');
-    row.appendChild(numEl);
+    textEl._rawText = raw;
+    textEl.textContent = raw.replace(/\t/g, _diffTabSpaces());
+    row.appendChild(oldEl);
+    row.appendChild(newEl);
     row.appendChild(signEl);
     row.appendChild(textEl);
     return row;
@@ -4027,6 +4139,16 @@ function _renderHunkRows(hunks) {
     container.innerHTML = '';
     var body = document.createElement('div');
     body.className = 'diff-body';
+    // A new file has no old numbers, a deleted one no new: drop that column.
+    var hasOld = false, hasNew = false;
+    for (var h = 0; h < (hunks || []).length; h++) {
+        var r = hunks[h] || {};
+        if (r.kind !== 'add' && r.kind !== 'del') { hasOld = hasNew = true; break; }
+        if (r.kind === 'del') hasOld = true;
+        if (r.kind === 'add') hasNew = true;
+    }
+    if (!hasOld) body.style.setProperty('--dcol-old', '0px');
+    if (!hasNew) body.style.setProperty('--dcol-new', '0px');
     var frag = document.createDocumentFragment();
     var list = Array.isArray(hunks) ? hunks : [];
     if (!list.length) {
@@ -4042,9 +4164,7 @@ function _renderHunkRows(hunks) {
             frag.appendChild(_diffSkipEl(it));
             continue;
         }
-        // Single gutter: del uses old number, everything else uses new.
-        var num = (kind === 'del') ? it.old : it.new;
-        frag.appendChild(_diffRowEl(kind, num, it.text));
+        frag.appendChild(_diffRowEl(kind, it.old, it.new, it.text));
     }
     body.appendChild(frag);
     container.appendChild(body);
@@ -4059,7 +4179,7 @@ function _diffExpandEl(el) {
     var frag = document.createDocumentFragment();
     for (var k = 0; k < lines.length; k++) {
         var ln = lines[k] || {};
-        frag.appendChild(_diffRowEl('ctx', ln.new, ln.text));
+        frag.appendChild(_diffRowEl('ctx', ln.old, ln.new, ln.text));
     }
     el.parentNode.replaceChild(frag, el);
 }
@@ -4099,21 +4219,40 @@ function showDiff(filePath, language, additions, deletions, hunks) {
 
     var countsEl = document.getElementById('diff-counts');
     countsEl.innerHTML = '';
-    if (additions) {
+    countsEl.title = '';
+    var _add = Math.max(0, additions | 0), _del = Math.max(0, deletions | 0);
+    if (_add) {
         var a = document.createElement('span');
         a.className = 'diff-add';
-        a.textContent = '+' + additions + ' ';
+        a.textContent = '+' + _add;
         countsEl.appendChild(a);
     }
-    if (deletions) {
+    if (_del) {
         var d = document.createElement('span');
         d.className = 'diff-del';
-        d.textContent = '-' + deletions;
+        d.textContent = '\u2212' + _del;
         countsEl.appendChild(d);
+    }
+    if (_add || _del) {
+        // Five blocks split by the share of added vs removed lines.
+        var stat = document.createElement('span');
+        stat.className = 'diff-stat';
+        stat.setAttribute('aria-hidden', 'true');
+        var nA = Math.round(5 * _add / (_add + _del));
+        if (_add && !nA) nA = 1;
+        if (_del && nA === 5) nA = 4;
+        for (var b = 0; b < 5; b++) {
+            var blk = document.createElement('i');
+            blk.className = b < nA ? 'a' : 'd';
+            stat.appendChild(blk);
+        }
+        countsEl.appendChild(stat);
+        countsEl.title = _add + ' added, ' + _del + ' removed';
     }
 
     _diffState = { rows: hunks || [] };
     try {
+        _syncDiffEditorPrefs();
         _renderHunkRows(hunks || []);
         window.diffEditorReady = true;
     } catch (e) {
