@@ -289,8 +289,10 @@ _CENSUS_EXCLUDED_DIRS: Set[str] = {
 # exemptions, and to 5 when per-file ``class_bases`` was added so
 # dispatch-by-name methods (``visit_*``, ``handle_*``) stop being reported
 # unused - v4 cache entries carry no bases, so reusing them would silently
-# reintroduce those false positives on incremental scans.
-_CACHE_VERSION = 5
+# reintroduce those false positives on incremental scans, and to 6 when the
+# generated health report and PyInstaller hooks were excluded from the
+# dead-code census (a v5 verdict can still be the report-poisoned one).
+_CACHE_VERSION = 6
 _CACHE_RELATIVE = Path(".cortex") / "health_map.json"
 
 
@@ -474,6 +476,37 @@ def _is_excluded_dir(name: str) -> bool:
     return name in _EXCLUDED_DIRS or name.endswith(".egg-info")
 
 
+# The health panel exports ``health-report-<project>.md`` by default. A copy
+# saved inside the project must never be read back as source: the dead-code
+# census counts any text mention of a name as usage, and a report lists every
+# symbol it found, so the next scan would report "0 unused symbols".
+_GENERATED_REPORT_PREFIX = "health-report-"
+
+# Directories holding PyInstaller hooks. A hook is loaded by FILENAME from
+# ``hookspath`` (cortex.spec names only the directory), so it is imported by
+# nothing and its stem is mentioned nowhere.
+_HOOK_DIR_NAMES: Set[str] = {"pyinstaller_hooks"}
+
+
+def _is_generated_report(name: str) -> bool:
+    """True for a health report written back into the project by this panel."""
+    lowered = name.lower()
+    return lowered.endswith(".md") and lowered.startswith(_GENERATED_REPORT_PREFIX)
+
+
+def _is_pyinstaller_hook(rel: str) -> bool:
+    """True for ``hook-<module>.py`` inside a PyInstaller hooks directory.
+
+    Without this rule every hook is a permanent orphan false positive: no
+    import edge exists and no file mentions the hyphenated stem (the census
+    tokeniser splits ``hook-foo`` into two identifiers).
+    """
+    path = Path(rel)
+    if path.suffix != ".py" or not path.name.startswith("hook-"):
+        return False
+    return any(part in _HOOK_DIR_NAMES for part in path.parts[:-1])
+
+
 def _guarded_import_lines(tree: ast.AST) -> Set[int]:
     """Line numbers of import statements wrapped in try/except.
 
@@ -609,6 +642,9 @@ class ProjectHealthScanner:
             for root, dirs, filenames in os.walk(self.project_root):
                 dirs[:] = [d for d in dirs if not _is_excluded_dir(d)]
                 for name in filenames:
+                    # Never read a previously exported report back as source.
+                    if _is_generated_report(name):
+                        continue
                     path = Path(root) / name
                     ext = path.suffix.lower()
                     if ext in _EXCLUDED_EXT:
@@ -1222,6 +1258,9 @@ class ProjectHealthScanner:
             if fname == "__init__.py" or fname in _ENTRY_FILENAMES:
                 continue
             if fname.startswith("test_") or fname.endswith("_test.py"):
+                continue
+            # PyInstaller hooks are consumed by filename, never imported.
+            if _is_pyinstaller_hook(fh.rel):
                 continue
             parts = fh.rel.split("/")
             if any(seg in _ENTRY_DIRS for seg in parts[:-1]):

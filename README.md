@@ -427,7 +427,7 @@ Cortex-Desktop/
 │   │   ├── semantic_search.py, embeddings.py, codebase_index.py
 │   │   ├── loop_engine/     Verified iteration: verify, review, budget
 │   │   ├── security_toolkit/  Recon, defense, web probe, reporting
-│   │   └── git_manager.py, memory_storage.py, secure_http.py
+│   │   └── git_manager.py, secure_http.py
 │   ├── ui/                  PyQt6 widgets and the embedded web assets
 │   │   ├── fonts.py         Registers the bundled fonts with Qt and WebEngine
 │   │   ├── color_themes.py  The 16 colour themes for shell, chat and terminal
