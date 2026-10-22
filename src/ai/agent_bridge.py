@@ -465,10 +465,6 @@ def get_project_root() -> str:
     """Get project root directory."""
     return _agent_get_project_root()
 
-# Backwards compatibility alias
-_HAS_AGENT_STATE = _has_agent_state
-
-
 # ============================================================
 # LOCAL DATA CLASSES
 # ============================================================
@@ -3090,6 +3086,12 @@ def _mcp_prompt_section(mcp_names: List[str], deferred: bool,
 #   "error"     → marks card red
 # ============================================================
 
+# Characters of each side of an Edit kept in the activity payload so the card
+# can draw the change inline. Bounded: native_chat_bridge caps the whole info
+# string at 64KB and slices its TAIL, so an oversized payload loses the
+# leading '{' and stops parsing as JSON at all.
+_EDIT_DIFF_MAX_CHARS = 4000
+
 _TOOL_TO_ACTIVITY_NAME: Dict[str, str] = {
     "Read":      "read_file",
     "Write":     "write_file",
@@ -3101,6 +3103,7 @@ _TOOL_TO_ACTIVITY_NAME: Dict[str, str] = {
     "Grep":  "grep",
     "LS":    "list_directory",
     "SementicSearch": "semantic_search",
+    "AskUserQuestion": "ask_user",
     "WebSearch":  "web_search",
     "WebFetch":   "web_fetch",
     "TeamCreate": "team_create",
@@ -3114,10 +3117,6 @@ _TOOL_TO_ACTIVITY_NAME: Dict[str, str] = {
     "Skill":      "load_skill",
     "SecurityScan": "security_scan",
 }
-
-# Tools that trigger the "create_file" UI card (Write on a new file)
-_CREATE_TOOL_NAMES = {"Write"}
-
 
 # ============================================================
 # AGENT WORKER THREAD
@@ -5437,12 +5436,23 @@ Required behavior:
         else:
             keep_tail = 25  # Legacy, small models
         if len(messages) <= keep_tail + 2:
+            # Returned unchanged, so the caller can tell this was a no-op by
+            # object identity. It used to be silent, which made a compaction
+            # that did nothing indistinguishable from one that never ran.
+            log.info(
+                f'[BRIDGE] Compact skipped: {len(messages)} message(s) fit inside '
+                f'keep_tail={keep_tail}, nothing to drop'
+            )
             return messages  # nothing meaningful to drop
 
         system_msg: Any = messages[0]
         rest: List[Any] = messages[1:]          # everything after the system prompt
 
         if len(rest) <= keep_tail:
+            log.info(
+                f'[BRIDGE] Compact skipped: {len(rest)} message(s) after the system '
+                f'prompt fit inside keep_tail={keep_tail}, nothing to drop'
+            )
             return messages
 
         # The tail must not START with a tool result (it must follow the
@@ -6089,6 +6099,11 @@ Required behavior:
             _executor: ToolExecutionEngine = self._tool_executor
 
             _compacted_once = False  # Track if we already compacted
+            # Compaction can return the message list untouched (every message
+            # still fits inside keep_tail). Cap the attempts so a no-op cannot
+            # re-run, re-checkpoint and re-warn on every remaining turn.
+            _MAX_COMPACT_ATTEMPTS = 3
+            _compact_attempts = 0
             _mistral_downgraded_once = False  # Per-request, timeout-triggered model fallback within Mistral
 
             # ── OpenAI reasoning-only first pass flag ──────────────────────
@@ -6179,6 +6194,13 @@ Required behavior:
                 # to keep context lean by clearing stale tool result content.
                 # keep_recent scales with budget: 1M models keep 24 results (~12 turns)
                 # instead of 16 (~8 turns) so recent file content isn't lost.
+                #
+                # _budget is loop-invariant and read below, so it is resolved
+                # BEFORE first use. It used to be assigned further down, in the
+                # token-emit block, which meant the micro-compact line read a
+                # value left over from the previous iteration: a latent
+                # NameError whenever turn 0 returned before that assignment.
+                _budget = getattr(_limits, 'context_budget', 100_000)
                 if turn > 0:
                     try:
                         from src.ai.conversation_compactor import microcompact_messages
@@ -6191,7 +6213,6 @@ Required behavior:
 
                 # ── Emit token budget update to UI ─────────────────────────
                 _est_tokens = self._estimate_message_tokens(messages)
-                _budget = getattr(_limits, 'context_budget', 100_000)
                 _prov_label = provider_type.value if hasattr(provider_type, 'value') else str(provider_type)
                 try:
                     self._safe_emit(self.context_budget_update, int(_est_tokens), int(_budget), _prov_label)
@@ -6209,7 +6230,8 @@ Required behavior:
                     # Larger budget → higher threshold (more headroom before compacting)
                     _threshold = 0.85 if _budget >= 800_000 else 0.80 if _budget >= 400_000 else 0.75
                     if _usage_pct > _threshold:
-                        if not _compacted_once:
+                        if not _compacted_once and _compact_attempts < _MAX_COMPACT_ATTEMPTS:
+                            _compact_attempts += 1
                             log.warning(
                                 f"[BRIDGE] Pre-overflow: {_est_tokens:,} tokens estimated ({_usage_pct:.0%} of {_budget:,} budget), compacting proactively"
                             )
@@ -6218,9 +6240,24 @@ Required behavior:
                                 'compacting',
                                 f'Context {_usage_pct:.0%} full, checkpointing and compacting...'
                             )
+                            _before_compact = messages
                             messages = self._compact_messages(messages, PCM)
-                            _compacted_once = True
-                        elif _usage_pct > (_threshold + 0.07):
+                            # Latch ONLY if the list really changed.
+                            # _compact_messages returns the SAME list object when
+                            # it has nothing to drop (everything still fits inside
+                            # keep_tail). Latching that no-op used to set
+                            # _compacted_once = True, which disabled the periodic
+                            # path below while the context stayed over threshold,
+                            # leaving nothing to catch the overflow.
+                            if messages is not _before_compact:
+                                _compacted_once = True
+                            else:
+                                log.warning(
+                                    f"[BRIDGE] Compaction made no change at {_usage_pct:.0%} of budget "
+                                    f"(attempt {_compact_attempts}/{_MAX_COMPACT_ATTEMPTS}); "
+                                    f"keeping periodic compaction enabled"
+                                )
+                        elif _compacted_once and _usage_pct > (_threshold + 0.07):
                             # Already compacted once and STILL over threshold+7%, aggressive trim
                             log.warning(
                                 f"[BRIDGE] Post-compact overflow: {_est_tokens:,} tokens ({_usage_pct:.0%}), aggressive trim"
@@ -8403,6 +8440,44 @@ Required behavior:
                     info["description"] = "Editing"
                 else:
                     info["description"] = "Deleting lines"
+                # The card renders the change inline. It used to get only the
+                # path, so the Edit row in the tool section was an empty shell
+                # and the diff lived solely in the separate DiffCard (which is
+                # folded away, and absent entirely when file_edited_diff never
+                # reached the panel). Capped because this rides in the same
+                # JSON payload as everything else, and a whole-file replace
+                # would otherwise blow past _MAX_ACTIVITY_INFO and truncate
+                # the JSON into unparseable text.
+                if isinstance(old_s, str) and old_s:
+                    info["old_string"] = old_s[:_EDIT_DIFF_MAX_CHARS]
+                if isinstance(new_s, str) and new_s:
+                    info["new_string"] = new_s[:_EDIT_DIFF_MAX_CHARS]
+
+            elif activity == "ask_user":
+                # AskUserQuestion. Without this branch the tool row reached
+                # the UI with no data at all: the name missed every card key
+                # and the card rendered as a bare "AskUserQuestion" label.
+                questions = args.get("questions")
+                compact: list = []
+                if isinstance(questions, list):
+                    for q in questions[:4]:
+                        if not isinstance(q, dict):
+                            continue
+                        opts = []
+                        for o in (q.get("options") or [])[:8]:
+                            if isinstance(o, dict):
+                                opts.append({
+                                    "label": str(o.get("label", ""))[:120],
+                                    "description": str(o.get("description", ""))[:200],
+                                })
+                        compact.append({
+                            "question": str(q.get("question", ""))[:400],
+                            "header": str(q.get("header", ""))[:80],
+                            "options": opts,
+                        })
+                if compact:
+                    info["questions"] = compact
+                info["description"] = "Waiting for an answer"
 
             elif activity in ("write_file", "create_file"):
                 info["file_path"] = fp
@@ -12258,10 +12333,16 @@ Required behavior:
                              for f in filenames]
                 # P6: Apply search exclusion patterns
                 filenames = AgentSafetyGuard.filter_search_results(filenames)
+                # numFiles must describe `files`, not the pre-filter match count.
+                # It used to come straight from the tool, so a glob whose only
+                # hits lived in an excluded path (`.cortex/`, `__pycache__`)
+                # returned `numFiles: 1` with an empty `files` list. To the
+                # model that reads as a broken tool, and it retries instead of
+                # accepting that there were no usable results.
                 return ToolResult(tool_id=tool_id, result={
                     "pattern": args.get("pattern", ""),
                     "files": filenames,
-                    "numFiles": data_map.get("numFiles", len(filenames)),
+                    "numFiles": len(filenames),
                     "truncated": data_map.get("truncated", False),
                 })
             except Exception as exc:
@@ -12287,7 +12368,11 @@ Required behavior:
             files = sorted(_glob.glob(full_pattern, recursive=True))
             # P6: Apply search exclusion patterns
             files = AgentSafetyGuard.filter_search_results(files)
-            return ToolResult(tool_id=tool_id, result={"pattern": pattern, "files": files})
+            return ToolResult(tool_id=tool_id, result={
+                "pattern": pattern,
+                "files": files,
+                "numFiles": len(files),
+            })
         except Exception as e:
             return ToolResult(tool_id=tool_id, result=None, success=False, error=str(e))
 
