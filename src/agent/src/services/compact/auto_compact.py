@@ -23,7 +23,7 @@ except ImportError:
         return False
 
 try:
-    from bootstrap.state import markPostCompaction, getSdkBetas
+    from ...app_state.state import markPostCompaction, getSdkBetas
 except ImportError:
     def markPostCompaction() -> None:
         """Stub - marks post-compaction state"""
@@ -87,7 +87,7 @@ except ImportError:
         return 0
 
 try:
-    from analytics.growthbook import getFeatureValue_CACHED_MAY_BE_STALE
+    from ...feature_flags.flags import getFeatureValue_CACHED_MAY_BE_STALE
 except ImportError:
     def getFeatureValue_CACHED_MAY_BE_STALE(key: str, default):
         """Stub - returns default feature value"""

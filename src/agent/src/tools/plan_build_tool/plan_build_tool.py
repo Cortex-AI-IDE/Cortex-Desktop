@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 # Defensive imports
 try:
-    from ...bootstrap.state import get_project_root
+    from ...app_state.state import get_project_root
 except ImportError:
     def get_project_root():
         return os.getcwd()

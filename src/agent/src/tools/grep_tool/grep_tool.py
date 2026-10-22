@@ -53,7 +53,7 @@ DEFAULT_HEAD_LIMIT = 80
 def get_cwd() -> str:
     """Get current working directory, prefers project root over raw os.getcwd()."""
     try:
-        from ...bootstrap.state import get_project_root
+        from ...app_state.state import get_project_root
         root = get_project_root()
         # CRITICAL: Never return Program Files as working directory
         if root and 'Program Files' not in root:
@@ -96,7 +96,12 @@ def check_read_permission_for_tool(
     Returns:
         PermissionDecision with behavior 'allow', 'deny', or 'ask'
     """
-    from utils.permissions.filesystem_security import check_read_permission
+    # See file_read_tool: the bare `utils.*` form needs src/agent/src as its
+    # own sys.path root, which neither dev nor the frozen build guarantees.
+    try:
+        from utils.permissions.filesystem_security import check_read_permission
+    except ImportError:
+        from src.agent.src.utils.permissions.filesystem_security import check_read_permission
 
     path = input_.get("path", "") if isinstance(input_, dict) else ""
     if not path:

@@ -40,7 +40,7 @@ class APIUserAbortError(Exception):
     pass
 
 try:
-    from bootstrap.state import markPostCompaction, getInvokedSkillsForAgent
+    from ...app_state.state import markPostCompaction, getInvokedSkillsForAgent
 except ImportError:
     def markPostCompaction() -> None:
         """Stub - marks post-compaction state"""
@@ -322,7 +322,7 @@ except ImportError:
             """Stub - returns items as-is"""
             return items
 
-# Growthbook feature flags - disabled
+# Feature flags - disabled
 def getFeatureValue_CACHED_MAY_BE_STALE(key: str, default):
     return default
 

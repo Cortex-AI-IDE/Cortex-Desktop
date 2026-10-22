@@ -4,7 +4,7 @@ Memory Semantic Search - Vector-based memory retrieval.
 Uses embeddings to find memories semantically similar to user queries,
 replacing the LLM-based selection with fast cosine similarity search.
 
-NOTE: This module is the memdir-layer semantic search. For tool-level
+NOTE: This module is the project-memory-layer semantic search. For tool-level
 semantic search, see src/core/semantic_search.py. This module adds
 caching, index persistence, and the SemanticMemorySearcher high-level API.
 """
@@ -396,7 +396,7 @@ class SemanticMemorySearcher:
     """
     High-level API for semantic memory search.
     
-    Integrates with the memdir system to provide
+    Integrates with the project memory system to provide
     embedding-based memory retrieval.
     """
     

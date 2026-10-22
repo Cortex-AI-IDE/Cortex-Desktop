@@ -421,30 +421,30 @@ def _sanitize_tool_call_messages(messages: list) -> list:
 
 
 # ============================================================
-# IMPORT REAL AGENT STATE (bootstrap/state.py)
+# IMPORT REAL AGENT STATE (app_state/state.py)
 # ============================================================
 _has_agent_state = False  # Internal flag (lowercase to avoid constant redefinition warning)
 try:
-    from src.agent.src.bootstrap.state import ( 
+    from src.agent.src.app_state.state import ( 
         set_original_cwd,  
         set_project_root as _agent_set_project_root,  
         getSessionId as _get_session_id,
         get_project_root as _agent_get_project_root,
     )
     _has_agent_state = True
-    log.info("[BRIDGE] Real agent bootstrap/state loaded")
+    log.info("[BRIDGE] Real agent app_state/state loaded")
 except ImportError:
     try:
-        from agent.src.bootstrap.state import ( 
+        from agent.src.app_state.state import ( 
             set_original_cwd,  
             set_project_root as _agent_set_project_root,  
             getSessionId as _get_session_id,
             get_project_root as _agent_get_project_root,
         )
         _has_agent_state = True
-        log.info("[BRIDGE] Real agent bootstrap/state loaded")
+        log.info("[BRIDGE] Real agent app_state/state loaded")
     except ImportError as _e:
-        log.warning(f"[BRIDGE] agent bootstrap/state not available: {_e}")
+        log.warning(f"[BRIDGE] agent app_state/state not available: {_e}")
 
     def set_original_cwd(cwd: str) -> None: pass
     def _agent_set_project_root(path: str) -> None: pass
@@ -592,22 +592,26 @@ import importlib.util as _importlib_util
 
 def _load_agent_tool(module_path: str, class_name: str) -> Optional[type]:
     """Dynamically import a real agent tool class. Returns None on failure.
-    
+
     Tries src.agent path first (frozen build), then agent path (dev).
     """
     paths_to_try = [module_path]
     if module_path.startswith("agent."):
         paths_to_try.insert(0, "src." + module_path)
-    
+
+    failures = []
     for path in paths_to_try:
         try:
             mod = _importlib.import_module(path)
             cls = getattr(mod, class_name)
             log.info(f"[BRIDGE] Real {class_name} loaded")
             return cls
-        except Exception:
+        except Exception as _e:
+            # Keep the reason. Without it a missing tool looks identical whether
+            # the module was never bundled or simply raised on import.
+            failures.append(f"{path} -> {type(_e).__name__}: {_e}")
             continue
-    log.warning(f"[BRIDGE] {class_name} not available: tried {paths_to_try}")
+    log.warning(f"[BRIDGE] {class_name} not available: " + "; ".join(failures))
     return None
 
 
@@ -620,7 +624,12 @@ def _load_agent_tool(module_path: str, class_name: str) -> Optional[type]:
 USE_NEW_ENGINE: Dict[str, bool] = {
     "read_file": False,
     "write_file": False,
-    "edit_file": False,
+    # No "edit_file" key on purpose. _dispatch_edit is bridge-native end to
+    # end (diff cards, permission gate, staging, git-diff refresh); it never
+    # consults a loaded class. The switch used to advertise edit_file, but
+    # _REAL_FILE_EDIT_TOOL was assigned and then never read, so flipping that
+    # flag would have looked like it worked and changed nothing. Wiring the
+    # engine's Edit in means rewriting _dispatch_edit deliberately, not a flag.
     "glob": False,
     "grep": False,
     "semantic_search": False,
@@ -645,7 +654,10 @@ def _load_engine_tool(name: str) -> Optional[type]:
 
 
 _REAL_FILE_READ_TOOL  = _load_engine_tool("read_file") or _load_agent_tool("agent.src.tools.file_read_tool.file_read_tool",  "FileReadTool")
-_REAL_FILE_EDIT_TOOL  = _load_engine_tool("edit_file") or _load_agent_tool("agent.src.tools.file_edit_tool.file_edit_tool",  "FileEditTool")
+# Edit does NOT load the agent FileEditTool. _dispatch_edit replaced it with a
+# bridge-native implementation ("the old 3-path system" is gone), so the load
+# here was pure startup cost plus a log line that claimed a tool was in use when
+# it was not. See the USE_NEW_ENGINE comment above before adding it back.
 _REAL_FILE_WRITE_TOOL = _load_engine_tool("write_file") or _load_agent_tool("agent.src.tools.file_write_tool.file_write_tool", "FileWriteTool")
 _REAL_GLOB_TOOL       = _load_engine_tool("glob") or _load_agent_tool("agent.src.tools.glob_tool.glob_tool",          "GlobTool")
 _REAL_GREP_TOOL            = _load_engine_tool("grep") or _load_agent_tool("agent.src.tools.grep_tool.grep_tool",                     "GrepTool")
@@ -3838,7 +3850,7 @@ class CortexAgentBridge(QObject):
 
         log.info("[BRIDGE] Initialising Cortex Agent Bridge")
 
-        # Initialise real agent bootstrap state
+        # Initialise real agent app_state
         self._init_agent_state()
 
         # Build tool context for real agent tools (use model from settings if available)
@@ -4049,7 +4061,7 @@ class CortexAgentBridge(QObject):
     # ── Initialisation helpers ─────────────────────────────────
 
     def _init_agent_state(self):
-        """Wire into the real agent bootstrap/state module."""
+        """Wire into the real agent app_state/state module."""
         try:
             cwd = os.getcwd()
             # CRITICAL: NEVER use Program Files as project root, causes UAC prompts
@@ -4789,7 +4801,7 @@ Required behavior:
 
         Three layers:
           1. Behavioral instructions (how to save/read memories) + MEMORY.md index
-             via buildMemoryPrompt() from memdir package.
+             via buildMemoryPrompt() from the project_memory package.
           2. Content of recently-modified individual memory files (up to 10).
 
         Returns the combined string, or empty string if the memory system is
@@ -4798,13 +4810,13 @@ Required behavior:
         parts: List[str] = []
 
         # --- Layer 1: Instructions + MEMORY.md index ---
-        _memdir_spec = _importlib_util.find_spec("src.agent.src.memdir.memdir") or _importlib_util.find_spec("agent.src.memdir.memdir")
-        if _memdir_spec:
+        _prompt_spec = _importlib_util.find_spec("src.agent.src.project_memory.prompt") or _importlib_util.find_spec("agent.src.project_memory.prompt")
+        if _prompt_spec:
             try:
                 try:
-                    from src.agent.src.memdir.memdir import buildMemoryPrompt
+                    from src.agent.src.project_memory.prompt import buildMemoryPrompt
                 except ImportError:
-                    from agent.src.memdir.memdir import buildMemoryPrompt
+                    from agent.src.project_memory.prompt import buildMemoryPrompt
                 prompt = buildMemoryPrompt({
                     'displayName': 'Cortex Memory',
                     'memoryDir': memory_dir,
@@ -4814,7 +4826,7 @@ Required behavior:
             except Exception as exc:
                 log.debug('[BRIDGE] buildMemoryPrompt failed (%s); using fallback', exc)
         else:
-            log.debug('[BRIDGE] memdir.memdir not available; using fallback')
+            log.debug('[BRIDGE] project_memory.prompt not available; using fallback')
             fallback_lines = [
                 '# Cortex Memory',
                 '',
@@ -4864,13 +4876,13 @@ Required behavior:
         # --- Layer 2: Recent individual memory files ---
         memoryFreshnessNote: Callable[[float], str] = lambda mtime_ms: ""
 
-        _mage_spec = _importlib_util.find_spec("src.agent.src.memdir.memory_age") or _importlib_util.find_spec("agent.src.memdir.memory_age")
-        if _mage_spec:
+        _age_spec = _importlib_util.find_spec("src.agent.src.project_memory.memory_age") or _importlib_util.find_spec("agent.src.project_memory.memory_age")
+        if _age_spec:
             try:
                 try:
-                    from src.agent.src.memdir.memory_age import memoryFreshnessNote as _mf
+                    from src.agent.src.project_memory.memory_age import memoryFreshnessNote as _mf
                 except ImportError:
-                    from agent.src.memdir.memory_age import memoryFreshnessNote as _mf
+                    from agent.src.project_memory.memory_age import memoryFreshnessNote as _mf
                 memoryFreshnessNote = cast(Callable[[float], str], _mf)
             except Exception:
                 pass
@@ -11000,7 +11012,7 @@ Required behavior:
             'PROJECT_MEMORY.md',
             'AI_MEMORY.md',
             'AGENT_MEMORY.md',
-            'MEMORY.md',  # reserved, only the memdir system writes MEMORY.md
+            'MEMORY.md',  # reserved, only the project_memory system writes MEMORY.md
             'SESSION_MEMORY.md',
             'PROJECT_CONTEXT.md',  # use .cortex/context.md instead
             'PROJECT_RULES.md',    # use .cortex/rules.md instead

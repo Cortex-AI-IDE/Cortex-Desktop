@@ -30,7 +30,7 @@ log = get_logger("memory_manager")
 
 # Import cross-project memory manager
 try:
-    from src.agent.src.memdir.cross_project_memory import get_cross_project_manager
+    from src.agent.src.project_memory.cross_project_memory import get_cross_project_manager
     HAS_CROSS_PROJECT = True
 except ImportError:
     HAS_CROSS_PROJECT = False
@@ -64,11 +64,10 @@ def _compute_memory_dir(project_root: str) -> str:
     return os.path.join(project_root, ".cortex", "memory")
 
 def _compute_global_memory_dir() -> str:
-    try:
-        from src.agent.src.memdir.paths import getGlobalMemPath
-        return getGlobalMemPath().rstrip("/\\")
-    except Exception:
-        return os.path.join(os.path.expanduser("~"), ".cortex", "global", "memory")
+    # project_memory.paths is an unimplemented placeholder, so importing
+    # getGlobalMemPath from it always raised ModuleNotFoundError and the
+    # fallback was the only branch that ever ran. Return that path directly.
+    return os.path.join(os.path.expanduser("~"), ".cortex", "global", "memory")
 
 
 def _compute_project_rules_dir(project_root: str) -> str:
@@ -208,7 +207,7 @@ class MemoryManagerBridge(QObject):
     def _init_semantic_search(self):
         """Initialize semantic search for current project."""
         try:
-            from src.agent.src.memdir.semantic_search import get_semantic_searcher
+            from src.agent.src.project_memory.semantic_search import get_semantic_searcher
             self._semantic_searcher = get_semantic_searcher(self._project_memory_dir)
             log.info("[MemoryManager] Semantic search initialized")
         except Exception as e:
@@ -705,7 +704,7 @@ scope: project
             log.info(f"[MemoryManager] Running consolidation on {memory_dir} (auto_merge={auto_merge})")
             self.toast_requested.emit("info", "Starting memory consolidation...")
             
-            from src.agent.src.memdir.memory_consolidation import MemoryConsolidator
+            from src.agent.src.project_memory.memory_consolidation import MemoryConsolidator
             
             consolidator = MemoryConsolidator(memory_dir)
             report = consolidator.run_consolidation(auto_merge=auto_merge)

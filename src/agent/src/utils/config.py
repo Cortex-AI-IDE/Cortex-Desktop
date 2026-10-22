@@ -367,7 +367,7 @@ def computeTrustDialogAccepted() -> bool:
     """Compute trust dialog acceptance"""
     # Import here to avoid circular dependencies
     try:
-        from .bootstrap.state import getSessionTrustAccepted, getOriginalCwd
+        from ..app_state.state import getSessionTrustAccepted, getOriginalCwd
         from .path import normalizePathForConfigKey
     except ImportError:
         return False
@@ -1006,7 +1006,7 @@ def recordFirstStartTime() -> None:
 def getProjectPathForConfig() -> str:
     """Get project path for config lookup"""
     try:
-        from .bootstrap.state import getOriginalCwd
+        from ..app_state.state import getOriginalCwd
         from .git import findCanonicalGitRoot
         from .path import normalizePathForConfigKey
     except ImportError:
@@ -1166,7 +1166,7 @@ def formatAutoUpdaterDisabledReason(reason: Dict) -> str:
 def getMemoryPath(memoryType: str) -> str:
     """Get memory file path"""
     try:
-        from .bootstrap.state import getOriginalCwd
+        from ..app_state.state import getOriginalCwd
         from .envUtils import getCortexConfigHomeDir
         from .settings.managed_path import getManagedFilePath
     except ImportError:
@@ -1189,7 +1189,7 @@ def getMemoryPath(memoryType: str) -> str:
         return os.path.join(getManagedFilePath(), 'CORTEX.md')
     elif memoryType == 'AutoMem':
         try:
-            from .memdir.paths import getAutoMemEntrypoint
+            from ..project_memory.paths import getAutoMemEntrypoint
             return getAutoMemEntrypoint()
         except ImportError:
             return ''

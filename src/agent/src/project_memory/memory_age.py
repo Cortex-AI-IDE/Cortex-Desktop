@@ -1,5 +1,5 @@
 """
-Auto-generated stub for memdir.memoryAge.
+Freshness notes for project memory files.
 TODO: Implement based on requirements.
 """
 from typing import Any, Dict, List, Optional

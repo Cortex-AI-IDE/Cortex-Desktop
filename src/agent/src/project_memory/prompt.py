@@ -1,8 +1,7 @@
-"""memdir utilities.
+"""Project memory prompt builder.
 
-The upstream agent uses a memory directory to inject project-specific context
-into the system prompt. This module provides the implementation used by the
-rest of the agent engine.
+Cortex keeps a per-project memory directory and injects its MEMORY.md index
+into the system prompt. This module builds that section.
 """
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from ..bootstrap.state import getKairosActive, getOriginalCwd
+from ..app_state.state import getKairosActive, getOriginalCwd
 from ..tools.grep_tool.prompt import GREP_TOOL_NAME
 
 __all__ = [

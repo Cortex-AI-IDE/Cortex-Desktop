@@ -1,5 +1,5 @@
 """
-Auto-generated stub for .memdir.paths.
+Placeholder for project memory path helpers.
 TODO: Implement based on requirements.
 """
 from typing import Any, Dict, List, Optional

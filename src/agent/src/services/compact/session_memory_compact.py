@@ -278,7 +278,7 @@ def should_use_session_memory_compaction(
     if disable_env or os.environ.get('DISABLE_CORTEX_CODE_SM_COMPACT', '').lower() in ('true', '1', 'yes'):
         return False
     
-    # Would check feature flags (GrowthBook/Statsig) in real implementation
+    # Would check feature flags in a real implementation
     # For now, default to False (experimental feature)
     return False
 

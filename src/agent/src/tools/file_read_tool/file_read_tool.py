@@ -797,7 +797,15 @@ def check_read_permission_for_tool(
     Returns:
         Dict with 'behavior' ('allow', 'deny', 'ask') and 'updated_input'
     """
-    from utils.permissions.filesystem_security import check_read_permission
+    # `utils.permissions` only resolves when src/agent/src is its own sys.path
+    # root. Cortex puts the PROJECT root on sys.path instead (main.py:13), and in
+    # dev it never adds src/agent/src at all - only the frozen runtime hook does.
+    # So the bare form raised ModuleNotFoundError on every call. The absolute
+    # form works under both roots; keep both, cheap and order-independent.
+    try:
+        from utils.permissions.filesystem_security import check_read_permission
+    except ImportError:
+        from src.agent.src.utils.permissions.filesystem_security import check_read_permission
 
     file_path = input_data.get('file_path', '') if isinstance(input_data, dict) else ''
     if not file_path:
@@ -1099,8 +1107,8 @@ def create_user_message(content: Any, is_meta: bool = False) -> Dict[str, Any]:
 # ============================================================
 
 def get_feature_value_cached_may_be_stale(feature_name: str, default: Any) -> Any:
-    """Get a feature flag value from growthbook."""
-    # Would integrate with growthbook in full implementation
+    """Get a feature flag value."""
+    # Would read it from feature_flags in a full implementation
     return default
 
 

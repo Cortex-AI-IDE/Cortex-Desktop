@@ -244,8 +244,8 @@ if not getattr(sys, "frozen", False) and hasattr(sys.stderr, "fileno"):
     except Exception:
         pass  # Don't crash if stderr redirect fails
 
-# Align the embedded agent's memdir base with Cortex's config home.
-# agent/src/memdir/paths.py uses CLAUDE_CODE_REMOTE_MEMORY_DIR as the memory base.
+# Align the embedded agent's project memory base with Cortex's config home.
+# agent/src/project_memory/paths.py uses CLAUDE_CODE_REMOTE_MEMORY_DIR as the memory base.
 if not os.environ.get("CLAUDE_CODE_REMOTE_MEMORY_DIR"):
     os.environ["CLAUDE_CODE_REMOTE_MEMORY_DIR"] = str(Path.home() / ".cortex")
 

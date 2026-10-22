@@ -89,7 +89,12 @@ def check_read_permission_for_tool(
     Returns:
         PermissionDecision with behavior 'allow', 'deny', or 'ask'
     """
-    from utils.permissions.filesystem_security import check_read_permission
+    # See file_read_tool: the bare `utils.*` form needs src/agent/src as its
+    # own sys.path root, which neither dev nor the frozen build guarantees.
+    try:
+        from utils.permissions.filesystem_security import check_read_permission
+    except ImportError:
+        from src.agent.src.utils.permissions.filesystem_security import check_read_permission
 
     path = input_.get("path", "") if isinstance(input_, dict) else ""
     if not path:

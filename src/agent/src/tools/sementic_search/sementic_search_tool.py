@@ -86,7 +86,7 @@ DEFAULT_CONTEXT_LINES = 3
 def get_cwd() -> str:
     """Get current working directory, prefers project root."""
     try:
-        from ...bootstrap.state import get_project_root
+        from ...app_state.state import get_project_root
         root = get_project_root()
         if root and 'Program Files' not in root:
             return root

@@ -35,7 +35,7 @@ class ZodSafeParseResult:
 
 # Try to import from src, fallback to stubs
 try:
-    from ..bootstrap.state import getAdditionalDirectoriesForCortexMd, getSessionId
+    from ..app_state.state import getAdditionalDirectoriesForCortexMd, getSessionId
     from ..services.analytics.index import (
         logEvent,
     )

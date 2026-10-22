@@ -111,7 +111,7 @@ except ImportError:
         return os.path.join(getManagedFilePath(), 'managed-settings.d')
 
 try:
-    from .mdm.settings import getHkcuSettings, getMdmSettings
+    from ...managed_config.settings import getHkcuSettings, getMdmSettings
 except ImportError:
     def getHkcuSettings():
         return {'settings': {}, 'errors': []}
@@ -120,7 +120,7 @@ except ImportError:
         return {'settings': {}, 'errors': []}
 
 try:
-    from ..bootstrap.state import (
+    from ...app_state.state import (
         getFlagSettingsInline,
         getFlagSettingsPath,
         getOriginalCwd,
