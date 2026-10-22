@@ -27,10 +27,10 @@ except ImportError:
         """Expand path with home directory support."""
         return os.path.expanduser(os.path.abspath(p)) if p else os.getcwd()
     
-    def to_relative_path(p: str) -> str:
-        """Convert absolute path to relative path."""
+    def to_relative_path(p: str, base: Optional[str] = None) -> str:
+        """Convert absolute path to a path relative to base (default: cwd)."""
         try:
-            return os.path.relpath(p, os.getcwd())
+            return os.path.relpath(p, base or os.getcwd())
         except ValueError:
             # Different drive on Windows
             return p
@@ -423,16 +423,20 @@ class GlobTool:
         limit = glob_limits.max_results if hasattr(glob_limits, "max_results") else DEFAULT_GLOB_LIMIT
         
         # Execute glob search
+        search_dir = GlobTool.get_path(inp)
         result = await glob(
             pattern=pattern,
-            search_dir=GlobTool.get_path(inp),
+            search_dir=search_dir,
             options={"limit": limit, "offset": 0},
             signal=getattr(context.abort_controller, "signal", None) if hasattr(context, "abort_controller") else None,
             permission_context=app_state.tool_permission_context,
         )
-        
-        # Convert absolute paths to relative paths to save tokens
-        filenames = [to_relative_path(f) for f in result["files"]]
+
+        # Relative to the searched directory, not the process cwd. The app
+        # never chdirs into the project, so cwd-relative names came out as
+        # "..\..\AppData\...\pkg\calc.py" for a project outside the install
+        # dir. Grep uses the same base, so the two tools agree.
+        filenames = [to_relative_path(f, search_dir) for f in result["files"]]
         
         # Build output
         output: GlobOutput = {

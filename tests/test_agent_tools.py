@@ -111,6 +111,22 @@ def test_glob_tool_finds_python_files(ctx: CortexToolContext) -> None:
     assert all(name.endswith(".py") for name in data["filenames"])
 
 
+def test_glob_names_are_relative_to_the_search_dir_not_cwd(
+    ctx: CortexToolContext, tmp_path, monkeypatch
+) -> None:
+    """The app never chdirs into the project; names must not depend on cwd."""
+    (tmp_path / "proj" / "pkg").mkdir(parents=True)
+    (tmp_path / "proj" / "pkg" / "calc.py").write_text("VALUE = 41\n")
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "elsewhere")
+
+    result = _run(
+        _REAL_GLOB_TOOL.call({"pattern": "**/*.py", "path": str(tmp_path / "proj")}, ctx)
+    )
+
+    assert result["data"]["filenames"] == [os.path.join("pkg", "calc.py")]
+
+
 def test_grep_tool_finds_a_known_pattern(ctx: CortexToolContext) -> None:
     tests_dir = os.path.join(ROOT, "tests")
 

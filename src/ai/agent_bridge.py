@@ -11773,6 +11773,17 @@ Required behavior:
                 return None
         return resolved
 
+    def _project_relative(self, path: str) -> str:
+        """Name a path relative to the project root, or absolute when outside it."""
+        abs_path = os.path.normpath(path)
+        if not self._project_root:
+            return abs_path
+        try:
+            rel = os.path.relpath(abs_path, self._project_root)
+        except ValueError:  # different drive on Windows
+            return abs_path
+        return abs_path if rel == os.pardir or rel.startswith(os.pardir + os.sep) else rel
+
     def _announce_skill_in_use(self, name: str, already_active: bool) -> None:
         """Tell the UI which skill is steering this task.
 
@@ -12239,6 +12250,12 @@ Required behavior:
                 filenames: List[str] = [
                     f for f in cast(List[Any], filenames_raw) if isinstance(f, str)
                 ] if isinstance(filenames_raw, list) else []
+                # GlobTool names files relative to the searched directory.
+                # Rebase them on the project root, the base Read/Edit resolve
+                # relative paths against, so a Glob of "src" hands back
+                # "src\core\x.py" rather than "core\x.py".
+                filenames = [self._project_relative(os.path.join(_search_dir, f)) if _search_dir else f
+                             for f in filenames]
                 # P6: Apply search exclusion patterns
                 filenames = AgentSafetyGuard.filter_search_results(filenames)
                 return ToolResult(tool_id=tool_id, result={
@@ -12342,6 +12359,9 @@ Required behavior:
                                     "line": parts[1],
                                     "text": parts[2] if len(parts) > 2 else "",
                                 })
+                # Content mode has no numResults and no results list, so the
+                # count was 0 next to a non-empty matches list.
+                match_count = match_count or len(matches)
 
                 # Outcome MUST be logged: three rounds of "grep came back
                 # empty" reports were undiagnosable because only the
