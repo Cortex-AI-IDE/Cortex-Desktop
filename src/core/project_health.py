@@ -158,8 +158,6 @@ _LANG_BY_EXT: Dict[str, str] = {
     ".sh": "shell", ".bat": "shell", ".ps1": "shell",
 }
 
-_DEEP_ANALYSIS_LANGS: Set[str] = {"python", "json", "html", "yaml", "toml", "css"}
-
 # HTML5 void elements: never have an end tag, so they must not be pushed onto
 # the balance stack or every <img>/<br> would read as "unclosed".
 _HTML_VOID: Set[str] = {
@@ -206,7 +204,7 @@ _ENTRY_FILENAMES: Set[str] = {
     "main.py", "__main__.py", "setup.py", "conftest.py", "manage.py",
     "app.py", "run.py", "cli.py",
 }
-_ENTRY_DIRS: Set[str] = {"tests", "test", "scripts", "examples", "docs", "migrations"}
+_ENTRY_DIRS: Set[str] = {"tests", "test", "scripts", "examples", "docs", "migrations", "tools"}
 
 # Directories whose Python symbols are collected by pytest, never called
 # explicitly - reporting test_* functions as "unused" is always a false
@@ -227,6 +225,23 @@ _FRAMEWORK_NAMES: Set[str] = {
     "leaveEvent", "focusInEvent", "focusOutEvent", "contextMenuEvent",
     "dragEnterEvent", "dragMoveEvent", "dropEvent", "changeEvent",
     "timerEvent", "eventFilter", "sizeHint", "minimumSizeHint",
+    # Further Qt virtuals. Each name is Qt-specific enough that exempting it
+    # everywhere hides nothing; generic ones (``data``, ``paint``, ``event``)
+    # are in _QT_GENERIC_VIRTUALS, scoped to Qt subclasses.
+    "createHandle", "dragLeaveEvent", "inputMethodEvent", "inputMethodQuery",
+    "tabletEvent", "actionEvent", "nativeEvent", "customEvent", "childEvent",
+    "focusNextPrevChild", "heightForWidth", "hasHeightForWidth",
+    "scrollContentsBy", "viewportEvent", "initStyleOption",
+    "acceptNavigationRequest", "createWindow", "interceptRequest",
+    "javaScriptAlert", "javaScriptConfirm", "javaScriptPrompt", "chooseFiles",
+    "certificateError", "createEditor", "setEditorData", "setModelData",
+    "updateEditorGeometry", "editorEvent", "rowCount", "columnCount",
+    "headerData", "roleNames", "canFetchMore", "fetchMore", "mimeTypes",
+    "mimeData", "dropMimeData", "supportedDropActions", "supportedDragActions",
+    "filterAcceptsRow", "filterAcceptsColumn", "lessThan", "highlightBlock",
+    "boundingRect", "textFromValue", "valueFromText", "stepBy", "stepEnabled",
+    "sizeFromContents", "drawControl", "drawPrimitive", "drawComplexControl",
+    "pixelMetric", "styleHint", "expandingDirections", "readData", "writeData",
     "setUp", "tearDown", "setUpClass", "tearDownClass",
     "setup", "teardown", "setup_method", "teardown_method",
     "setup_class", "teardown_class",
@@ -254,16 +269,45 @@ _DISPATCH_BASE_EXACT: Dict[str, Set[str]] = {
     "NodeTransformer": {"generic_visit"},
 }
 
-# File-object protocol methods. A class defining these is standing in for a
-# stream (io.StringIO, sys.stdout, a log sink), and the consumer calls them
-# through the protocol, never by name in project code. Only applied to METHODS
-# (a symbol with a parent class) - a module-level ``def read()`` is still
-# reported, since nothing dispatches to it.
+# Shortest literal prefix worth treating as a runtime dispatch key when a
+# module builds a method name itself (``getattr(o, f"on_{event}")``). A
+# one- or two-character head (``f"{a}{b}"``) says nothing about which methods
+# the lookup can reach, so it is ignored rather than exempting half the file.
+_MIN_DISPATCH_PREFIX = 3
+
+# Qt virtuals whose names are ordinary words. Qt calls them on a subclass
+# (``QAbstractItemModel.data``, ``QGraphicsItem.paint``, ``QDialog.accept``),
+# but exempting ``data`` or ``accept`` everywhere would hide genuinely dead
+# methods of plain classes, so they apply only to a class with a direct Qt
+# base (see _is_qt_base). A subclass of a project class that derives from Qt
+# is not covered.
+_QT_GENERIC_VIRTUALS: Set[str] = {
+    "event", "paint", "shape", "data", "setData", "flags", "index", "parent",
+    "validate", "fixup", "accept", "reject", "done", "itemAt", "takeAt",
+    "addItem", "count", "setGeometry", "isSequential",
+}
+
+
+def _is_qt_base(name: str) -> bool:
+    """True for a PyQt/PySide class name: ``Q`` followed by a capital."""
+    return len(name) > 2 and name[0] == "Q" and name[1].isupper()
+
+# File-object and agent-tool protocol methods. A class defining these is
+# standing in for a stream (io.StringIO, sys.stdout, a log sink) or an agent
+# Tool/Context contract, and the consumer calls them through the protocol,
+# never by name in project code. Only applied to METHODS (a symbol with a
+# parent class) - a module-level ``def read()`` is still reported, since
+# nothing dispatches to it.
 _PROTOCOL_NAMES: Set[str] = {
     "read", "read1", "readall", "readinto", "readline", "readlines",
     "write", "writelines", "flush", "close", "closed", "seek", "seekable",
     "tell", "truncate", "readable", "writable", "fileno", "isatty",
     "detach", "peek", "getvalue", "getbuffer",
+    "to_auto_classifier_input", "backfill_observable_input",
+    "prepare_permission_matcher", "check_permissions", "inputs_equivalent",
+    "map_tool_result_to_block", "get_activity_description",
+    "is_search_or_read_command", "extract_search_text",
+    "render_tool_use_message",
 }
 
 # Config/build files the main walk ignores (extension not in _LANG_BY_EXT)
@@ -297,8 +341,14 @@ _CENSUS_EXCLUDED_DIRS: Set[str] = {
 # ``from pkg import helper`` would keep leaving helper.py unimported, and to
 # 10 when imports from a subdirectory on sys.path (``from utils.x import``
 # under src/agent/src) started resolving - the cached whole-project dead-code
-# verdict is reused when no file changed, so it must not survive this.
-_CACHE_VERSION = 10
+# verdict is reused when no file changed, so it must not survive this, and to
+# 11 when per-file ``string_modules`` was added and skill-folder and
+# build-spec files left the app's dead-code lists, and to 12 when more Qt
+# virtuals became exempt (a cached verdict would keep listing createHandle),
+# and to 14 when runtime ``getattr`` prefixes and contract stubs became exempt
+# - an older entry carries neither, so reusing it would keep listing every
+# method those two rules now cover.
+_CACHE_VERSION = 14
 _CACHE_RELATIVE = Path(".cortex") / "health_map.json"
 
 
@@ -353,6 +403,18 @@ class FileHealth:
     imports: List[Tuple[str, int, bool]] = field(default_factory=list)  # (dotted, line, guarded)
     # ``X.name`` for each ``from X import name``; edge candidates only.
     submodule_imports: List[str] = field(default_factory=list)
+    # Dotted string literals (``"src.ai.providers.x_provider"``); edges only
+    # when one is exactly a project module.
+    string_modules: List[str] = field(default_factory=list)
+    # Literal name prefixes this module hands to ``getattr``/``hasattr``
+    # (``getattr(plugin, f"on_{event}")`` -> ``"on_"``). A method reached that
+    # way has no static call site anywhere, so the dead-code pass exempts
+    # methods whose name starts with one of these.
+    dispatch_prefixes: List[str] = field(default_factory=list)
+    # ``"Class.method"`` for every method whose body is only a docstring and/or
+    # ``pass``, ``...`` or ``raise NotImplementedError``. That is a contract to
+    # be implemented elsewhere, not a deletable implementation.
+    stub_methods: List[str] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
     deep: bool = False  # did we actually parse it?
 
@@ -570,6 +632,173 @@ def _from_import_target(node: ast.ImportFrom, pkg_parts: List[str]) -> str:
     base = pkg_parts[: len(pkg_parts) - up]
     tail = node.module.split(".") if node.module else []
     return ".".join([*base, *tail])
+
+
+_DOTTED_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
+_MAX_STRING_MODULES_PER_FILE = 300
+
+
+def _collect_string_modules(tree: ast.AST) -> List[str]:
+    """Return every string literal shaped like a dotted module path.
+
+    Providers and tools are loaded with ``importlib.import_module`` from
+    strings such as ``"src.ai.providers.deepseek_provider"``, so no import
+    statement names them and they looked imported by nothing. Shape alone
+    is not evidence (``"os.path"``, ``"editor.font_size"``), so these are
+    candidates: ``_resolve_edges`` keeps one only when it is exactly a
+    project module.
+    """
+    out: List[str] = []
+    seen: Set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        value = node.value
+        if value in seen or not _DOTTED_RE.fullmatch(value):
+            continue
+        seen.add(value)
+        out.append(value)
+        if len(out) >= _MAX_STRING_MODULES_PER_FILE:
+            break
+    return out
+
+
+_QUOTED_RE = re.compile(r"""['"]([^'"\n]+)['"]""")
+
+
+def _dynamic_prefix(node: ast.expr) -> str:
+    """Literal head of a name this code builds at runtime, or ``""``.
+
+    Only shapes that append a runtime suffix qualify:
+
+    * ``f"on_{event}"`` -> ``"on_"`` (leading literal part of the joined string)
+    * ``"on_" + event`` -> ``"on_"`` (literal left side of the concatenation)
+
+    A plain constant (``getattr(o, "on_file_open")``) returns ``""``: that name
+    is already visible to the token census, so treating it as a prefix would
+    exempt every method sharing its opening characters for no reason.
+    """
+    if isinstance(node, ast.JoinedStr):
+        head = ""
+        for part in node.values:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                head += part.value
+            else:
+                break
+        return head
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = node.left
+        if isinstance(left, ast.Constant) and isinstance(left.value, str):
+            return left.value
+        return _dynamic_prefix(left)
+    return ""
+
+
+def _collect_dispatch_prefixes(tree: ast.AST) -> List[str]:
+    """Name prefixes this module passes to ``getattr``/``hasattr``.
+
+    ``PluginManager.broadcast_event`` does
+    ``getattr(plugin, f"on_{event_name}")``, so ``Plugin.on_file_open`` is
+    invoked on every call and yet its name never appears at a call site. No
+    static count can see that, so the dead-code pass exempts methods starting
+    with a collected prefix. Prefixes shorter than
+    ``_MIN_DISPATCH_PREFIX`` characters are dropped: a one- or two-character
+    head (``f"{a}{b}"``) would exempt almost everything.
+    """
+    prefixes: Set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Name) and fn.id in ("getattr", "hasattr")):
+            continue
+        if len(node.args) < 2:
+            continue
+        head = _dynamic_prefix(node.args[1])
+        if len(head) >= _MIN_DISPATCH_PREFIX:
+            prefixes.add(head)
+    return sorted(prefixes)
+
+
+def _is_stub_body(node: ast.AST) -> bool:
+    """True when a function body does nothing but declare a contract.
+
+    A docstring followed by ``pass``, ``...`` or ``raise NotImplementedError``
+    says "implement this elsewhere" - it is overridden by a subclass or by
+    third-party plugin code, so removing it removes the contract rather than
+    dead weight. Any other statement means there is real behaviour and the
+    usual unused check applies.
+    """
+    body = list(getattr(node, "body", []))
+    if not body:
+        return True
+    if (
+        isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    if not body:
+        return True
+    if len(body) != 1:
+        return False
+    only = body[0]
+    if isinstance(only, ast.Pass):
+        return True
+    if (
+        isinstance(only, ast.Expr)
+        and isinstance(only.value, ast.Constant)
+        and only.value.value is Ellipsis
+    ):
+        return True
+    if isinstance(only, ast.Raise):
+        exc = only.exc
+        if isinstance(exc, ast.Call):
+            exc = exc.func
+        if isinstance(exc, ast.Name) and exc.id in ("NotImplementedError", "NotImplemented"):
+            return True
+    return False
+
+
+def _collect_stub_methods(tree: ast.AST) -> List[str]:
+    """``"Class.method"`` for every method that is only a contract stub."""
+    out: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for item in node.body:
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if _is_stub_body(item):
+                out.append(f"{node.name}.{item.name}")
+    return out
+
+
+def _spec_path_refs(spec_text: str, py_rels: Set[str]) -> Set[str]:
+    """Project ``.py`` files a PyInstaller spec names by path.
+
+    Runtime hooks and entry scripts are listed by path, never imported:
+    ``os.path.join(ROOT, 'src', 'utils', 'runtime_hook_certifi.py')``. On a
+    line naming a ``.py`` literal, the quoted segments ending at it are
+    joined and kept only when they spell an existing project file exactly,
+    so a bare filename shared by two modules matches neither.
+    """
+    refs: Set[str] = set()
+    for line in spec_text.splitlines():
+        if ".py" not in line:
+            continue
+        lits = [s.replace("\\", "/").strip("/") for s in _QUOTED_RE.findall(line)]
+        for i, lit in enumerate(lits):
+            if not lit.endswith(".py"):
+                continue
+            for k in range(i, -1, -1):
+                joined = "/".join(p for p in lits[k : i + 1] if p and p != ".")
+                if joined.startswith("./"):
+                    joined = joined[2:]
+                if joined in py_rels:
+                    refs.add(joined)
+                    break
+    return refs
 
 
 def _collect_submodule_imports(tree: ast.AST, package: str = "") -> List[str]:
@@ -807,6 +1036,9 @@ class ProjectHealthScanner:
             package = fh.module.rsplit(".", 1)[0] if "." in fh.module else ""
         fh.imports = _collect_imports(tree, guarded, package)
         fh.submodule_imports = _collect_submodule_imports(tree, package)
+        fh.string_modules = _collect_string_modules(tree)
+        fh.dispatch_prefixes = _collect_dispatch_prefixes(tree)
+        fh.stub_methods = _collect_stub_methods(tree)
 
         if _HAS_EXTRACTOR:
             try:
@@ -1062,6 +1294,15 @@ class ProjectHealthScanner:
         fh.submodule_imports = [
             s for s in cached.get("submodule_imports", []) or [] if isinstance(s, str)
         ]
+        fh.string_modules = [
+            s for s in cached.get("string_modules", []) or [] if isinstance(s, str)
+        ]
+        fh.dispatch_prefixes = [
+            s for s in cached.get("dispatch_prefixes", []) or [] if isinstance(s, str)
+        ]
+        fh.stub_methods = [
+            s for s in cached.get("stub_methods", []) or [] if isinstance(s, str)
+        ]
         for pr in cached.get("problems", []) or []:
             fh.problems.append(
                 Problem(
@@ -1082,7 +1323,7 @@ class ProjectHealthScanner:
         known = self._modules
         seen: Set[Tuple[str, str]] = set()
         for fh in self._files:
-            if not fh.imports and not fh.submodule_imports:
+            if not fh.imports and not fh.submodule_imports and not fh.string_modules:
                 continue
             src_id = _stable_id("file", fh.rel)
             roots = self._ancestor_roots(fh)
@@ -1096,6 +1337,13 @@ class ProjectHealthScanner:
             targets += [
                 known.get(sub) or self._resolve_under_roots(sub, roots, known, exact=True)
                 for sub in fh.submodule_imports
+            ]
+            # Loader strings get the same exact-only rule. Under an ancestor
+            # root too: agent_bridge loads "agent.src.tools.glob_tool.glob_tool"
+            # and prefixes "src." itself.
+            targets += [
+                known.get(s) or self._resolve_under_roots(s, roots, known, exact=True)
+                for s in fh.string_modules
             ]
             for target in targets:
                 if not target or target == fh.rel:
@@ -1287,10 +1535,23 @@ class ProjectHealthScanner:
                 for base in bases:
                     prefixes.extend(_DISPATCH_BASE_PREFIXES.get(base, ()))
                     exact |= _DISPATCH_BASE_EXACT.get(base, set())
+                    if _is_qt_base(base):
+                        exact |= _QT_GENERIC_VIRTUALS
                 if prefixes or exact:
                     rules[cls] = (tuple(prefixes), exact)
             if rules:
                 dispatch_rules[fh.rel] = rules
+
+        # Runtime name lookups the project builds itself: every literal
+        # ``getattr(o, f"on_{event}")`` prefix anywhere in the tree, plus the
+        # ``"Class.method"`` contract stubs per file. Both describe methods
+        # that are reached without a call site naming them, so both exempt.
+        runtime_prefixes: Set[str] = set()
+        stub_methods: Dict[str, Set[str]] = {}
+        for fh in py:
+            runtime_prefixes.update(fh.dispatch_prefixes or ())
+            if fh.stub_methods:
+                stub_methods[fh.rel] = set(fh.stub_methods)
 
         def _is_test_path(rel: str) -> bool:
             parts = rel.split("/")
@@ -1319,6 +1580,17 @@ class ProjectHealthScanner:
                     prefixes, exact = entry
                     if name in exact or name.startswith(prefixes):
                         return True
+                # Method this project looks up by a name it builds itself
+                # (``getattr(plugin, f"on_{event}")``). The prefix is only
+                # honoured for methods: a module-level ``on_*`` function is
+                # not reachable through an instance lookup.
+                if name.startswith(tuple(runtime_prefixes)):
+                    return True
+                # Contract stub (``pass``, ``...``, ``raise
+                # NotImplementedError``): declared to be overridden elsewhere,
+                # so deleting it removes an interface, not dead weight.
+                if f"{parent}.{name}" in stub_methods.get(rel, ()):
+                    return True
                 # File-object protocol method (``seekable`` on a stream
                 # stand-in): called through the protocol, never by name.
                 if name in _PROTOCOL_NAMES:
@@ -1413,6 +1685,7 @@ class ProjectHealthScanner:
         except Exception:
             pass
 
+        build_refs: Set[str] = set()
         for path, rel in census:
             try:
                 src = read_source_bom_safe(path)
@@ -1420,6 +1693,8 @@ class ProjectHealthScanner:
                 continue
             if rel in py_rels and "__main__" in src:
                 has_main_guard.add(rel)
+            if rel.endswith(".spec"):
+                build_refs |= _spec_path_refs(src, py_rels)
             own_stem = Path(rel).stem
             for tok, cnt in Counter(_IDENT_RE.findall(src)).items():
                 if tok in totals:
@@ -1431,16 +1706,40 @@ class ProjectHealthScanner:
                         # docstrings) are not references from elsewhere.
                         stem_self[tok] += cnt
 
+        # Files inside a skill folder (one holding SKILL.md) are run by the
+        # agent as programs or read as reference, never imported by the app,
+        # so they are excluded from dead-code counting entirely.
+        skill_dirs = {
+            fh.rel.rsplit("/", 1)[0]
+            for fh in self._files
+            if "/" in fh.rel and fh.rel.rsplit("/", 1)[1].lower() == "skill.md"
+        }
+
+        def _in_skill(rel: str) -> bool:
+            parts = rel.split("/")
+            return any("/".join(parts[:i]) in skill_dirs for i in range(1, len(parts)))
+
         # 4. Unused = occurrences never exceed the definition sites.
         unused: List[Dict[str, Any]] = []
+        skill_unused: List[Dict[str, Any]] = []
         total_unused = 0
+        total_skill_unused = 0
         for name, sites in defs.items():
             if totals[name] <= len(sites):
-                total_unused += len(sites)
-                if len(unused) < _MAX_DEAD_SYMBOLS:
-                    unused.extend(sites)
+                for site in sites:
+                    if _in_skill(site["file"]):
+                        continue
+                    total_unused += 1
+                    if len(unused) < _MAX_DEAD_SYMBOLS:
+                        unused.append(site)
         unused.sort(key=lambda d: (d["file"], d["line"] or 0))
         unused_capped = total_unused > len(unused)
+        # A module a build spec names by path is used by the build, and a
+        # skill file is an external agent asset, so neither is a candidate.
+        orphan_candidates = [
+            fh for fh in orphan_candidates
+            if fh.rel not in build_refs and not _in_skill(fh.rel)
+        ]
 
         # 5. Orphans: candidates whose stem no OTHER file mentions. The stem
         #    rule rescues dynamically loaded modules - importlib string paths
@@ -1488,14 +1787,22 @@ class ProjectHealthScanner:
         unimported.sort(key=lambda d: d["file"])
         unimported_capped = total_unimported > len(unimported)
 
+        skill_unimported: List[str] = []
+
         return {
             "unused_symbols": unused,
             "orphan_files": orphans,
             "unimported_files": unimported,
+            "skill_unused_symbols": skill_unused,
+            "skill_unimported_files": skill_unimported[:_MAX_ORPHAN_FILES],
+            "build_referenced_files": sorted(build_refs),
             "counts": {
                 "unused_symbols": total_unused,
                 "orphan_files": total_orphans,
                 "unimported_files": total_unimported,
+                "skill_unused_symbols": total_skill_unused,
+                "skill_unimported_files": len(skill_unimported),
+                "build_referenced_files": len(build_refs),
                 "unused_capped": unused_capped,
                 "orphans_capped": orphans_capped,
                 "unimported_capped": unimported_capped,
@@ -1686,6 +1993,8 @@ class ProjectHealthScanner:
                 "unused_symbols": dc_counts.get("unused_symbols", 0),
                 "orphan_files": dc_counts.get("orphan_files", 0),
                 "unimported_files": dc_counts.get("unimported_files", 0),
+                "skill_unused_symbols": dc_counts.get("skill_unused_symbols", 0),
+                "skill_unimported_files": dc_counts.get("skill_unimported_files", 0),
             },
             "nodes": nodes,
             "symbols": symbols_out,
@@ -1774,6 +2083,9 @@ class ProjectHealthScanner:
                     "class_bases": fh.class_bases,
                     "imports": [[d, ln, g] for d, ln, g in fh.imports],
                     "submodule_imports": fh.submodule_imports,
+                    "string_modules": fh.string_modules,
+                    "dispatch_prefixes": fh.dispatch_prefixes,
+                    "stub_methods": fh.stub_methods,
                     "problems": [p.to_dict() for p in fh.problems],
                 }
             blob = {
@@ -1861,6 +2173,11 @@ def _report_md(payload: Dict[str, Any]) -> str:
     add(f"| Unused symbols | {s.get('unused_symbols', 0)} |")
     add(f"| Orphan files | {s.get('orphan_files', 0)} |")
     add(f"| Unimported modules | {s.get('unimported_files', 0)} |")
+    if s.get("skill_unused_symbols") or s.get("skill_unimported_files"):
+        add(
+            f"| Skill folders (listed apart) | {s.get('skill_unused_symbols', 0)} unused, "
+            f"{s.get('skill_unimported_files', 0)} unimported |"
+        )
     add("")
 
     broken = _report_grouped_problems(payload, STATUS_BROKEN)
@@ -1954,9 +2271,10 @@ def _report_md(payload: Dict[str, Any]) -> str:
     add(f"### Unimported modules ({unimported_total} listed)")
     add("")
     add(
-        "No other file imports these. This is **not** a claim that they are "
-        "dead: tools, providers and skills are loaded by dotted-path string, "
-        "and a module named after an ordinary word is mentioned everywhere. "
+        "No other file imports these, names them in a dotted-path string, or "
+        "lists them by path in a build spec. This is still **not** a claim "
+        "that they are dead: a loader can build the name at runtime, and a "
+        "module named after an ordinary word is mentioned everywhere. "
         "`named elsewhere` means the module's name occurs in other project "
         "text, which is where a dynamic reference would appear. `not named "
         "anywhere` is the subset also reported above as orphan files. Review "
@@ -1970,6 +2288,36 @@ def _report_md(payload: Dict[str, Any]) -> str:
         mark = "named elsewhere" if u.get("named_elsewhere") else "not named anywhere"
         add(f"- `{u.get('file', '?')}` - {mark}")
     if unimported:
+        add("")
+
+    skill_unused = dc.get("skill_unused_symbols", []) or []
+    skill_unimported = dc.get("skill_unimported_files", []) or []
+    if skill_unused or skill_unimported:
+        add("## Inside skill folders")
+        add("")
+        add(
+            "Files under a folder holding `SKILL.md` are run by the agent as "
+            "scripts or read as reference, never imported by the app, so "
+            "\"unused\" and \"unimported\" mean little here. Listed apart so "
+            "they do not bury the app's own findings."
+        )
+        add("")
+        add(f"### Unused symbols in skills ({dc_counts.get('skill_unused_symbols', len(skill_unused))})")
+        add("")
+        for u in skill_unused:
+            add(
+                f"- {u.get('kind', 'symbol')} `{u.get('qualname', u.get('name', '?'))}` "
+                f"- `{u.get('file', '?')}:{u.get('line', 0)}`"
+            )
+        if not skill_unused:
+            add("None found.")
+        add("")
+        add(f"### Skill modules nothing imports ({dc_counts.get('skill_unimported_files', len(skill_unimported))})")
+        add("")
+        for rel in skill_unimported:
+            add(f"- `{rel}`")
+        if not skill_unimported:
+            add("None found.")
         add("")
 
     notes = payload.get("notes", []) or []

@@ -131,3 +131,55 @@ def test_report_counts_unimported_modules_separately_from_orphans(project: Path)
     assert "Unimported modules" in report
     assert "`pkg/log.py`" in report
     assert "named elsewhere" in report
+
+
+# ---------------------------------------------------------------------------
+# Qt virtual overrides
+#
+# Qt calls an override itself (QSplitter calls createHandle when it adds a
+# handle), so the name never appears at a call site and CursorSplitter
+# .createHandle was reported unused. Ordinary-word virtuals (data, paint,
+# accept) are exempt only on a Qt subclass, so the same names on a plain
+# class are still reported.
+# ---------------------------------------------------------------------------
+
+
+def test_qt_specific_override_is_not_unused(project: Path):
+    _write(
+        project / "pkg" / "split.py",
+        "from PyQt6.QtWidgets import QSplitter\n"
+        "class CursorSplitter(QSplitter):\n"
+        "    def createHandle(self):\n"
+        "        return None\n",
+    )
+
+    payload = ProjectHealthScanner(project).scan(force=True)
+
+    assert "createHandle" not in _unused_names(payload)
+
+
+def test_generic_qt_virtual_is_exempt_on_a_qt_subclass(project: Path):
+    _write(
+        project / "pkg" / "model.py",
+        "from PyQt6 import QtCore\n"
+        "class Model(QtCore.QAbstractListModel):\n"
+        "    def data(self, index, role):\n"
+        "        return None\n",
+    )
+
+    payload = ProjectHealthScanner(project).scan(force=True)
+
+    assert "data" not in _unused_names(payload)
+
+
+def test_generic_qt_virtual_name_on_a_plain_class_is_still_unused(project: Path):
+    _write(
+        project / "pkg" / "plain.py",
+        "class Store:\n"
+        "    def accept(self):\n"
+        "        return None\n",
+    )
+
+    payload = ProjectHealthScanner(project).scan(force=True)
+
+    assert "accept" in _unused_names(payload)

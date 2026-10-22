@@ -52,26 +52,6 @@ ANSI_COLORS = {
     '97': '#F2F2F2',  # Bright White
 }
 
-# PowerShell color mapping
-PS_COLORS = {
-    'Black': '#0C0C0C',
-    'DarkBlue': '#0037DA',
-    'DarkGreen': '#13A10E',
-    'DarkCyan': '#3A96DD',
-    'DarkRed': '#C50F1F',
-    'DarkMagenta': '#881798',
-    'DarkYellow': '#C19C00',
-    'Gray': '#CCCCCC',
-    'DarkGray': '#767676',
-    'Blue': '#3B78FF',
-    'Green': '#16C60C',
-    'Cyan': '#61D6D6',
-    'Red': '#E74856',
-    'Magenta': '#B4009E',
-    'Yellow': '#F9F1A5',
-    'White': '#F2F2F2',
-}
-
 
 class WindowsTerminalWidget(QWidget):
     """

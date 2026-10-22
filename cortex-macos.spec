@@ -72,7 +72,6 @@ for nm_sub in ('monaco-editor',):
 hiddenimports = [
     'src.version',
     'src._build_info',
-    'src.commands',
     'PyQt6',
     'PyQt6.QtWidgets',
     'PyQt6.QtCore',
@@ -133,7 +132,6 @@ hiddenimports = [
     'src.ui.render_health',
     'src.ui.native_menu',
     'src.core.voice_input',
-    'src.core.voice_stream',
     # collect_submodules('src.*') below already reaches these; naming them keeps
     # the dependency visible and survives a change to that list.
     'src.ui.fonts',
@@ -147,7 +145,6 @@ hiddenimports = [
     'src.ai.mcp_guidance',
     'src.utils.exit_hooks',
     'src.utils.proc_kill',
-    'websocket',
     # data and config
     'yaml',
     'pydantic',

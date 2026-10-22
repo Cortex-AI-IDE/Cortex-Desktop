@@ -13,19 +13,6 @@ from src.utils.logger import get_logger
 
 log = get_logger("project_context")
 
-# Files to read for framework/project type detection
-KEY_CONFIG_FILES = [
-    "package.json",       "pyproject.toml",     "setup.py",
-    "setup.cfg",          "requirements.txt",    "Cargo.toml",
-    "go.mod",             "pubspec.yaml",         "build.gradle",
-    "pom.xml",            "composer.json",        "Gemfile",
-    "mix.exs",            "*.csproj",             "Makefile",
-    "Dockerfile",         "docker-compose.yml",   ".env.example",
-    "tsconfig.json",      "vite.config.ts",       "vite.config.js",
-    "next.config.js",     "nuxt.config.ts",       "angular.json",
-    "README.md",          "README.rst",           "CONTRIBUTING.md",
-]
-
 # Directories to completely skip during scan
 SKIP_DIRS = {
     'node_modules', '.venv', 'venv', 'env', '__pycache__', '.git',

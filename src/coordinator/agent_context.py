@@ -16,16 +16,6 @@ DEFAULT_WORKER_TOOLS = [
     "GitCommit",
 ]
 
-# Internal tools that coordinators use but workers don't need
-INTERNAL_COORDINATOR_TOOLS = {
-    "SendMessage",
-    "TaskStop",
-    "TeamCreate",
-    "TeamDelete",
-    "SyntheticOutput",
-}
-
-
 def get_worker_tool_context(
     mcp_servers: List[Dict[str, str]] = None,
     simple_mode: bool = False

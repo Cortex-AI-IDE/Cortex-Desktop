@@ -581,6 +581,9 @@ class Settings:
     @theme.setter
     def theme(self, value: str):
         self._data["theme"] = value
+        # Without this, _merged_with_disk() copies the old value back from
+        # the file and the choice reverts at the next start.
+        self._touched.add(("theme",))
         self._save()
 
     def all(self) -> dict:

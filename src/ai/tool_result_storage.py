@@ -27,15 +27,9 @@ MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 100_000
 # Preview size shown to LLM when result is persisted
 PREVIEW_SIZE_CHARS = 2_000
 
-# Bytes-per-token rough estimate
-BYTES_PER_TOKEN = 4
-
 # XML-style tags for persisted output
 PERSISTED_OUTPUT_TAG = "<persisted-output>"
 PERSISTED_OUTPUT_CLOSING_TAG = "</persisted-output>"
-
-# Message used when old tool results are cleared by micro-compact
-TOOL_RESULT_CLEARED_MESSAGE = "[Old tool result content cleared]"
 
 # Subdirectory name for persisted tool results
 TOOL_RESULTS_SUBDIR = "tool-results"

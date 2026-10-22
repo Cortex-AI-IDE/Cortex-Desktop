@@ -194,12 +194,6 @@ hiddenimports = [
     # Store build would keep its self-updater switched on.
     'src.version',
     'src._build_info',
-    # src/commands.py is a TOP-LEVEL src module, not a member of a src.*
-    # package, so collect_submodules('src.core'/'src.ui'/...) never walks it.
-    # skill_tool.py imports it here and inside functions, and that first import
-    # sits in a try/except that only logs, so without this entry the frozen
-    # build silently reports 0 commands / 0 skills.
-    'src.commands',
     # ── PyQt6 ──
     'PyQt6',
     'PyQt6.QtWidgets',
@@ -327,14 +321,6 @@ hiddenimports = [
     'src.ui.native_menu',
     # Lazy-imported by the mic button in chat_panel
     'src.core.voice_input',
-    # Live transcription. websocket is imported INSIDE a function in
-    # voice_stream, which PyInstaller's static analysis misses, so the
-    # frozen build would raise ImportError the first time the mic was
-    # used while dev worked fine.
-    'src.core.voice_stream',
-    'websocket',
-    'websocket._app',
-    'websocket._core',
     'PyQt6.QtMultimedia',
     # Voice level check in chat_panel (`import wave as _wave, audioop as
     # _audioop`). audioop was removed from the stdlib in Python 3.13

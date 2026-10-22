@@ -33,7 +33,6 @@ PROGID_PREFIX = "Cortex"
 CAPABILITIES_KEY = r"Software\CortexAIIDE\Capabilities"
 CONTEXT_MENU_KEY = r"Software\Classes\*\shell\CortexIDE"
 CONTEXT_MENU_LABEL = "Open with Cortex IDE"
-LINUX_DESKTOP_ID = "cortex-ide.desktop"
 
 # Group key -> the type name Windows shows ("Type" column) and the MSIX
 # association's display name.

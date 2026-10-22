@@ -25,9 +25,6 @@ log = logging.getLogger("tool_executor")
 # Tools that can be safely run in parallel (no side effects)
 _READ_ONLY_TOOLS: Set[str] = {"Read", "Glob", "Grep", "LS"}
 
-# Maximum consecutive turns with the same read-only tool before nudging
-_CONSECUTIVE_READONLY_LIMIT = 2  # Nudge after 2 same-tool calls, stop Grep/Grep/Grep loops
-
 # Tool name → activity name mapping for UI cards
 _TOOL_TO_ACTIVITY: Dict[str, str] = {
     "Read": "read_file",

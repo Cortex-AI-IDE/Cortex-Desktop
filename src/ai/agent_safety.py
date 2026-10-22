@@ -25,7 +25,6 @@ from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 # Constants
 # ============================================================
 
-MAX_TOOL_ITERATIONS = 0  # P2: No limit, agent uses unlimited tools (advisory reminders every 50 calls)
 DOOM_LOOP_FINGERPRINT_SIZE = 20   # P1: Last N tool calls to fingerprint
 DOOM_LOOP_REPEAT_LIMIT = 3        # P1: Same fingerprint → warning
 DOOM_LOOP_FORCE_EXIT = 5          # P1: Same fingerprint → forced stop
@@ -71,12 +70,6 @@ WRITE_TOOL_NAMES: Set[str] = {
 # Read tool names that register files as "read"
 READ_TOOL_NAMES: Set[str] = {
     "Read", "read_file", "readFile",
-}
-
-# Search tool names that don't require read-before-edit
-SEARCH_TOOL_NAMES: Set[str] = {
-    "Grep", "Glob", "LS", "SemanticSearch", "WebSearch", "WebFetch",
-    "grep", "glob", "list_directory",
 }
 
 # ============================================================

@@ -103,7 +103,6 @@ _PY_CLASS     = re.compile(r'^(\s*)class\s+(\w+)')
 _PY_DEF       = re.compile(r'^(\s*)(async\s+)?def\s+(\w+)\s*\(')
 _PY_DECORATOR = re.compile(r'^(\s*)@\w+')
 _PY_ASSIGN    = re.compile(r'^([A-Z_][A-Z_0-9]*)\s*=')  # Top-level CONSTANTS
-_PY_DOCSTRING = re.compile(r'^\s*"""')
 
 
 def _skeleton_python(lines):
