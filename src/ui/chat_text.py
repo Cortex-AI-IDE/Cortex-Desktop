@@ -345,13 +345,73 @@ def clean_markdown_urls(text: str) -> str:
 # A markdown list item at any indent: "- x", "* x", "+ x", "1. x", "2) x".
 _LIST_ITEM_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\S')
 
+# ── Glued fence openers: "```mermaidflowchart TB ..." ─────────────────────
+# DeepSeek v4 emits the language and the first statement on ONE line, with no
+# newline between them (verified from the chunk stream in cortex.log). The
+# streaming stripper copes (_RE_MERMAID_OPEN makes the newline optional), but
+# turn-end segmentation requires a real newline, so the diagram card shown
+# while streaming was thrown away at turn end and the raw fence text leaked
+# into prose (where "-->|Yes|" even got parsed as a fake table).
+# Longest-prefix match against a known language set, so "csharp" is not split
+# as "c" + "sharp" and a clean "```python" is left completely untouched.
+_FENCE_LANGS = frozenset({
+    "mermaid", "graph", "flowchart", "sequencediagram", "classdiagram",
+    "statediagram", "erdiagram", "gantt", "pie", "mindmap", "timeline",
+    "journey", "gitgraph", "xychart", "block", "architecture",
+    "python", "py", "python3", "javascript", "js", "jsx", "typescript", "ts",
+    "tsx", "json", "jsonc", "yaml", "yml", "toml", "ini", "env", "dotenv",
+    "bash", "sh", "shell", "zsh", "fish", "powershell", "ps1", "bat", "cmd",
+    "sql", "html", "htm", "xml", "css", "scss", "sass", "less", "svg",
+    "java", "kotlin", "kts", "scala", "groovy", "gradle", "c", "h", "cpp",
+    "c++", "cc", "hpp", "csharp", "cs", "fsharp", "fs", "go", "golang",
+    "rust", "rs", "php", "ruby", "rb", "swift", "objc", "objectivec",
+    "dart", "lua", "perl", "r", "julia", "matlab", "vim", "elixir", "ex",
+    "erlang", "haskell", "clojure", "zig", "nim", "solidity", "asm",
+    "markdown", "md", "mdx", "text", "txt", "plaintext", "log", "csv", "tsv",
+    "diff", "patch", "dockerfile", "docker", "makefile", "make", "cmake",
+    "nginx", "apache", "graphql", "gql", "proto", "protobuf", "regex", "re",
+    "http", "promql", "terraform", "hcl", "vue", "svelte", "astro",
+    "prisma", "cypher", "mongo", "redis", "crontab", "systemd", "tcl",
+})
+
+# Anchored at line start, so an inline "```lang" inside a sentence is never
+# touched. Bounded quantifier: a fence opener cannot be thousands of chars.
+_GLUED_FENCE_RE = re.compile(r'^([ \t]*)```([A-Za-z0-9_#+.-]{1,64})(.*)$',
+                             re.MULTILINE)
+
+
+def split_glued_fence_languages(text: str) -> str:
+    """Insert the missing newline in a fence opener glued to its code.
+
+    "```mermaidflowchart TB ..." becomes "```mermaid\\nflowchart TB ...".
+    Only fires when the leading token starts with a KNOWN language name and
+    carries extra characters; a clean opener, inline backticks and prose are
+    returned unchanged. Idempotent: a repaired fence no longer matches.
+    """
+    if not text or '```' not in text:
+        return text
+
+    def _split(m: re.Match) -> str:
+        indent, token, rest = m.group(1), m.group(2), m.group(3)
+        low = token.lower()
+        # Longest known-language prefix wins; n == len(token) means clean.
+        for n in range(len(low), 0, -1):
+            if low[:n] in _FENCE_LANGS:
+                if n == len(token):
+                    return m.group(0)
+                return f"{indent}```{token[:n]}\n{token[n:]}{rest}"
+        return m.group(0)
+
+    return _GLUED_FENCE_RE.sub(_split, text)
+
 
 def auto_fix_broken_code_fences(text: str) -> str:
     """Repair malformed markdown code fences."""
     if not text:
         return text
 
-    fixed = text
+    # Glued opener first: every rule below expects a well-formed opener.
+    fixed = split_glued_fence_languages(text)
     trimmed = fixed.strip()
 
     # Convert literal <pre><code>...</code></pre> HTML to fenced code blocks.
@@ -701,6 +761,10 @@ def sanitize_prose_markdown(text: str) -> str:
     """
     if not text:
         return text
+    # A glued opener ("```mermaidflowchart TB") must be repaired before the
+    # fence balancer below, which counts openers and would otherwise pair a
+    # glued one with a later closer and mangle the tail.
+    text = split_glued_fence_languages(text)
     # Undo the scar the old fence rules left on an INLINE mention: "` ``` `"
     # was split into "`", "```", "`" on three lines (auto_fix_broken_code_
     # fences before 2026-10-21). A line holding only ``` between a line that
