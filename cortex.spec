@@ -54,6 +54,63 @@ def collect_package_modules(package):
                 names.add(prefix if stem == '__init__' else f'{prefix}.{stem}')
     return sorted(names)
 
+
+# Submodules that must never be collected.
+# mcp.cli is the MCP *command-line* app. Cortex only uses the SDK surface
+# (services/mcp_manager.py imports mcp, mcp.types, mcp.client.stdio,
+# mcp.client.sse, mcp.client.streamable_http), so nothing imports mcp.cli.
+# It also has to be excluded rather than merely ignored: mcp/cli/cli.py calls
+# sys.exit(1) when its optional `typer` dependency is missing, and SystemExit
+# is a BaseException. PyInstaller's on_error handling only guards
+# `except Exception`, so the SystemExit escapes, kills the isolated child
+# process, and aborts the whole build with
+#   RuntimeError: Child process call to _collect_submodules() failed
+_EXCLUDED_SUBMODULES = ('mcp.cli',)
+
+# Packages whose import is unsafe, so go straight to the filesystem walk.
+# `mcp` is here because PyInstaller imports every subpackage to enumerate it and
+# mcp.cli calls sys.exit(1) when its optional `typer` dependency is absent.
+# There is no way to filter that out before the import happens, so the only way
+# to avoid the failed child process (and the alarming traceback it prints) is to
+# never run the import-based collector for this package. The walk is also more
+# complete: 124 names on the filesystem versus 121 that import cleanly.
+_FILESYSTEM_WALK_PACKAGES = ('mcp',)
+
+
+def collect_submodules_safe(package, on_error='warn once'):
+    """collect_submodules() that cannot kill the build.
+
+    Collection runs inside PyInstaller's isolated child process, which IMPORTS
+    every subpackage to enumerate it. A dependency that calls sys.exit() at
+    import time therefore terminates that child, and the parent turns it into a
+    RuntimeError. Catch that here and fall back to the filesystem walk, which
+    never imports anything, so a missing optional extra degrades to a smaller
+    bundle instead of a failed build.
+
+    Packages in _FILESYSTEM_WALK_PACKAGES skip the attempt entirely, because a
+    caught failure still prints the child's traceback into the build log and
+    reads like a build error.
+
+    This is the same failure class the docstring on collect_package_modules()
+    describes, from the opposite direction: there the import system was blind
+    to namespace packages, here a package actively poisons the import.
+    """
+    if package in _FILESYSTEM_WALK_PACKAGES:
+        names = collect_package_modules(package)
+    else:
+        try:
+            names = collect_submodules(package, on_error=on_error)
+        except Exception as exc:
+            print(f"WARNING: collect_submodules('{package}') failed: {exc}")
+            print(f"         falling back to filesystem walk")
+            names = collect_package_modules(package)
+    return [
+        name for name in names
+        if not any(name == skip or name.startswith(skip + '.')
+                   for skip in _EXCLUDED_SUBMODULES)
+    ]
+
+
 # Data files to bundle.
 # NOTE: never bundle .env or .env.example. Installed builds do not read .env
 # (see main.py). API keys live in Windows Credential Manager via Settings.
@@ -337,13 +394,13 @@ hiddenimports = [
 # Bluetooth, Sensors, Help...) and ~70 MB of their DLLs and QML for the 9
 # Cortex imports. The PyQt6 modules listed above, plus whatever they import,
 # are all the app needs; PyInstaller's Qt hooks bring their DLLs and plugins.
-hiddenimports += collect_submodules('asyncio')
-hiddenimports += collect_submodules('multiprocessing')
-hiddenimports += collect_submodules('pydantic')
-hiddenimports += collect_submodules('cryptography')  # PyInstaller often misses crypto submodules
-hiddenimports += collect_submodules('openai')  # openai uses dynamic imports
-hiddenimports += collect_submodules('mcp')    # Model Context Protocol SDK (2.8.0 MCP servers)
-hiddenimports += collect_submodules('anyio')  # mcp's async runtime, backend loaded dynamically
+hiddenimports += collect_submodules_safe('asyncio')
+hiddenimports += collect_submodules_safe('multiprocessing')
+hiddenimports += collect_submodules_safe('pydantic')
+hiddenimports += collect_submodules_safe('cryptography')  # PyInstaller often misses crypto submodules
+hiddenimports += collect_submodules_safe('openai')  # openai uses dynamic imports
+hiddenimports += collect_submodules_safe('mcp')    # Model Context Protocol SDK (2.8.0 MCP servers)
+hiddenimports += collect_submodules_safe('anyio')  # mcp's async runtime, backend loaded dynamically
 hiddenimports += ['pydantic_settings', 'httpx_sse', 'jsonschema']  # mcp deps loaded dynamically
 
 # ════════════════════════════════════════════════════════════════
