@@ -93,15 +93,56 @@ notice is retained.
 
 ## 5. Bundled agent skills
 
-Cortex ships 248 agent skills under `src/agent/src/skills/bundled/`, collected
-from several upstream projects under MIT and Apache-2.0 terms, plus original
-Cortex work.
+Cortex ships 249 agent skills under `src/agent/src/skills/bundled/`. They come
+from several upstream projects under different terms, so the licence is recorded
+per skill rather than assumed for the folder as a whole.
+
+35 of the 249 carry their own `LICENSE.txt`:
+
+| Upstream | Licence | Skills |
+|---|---|---|
+| Anthropic | Apache-2.0 | algorithmic-art, brand-guidelines, canvas-design, claude-api, doc-coauthoring, frontend-design, internal-comms, mcp-builder, skill-creator, slack-gif-creator, theme-factory, web-artifacts-builder, webapp-testing (13) |
+| AgriciDaniel | MIT | seo, seo-audit, seo-backlinks, seo-competitor-pages, seo-content, seo-dataforseo, seo-firecrawl, seo-geo, seo-google, seo-hreflang, seo-image-gen, seo-images, seo-local, seo-maps, seo-page, seo-plan, seo-programmatic, seo-schema, seo-sitemap, seo-technical (20) |
+| Cloudflare | MIT | security-audit (1) |
+| puneetindersingh | MIT | seo-content-brief (1) |
+
+The other 214 skills carry no licence file of their own and are distributed under
+this repository's root Apache-2.0 licence (see `LICENSE`) unless a file inside
+them states otherwise. Any skill that is actually upstream work but is missing
+from the table above is a defect in this file, not a change of terms; report it
+through the omission process below.
+
+Apache-2.0 requires a copy of the licence, and any upstream `NOTICE`, to travel
+with redistributed copies (Apache-2.0 §4(a) and §4(d)). MIT requires the
+copyright and permission notice to be retained (MIT §1). The per-skill
+`LICENSE.txt` files are what satisfy those obligations for the 35 listed skills.
 
 ## 6. Provider APIs
 
 Cortex connects to third-party model providers using the user's own credentials.
 No provider library or model weights are redistributed here. Each provider's own
 terms govern that use.
+
+## 7. Cortex engine (`src/agent/src`)
+
+Sections 1 to 6 cover components Cortex redistributes from identifiable upstream
+projects. They do not cover the agent engine, so this section exists to state its
+status rather than to claim it is clear.
+
+`src/agent/src` is offered under the root Apache-2.0 licence as Cortex's own
+source. Two facts belong next to that claim:
+
+- No engine module carries a per-file copyright or SPDX header.
+- This repository holds no record of the engine's upstream provenance.
+
+A provenance record is a prerequisite for treating the engine as original work,
+and therefore for any release that relies on Cortex owning it. Stripping vendor
+identifiers from the code does not change this. Copyright protects expression,
+not names, and the engine's module layout, prompt text and control flow are
+unchanged by that work.
+
+If the engine contains code from another project, that project's licence applies
+to its portions and prevails over the root licence for those portions.
 
 ---
 
