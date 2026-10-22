@@ -17,7 +17,7 @@ from copy import deepcopy
 # ---------------------------------------------------------------------------
 
 try:
-    from bun.bundle import feature
+    from ...utils.feature_flags import feature
 except ImportError:
     def feature(name: str) -> bool:
         """Stub feature flag - always returns False"""
@@ -35,12 +35,9 @@ if feature('KAIROS'):
 # Defensive imports
 # ---------------------------------------------------------------------------
 
-try:
-    from anthropic import APIUserAbortError
-except ImportError:
-    class APIUserAbortError(Exception):
-        """Stub for Anthropic API user abort error"""
-        pass
+class APIUserAbortError(Exception):
+    """Raised when a provider aborts a request mid-stream."""
+    pass
 
 try:
     from bootstrap.state import markPostCompaction, getInvokedSkillsForAgent
@@ -888,8 +885,8 @@ async def createPostCompactFileAttachments(
                         'maxTokens': POST_COMPACT_MAX_TOKENS_PER_FILE,
                     },
                 },
-                'tengu_post_compact_file_restore_success',
-                'tengu_post_compact_file_restore_error',
+                'cortex_post_compact_file_restore_success',
+                'cortex_post_compact_file_restore_error',
                 'compact',
             )
             return createAttachmentMessage(attachment) if attachment else None
@@ -1089,7 +1086,7 @@ async def streamCompactSummary(
     TS lines 1136-1414 (~280 lines of logic with caching, streaming, retries)
     """
     promptCacheSharingEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-        'tengu_compact_cache_prefix',
+        'cortex_compact_cache_prefix',
         True,
     )
     
@@ -1144,7 +1141,7 @@ async def streamCompactSummary(
                 if (assistantMsg and assistantText 
                     and not assistantMsg.get('isApiErrorMessage')):
                     if not assistantText.startswith(PROMPT_TOO_LONG_ERROR_MESSAGE):
-                        logEvent('tengu_compact_cache_sharing_success', {
+                        logEvent('cortex_compact_cache_sharing_success', {
                             'preCompactTokenCount': preCompactTokenCount,
                             'outputTokens': result.get('totalUsage', {}).get('output_tokens', 0),
                             'cacheReadInputTokens': result.get('totalUsage', {}).get('cache_read_input_tokens', 0),
@@ -1157,20 +1154,20 @@ async def streamCompactSummary(
                     f'Compact cache sharing: no text in response, falling back. Response: {jsonStringify(assistantMsg)}',
                     level='warn'
                 )
-                logEvent('tengu_compact_cache_sharing_fallback', {
+                logEvent('cortex_compact_cache_sharing_fallback', {
                     'reason': 'no_text_response',
                     'preCompactTokenCount': preCompactTokenCount,
                 })
             except Exception as error:
                 logError(error)
-                logEvent('tengu_compact_cache_sharing_fallback', {
+                logEvent('cortex_compact_cache_sharing_fallback', {
                     'reason': 'error',
                     'preCompactTokenCount': preCompactTokenCount,
                 })
         
         # Regular streaming path (fallback)
         retryEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-            'tengu_compact_streaming_retry',
+            'cortex_compact_streaming_retry',
             False,
         )
         maxAttempts = MAX_COMPACT_STREAMING_RETRIES if retryEnabled else 1
@@ -1259,7 +1256,7 @@ async def streamCompactSummary(
                 
                 # Retry if no response
                 if attempt < maxAttempts:
-                    logEvent('tengu_compact_streaming_retry', {
+                    logEvent('cortex_compact_streaming_retry', {
                         'attempt': attempt,
                         'preCompactTokenCount': preCompactTokenCount,
                         'hasStartedStreaming': hasStartedStreaming,
@@ -1277,7 +1274,7 @@ async def streamCompactSummary(
                         f'Compact streaming failed after {attempt} attempts',
                         level='error'
                     )
-                    logEvent('tengu_compact_failed', {
+                    logEvent('cortex_compact_failed', {
                         'reason': 'no_streaming_response',
                         'preCompactTokenCount': preCompactTokenCount,
                         'hasStartedStreaming': hasStartedStreaming,
@@ -1354,7 +1351,7 @@ async def compactConversation(
         
         # Check cache sharing feature
         promptCacheSharingEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-            'tengu_compact_cache_prefix',
+            'cortex_compact_cache_prefix',
             True,
         )
         
@@ -1389,7 +1386,7 @@ async def compactConversation(
                 truncated = truncateHeadForPTLRetry(messagesToSummarize, summaryResponse)
             
             if not truncated:
-                logEvent('tengu_compact_failed', {
+                logEvent('cortex_compact_failed', {
                     'reason': 'prompt_too_long',
                     'preCompactTokenCount': preCompactTokenCount,
                     'promptCacheSharingEnabled': promptCacheSharingEnabled,
@@ -1397,7 +1394,7 @@ async def compactConversation(
                 })
                 raise Exception(ERROR_MESSAGE_PROMPT_TOO_LONG)
             
-            logEvent('tengu_compact_ptl_retry', {
+            logEvent('cortex_compact_ptl_retry', {
                 'attempt': ptlAttempts,
                 'droppedMessages': len(messagesToSummarize) - len(truncated),
                 'remainingMessages': len(truncated),
@@ -1415,14 +1412,14 @@ async def compactConversation(
                 f'Compact failed: no summary text in response. Response: {jsonStringify(summaryResponse)}',
                 level='error'
             )
-            logEvent('tengu_compact_failed', {
+            logEvent('cortex_compact_failed', {
                 'reason': 'no_summary',
                 'preCompactTokenCount': preCompactTokenCount,
                 'promptCacheSharingEnabled': promptCacheSharingEnabled,
             })
             raise Exception('Failed to generate conversation summary - response did not contain valid text content')
         elif startsWithApiErrorPrefix(summary):
-            logEvent('tengu_compact_failed', {
+            logEvent('cortex_compact_failed', {
                 'reason': 'api_error',
                 'preCompactTokenCount': preCompactTokenCount,
                 'promptCacheSharingEnabled': promptCacheSharingEnabled,
@@ -1551,7 +1548,7 @@ async def compactConversation(
         except:
             telemetry_context_stats = {}
         
-        logEvent('tengu_compact', {
+        logEvent('cortex_compact', {
             'preCompactTokenCount': preCompactTokenCount,
             'postCompactTokenCount': compactionCallTotalTokens,
             'truePostCompactTokenCount': truePostCompactTokenCount,
@@ -1762,14 +1759,14 @@ async def partialCompactConversation(
                 truncated = truncateHeadForPTLRetry(apiMessages, summaryResponse)
             
             if not truncated:
-                logEvent('tengu_partial_compact_failed', {
+                logEvent('cortex_partial_compact_failed', {
                     'reason': 'prompt_too_long',
                     **failureMetadata,
                     'ptlAttempts': ptlAttempts,
                 })
                 raise Exception(ERROR_MESSAGE_PROMPT_TOO_LONG)
             
-            logEvent('tengu_compact_ptl_retry', {
+            logEvent('cortex_compact_ptl_retry', {
                 'attempt': ptlAttempts,
                 'droppedMessages': len(apiMessages) - len(truncated),
                 'remainingMessages': len(truncated),
@@ -1784,13 +1781,13 @@ async def partialCompactConversation(
         
         # Validate summary
         if not summary:
-            logEvent('tengu_partial_compact_failed', {
+            logEvent('cortex_partial_compact_failed', {
                 'reason': 'no_summary',
                 **failureMetadata,
             })
             raise Exception('Failed to generate conversation summary - response did not contain valid text content')
         elif startsWithApiErrorPrefix(summary):
-            logEvent('tengu_partial_compact_failed', {
+            logEvent('cortex_partial_compact_failed', {
                 'reason': 'api_error',
                 **failureMetadata,
             })
@@ -1877,7 +1874,7 @@ async def partialCompactConversation(
         postCompactTokenCount = tokenCountFromLastAPIResponse([summaryResponse])
         compactionUsage = getTokenUsage(summaryResponse)
         
-        logEvent('tengu_partial_compact', {
+        logEvent('cortex_partial_compact', {
             'preCompactTokenCount': preCompactTokenCount,
             'postCompactTokenCount': postCompactTokenCount,
             'messagesKept': len(messagesToKeep),

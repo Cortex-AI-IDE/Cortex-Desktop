@@ -3,7 +3,7 @@
     THIS IS A TEMPLATE THAT SHOULD BE USED EVERY TIME AND MODIFIED.
     WHAT TO KEEP:
     ✓ Overall structure (header, sidebar, main content)
-    ✓ Anthropic branding (colors, fonts, layout)
+    ✓ House branding (colors, fonts, layout)
     ✓ Seed navigation section (always include this)
     ✓ Self-contained artifact (everything inline)
 
@@ -25,15 +25,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        /* Anthropic Brand Colors */
+        /* Brand colours */
         :root {
-            --anthropic-dark: #141413;
-            --anthropic-light: #faf9f5;
-            --anthropic-mid-gray: #b0aea5;
-            --anthropic-light-gray: #e8e6dc;
-            --anthropic-orange: #d97757;
-            --anthropic-blue: #6a9bcc;
-            --anthropic-green: #788c5d;
+            --brand-ink: #1e1e1e;
+            --brand-paper: #fafafa;
+            --brand-muted: #a0a0a0;
+            --brand-surface: #e8e8e8;
+            --brand-accent: #0078d4;
+            --brand-blue: #3794ff;
+            --brand-green: #89d185;
         }
 
         * {
@@ -44,9 +44,9 @@
 
         body {
             font-family: 'Poppins', sans-serif;
-            background: linear-gradient(135deg, var(--anthropic-light) 0%, #f5f3ee 100%);
+            background: linear-gradient(135deg, var(--brand-paper) 0%, #f0f0f0 100%);
             min-height: 100vh;
-            color: var(--anthropic-dark);
+            color: var(--brand-ink);
         }
 
         .container {
@@ -73,12 +73,12 @@
             font-family: 'Lora', serif;
             font-size: 24px;
             font-weight: 500;
-            color: var(--anthropic-dark);
+            color: var(--brand-ink);
             margin-bottom: 8px;
         }
 
         .sidebar .subtitle {
-            color: var(--anthropic-mid-gray);
+            color: var(--brand-muted);
             font-size: 14px;
             margin-bottom: 32px;
             line-height: 1.4;
@@ -92,7 +92,7 @@
         .control-section h3 {
             font-size: 16px;
             font-weight: 600;
-            color: var(--anthropic-dark);
+            color: var(--brand-ink);
             margin-bottom: 16px;
             display: flex;
             align-items: center;
@@ -101,27 +101,27 @@
 
         .control-section h3::before {
             content: '•';
-            color: var(--anthropic-orange);
+            color: var(--brand-accent);
             font-weight: bold;
         }
 
         /* Seed Controls */
         .seed-input {
             width: 100%;
-            background: var(--anthropic-light);
+            background: var(--brand-paper);
             padding: 12px;
             border-radius: 8px;
             font-family: 'Courier New', monospace;
             font-size: 14px;
             margin-bottom: 12px;
-            border: 1px solid var(--anthropic-light-gray);
+            border: 1px solid var(--brand-surface);
             text-align: center;
         }
 
         .seed-input:focus {
             outline: none;
-            border-color: var(--anthropic-orange);
-            box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.1);
+            border-color: var(--brand-accent);
+            box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.12);
             background: white;
         }
 
@@ -145,7 +145,7 @@
             display: block;
             font-size: 14px;
             font-weight: 500;
-            color: var(--anthropic-dark);
+            color: var(--brand-ink);
             margin-bottom: 8px;
         }
 
@@ -158,7 +158,7 @@
         .slider-container input[type="range"] {
             flex: 1;
             height: 4px;
-            background: var(--anthropic-light-gray);
+            background: var(--brand-surface);
             border-radius: 2px;
             outline: none;
             -webkit-appearance: none;
@@ -168,7 +168,7 @@
             -webkit-appearance: none;
             width: 16px;
             height: 16px;
-            background: var(--anthropic-orange);
+            background: var(--brand-accent);
             border-radius: 50%;
             cursor: pointer;
             transition: all 0.2s ease;
@@ -176,13 +176,13 @@
 
         .slider-container input[type="range"]::-webkit-slider-thumb:hover {
             transform: scale(1.1);
-            background: #c86641;
+            background: #0069bb;
         }
 
         .slider-container input[type="range"]::-moz-range-thumb {
             width: 16px;
             height: 16px;
-            background: var(--anthropic-orange);
+            background: var(--brand-accent);
             border-radius: 50%;
             border: none;
             cursor: pointer;
@@ -192,7 +192,7 @@
         .value-display {
             font-family: 'Courier New', monospace;
             font-size: 12px;
-            color: var(--anthropic-mid-gray);
+            color: var(--brand-muted);
             min-width: 60px;
             text-align: right;
         }
@@ -205,7 +205,7 @@
         .color-group label {
             display: block;
             font-size: 12px;
-            color: var(--anthropic-mid-gray);
+            color: var(--brand-muted);
             margin-bottom: 4px;
         }
 
@@ -228,12 +228,12 @@
         .color-value {
             font-family: 'Courier New', monospace;
             font-size: 12px;
-            color: var(--anthropic-mid-gray);
+            color: var(--brand-muted);
         }
 
         /* Buttons */
         .button {
-            background: var(--anthropic-orange);
+            background: var(--brand-accent);
             color: white;
             border: none;
             padding: 10px 16px;
@@ -246,7 +246,7 @@
         }
 
         .button:hover {
-            background: #c86641;
+            background: #0069bb;
             transform: translateY(-1px);
         }
 
@@ -255,19 +255,19 @@
         }
 
         .button.secondary {
-            background: var(--anthropic-blue);
+            background: var(--brand-blue);
         }
 
         .button.secondary:hover {
-            background: #5a8bb8;
+            background: #2f7fd6;
         }
 
         .button.tertiary {
-            background: var(--anthropic-green);
+            background: var(--brand-green);
         }
 
         .button.tertiary:hover {
-            background: #6b7b52;
+            background: #6ea05f;
         }
 
         .button-row {
@@ -309,7 +309,7 @@
             align-items: center;
             justify-content: center;
             font-size: 18px;
-            color: var(--anthropic-mid-gray);
+            color: var(--brand-muted);
         }
 
         /* Responsive - Stack on mobile */
@@ -493,7 +493,7 @@
             generateFlowField();
 
             // Clear background
-            background(250, 249, 245); // Anthropic light background
+            background(250, 250, 250); // brand paper
         }
 
         function generateFlowField() {

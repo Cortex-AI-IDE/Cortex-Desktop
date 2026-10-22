@@ -227,7 +227,7 @@ class DiffInIDEService:
         
         try:
             # Log analytics event
-            self._log_event('tengu_ext_will_show_diff', {})
+            self._log_event('cortex_ext_will_show_diff', {})
             
             # Show diff in IDE and wait for response
             result = await self._show_diff_in_ide()
@@ -236,7 +236,7 @@ class DiffInIDEService:
             if self._is_unmounted:
                 return
             
-            self._log_event('tengu_ext_diff_accepted', {})
+            self._log_event('cortex_ext_diff_accepted', {})
             
             # Compute edits from user's modifications
             new_edits = self._compute_edits_from_contents(
@@ -246,7 +246,7 @@ class DiffInIDEService:
             
             if len(new_edits) == 0:
                 # No changes -- edit was rejected (e.g., reverted)
-                self._log_event('tengu_ext_diff_rejected', {})
+                self._log_event('cortex_ext_diff_rejected', {})
                 
                 # Close the tab in the IDE
                 ide_client = get_connected_ide_client(

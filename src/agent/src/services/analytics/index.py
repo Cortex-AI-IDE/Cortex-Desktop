@@ -82,7 +82,7 @@ def attachAnalyticsSink(new_sink: Any) -> None:
         
         # Log queue size for debugging
         import os
-        if os.environ.get('USER_TYPE') == 'ant':
+        if os.environ.get('CORTEX_USER_TYPE') == 'internal':
             _sink.logEvent('analytics_sink_attached', {
                 'queued_event_count': len(queued_events),
             })

@@ -78,7 +78,7 @@ except ImportError:
 # CURLY QUOTE CONSTANTS
 # ============================================================
 
-# Claude can't output curly quotes, so we define them as constants here.
+# Models don't reliably emit curly quotes, so we define them as constants here.
 # We normalize curly quotes to straight quotes when applying edits.
 
 LEFT_SINGLE_CURLY_QUOTE = '‘'
@@ -676,9 +676,9 @@ def get_edits_for_patch(patch: List[StructuredPatchHunk]) -> List[FileEdit]:
 # DESANITIZATION
 # ============================================================
 
-# Contains replacements to de-sanitize strings from Claude
-# Since Claude can't see any of these strings (sanitized in the API)
-# It'll output the sanitized versions in the edit response
+# Contains replacements to de-sanitize strings from the model
+# Since models can't see any of these strings (sanitized in the API)
+# They'll output the sanitized versions in the edit response
 
 DESANITIZATIONS: Dict[str, str] = {
     '<fnr>': '<function_results>',

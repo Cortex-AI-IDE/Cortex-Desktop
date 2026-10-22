@@ -209,7 +209,7 @@ def count_lines_changed(patch: List[Hunk], content: Optional[str] = None) -> Non
                 additions += 1
             elif line.get('type') == 'delete':
                 deletions += 1
-    log_event('tengu_write_lines_changed', {
+    log_event('cortex_write_lines_changed', {
         'additions': additions,
         'deletions': deletions,
     })
@@ -736,7 +736,7 @@ class FileWriteTool:
         # Log when writing to CORTEX.md
         # --------------------------------------------------------------
         if full_file_path.endswith(os.sep + "CORTEX.md"):
-            log_event("tengu_write_cortexmd", {})
+            log_event("cortex_write_cortexmd", {})
         
         # --------------------------------------------------------------
         # Optional remote git diff (only when the feature flag is on)
@@ -744,7 +744,7 @@ class FileWriteTool:
         git_diff: Optional[GitDiff] = None
         if (
             is_env_truthy("CORTEX_CODE_REMOTE")
-            and get_feature_value_cached("tengu_quartz_lantern", False)
+            and get_feature_value_cached("cortex_quartz_lantern", False)
         ):
             loop = asyncio.get_running_loop()
             start_time = loop.time()
@@ -753,7 +753,7 @@ class FileWriteTool:
                 git_diff = diff
             elapsed_ms = int((loop.time() - start_time) * 1000)
             log_event(
-                "tengu_tool_use_diff_computed",
+                "cortex_tool_use_diff_computed",
                 {
                     "isWriteTool": True,
                     "durationMs": elapsed_ms,

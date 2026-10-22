@@ -223,7 +223,7 @@ class GlobalConfig(TypedDict, total=False):
     customApiKeyResponses: Dict[str, List[str]]
     primaryApiKey: str
     hasAcknowledgedCostThreshold: bool
-    hasSeenUndercoverAutoNotice: bool
+    hasSeenPrivacyModeNotice: bool
     hasSeenUltraplanTerms: bool
     hasResetAutoModeOptInForDefaultOffer: bool
     oauthAccount: AccountInfo
@@ -560,7 +560,7 @@ def saveConfigWithLock(
                 currentStats.st_mtime * 1000 != lastReadFileStats.get('mtime') or
                 currentStats.st_size != lastReadFileStats.get('size')
             ):
-                logEvent('tengu_config_stale_write', {
+                logEvent('cortex_config_stale_write', {
                     'read_mtime': lastReadFileStats.get('mtime'),
                     'write_mtime': currentStats.st_mtime * 1000,
                     'read_size': lastReadFileStats.get('size'),
@@ -575,7 +575,7 @@ def saveConfigWithLock(
     currentConfig = getConfig(file, createDefault)
     if file == getGlobalCortexFile() and wouldLoseAuthState(currentConfig):
         logForDebugging('saveConfigWithLock: auth-loss guard triggered', level='error')
-        logEvent('tengu_config_auth_loss_prevented', {})
+        logEvent('cortex_config_auth_loss_prevented', {})
         return False
     
     mergedConfig = mergeFn(currentConfig)
@@ -611,7 +611,7 @@ def saveConfigWithLock(
         logForDebugging(
             'Lock acquisition took longer than expected - another Cortex instance may be running'
         )
-        logEvent('tengu_config_lock_contention', {
+        logEvent('cortex_config_lock_contention', {
             'lock_time_ms': lockTime,
         })
     
@@ -710,7 +710,7 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                 except:
                     pass
                 
-                logEvent('tengu_config_parse_error', {
+                logEvent('cortex_config_parse_error', {
                     'has_backup': hasBackup,
                 })
             finally:
@@ -926,7 +926,7 @@ def reportConfigCacheStats() -> None:
     
     total = configCacheHits + configCacheMisses
     if total > 0:
-        logEvent('tengu_config_cache_stats', {
+        logEvent('cortex_config_cache_stats', {
             'cache_hits': configCacheHits,
             'cache_misses': configCacheMisses,
             'hit_rate': configCacheHits / total,

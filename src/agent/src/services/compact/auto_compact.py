@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 # ---------------------------------------------------------------------------
 
 try:
-    from bun.bundle import feature
+    from ...utils.feature_flags import feature
 except ImportError:
     def feature(name: str) -> bool:
         """Stub feature flag - always returns False"""
@@ -385,12 +385,12 @@ async def shouldAutoCompact(
     
     # Reactive-only mode: suppress proactive autocompact, let reactive compact
     # catch the API's prompt-too-long. feature() wrapper keeps the flag string
-    # out of external builds (REACTIVE_COMPACT is ant-only).
+    # unless the REACTIVE_COMPACT flag is enabled.
     # Note: returning false here also means autoCompactIfNeeded never reaches
     # trySessionMemoryCompaction in the query loop, the /compact call site
     # still tries session memory first. Revisit if reactive-only graduates.
     if feature('REACTIVE_COMPACT'):
-        if getFeatureValue_CACHED_MAY_BE_STALE('tengu_cobalt_raccoon', False):
+        if getFeatureValue_CACHED_MAY_BE_STALE('cortex_cobalt_raccoon', False):
             return False
     
     # Context-collapse mode: same suppression. Collapse IS the context
@@ -508,7 +508,7 @@ async def autoCompactIfNeeded(
         
         # Reset cache read baseline so the post-compact drop isn't flagged as a
         # break. compactConversation does this internally; SM-compact doesn't.
-        # BQ 2026-03-01: missing this made 20% of tengu_prompt_cache_break events
+        # BQ 2026-03-01: missing this made 20% of cortex_prompt_cache_break events
         # false positives (systemPromptChanged=true, timeSinceLastAssistantMsg=-1).
         if feature('PROMPT_CACHE_BREAK_DETECTION'):
             notifyCompaction(querySource or 'compact', getattr(toolUseContext, 'agentId', ''))

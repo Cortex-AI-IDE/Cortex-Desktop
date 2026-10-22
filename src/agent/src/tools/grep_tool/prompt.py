@@ -1,12 +1,9 @@
 # ------------------------------------------------------------
 # prompt.py
-# 
+#
 # GrepTool prompt template and description generator.
 # ------------------------------------------------------------
 
-from typing import Any
-
-# Import from your codebase - replace with actual imports
 try:
     from ..agent_tool.constants import AGENT_TOOL_NAME
 except ImportError:
@@ -34,40 +31,35 @@ GREP_TOOL_NAME = "Grep"
 def get_description() -> str:
     """
     Get the description for the GrepTool.
-    
+
     Returns:
         Complete description string for the grep tool
     """
-    return f"""A powerful search tool built on ripgrep
+    return f"""Searches file contents with ripgrep.
 
-Usage:
-- ALWAYS use {GREP_TOOL_NAME} for search tasks. NEVER invoke `grep` or `rg` as a {BASH_TOOL_NAME} command. The {GREP_TOOL_NAME} tool has been optimized for correct permissions and access.
-- Supports full regex syntax (e.g., "log.*Error", "function\\s+\\w+")
-- Filter files with glob parameter (e.g., "*.js", "**/*.tsx") or type parameter (e.g., "js", "py", "rust")
-- Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
-- PREFER "files_with_matches" first to find relevant files, then use targeted "content" mode with specific file path
-- Use {AGENT_TOOL_NAME} tool for open-ended searches requiring multiple rounds
-- Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\\{{\\}}` to find `interface{{}}` in Go code)
-- Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \\{{[\\s\\S]*?field`, use `multiline: true`
+How to call it:
+- Search with {GREP_TOOL_NAME}, not by shelling out to `grep` or `rg` through {BASH_TOOL_NAME}. This tool respects project permissions and ignores what the project ignores.
+- Full regex syntax works: `log.*Error`, `function\\s+\\w+`.
+- Narrow the search with glob (for example `*.js`, `**/*.tsx`) or with type (`js`, `py`, `rust`).
+- Output modes: `files_with_matches` lists paths only (the default), `content` shows matching lines, `count` shows per-file totals.
+- Start with `files_with_matches` to locate the area, then call again in `content` mode with a specific path.
+- Hand open-ended, multi-round hunts to {AGENT_TOOL_NAME} instead of looping here.
+- Patterns are ripgrep patterns, not grep patterns. Literal braces need escaping: `interface\\{{\\}}` finds `interface{{}}` in Go.
+- Matching is line by line unless you set `multiline: true`, which is what cross-line shapes like `struct \\{{[\\s\\S]*?field` need.
 
-🔥 THOROUGH SEARCH STRATEGY (MANDATORY):
-- BEFORE taking any action, you MUST run MULTIPLE searches with different patterns
-- Run AT LEAST 3-6 different searches to find ALL relevant code
-- Search for: function definitions, class definitions, imports, usage, error handling, tests
-- Example: If looking for "authentication", search for: "auth", "login", "session", "token", "credential"
-- After finding files with GrepTool, READ them ALL with ReadFileTool (minimum 3-5 files)
-- NEVER search only once and act - that's LAZY and leads to mistakes!
-- Spend 5-10 minutes searching thoroughly to save 30+ minutes fixing mistakes later
+Search breadth. Match it to the job, then stop:
+- Search more than once. One pattern is a guess, not a search.
+- Look for the definition, the call site, the import, the error path and the test. Those five answers rarely share a pattern.
+- Example: asked about authentication, try `auth`, then `login`, `session`, `token`, `credential`.
+- Once {GREP_TOOL_NAME} names the files, open them. Acting on a filename you never read is how a fix lands in the wrong function.
 
-📋 SEARCH DEPTH REQUIREMENTS:
-- Simple fix: Run 2-3 searches, read 2-3 files minimum
-- Feature addition: Run 4-6 searches, read 4-6 files minimum
-- Bug investigation: Run 5-8 searches, read 5-8 files minimum
-- Architecture change: Run 8-12 searches, read 8-12 files minimum
+Expected depth:
+- Small fix: 2 to 3 patterns, 2 to 3 files read.
+- New feature: 4 to 6 patterns, 4 to 6 files read.
+- Bug hunt: 5 to 8 patterns, 5 to 8 files read.
+- Refactor: 8 to 12 patterns, 8 to 12 files read.
 
-✅ GOOD PATTERN: Search → Find 15-30+ matches → Read 5-10 files → Understand → Act
-❌ BAD PATTERN: Search once → Find 3 matches → Read 1 file → Act (LAZY!)
-"""
+The shape that works: search, narrow to the real matches, read several files, understand, then change something. The shape that fails: one search, three hits, one file, act."""
 
 
 # ============================================================

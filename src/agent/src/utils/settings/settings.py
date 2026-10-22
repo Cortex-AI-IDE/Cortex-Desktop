@@ -909,7 +909,7 @@ def hasAutoModeOptIn() -> bool:
     mode opt-in dialog. projectSettings is intentionally excluded.
     """
     try:
-        from bun.bundle import feature
+        from ..feature_flags import feature
     except ImportError:
         def feature(name):
             return name == 'TRANSCRIPT_CLASSIFIER'
@@ -936,7 +936,7 @@ def getUseAutoModeDuringPlan() -> bool:
     Returns false if any trusted source explicitly sets false.
     """
     try:
-        from bun.bundle import feature
+        from ..feature_flags import feature
     except ImportError:
         def feature(name):
             return name == 'TRANSCRIPT_CLASSIFIER'
@@ -958,7 +958,7 @@ def getAutoModeConfig() -> Optional[Dict[str, Any]]:
     Only available when TRANSCRIPT_CLASSIFIER is active.
     """
     try:
-        from bun.bundle import feature
+        from ..feature_flags import feature
     except ImportError:
         def feature(name):
             return name == 'TRANSCRIPT_CLASSIFIER'
@@ -981,7 +981,7 @@ def getAutoModeConfig() -> Optional[Dict[str, Any]]:
                 allow.extend(autoMode['allow'])
             if autoMode.get('soft_deny'):
                 soft_deny.extend(autoMode['soft_deny'])
-            if os.environ.get('USER_TYPE') == 'ant':
+            if os.environ.get('CORTEX_USER_TYPE') == 'internal':
                 if autoMode.get('deny'):
                     soft_deny.extend(autoMode['deny'])
             if autoMode.get('environment'):

@@ -5,10 +5,10 @@ Controls which models can be used based on admin/team settings.
 Supports 3-tier matching:
   1. Family wildcards ("opus", "gpt4o", "gemini") — allows entire model families
   2. Version prefixes ("sonnet-4-0", "gpt-4o-2024") — allows specific versions
-  3. Exact matches ("claude-sonnet-4-20250514") — allows only exact model IDs
+  3. Exact matches ("cortex-sonnet-4-5") — allows only exact model IDs
 
 Multi-LLM support for all Cortex IDE providers:
-  - Anthropic (Claude): opus, sonnet, haiku
+  - Cortex: opus, sonnet, haiku
   - OpenAI: gpt4, gpt4o, o1, o3, codex
   - Google Gemini: gemini1, gemini2
   - DeepSeek: chat, code, r1
@@ -24,7 +24,7 @@ from typing import List, Optional, Set
 
 # Family-level aliases for multi-LLM providers
 MODEL_FAMILIES: Set[str] = {
-    # Anthropic
+    # Cortex
     'opus', 'sonnet', 'haiku',
     # OpenAI (multiple formats for matching)
     'gpt4', 'gpt-4', 'gpt4o', 'gpt-4o', 'o1', 'o3', 'codex',
@@ -55,7 +55,7 @@ def isModelFamilyAlias(model: str) -> bool:
 
     Example:
         isModelFamilyAlias('opus') → True
-        isModelFamilyAlias('claude-opus-4-6') → False
+        isModelFamilyAlias('cortex-opus-4-6') → False
     """
     return model.lower() in MODEL_FAMILIES
 
@@ -66,16 +66,16 @@ def modelBelongsToFamily(model: str, family: str) -> bool:
     contains the family identifier (with flexible formatting).
 
     Args:
-        model: Full model ID or alias (e.g. 'claude-opus-4-6-20250514')
+        model: Full model ID or alias (e.g. 'cortex-opus-4-6-20250514')
         family: Family identifier (e.g. 'opus', 'gpt4o')
 
     Returns:
         True if model belongs to the family
 
     Example:
-        modelBelongsToFamily('claude-opus-4-6', 'opus') → True
+        modelBelongsToFamily('cortex-opus-4-6', 'opus') → True
         modelBelongsToFamily('gpt-4o-mini', 'gpt4o') → True
-        modelBelongsToFamily('claude-sonnet-4-0', 'opus') → False
+        modelBelongsToFamily('cortex-sonnet-4-0', 'opus') → False
     """
     normalizedModel = model.lower()
     normalizedFamily = family.lower()
@@ -108,15 +108,15 @@ def prefixMatchesModel(modelName: str, prefix: str) -> bool:
     The prefix must match up to the end of the name or a "-" separator.
 
     Args:
-        modelName: Full model ID (e.g. 'claude-opus-4-5-20251101')
-        prefix: Prefix to check (e.g. 'claude-opus-4-5')
+        modelName: Full model ID (e.g. 'cortex-opus-4-5-20251101')
+        prefix: Prefix to check (e.g. 'cortex-opus-4-5')
 
     Returns:
         True if prefix matches at segment boundary
 
     Example:
-        prefixMatchesModel('claude-opus-4-5-20251101', 'claude-opus-4-5') → True
-        prefixMatchesModel('claude-opus-4-50', 'claude-opus-4-5') → False  # Not at boundary
+        prefixMatchesModel('cortex-opus-4-5-20251101', 'cortex-opus-4-5') → True
+        prefixMatchesModel('cortex-opus-4-50', 'cortex-opus-4-5') → False  # Not at boundary
     """
     if not modelName.startswith(prefix):
         return False
@@ -127,30 +127,30 @@ def prefixMatchesModel(modelName: str, prefix: str) -> bool:
 def modelMatchesVersionPrefix(model: str, entry: str) -> bool:
     """
     Check if a model matches a version-prefix entry in the allowlist.
-    Supports shorthand like "opus-4-5" (mapped to "claude-opus-4-5") and
-    full prefixes like "claude-opus-4-5".
+    Supports shorthand like "opus-4-5" (mapped to "cortex-opus-4-5") and
+    full prefixes like "cortex-opus-4-5".
 
     Args:
         model: Model ID to check
-        entry: Allowlist entry (e.g. 'opus-4-5' or 'claude-opus-4-5')
+        entry: Allowlist entry (e.g. 'opus-4-5' or 'cortex-opus-4-5')
 
     Returns:
         True if model matches the version prefix
 
     Example:
-        modelMatchesVersionPrefix('claude-opus-4-5-20251101', 'opus-4-5') → True
-        modelMatchesVersionPrefix('claude-opus-4-5-20251101', 'claude-opus-4-5') → True
+        modelMatchesVersionPrefix('cortex-opus-4-5-20251101', 'opus-4-5') → True
+        modelMatchesVersionPrefix('cortex-opus-4-5-20251101', 'cortex-opus-4-5') → True
     """
     normalizedModel = model.lower()
 
-    # Try the entry as-is (e.g. "claude-opus-4-5")
+    # Try the entry as-is (e.g. "cortex-opus-4-5")
     if prefixMatchesModel(normalizedModel, entry.lower()):
         return True
 
-    # Try with "claude-" prefix (e.g. "opus-4-5" → "claude-opus-4-5")
-    if not entry.lower().startswith('claude-'):
-        claudePrefix = f'claude-{entry.lower()}'
-        if prefixMatchesModel(normalizedModel, claudePrefix):
+    # Try with the product prefix (e.g. "opus-4-5" → "cortex-opus-4-5")
+    if not entry.lower().startswith('cortex-'):
+        prefixed = f'cortex-{entry.lower()}'
+        if prefixMatchesModel(normalizedModel, prefixed):
             return True
 
     return False
@@ -184,7 +184,7 @@ def familyHasSpecificEntries(family: str, allowlist: List[str]) -> bool:
             continue
 
         # Check if entry is a version-qualified variant of this family
-        # e.g., "opus-4-5" or "claude-opus-4-5-20251101" for the "opus" family
+        # e.g., "opus-4-5" or "cortex-opus-4-5-20251101" for the "opus" family
         # Must match at a segment boundary (followed by '-' or end)
         idx = normalizedEntry.find(normalizedFamily)
         if idx == -1:
@@ -208,8 +208,8 @@ def isModelAllowed(
     Matching tiers:
       1. Family aliases ("opus", "sonnet", "haiku") — wildcard for entire family,
          UNLESS more specific entries also exist (e.g., "opus-4-5").
-      2. Version prefixes ("opus-4-5", "claude-opus-4-5") — any build of that version
-      3. Full model IDs ("claude-opus-4-5-20251101") — exact match only
+      2. Version prefixes ("opus-4-5", "cortex-opus-4-5") — any build of that version
+      3. Full model IDs ("cortex-opus-4-5-20251101") — exact match only
 
     Args:
         model: Model ID or alias to check
@@ -219,10 +219,10 @@ def isModelAllowed(
         True if model is allowed
 
     Examples:
-        isModelAllowed('claude-opus-4-6', ['opus']) → True (family wildcard)
-        isModelAllowed('claude-opus-3-5', ['opus', 'opus-4-5']) → False (narrowed)
-        isModelAllowed('gpt-4o', ['gpt-4o', 'claude-sonnet']) → True
-        isModelAllowed('claude-sonnet-4', None) → True (no restrictions)
+        isModelAllowed('cortex-opus-4-6', ['opus']) → True (family wildcard)
+        isModelAllowed('cortex-opus-3-5', ['opus', 'opus-4-5']) → False (narrowed)
+        isModelAllowed('gpt-4o', ['gpt-4o', 'cortex-sonnet']) → True
+        isModelAllowed('cortex-sonnet-4', None) → True (no restrictions)
     """
     # No restrictions — all models allowed
     if availableModels is None:
@@ -257,7 +257,7 @@ def isModelAllowed(
             return True
 
     # ── TIER 3: Version-prefix matching ──────────────────────────────────
-    # "opus-4-5" or "claude-opus-4-5" matches "claude-opus-4-5-20251101"
+    # "opus-4-5" or "cortex-opus-4-5" matches "cortex-opus-4-5-20251101"
     for entry in normalizedAllowlist:
         if not isModelFamilyAlias(entry):
             if modelMatchesVersionPrefix(normalizedModel, entry):
@@ -287,8 +287,8 @@ def getAllowedModelsFromConfig(
     Example:
         getAllowedModelsFromConfig(
             ['opus'],
-            ['claude-opus-4-6', 'claude-sonnet-4-0', 'gpt-4o']
-        ) → ['claude-opus-4-6']
+            ['cortex-opus-4-6', 'cortex-sonnet-4-0', 'gpt-4o']
+        ) → ['cortex-opus-4-6']
     """
     if availableModels is None:
         return allAvailableModels or []

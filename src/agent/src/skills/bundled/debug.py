@@ -275,7 +275,7 @@ def get_debug_skill_description() -> str:
     Returns:
         Skill description string
     """
-    if os.environ.get('USER_TYPE') == 'ant':
+    if os.environ.get('CORTEX_USER_TYPE') == 'internal':
         return (
             "Debug your current Cortex Code session by reading the session debug log. "
             "Includes all event logging"

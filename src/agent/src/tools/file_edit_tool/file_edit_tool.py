@@ -372,7 +372,7 @@ def count_lines_changed(patch: str) -> None:
         elif line.startswith('-') and not line.startswith('---'):
             deletions += 1
     # Log analytics event
-    log_event('tengu_edit_lines_changed', {
+    log_event('cortex_edit_lines_changed', {
         'additions': additions,
         'deletions': deletions,
     })
@@ -1074,12 +1074,12 @@ class FileEditTool:
         # Analytics & logging
         # --------------------------------------------------------------
         if absolute_file_path.endswith(os.sep + "CORTEX.md"):
-            log_event("tengu_write_cortexmd", {})
+            log_event("cortex_write_cortexmd", {})
         
         count_lines_changed(patch)
         
         log_event(
-            "tengu_edit_string_lengths",
+            "cortex_edit_string_lengths",
             {
                 "oldStringBytes": len(inp.get("old_string", "").encode("utf-8")),
                 "newStringBytes": len(inp.get("new_string", "").encode("utf-8")),
@@ -1093,7 +1093,7 @@ class FileEditTool:
         git_diff: Optional[Dict[str, Any]] = None
         if (
             is_env_truthy("CORTEX_CODE_REMOTE")
-            and get_feature_value_cached("tengu_quartz_lantern", False)
+            and get_feature_value_cached("cortex_quartz_lantern", False)
         ):
             loop = asyncio.get_running_loop()
             start = loop.time()
@@ -1102,7 +1102,7 @@ class FileEditTool:
                 git_diff = diff
             elapsed_ms = int((loop.time() - start) * 1000)
             log_event(
-                "tengu_tool_use_diff_computed",
+                "cortex_tool_use_diff_computed",
                 {
                     "isEditTool": True,
                     "durationMs": elapsed_ms,

@@ -1,47 +1,42 @@
-﻿# prompt.py
-# Prompt and description constants for FileReadTool
+# prompt.py
+# Prompt and description constants for FileReadTool.
 
-from typing import Optional
-
-# Tool name constant
+# Tool name constant. The app loads this class by dotted path, so the name stays.
 FILE_READ_TOOL_NAME = 'Read'
 
-# Stub message for unchanged files
+# Stub message returned when the file has not changed since the last read
 FILE_UNCHANGED_STUB = (
-    'File unchanged since last read. The content from the earlier Read tool_result '
-    'in this conversation is still current - refer to that instead of re-reading.'
+    'File unchanged since your last read. The copy already in this conversation '
+    'is current, so work from that instead of reading it again.'
 )
 
-# Maximum lines to read per default chunk (aligns with agent_bridge DEFAULT_READ_CHUNK_LINES_FALLBACK)
+# Maximum lines returned by a default read (matches agent_bridge
+# DEFAULT_READ_CHUNK_LINES_FALLBACK)
 MAX_LINES_TO_READ = 500
 
 # Description
-DESCRIPTION = 'Read a file from the local filesystem.'
+DESCRIPTION = 'Read a file from disk and return its contents with line numbers.'
 
 # Line format instruction
 LINE_FORMAT_INSTRUCTION = (
-    '- Results are returned using cat -n format, with line numbers starting at 1'
+    '- Every line arrives numbered from 1, in the style of cat -n'
 )
 
 # Offset instructions
 OFFSET_INSTRUCTION_DEFAULT = (
-    '- If you do not provide limit, the tool reads only a safe default chunk. '
-    'For deeper inspection, read additional chunks with offset and limit.'
+    '- Leave limit out and you get one safe chunk. To go deeper, call again with '
+    'offset and limit.'
 )
 
 OFFSET_INSTRUCTION_TARGETED = (
-    '- When you already know which part of the file you need, only read that part. '
-    'This can be important for larger files.'
+    '- Once you know which part of the file matters, ask for only that part. On a '
+    'large file this is the difference between one cheap call and an expensive one.'
 )
 
 
 def is_pdf_supported() -> bool:
-    """Check if PDF reading is supported."""
-    try:
-        import base64
-        return True
-    except ImportError:
-        return False
+    """Cortex reads PDFs directly, so this is always true."""
+    return True
 
 
 def render_prompt_template(
@@ -50,29 +45,30 @@ def render_prompt_template(
     offset_instruction: str,
 ) -> str:
     """Renders the Read tool prompt template."""
-    bash_tool_name = "Bash"
-    
-    pdf_instruction = ""
+    bash_tool_name = 'Bash'
+
+    pdf_instruction = ''
     if is_pdf_supported():
         pdf_instruction = (
-            chr(10) + '- This tool can read PDF files (.pdf). For large PDFs (more than 10 pages), '
-            'you MUST provide the pages parameter to read specific page ranges (e.g., pages: "1-5"). '
-            'Reading a large PDF without the pages parameter will fail. Maximum 20 pages per request.'
+            chr(10) + '- PDFs are read directly. Past 10 pages you must pass pages '
+            '(for example pages: "1-5"), at most 20 pages per call.'
         )
-    
-    return f'''Reads a file from the local filesystem. You can access any file directly by using this tool.
-Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
 
-Usage:
-- The file_path parameter must be an absolute path, not a relative path
-- By default, it reads up to {MAX_LINES_TO_READ} lines starting from the beginning of the file{max_size_instruction}
+    return f'''Reads a file from disk and returns its contents.
+
+Assume this process can reach every file on the machine. If the user hands you a path, treat it as real. A bad path comes back as an error, never as an invented file.
+
+How to call it:
+- file_path must be absolute. Relative paths are rejected.
+- With no limit it returns the first {MAX_LINES_TO_READ} lines{max_size_instruction}
 {offset_instruction}
 {line_format}
-- This tool allows reading images (eg PNG, JPG, etc). When reading an image file the contents are presented visually as Cortex AI IDE is a multimodal LLM.{pdf_instruction}
-- This tool can read Jupyter notebooks (.ipynb files) and returns all cells with their outputs, combining code, text, and visualizations.
-- This tool can only read files, not directories. To read a directory, use an ls command via the {bash_tool_name} tool.
-- You will regularly be asked to read screenshots. If the user provides a path to a screenshot, ALWAYS use this tool to view the file at the path. This tool will work with all temporary file paths.
-- If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.'''
+- Images (PNG, JPG and the rest) arrive as visual content, because Cortex AI IDE hands them to a vision-capable model.{pdf_instruction}
+- Notebooks (.ipynb) arrive with every cell plus its stored output, so code, prose and rendered results stay together.
+- Files only. To list a directory, run ls through the {bash_tool_name} tool.
+- Screenshots are routine input. Whenever the user gives a path to one, open it here, including the temporary paths the IDE creates.
+- A file that exists but is empty returns a system reminder in place of content.
+- Reading a file you already hold is waste. When the tool reports nothing changed, keep the copy you have.'''
 
 
 __all__ = [

@@ -1,16 +1,16 @@
 ---
 name: brand-guidelines
-description: Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.
+description: Applies Cortex's brand colors and typography to any artifact that benefits from having the Cortex look and feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.
 license: Complete terms in LICENSE.txt
 ---
 
-# Anthropic Brand Styling
+# Cortex Brand Styling
 
 ## Overview
 
-To access Anthropic's official brand identity and style resources, use this skill.
+Use this skill to apply the Cortex visual identity to decks, documents, charts, and other artifacts.
 
-**Keywords**: branding, corporate identity, visual identity, post-processing, styling, brand colors, typography, Anthropic brand, visual formatting, visual design
+**Keywords**: branding, corporate identity, visual identity, post-processing, styling, brand colors, typography, Cortex brand, visual formatting, visual design
 
 ## Brand Guidelines
 
@@ -18,16 +18,16 @@ To access Anthropic's official brand identity and style resources, use this skil
 
 **Main Colors:**
 
-- Dark: `#141413` - Primary text and dark backgrounds
-- Light: `#faf9f5` - Light backgrounds and text on dark
-- Mid Gray: `#b0aea5` - Secondary elements
-- Light Gray: `#e8e6dc` - Subtle backgrounds
+- Ink: `#1e1e1e` - Primary text and dark backgrounds
+- Paper: `#fafafa` - Light backgrounds and text on dark
+- Mid Gray: `#a0a0a0` - Secondary elements
+- Surface: `#e8e8e8` - Subtle backgrounds
 
 **Accent Colors:**
 
-- Orange: `#d97757` - Primary accent
-- Blue: `#6a9bcc` - Secondary accent
-- Green: `#788c5d` - Tertiary accent
+- Blue: `#0078d4` - Primary accent
+- Light Blue: `#3794ff` - Secondary accent
+- Green: `#89d185` - Tertiary accent
 
 ### Typography
 
@@ -54,7 +54,7 @@ To access Anthropic's official brand identity and style resources, use this skil
 ### Shape and Accent Colors
 
 - Non-text shapes use accent colors
-- Cycles through orange, blue, and green accents
+- Cycles through blue, light blue, and green accents
 - Maintains visual interest while staying on-brand
 
 ## Technical Details

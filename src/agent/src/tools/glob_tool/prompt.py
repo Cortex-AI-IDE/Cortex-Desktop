@@ -1,6 +1,6 @@
 # ------------------------------------------------------------
 # prompt.py
-# 
+#
 # GlobTool prompt template and description.
 # ------------------------------------------------------------
 
@@ -15,27 +15,23 @@ GLOB_TOOL_NAME = "Glob"
 # GLOB TOOL DESCRIPTION
 # ============================================================
 
-DESCRIPTION = """- Fast file pattern matching tool that works with any codebase size
-- Supports glob patterns like "**/*.js" or "src/**/*.ts"
-- Returns matching file paths sorted by modification time
-- Use this tool when you need to find files by name patterns
-- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead
+DESCRIPTION = """- Finds files by name pattern, and stays fast on a large tree
+- Glob patterns work as expected: `**/*.js`, `src/**/*.ts`
+- Results come back ordered by modification time, newest first
+- Reach for it when you know roughly what a file is called but not where it lives
+- For a hunt that needs several rounds of widening patterns, hand it to the Agent tool
 
-🔥 DISCOVERY STRATEGY (USE FIRST!):
-- BEFORE using GrepTool, use GlobTool to understand project structure
-- Find ALL files of relevant types: "**/*.py", "**/*.ts", "**/*.tsx"
-- Find files in specific directories: "src/auth/**/*", "tests/**/*"
-- Run 2-3 GlobTool searches to map out the codebase structure
-- This helps you know WHERE to search with GrepTool
+Search structure before you search text:
+- Map the project with Glob, then look inside with Grep. Guessing at Grep patterns in a tree you have not mapped wastes calls.
+- Two or three passes usually cover it: `**/*.py` to see the layout, then the folder that matters.
 
-📋 COMMON DISCOVERY PATTERNS:
-- Python projects: "src/**/*.py", "tests/**/*.py", "**/models/*.py"
-- TypeScript projects: "src/**/*.ts", "src/**/*.tsx", "**/components/**/*"
-- Test files: "**/*.test.py", "**/*.spec.ts", "**/test_*.py"
-- Config files: "**/*.json", "**/*.yaml", "**/*.env*"
+Patterns worth starting from:
+- Python: `src/**/*.py`, `tests/**/*.py`, `**/models/*.py`
+- TypeScript: `src/**/*.ts`, `src/**/*.tsx`, `**/components/**/*`
+- Tests: `**/test_*.py`, `**/*.spec.ts`, `**/*.test.py`
+- Config: `**/*.json`, `**/*.yaml`, `**/*.env*`
 
-✅ WORKFLOW: GlobTool (discover structure) → GrepTool (find logic) → ReadFileTool (understand context)
-"""
+The useful order: Glob to learn the shape, Grep to find the logic, Read to understand it."""
 
 
 # ============================================================

@@ -23,10 +23,6 @@ class CortexError(Exception):
         self.name = self.__class__.__name__
 
 
-# Alias for backward compatibility
-ClaudeError = CortexError
-
-
 class MalformedCommandError(Exception):
     """Error raised when a command is malformed or invalid."""
     pass

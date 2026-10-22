@@ -215,7 +215,7 @@ async def call(input_data: Input, context) -> Dict[str, Any]:
 
 
 def mapToolResultToToolResultBlockParam(content: Output, toolUseID: str) -> Dict[str, Any]:
-    """Map the tool output to an Anthropic API tool result block."""
+    """Map the tool output to a provider tool-result block."""
     plan_id = content.get('plan_id', 'unknown')
     title = content.get('title', 'Untitled')
     step_count = len(content.get('steps', []))

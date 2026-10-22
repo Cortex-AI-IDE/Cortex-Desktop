@@ -89,8 +89,8 @@ def getModelOptions(
     Example:
         getModelOptions()
         → [
-            {'value': 'sonnet', 'label': 'Cortex Sonnet 4.6', ...},
-            {'value': 'gpt4o', 'label': 'GPT-4o', ...},
+            {'value': 'deepseekv4pro', 'label': 'DeepSeek V4 Pro', ...},
+            {'value': 'gpt54', 'label': 'GPT-5.4', ...},
             ...
           ]
 

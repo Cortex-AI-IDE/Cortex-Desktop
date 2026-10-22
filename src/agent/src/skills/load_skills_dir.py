@@ -994,7 +994,7 @@ async def addSkillDirectories(dirs: List[str]) -> None:
             f"[skills] Dynamically discovered {new_skill_count} skills from {len(dirs)} directories"
         )
         if len(added_skills) > 0:
-            logEvent('tengu_dynamic_skills_changed', {
+            logEvent('cortex_dynamic_skills_changed', {
                 'source': 'file_operation',
                 'previousCount': len(previous_skill_names_for_logging),
                 'newCount': len(dynamic_skills),
@@ -1081,7 +1081,7 @@ def activateConditionalSkillsForPaths(
                 break
 
     if len(activated) > 0:
-        logEvent('tengu_dynamic_skills_changed', {
+        logEvent('cortex_dynamic_skills_changed', {
             'source': 'conditional_paths',
             'previousCount': len(dynamic_skills) - len(activated),
             'newCount': len(dynamic_skills),

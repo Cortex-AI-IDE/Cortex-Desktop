@@ -1139,21 +1139,21 @@ class FileReadTool:
             'properties': {
                 'file_path': {
                     'type': 'string',
-                    'description': 'The absolute path to the file to read',
+                    'description': 'Absolute path to the file',
                 },
                 'offset': {
                     'type': 'integer',
                     'minimum': 0,
-                    'description': 'The line number to start reading from. Only provide if the file is too large to read at once',
+                    'description': 'First line to return. Worth setting only when the file is too large to read whole.',
                 },
                 'limit': {
                     'type': 'integer',
                     'minimum': 1,
-                    'description': 'The number of lines to read. Only provide if the file is too large to read at once.',
+                    'description': 'How many lines to return. Worth setting only when the file is too large to read whole.',
                 },
                 'pages': {
                     'type': 'string',
-                    'description': f'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum {PDF_MAX_PAGES_PER_READ} pages per request.',
+                    'description': f'PDF page range: "1-5", "3", "10-20". PDFs only, at most {PDF_MAX_PAGES_PER_READ} pages per call.',
                 },
             },
             'required': ['file_path'],
@@ -1492,7 +1492,7 @@ class FileReadTool:
         
         # Telemetry: track when callers override default read limits
         if context and hasattr(context, 'file_reading_limits') and context.file_reading_limits:
-            log_event('tengu_file_read_limits_override', {
+            log_event('cortex_file_read_limits_override', {
                 'hasMaxTokens': context.file_reading_limits.get('maxTokens') is not None,
                 'hasMaxSizeBytes': context.file_reading_limits.get('maxSizeBytes') is not None,
             })
@@ -1506,7 +1506,7 @@ class FileReadTool:
         # Uses BOTH mtime and file_size, on Windows/OneDrive, mtime alone can
         # be stale because cloud-sync placeholders preserve the old timestamp
         # until the download completes.  A size change reliably signals new content.
-        dedup_killswitch = get_feature_value_cached_may_be_stale('tengu_read_dedup_killswitch', False)
+        dedup_killswitch = get_feature_value_cached_may_be_stale('cortex_read_dedup_killswitch', False)
         existing_state = None if dedup_killswitch else self._read_file_state.get(full_file_path)
         
         if existing_state and not existing_state.is_partial_view and existing_state.offset is not None:
@@ -1516,7 +1516,7 @@ class FileReadTool:
                     mtime_ms, file_size = await get_file_stat_async(full_file_path)
                     if mtime_ms == existing_state.timestamp and file_size == existing_state.file_size:
                         analytics_ext = get_file_extension_for_analytics(full_file_path)
-                        log_event('tengu_file_read_dedup', {
+                        log_event('cortex_file_read_dedup', {
                             **({'ext': analytics_ext} if analytics_ext else {}),
                         })
                         return {
@@ -1729,7 +1729,7 @@ class FileReadTool:
                 if not extract_result.get('success'):
                     raise Exception(extract_result.get('error', {}).get('message', 'PDF extraction failed'))
                 
-                log_event('tengu_pdf_page_extraction', {
+                log_event('cortex_pdf_page_extraction', {
                     'success': True,
                     'page_count': extract_result['data']['file']['count'],
                     'file_size': extract_result['data']['file']['original_size'],
@@ -1760,13 +1760,13 @@ class FileReadTool:
             if should_extract_pages:
                 extract_result = await extract_pdf_pages(resolved_file_path)
                 if extract_result.get('success'):
-                    log_event('tengu_pdf_page_extraction', {
+                    log_event('cortex_pdf_page_extraction', {
                         'success': True,
                         'page_count': extract_result['data']['file']['count'],
                         'file_size': extract_result['data']['file']['original_size'],
                     })
                 else:
-                    log_event('tengu_pdf_page_extraction', {
+                    log_event('cortex_pdf_page_extraction', {
                         'success': False,
                         'available': extract_result.get('error', {}).get('reason') != 'unavailable',
                         'file_size': stat.st_size,
@@ -1774,7 +1774,7 @@ class FileReadTool:
             
             if not _is_pdf_supported():
                 raise ValueError(
-                    'Reading full PDFs is not supported with this model. Use a newer model (Sonnet 3.5 v2 or later), '
+                    'Reading full PDFs is not supported with this model. Use a model with native PDF support, '
                     f'or use the pages parameter to read specific page ranges (e.g., pages: "1-5", maximum {PDF_MAX_PAGES_PER_READ} pages per request). '
                     'Page extraction requires poppler-utils: install with `brew install poppler` on macOS or `apt-get install poppler-utils` on Debian/Ubuntu.'
                 )
@@ -1882,7 +1882,7 @@ class FileReadTool:
         # Analytics
         session_file_type = detect_session_file_type(full_file_path)
         analytics_ext = get_file_extension_for_analytics(full_file_path)
-        log_event('tengu_session_file_read', {
+        log_event('cortex_session_file_read', {
             'total_lines': total_lines,
             'read_lines': final_line_count,
             'total_bytes': result['total_bytes'],
@@ -1902,7 +1902,7 @@ class FileReadTool:
         data: FileReadOutput,
         tool_use_id: str,
     ) -> Dict[str, Any]:
-        """Convert tool result to Anthropic SDK format."""
+        """Convert tool result to the provider tool-result block format."""
         
         if data.type == 'image':
             return {

@@ -1,12 +1,9 @@
 # ------------------------------------------------------------
 # prompt.py
-# 
+#
 # FileWriteTool prompt template and description generator.
 # ------------------------------------------------------------
 
-from typing import Any
-
-# Import from your codebase - replace with actual imports
 try:
     from ..file_read_tool.prompt import FILE_READ_TOOL_NAME
 except ImportError:
@@ -19,7 +16,7 @@ except ImportError:
 # ============================================================
 
 FILE_WRITE_TOOL_NAME = "Write"
-DESCRIPTION = "Write a file to the local filesystem."
+DESCRIPTION = "Write a file to disk, replacing whatever was there."
 
 
 # ============================================================
@@ -29,14 +26,13 @@ DESCRIPTION = "Write a file to the local filesystem."
 def get_pre_read_instruction() -> str:
     """
     Get instruction about reading file before writing.
-    
+
     Returns:
         String containing the pre-read requirement instruction
     """
     return (
-        f"\n- If this is an existing file, you MUST use the {FILE_READ_TOOL_NAME} "
-        "tool first to read the file's contents. This tool will fail if you did "
-        "not read the file first."
+        f"\n- If the file already exists you must open it with `{FILE_READ_TOOL_NAME}` "
+        "first. The call fails otherwise, so that nothing is overwritten unseen."
     )
 
 
@@ -47,17 +43,16 @@ def get_pre_read_instruction() -> str:
 def get_write_tool_description() -> str:
     """
     Get the description for the FileWriteTool.
-    
+
     Returns:
         Complete description string for the write tool
     """
-    return f"""Writes a file to the local filesystem.
+    return f"""Creates a file, or replaces one in full.
 
-Usage:
-- This tool will overwrite the existing file if there is one at the provided path.{get_pre_read_instruction()}
-- Prefer the Edit tool for modifying existing files, it only sends the diff. Only use this tool to create new files or for complete rewrites.
-- NEVER create documentation files (*.md) or README files unless explicitly requested by the User.
-- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked."""
+- An existing file at that path is overwritten completely. There is no merge, and no undo beyond version control.{get_pre_read_instruction()}
+- For a change to an existing file prefer Edit. Edit sends only the changed text; this tool sends the whole file.
+- Do not create documentation or README files on your own initiative. Only when the user asks.
+- No emojis unless the user asks for them."""
 
 
 # ============================================================
