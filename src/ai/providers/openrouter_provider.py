@@ -195,6 +195,35 @@ def openrouter_supports_vision(model_id: str) -> bool:
     return False
 
 
+def _reasoning_text_from_details(details: Any) -> str:
+    """Readable reasoning in a streamed ``delta.reasoning_details`` list.
+
+    OpenRouter documents streamed reasoning as ``reasoning_details`` items:
+    ``reasoning.text`` (``text``), ``reasoning.summary`` (``summary``) and
+    ``reasoning.encrypted`` (opaque ``data``, may stream as "[REDACTED]").
+    Some models fill the plain ``delta.reasoning`` too, but one that sends
+    only the details list (Gemini through OpenRouter) left the thought card
+    empty, because the stream reader looked at ``delta.reasoning`` alone.
+    Encrypted items carry nothing displayable and are skipped.
+    """
+    if not isinstance(details, list):
+        return ""
+    parts: List[str] = []
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type") or ""
+        if kind == "reasoning.text":
+            text = item.get("text")
+        elif kind == "reasoning.summary":
+            text = item.get("summary")
+        else:
+            continue
+        if isinstance(text, str) and text and text != "[REDACTED]":
+            parts.append(text)
+    return "".join(parts)
+
+
 def _extract_openrouter_error(resp_body: str) -> str:
     """Pull the most informative message out of an OpenRouter error body.
 
@@ -589,8 +618,8 @@ class OpenRouterProvider(BaseProvider):
             "X-OpenRouter-Title": self._app_name,
         }
 
-    def _extra_payload(self) -> Dict[str, Any]:
-        """Provider-level body defaults. Never overrides keys already set."""
+    def _extra_payload(self, model: str = "") -> Dict[str, Any]:
+        """Body defaults for a request to ``model``. Never overrides keys already set."""
         return {}
 
     # ── Core streaming request ─────────────────────────────────────────────────
@@ -729,7 +758,7 @@ class OpenRouterProvider(BaseProvider):
         else:
             log.info(f"[{self.DISPLAY_NAME}] model={model} (no tools)")
 
-        for _k, _v in (self._extra_payload() or {}).items():
+        for _k, _v in (self._extra_payload(model) or {}).items():
             if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
                 payload.setdefault(_k, _v)
 
@@ -777,6 +806,7 @@ class OpenRouterProvider(BaseProvider):
                     # raw socket access fails (varies by OS/urllib3 version).
                     _saved_sock_timeout = None
                     _yielded_content = False
+                    _reasoning_source_logged = False  # one INFO line per stream
                     _raw_sock = None
                     _first_chunk_timeout = 30.0
                     try:
@@ -864,6 +894,14 @@ class OpenRouterProvider(BaseProvider):
                             delta      = choices[0].get("delta") or {}
                             content    = delta.get("content") or ""
                             reasoning  = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                            if not reasoning and delta.get("reasoning_details"):
+                                reasoning = _reasoning_text_from_details(delta["reasoning_details"])
+                                if not _reasoning_source_logged:
+                                    _reasoning_source_logged = True
+                                    log.info(
+                                        f"[{self.DISPLAY_NAME}] reasoning arrives in reasoning_details "
+                                        f"({'readable' if reasoning else 'encrypted only, nothing to show'})"
+                                    )
                             tool_calls = delta.get("tool_calls") or []
 
                             if content:

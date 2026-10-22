@@ -81,8 +81,18 @@ class DynamicProvider(OpenRouterProvider):
                 headers[k] = str(v)
         return headers
 
-    def _extra_payload(self) -> Dict[str, Any]:
-        return dict(self.spec.get("extra_body") or {})
+    def _extra_payload(self, model: str = "") -> Dict[str, Any]:
+        """Provider extra_body, with the requested model's own on top.
+
+        ``model`` is the upstream id (chat/chat_stream strip ``dp/<slug>/``
+        before it reaches the request), so it matches the model's model_id.
+        """
+        body = dict(self.spec.get("extra_body") or {})
+        for m in self.spec.get("models") or []:
+            if m.get("model_id") == model:
+                body.update(m.get("extra_body") or {})
+                break
+        return body
 
     # ── model ids ───────────────────────────────────────────────────────
     def _upstream(self, model: str) -> str:

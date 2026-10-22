@@ -140,6 +140,16 @@ def _int(v, default):
         return default
 
 
+# Keys an extra_body may never set; the server rejects them too.
+_FORBIDDEN_BODY_KEYS = frozenset({"model", "messages", "stream", "tools", "tool_choice"})
+
+
+def _clean_extra_body(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k not in _FORBIDDEN_BODY_KEYS}
+
+
 def _clean_model(slug: str, raw: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
@@ -158,6 +168,9 @@ def _clean_model(slug: str, raw: Any) -> Optional[Dict[str, Any]]:
         "supports_vision": bool(raw.get("supports_vision")),
         "supports_tools": bool(raw.get("supports_tools", True)),
         "supports_thinking": bool(raw.get("supports_thinking")),
+        # Per-model body (e.g. the switch that turns this model's reasoning
+        # on), merged over the provider's extra_body for this model only.
+        "extra_body": _clean_extra_body(raw.get("extra_body")),
         "price_in": float(raw.get("price_in") or 0),
         "price_out": float(raw.get("price_out") or 0),
         "is_free": bool(raw.get("is_free")),
@@ -188,7 +201,7 @@ def _clean_provider(raw: Any) -> Optional[Dict[str, Any]]:
         "auth_header_name": str(raw.get("auth_header_name") or ""),
         "models_path": str(raw.get("models_path") or "/models"),
         "extra_headers": raw.get("extra_headers") if isinstance(raw.get("extra_headers"), dict) else {},
-        "extra_body": raw.get("extra_body") if isinstance(raw.get("extra_body"), dict) else {},
+        "extra_body": _clean_extra_body(raw.get("extra_body")),
         "key_prefix_hint": str(raw.get("key_prefix_hint") or ""),
         "signup_url": str(raw.get("signup_url") or ""),
         "docs_url": str(raw.get("docs_url") or ""),
