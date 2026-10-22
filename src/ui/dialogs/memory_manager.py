@@ -1100,12 +1100,16 @@ scope: project
             # canonical id before it is persisted, same layering as the
             # agent path (remote aliases first, built-in ALIAS_MAP second).
             try:
-                import sys as _sys
-                from pathlib import Path as _Path
-                _agent_src = str(_Path(__file__).resolve().parents[2] / "agent" / "src")
-                if _agent_src not in _sys.path:
-                    _sys.path.append(_agent_src)
-                from utils.model.aliases import resolveOrPassthrough as _resolve
+                # Absolute project import, matching every other agent-tree
+                # import in this file. The previous form appended
+                # src/agent/src to sys.path and imported `utils.model.aliases`,
+                # which only resolves when that directory is itself a sys.path
+                # root (the frozen runtime hook does that; dev does not), so in
+                # dev the import always failed and silently skipped alias
+                # resolution.
+                from src.agent.src.utils.model.aliases import (
+                    resolveOrPassthrough as _resolve,
+                )
                 _resolved = _resolve(model_id)
                 if _resolved:
                     model_id = _resolved

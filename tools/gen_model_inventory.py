@@ -13,12 +13,18 @@ try:
 except Exception:
     pass
 
-from src.ai.model_registry import MODEL_GROUPS
+from src.ai.model_registry import get_model_groups
 from src.ai.model_limits import get_model_limits, _DEFAULT_LIMITS
 from src.agent.src.utils.thinking import (
     model_supports_thinking, THINKING_SUPPORTED_MODELS, ADAPTIVE_THINKING_MODELS,
 )
 from src.agent.src.utils.model.aliases import ALIAS_MAP
+
+# The dropdown catalogue used to be the module constant MODEL_GROUPS. It is now
+# resolved at runtime by get_model_groups() (the directory is publishable), so
+# the generator has to call it. Kept under the old name to leave the body below
+# untouched.
+MODEL_GROUPS = get_model_groups()
 
 try:
     from src.core.loop_engine.model_pricing import _RATES, _DEFAULT
