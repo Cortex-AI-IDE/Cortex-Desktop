@@ -846,10 +846,6 @@ def getInitialSettings() -> SettingsJson:
     return result.get('settings') or {}
 
 
-# Deprecated alias for backwards compatibility
-getSettings_DEPRECATED = getInitialSettings
-
-
 def getSettingsWithSources() -> Dict[str, Any]:
     """
     Get the effective merged settings alongside the raw per-source settings,

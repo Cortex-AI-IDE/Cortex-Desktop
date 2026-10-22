@@ -137,6 +137,12 @@ SECRET_ALLOWLIST = {
 ENTROPY_MIN_LENGTH = 20
 ENTROPY_THRESHOLD = 4.2
 
+# Quoted-value scan used by the entropy fallback. The lower bound is the
+# constant above so the two can never drift apart.
+_ENTROPY_VALUE_RE = re.compile(
+    rf"['\"]([A-Za-z0-9+/=_\-]{{{ENTROPY_MIN_LENGTH},100}})['\"]"
+)
+
 
 def shannon_entropy(value: str) -> float:
     """Bits per character. Random secrets land near 4.5-6; prose lands near 3."""
@@ -288,7 +294,7 @@ def scan_secrets(
 
 
 def _entropy_secret(line: str) -> bool:
-    for m in re.finditer(r"['\"]([A-Za-z0-9+/=_\-]{20,100})['\"]", line):
+    for m in _ENTROPY_VALUE_RE.finditer(line):
         value = m.group(1)
         if not _is_probably_real(value):
             continue

@@ -112,9 +112,6 @@ TRAVERSAL_SIGNATURES = [
     (r"daemon:.*:/usr/sbin", "Unix /etc/passwd"),
 ]
 
-DANGEROUS_METHODS = ["PUT", "DELETE", "TRACE", "PATCH"]
-
-
 class Requester:
     """Scoped, rate-limited HTTP client.
 

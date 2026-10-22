@@ -14,8 +14,6 @@ import logging
 
 log = logging.getLogger(__name__)
 
-PREF_KEYS = ("editor.tab_size", "editor.word_wrap", "editor.minimap")
-
 _listeners: list = []
 
 

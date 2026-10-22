@@ -964,16 +964,6 @@ def build_qss(t: dict | None = None, mode: str | None = None) -> str:
     """
 
 
-# ── Context Window Compact Thresholds ──────────────────────────────────────
-# These are UI design tokens for display purposes.
-# The actual runtime threshold is calculated by
-# agent.src.services.compact.autoCompact.getAutoCompactThreshold()
-# which uses model-aware buffer tokens (13K for auto, 3K for manual).
-
-COMPACT_EARLY_THRESHOLD = 0.85   # 85%, visual warning in token bar
-COMPACT_URGENT_THRESHOLD = 0.95  # 95%, visual urgent state in token bar
-
-
 def get_model_context_limit(model_id: str) -> int:
     """
     Get the context window size (tokens) for a given model ID.

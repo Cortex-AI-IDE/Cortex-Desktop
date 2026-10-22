@@ -106,25 +106,6 @@ class TelemetrySafeError(Exception):
 # Error Classification Functions
 # ============================================================================
 
-def is_abort_error(e: Any) -> bool:
-    """
-    True iff `e` is any of the abort-shaped errors the codebase encounters:
-    our AbortError class, or a generic Error with name === 'AbortError'.
-    
-    Checks the name property because Python doesn't have APIUserAbortError.
-    
-    Args:
-        e: The error to check
-        
-    Returns:
-        True if this is an abort error
-    """
-    return (
-        isinstance(e, AbortError) or
-        (isinstance(e, Exception) and getattr(e, 'name', None) == 'AbortError')
-    )
-
-
 def isENOENT(e: Any) -> bool:
     """
     Check if error is ENOENT (file/directory not found).
@@ -166,20 +147,6 @@ def has_exact_error_message(error: Any, message: str) -> bool:
         True if error message matches exactly
     """
     return isinstance(error, Exception) and str(error) == message
-
-
-def to_error(e: Any) -> Exception:
-    """
-    Normalize an unknown value into an Exception.
-    Use at catch-site boundaries when you need an Exception instance.
-    
-    Args:
-        e: The error value to normalize
-        
-    Returns:
-        Exception instance
-    """
-    return e if isinstance(e, Exception) else Exception(str(e))
 
 
 def error_message(e: Any) -> str:
@@ -240,26 +207,6 @@ def is_enoent(e: Any) -> bool:
         True if error is ENOENT
     """
     return get_errno_code(e) == 'ENOENT'
-
-
-def get_errno_path(e: Any) -> Optional[str]:
-    """
-    Extract the errno path (the filesystem path that triggered the error)
-    from a caught error. Returns None if the error has no path.
-    
-    Replaces the `(e as NodeJS.ErrnoException).path` cast pattern.
-    
-    Args:
-        e: The error value
-        
-    Returns:
-        Error path string or None
-    """
-    if e and isinstance(e, Exception) and hasattr(e, 'filename'):
-        path = getattr(e, 'filename', None)
-        if path and isinstance(path, str):
-            return path
-    return None
 
 
 def short_error_stack(e: Any, max_frames: int = 5) -> str:
@@ -347,10 +294,6 @@ def is_fs_inaccessible(e: Any) -> bool:
 # HTTP/Axios Error Classification
 # ============================================================================
 
-# Type alias for Axios error kinds
-AxiosErrorKind = str  # 'auth', 'timeout', 'network', 'http', 'other'
-
-
 def classify_axios_error(e: Any) -> Dict[str, Any]:
     """
     Classify a caught error from an HTTP request into one of a few buckets.
@@ -407,13 +350,6 @@ def classify_axios_error(e: Any) -> Dict[str, Any]:
 # ============================================================================
 
 # camelCase aliases
-isAbortError = is_abort_error
 hasExactErrorMessage = has_exact_error_message
-toError = to_error
-errorMessage = error_message
-getErrnoCode = get_errno_code
 isENOENT = is_enoent
-getErrnoPath = get_errno_path
-shortErrorStack = short_error_stack
 isFsInaccessible = is_fs_inaccessible
-classifyAxiosError = classify_axios_error

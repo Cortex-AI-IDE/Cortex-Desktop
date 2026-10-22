@@ -846,18 +846,6 @@ async def getSkillDirCommands(cwd: str) -> List[Command]:
     return unconditional_skills
 
 
-def clearSkillCaches():
-    """Clear all skill caches"""
-    _skill_dir_commands_cache.clear()
-    conditional_skills.clear()
-    activated_conditional_skill_names.clear()
-
-
-# Backwards-compatible aliases for tests
-getCommandDirCommands = getSkillDirCommands
-clearCommandCaches = clearSkillCaches
-
-
 # ============================================================
 # PHASE 5: Dynamic/conditional skills + MCP registration
 # ============================================================

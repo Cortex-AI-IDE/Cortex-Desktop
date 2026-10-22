@@ -63,8 +63,6 @@ lastReadFileStats: Optional[Dict] = None
 configCacheHits = 0
 configCacheMisses = 0
 globalConfigWriteCount = 0
-CONFIG_WRITE_DISPLAY_THRESHOLD = 20
-CONFIG_FRESHNESS_POLL_MS = 1000
 freshnessWatcherStarted = False
 configReadingAllowed = False
 
@@ -96,9 +94,6 @@ class SerializedStructuredHistoryEntry(TypedDict, total=False):
 class HistoryEntry(TypedDict, total=False):
     display: str
     pastedContents: Dict[int, PastedContent]
-
-
-ReleaseChannel = str  # 'stable' | 'latest'
 
 
 class ModelUsageEntry(TypedDict):
@@ -171,8 +166,6 @@ DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 
 InstallMethod = str  # 'local' | 'native' | 'global' | 'unknown'
 
-NOTIFICATION_CHANNELS: List[str] = []
-EDITOR_MODES: List[str] = []
 NotificationChannel = str
 
 
@@ -192,7 +185,6 @@ class AccountInfo(TypedDict, total=False):
 
 EditorMode = str
 DiffTool = str  # 'terminal' | 'auto'
-OutputStyle = str
 
 
 # ============================================================
@@ -1294,7 +1286,6 @@ get_managed_cortex_rules_dir = getManagedCortexRulesDir
 get_user_cortex_rules_dir = getUserCortexRulesDir
 check_has_trust_dialog_accepted = checkHasTrustDialogAccepted
 is_path_trusted = isPathTrusted
-canonicalize_config_key = lambda k: k  # stub
 is_global_config_key = isGlobalConfigKey
 is_project_config_key = isProjectConfigKey
 enable_configs = enableConfigs

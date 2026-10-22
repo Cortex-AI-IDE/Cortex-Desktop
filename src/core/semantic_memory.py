@@ -103,7 +103,6 @@ except ImportError:
 DEFAULT_MEMORY_DIR = Path.cwd() / ".cortex" / "semantic_memory" if (Path.cwd() / ".cortex").is_dir() else Path.home() / ".cortex" / "semantic_memory"
 MAX_ENTRIES = 100  # hard limit — oldest entries are pruned first
 MAX_SESSION_SUMMARY_CHARS = 2000
-TOP_K_RESULTS = 5
 INJECT_TOP_N = 3  # how many results to inject into the prompt
 
 

@@ -140,7 +140,5 @@ class ToolResult:
 # Re-export names used by existing tool modules
 # ---------------------------------------------------------------------------
 
-ToolProgress = Dict[str, Any]
 ToolUseContext = Dict[str, Any]
-ValidationResult = Dict[str, Any]
 Tools = List[Any]

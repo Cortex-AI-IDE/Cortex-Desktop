@@ -18,10 +18,6 @@ from typing import Any, Callable, Dict, List, Optional
 AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS = str
 
 
-# Marker type for values routed to PII-tagged proto columns
-AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED = str
-
-
 def stripProtoFields(metadata: Dict[str, Any]) -> Dict[str, Any]:
     """
     Strip `_PROTO_*` keys from a payload destined for general-access storage.
