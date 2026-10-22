@@ -87,16 +87,23 @@ secrets.json
 credentials.json
 
 # --- Build / packaging ----------------------------------------------------
-# The PyInstaller specs and the Inno Setup script are part of the source: both
-# Windows and macOS builds are reproducible from a clone. Only their OUTPUT is
-# ignored.
+# The macOS PyInstaller spec stays in the source so that build is reproducible
+# from a clone. Everything else here is local build configuration and is not
+# published.
+#
+# cortex.spec and cortex_setup.iss are kept out of the repository by request:
+# they hold local machine paths and packaging options. The MSIX manifest holds
+# Partner Center account identity (package name and publisher distinguished
+# name), so it must never be committed. Keep a local copy before a release
+# build; build.ps1 and build_tools/msix/build_msix.ps1 both read them.
 *.spec
-!cortex.spec
 !cortex-macos.spec
 *.iss
-!cortex_setup.iss
-# Generated from src/core/file_associations.py on every build.
-build_tools/file_assoc/cortex_file_assoc.iss
+# The whole build_tools tree is local-only by request. It carries Partner Center
+# account identity (AppxManifest.template.xml: package name, publisher DN,
+# display name), generator output, and signing helpers. Keep a local copy before
+# a release build; build.ps1 and build_tools/msix/build_msix.ps1 both read it.
+build_tools/
 *.msix
 *.msixbundle
 *.appx
