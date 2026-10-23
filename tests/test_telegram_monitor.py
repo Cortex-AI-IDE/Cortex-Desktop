@@ -239,6 +239,122 @@ def test_pairing_ignores_a_message_with_no_chat():
     assert manager.submit("/pair " + code, None, now=1.0) is False
 
 
+# ---------------------------------------------------------------------------
+# Takeover guards: one chat, one bot, and moving it is never silent
+# ---------------------------------------------------------------------------
+
+
+def test_only_a_private_chat_counts():
+    is_private = tm.TelegramMonitor._is_private_chat
+    assert is_private({"id": 42, "type": "private"}) is True
+    # Telegram always sends a type; the sign still covers an update without one.
+    assert is_private({"id": 42}) is True
+    assert is_private({"id": -100123, "type": "supergroup"}) is False
+    assert is_private({"id": -100123, "type": "group"}) is False
+    assert is_private({"id": -42}) is False
+    assert is_private({"id": "not-a-number"}) is False
+    assert is_private(None) is False
+
+
+def test_pairing_is_refused_while_a_chat_is_paired(no_settings_writes):
+    """A fresh code would silently overwrite the saved chat: that is the takeover."""
+    transport = FakeTransport()
+    monitor = tm.TelegramMonitor(
+        client=tm.TelegramClient(transport, sleep=lambda _s: None)
+    )
+    monitor._config_loader = lambda: make_cfg(chat_id="42")
+    assert monitor.begin_pairing() == tm.PAIR_REFUSED_ALREADY_PAIRED
+    assert monitor.pairing.pending(now=0.0) is None
+
+
+def test_a_group_cannot_pair(no_settings_writes):
+    transport = FakeTransport()
+    monitor = tm.TelegramMonitor(
+        client=tm.TelegramClient(transport, sleep=lambda _s: None)
+    )
+    monitor._config_loader = lambda: make_cfg(chat_id="")
+    code = monitor.pairing.begin(now=0.0)
+    updates = [
+        {
+            "update_id": 1,
+            "message": {
+                "chat": {"id": -100123, "type": "supergroup"},
+                "text": "/pair " + code,
+            },
+        }
+    ]
+    assert monitor._handle_pair_updates(updates, now=1.0) is False
+    # The code survives, so a paste into the wrong chat costs nothing.
+    assert monitor.pairing.pending(now=1.5) == code
+    sends = transport.payloads("sendMessage")
+    assert len(sends) == 1
+    assert sends[0]["chat_id"] == "-100123"
+    assert "private chat" in sends[0]["text"]
+
+
+def test_moving_the_chat_tells_the_old_one(no_settings_writes):
+    transport = FakeTransport()
+    monitor = tm.TelegramMonitor(
+        client=tm.TelegramClient(transport, sleep=lambda _s: None)
+    )
+    monitor._config_loader = lambda: make_cfg(chat_id="7")
+    code = monitor.pairing.begin(now=0.0)
+    updates = [
+        {
+            "update_id": 1,
+            "message": {"chat": {"id": 42, "type": "private"}, "text": "/pair " + code},
+        }
+    ]
+    assert monitor._handle_pair_updates(updates, now=1.0) is True
+    sends = transport.payloads("sendMessage")
+    # The chat that lost the channel is told before the new one is welcomed.
+    assert [s["chat_id"] for s in sends] == ["7", "42"]
+    assert "another chat" in sends[0]["text"]
+    assert "Paired" in sends[1]["text"]
+
+
+def test_staying_in_the_same_chat_sends_no_moving_notice(no_settings_writes):
+    transport = FakeTransport()
+    monitor = tm.TelegramMonitor(
+        client=tm.TelegramClient(transport, sleep=lambda _s: None)
+    )
+    monitor._config_loader = lambda: make_cfg(chat_id="42")
+    code = monitor.pairing.begin(now=0.0, reusable=True)
+    updates = [
+        {
+            "update_id": 1,
+            "message": {"chat": {"id": 42, "type": "private"}, "text": "/pair " + code},
+        }
+    ]
+    assert monitor._handle_pair_updates(updates, now=1.0) is True
+    sends = transport.payloads("sendMessage")
+    assert [s["chat_id"] for s in sends] == ["42"]
+
+
+def test_inbound_ignores_a_group_chat(no_settings_writes):
+    """In a group every member shares the id, so the id alone is not proof."""
+    ran = []
+    transport = FakeTransport()
+    monitor = tm.TelegramMonitor(
+        client=tm.TelegramClient(transport, sleep=lambda _s: None)
+    )
+    monitor.set_prompt_handler(ran.append)
+    updates = [
+        {
+            "update_id": 1,
+            "message": {
+                "chat": {"id": -100123, "type": "supergroup"},
+                "text": "delete the build folder",
+                "date": 1000.0,
+            },
+        }
+    ]
+    config = make_cfg(chat_id="-100123", inbound_enabled=True)
+    assert monitor._handle_inbound_updates(updates, config, now=1001.0) == 0
+    assert ran == []
+    assert transport.calls == []
+
+
 def test_pair_updates_bind_and_answer_once(no_settings_writes):
     paired = []
     transport = FakeTransport()
@@ -246,6 +362,9 @@ def test_pair_updates_bind_and_answer_once(no_settings_writes):
         client=tm.TelegramClient(transport, sleep=lambda _s: None),
         on_paired=paired.append,
     )
+    # An explicit loader: the developer's own settings would otherwise decide
+    # this test, and a machine that is already paired would add a notice.
+    monitor._config_loader = lambda: make_cfg(chat_id="")
     code = monitor.pairing.begin(now=0.0)
     updates = [
         {"update_id": 1, "message": {"chat": {"id": 99}, "text": "/pair WRONGCOD"}},
@@ -325,7 +444,7 @@ def test_begin_pairing_uses_the_configured_expiry(monkeypatch, no_settings_write
     transport = FakeTransport()
     monitor = tm.TelegramMonitor(
         client=tm.TelegramClient(transport, sleep=lambda _s: None),
-        config_loader=lambda: make_cfg(pair_expiry="30d"),
+        config_loader=lambda: make_cfg(pair_expiry="30d", chat_id=""),
     )
     monkeypatch.setattr(monitor, "_poll_loop", lambda *_a, **_k: None)
 
@@ -343,7 +462,9 @@ def test_begin_pairing_honours_the_reusable_switch(monkeypatch, no_settings_writ
     transport = FakeTransport()
     monitor = tm.TelegramMonitor(
         client=tm.TelegramClient(transport, sleep=lambda _s: None),
-        config_loader=lambda: make_cfg(pair_expiry="unlimited", pair_reusable=True),
+        config_loader=lambda: make_cfg(
+            pair_expiry="unlimited", pair_reusable=True, chat_id=""
+        ),
     )
     monkeypatch.setattr(monitor, "_poll_loop", lambda *_a, **_k: None)
 
@@ -1665,4 +1786,139 @@ def test_the_monitor_is_handed_the_self_healing_busy_check():
     # The window must not decide this on its own flag again.
     assert "_telegram_busy" in text
     assert "run_in_flight" in text
+
+
+# ---------------------------------------------------------------------------
+# Paid feature: Telegram needs an active subscription
+# ---------------------------------------------------------------------------
+# The bot reports runs and executes prompts on the PC, so it is sold with a
+# subscription. The verdict is an injected predicate, because this module is
+# transport and only the application knows about billing; get_monitor() is the
+# one place the real check is attached.
+
+
+def _inbound_update(text="run the tests", chat_id=42, update_id=1):
+    return [
+        {
+            "update_id": update_id,
+            "message": {
+                "chat": {"id": chat_id, "type": "private"},
+                "text": text,
+                "date": 1000.0,
+            },
+        }
+    ]
+
+
+def test_no_policy_wired_leaves_the_component_ungated():
+    monitor, _transport, _clock = make_monitor()
+    assert monitor._is_subscribed is None
+    assert monitor._entitled() is True
+
+
+def test_pairing_is_refused_without_a_subscription(no_settings_writes):
+    monitor, transport, _clock = make_monitor(is_subscribed=lambda: False)
+    monitor._config_loader = lambda: make_cfg(chat_id="")
+    assert monitor.begin_pairing() == tm.PAIR_REFUSED_NO_SUBSCRIPTION
+    # No code was issued, so there is nothing to redeem, and nothing was polled.
+    assert monitor.pairing.pending(now=0.0) is None
+    assert transport.calls == []
+
+
+def test_a_subscriber_can_still_pair(no_settings_writes, monkeypatch):
+    monitor, _transport, _clock = make_monitor(is_subscribed=lambda: True)
+    monitor._config_loader = lambda: make_cfg(chat_id="")
+    # The poller is a thread that would outlive the test; the code is the point.
+    monkeypatch.setattr(monitor, "_ensure_poller", lambda: True)
+    code = monitor.begin_pairing()
+    assert len(code) == tm.PAIR_LEN
+    assert not code.startswith("!")
+
+
+def test_inbound_prompts_are_ignored_without_a_subscription():
+    ran = []
+    monitor, transport, _clock = make_monitor(is_subscribed=lambda: False)
+    monitor.set_prompt_handler(ran.append)
+    config = make_cfg(chat_id="42", inbound_enabled=True)
+    assert monitor._handle_inbound_updates(_inbound_update(), config, now=1001.0) == 0
+    assert ran == []
+    # Silence, not a refusal reply: answering would need the very network
+    # access the gate is refusing.
+    assert transport.calls == []
+
+
+def test_the_lapse_is_recorded_once_per_window():
+    monitor, _transport, _clock = make_monitor(is_subscribed=lambda: False)
+    config = make_cfg(chat_id="42", inbound_enabled=True)
+    monitor._handle_inbound_updates(_inbound_update(), config, now=1001.0)
+    first = monitor._last_sub_warn
+    assert first == 1001.0
+    monitor._handle_inbound_updates(_inbound_update(update_id=2), config, now=1002.0)
+    assert monitor._last_sub_warn == first
+
+
+def test_a_locked_account_gets_no_client_at_all():
+    """Every network path needs the client, so this one check covers them all."""
+    monitor, _transport, _clock = make_monitor(is_subscribed=lambda: False)
+    assert monitor._ensure_client() is None
+
+
+def test_nothing_is_sent_while_locked():
+    monitor, transport, _clock = make_monitor(is_subscribed=lambda: False)
+    monitor._handle({"kind": "test"})
+    assert transport.calls == []
+
+
+def test_the_subscription_is_checked_before_the_file_is_opened():
+    """A lapsed account must not spend a read on something it cannot send."""
+    monitor, transport, _clock = make_monitor(is_subscribed=lambda: False)
+    result = monitor.send_photo("C:/does/not/exist.png")
+    assert result["ok"] is False
+    assert "subscription" in result["reason"].lower()
+    assert transport.calls == []
+
+
+def test_a_subscriber_gets_past_the_gate(tmp_path):
+    monitor, _transport, _clock = make_monitor(is_subscribed=lambda: True)
+    monitor._config_loader = lambda: make_cfg(chat_id="")
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+    # Past the gate and on to the next refusal, which is the pairing itself.
+    assert monitor.send_photo(str(path))["reason"] == "no chat is paired"
+
+
+def test_the_verdict_is_reused_within_the_ttl_and_reasked_after():
+    verdicts = [False]
+    calls = []
+
+    def check():
+        calls.append(1)
+        return verdicts[0]
+
+    monitor, _transport, clock = make_monitor(is_subscribed=check)
+    assert monitor._entitled() is False
+    assert monitor._entitled() is False
+    assert len(calls) == 1
+    clock.advance(tm.ENTITLEMENT_TTL_S + 1)
+    verdicts[0] = True
+    assert monitor._entitled() is True
+    assert len(calls) == 2
+
+
+def test_a_broken_check_locks_instead_of_unlocking():
+    def boom():
+        raise RuntimeError("no account")
+
+    monitor, _transport, _clock = make_monitor(is_subscribed=boom)
+    assert monitor._entitled() is False
+
+
+def test_the_shared_monitor_is_given_a_verdict_to_check(monkeypatch):
+    monkeypatch.setattr(tm, "_shared", None)
+    try:
+        monitor = tm.get_monitor()
+        assert callable(monitor._is_subscribed)
+    finally:
+        monkeypatch.setattr(tm, "_shared", None)
+
 

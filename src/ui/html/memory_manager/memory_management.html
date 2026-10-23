@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cortex Settings</title>
-  <link rel="stylesheet" href="./memory_management.css?v=13">
+  <link rel="stylesheet" href="./memory_management.css?v=15">
 </head>
 
 <body>
@@ -1084,8 +1084,15 @@
               <p>Kept in the encrypted vault and never sent back to this page, so a saved token reads as dots. Paste a new one to replace it.</p>
             </div>
             <div class="setting-control">
-              <input type="password" class="setting-input" id="tgToken" placeholder="8123456789:AAH..." autocomplete="off" spellcheck="false">
-              <button class="setting-btn primary" id="tgSaveToken">Save</button>
+              <div class="tg-token-saved" id="tgTokenSaved" hidden>
+                <span class="tg-token-dots" aria-label="A bot token is saved">••••••••••••</span>
+                <button type="button" class="setting-btn tg-text-btn" id="tgTokenChange">Change</button>
+              </div>
+              <div class="tg-token-edit" id="tgTokenEdit">
+                <input type="password" class="setting-input" id="tgToken" placeholder="8123456789:AAH..." autocomplete="off" spellcheck="false">
+                <button type="button" class="setting-btn primary" id="tgSaveToken">Save</button>
+                <button type="button" class="setting-btn" id="tgTokenCancel" hidden>Cancel</button>
+              </div>
             </div>
           </div>
           <div class="tg-note" id="tgTokenHint"></div>
@@ -1273,7 +1280,7 @@
     window.onerror = function(msg, src, line) { window.__memMgrDebug.errors.push({msg,src,line}); return false; };
     window.receiveMemoryState = window.receiveMemoryState || function(s) { window.__memMgrDebug.fallbackState = s; };
   </script>
-  <script src="./memory_management.js?v=15"></script>
+  <script src="./memory_management.js?v=18"></script>
 </body>
 
 </html>

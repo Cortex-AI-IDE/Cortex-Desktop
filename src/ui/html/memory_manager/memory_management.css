@@ -840,10 +840,9 @@ kbd {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    background: var(--surface-2);
-    padding: 6px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
+    /* No box around it: a bordered box reads as a filled input, which is the
+       thing a masked value should never look like. */
+    padding: 6px 0
 }
 
 /* Action buttons - compact inline */
@@ -877,14 +876,6 @@ kbd {
 /* Key status indicators */
 .provider-row[data-has-key="true"] .key-input {
     border-color: rgba(76, 175, 80, 0.3);
-}
-
-.provider-row[data-has-key="true"] .remove-btn {
-    display: inline-flex !important;
-}
-
-.provider-row[data-has-key="false"] .remove-btn {
-    display: none !important;
 }
 
 /* Test button states */
@@ -3368,6 +3359,22 @@ html[data-theme="light"] .theme-notification-restart:hover {
     border-color: color-mix(in oklab, var(--accent) 38%, var(--border))
 }
 
+/* Locked is a state, not an error: a dashed edge says "not available yet"
+   without the alarm a red border would add. Nothing else changes, so the card
+   still reads as the same object in a different mode. */
+.tg-status.is-locked {
+    border-style: dashed
+}
+
+/* Telegram is sold with a subscription, so a locked section disables its
+   controls. Native styling greys the text barely at all, which leaves a
+   disabled switch looking pressable; this matches the dependent rows, which
+   already dim when their parent switch is off. */
+.settings-section[data-section="telegram"] :disabled {
+    opacity: .45;
+    cursor: not-allowed
+}
+
 /* Five cards is more breathing room than sixteen settings rows need at the
    shared 16px gap, which read as one continuous column. */
 .settings-section[data-section="telegram"] .settings-card {
@@ -3415,6 +3422,49 @@ html[data-theme="light"] .theme-notification-restart:hover {
     color: var(--muted);
     max-width: 62ch;
     margin: -10px 0 4px
+}
+
+/* A saved token is a fact, not a field. It renders as a static mask: no caret,
+   no focus ring, nothing that can be typed into by accident. The input only
+   exists while a new token is being pasted, so the two states never overlap. */
+.tg-token-saved,
+.tg-token-edit {
+    display: flex;
+    align-items: center;
+    gap: 8px
+}
+
+.tg-token-saved[hidden],
+.tg-token-edit[hidden],
+.tg-token-saved [hidden] {
+    display: none
+}
+
+.tg-token-dots {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 2px;
+    user-select: none
+}
+
+.tg-text-btn {
+    background: none;
+    border-color: transparent;
+    color: var(--accent);
+    padding: 6px 10px
+}
+
+.tg-text-btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border)
 }
 
 /* A switch that only means anything while another switch is on. Indented and

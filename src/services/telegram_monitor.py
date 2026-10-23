@@ -73,6 +73,50 @@ PAIR_TTL_S = 3600.0
 PAIR_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 PAIR_LEN = 8
 
+# Refusals are answered with a marker, not an empty string: the Settings panel
+# has to tell "you have no token yet" apart from "a chat already holds this
+# bot", and a blank code can only say "something failed". No marker can collide
+# with a real code, because PAIR_ALPHABET holds no "!".
+PAIR_REFUSED_NO_TOKEN = "!no-token"
+PAIR_REFUSED_ALREADY_PAIRED = "!already-paired"
+PAIR_REFUSED_NO_SUBSCRIPTION = "!no-subscription"
+
+# Telegram ships with the subscription, like OCR, embeddings and web search, so
+# it uses the SAME verdict they do: CortexAPIClient.has_subscription(). There is
+# no Telegram-specific entitlement rule. A plan that lapses freezes this bot at
+# the same moment it freezes the rest of Cortex, and a renewal unfreezes both.
+# The check reads the saved account copy, so it answers offline; it is cached
+# for ENTITLEMENT_TTL_S because it sits on every network path.
+SUB_REQUIRED_REASON = "Telegram needs a Cortex subscription"
+
+# Said once per rate window to a paired chat whose subscription lapsed. Silence
+# was the alternative, but a bot that simply stops looks broken rather than
+# unpaid, and the message names the way back.
+SUB_REQUIRED_REPLY = (
+    "Cortex needs a subscription before this bot can report runs or run "
+    "prompts. Open Cortex, then Help -> Upgrade to Pro. Renewing turns this "
+    "bot back on by itself."
+)
+
+# How long one entitlement verdict is reused. Every outbound send, poll and
+# prompt runs through _entitled(), so without this a busy run would ask the
+# account layer on every event; with it a renewal is picked up within a minute.
+ENTITLEMENT_TTL_S = 60.0
+
+# Sent to the chat that a new pairing displaced. Losing the channel must never
+# look like the phone simply went quiet.
+PAIR_MOVED_NOTICE = (
+    "Cortex was paired to another chat, so this one no longer receives reports "
+    "or runs prompts. Show a new code in Cortex to come back."
+)
+
+# Sent into a group that tries to pair. Groups share one chat id between every
+# member, so pairing there would hand the agent to all of them.
+PAIR_GROUP_REFUSED = (
+    "Pair Cortex in a private chat with this bot, not in a group. "
+    "Group members share one chat, so anyone in it could run prompts."
+)
+
 PAIR_POLL_S = 2.0
 
 # A long-lived code (30 or 90 days) must not mean one request every 2 s for
@@ -1048,6 +1092,7 @@ class TelegramMonitor:
         poll_interval_s: float = PAIR_POLL_S,
         on_prompt: Optional[Callable[[str], None]] = None,
         is_busy: Optional[Callable[[], bool]] = None,
+        is_subscribed: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
         self._stop = threading.Event()
@@ -1067,6 +1112,13 @@ class TelegramMonitor:
         self._poll_interval = float(poll_interval_s)
         self._on_prompt = on_prompt
         self._is_busy = is_busy
+        # Subscription verdict. None means no policy is wired, which is the
+        # case for this module's own tests: the monitor is transport, the
+        # application decides who may use it, and get_monitor() always wires
+        # the real check. See _entitled().
+        self._is_subscribed = is_subscribed
+        self._entitled_verdict = False
+        self._entitled_at: Optional[float] = None
         # A picture takes a separate callback, because its payload is not a
         # string. Set through set_image_handler; both default to off.
         self._on_image: Optional[Callable[[str, str, str], None]] = None
@@ -1080,6 +1132,9 @@ class TelegramMonitor:
         # Same reasoning for unsupported (non-text) messages: a burst of photos
         # is answered once, not once per photo.
         self._last_media_warn = 0.0
+        # And for a lapsed subscription: one explanation per window, so a phone
+        # left sending prompts does not turn into a wall of identical replies.
+        self._last_sub_warn = 0.0
         # Set by _handle_pair_updates so the update that paired is not also
         # fed to the prompt path.
         self._pair_update_id = None
@@ -1104,7 +1159,50 @@ class TelegramMonitor:
         except Exception:
             return False
 
+    def _entitled(self) -> bool:
+        """Whether this account may use Telegram at all.
+
+        The verdict comes from an injected predicate that reads the saved
+        account copy (no network, no blocking), and it is reused for
+        ENTITLEMENT_TTL_S because this sits on every send, poll and prompt.
+        get_monitor() wires the app's single subscription check into it.
+
+        With no predicate wired the answer is True: this class is transport,
+        and only the application knows about billing.
+
+        Failing closed matters more than convenience here: an exception in the
+        predicate, or an account whose plan lookup broke, must not hand out a
+        remote-control channel for free.
+        """
+        if self._is_subscribed is None:
+            return True
+        now = self._clock()
+        if self._entitled_at is not None and now - self._entitled_at < ENTITLEMENT_TTL_S:
+            return self._entitled_verdict
+        try:
+            verdict = bool(self._is_subscribed())
+        except Exception as e:
+            log.error("[Telegram] Subscription check failed: %s", type(e).__name__)
+            verdict = False
+        was = self._entitled_verdict
+        self._entitled_verdict = verdict
+        self._entitled_at = now
+        # Log the transitions only. This runs on every send, poll and prompt, so
+        # an unconditional line would fill the log during a normal session.
+        if not verdict and was is not False:
+            log.info("[Telegram] Frozen: the subscription is not active")
+        elif verdict and was is False:
+            log.info("[Telegram] Resumed: the subscription is active again")
+        return verdict
+
     def _ensure_client(self) -> Optional[TelegramClient]:
+        # The single choke point every network path passes through, so it is
+        # also where the subscription gate lives: no subscription, no client,
+        # therefore no getUpdates, no message and no upload. Checked before the
+        # cached client is returned, or a plan that lapsed mid-session would
+        # keep sending through the client it already built.
+        if not self._entitled():
+            return None
         if self._client is not None:
             return self._client
         # Without a token this is called on every status tick. Decrypting the
@@ -1158,6 +1256,7 @@ class TelegramMonitor:
         self._last_rate_warn = 0.0
         self._last_stale_warn = 0.0
         self._last_media_warn = 0.0
+        self._last_sub_warn = 0.0
         self._pair_update_id = None
         # A prompt waiting for a run must not outlive the pairing it came from.
         self.clear_queued_prompts()
@@ -1273,6 +1372,11 @@ class TelegramMonitor:
             log.warning("[Telegram] Photo not sent: %s", reason)
             return {"ok": False, "message_id": None, "reason": reason}
 
+        # Cheapest refusal first. The subscription is checked before the file
+        # is opened, so a lapsed account never spends a 10 MB read (or an
+        # upload) on a picture that cannot leave.
+        if not self._entitled():
+            return _fail(SUB_REQUIRED_REASON)
         if not path:
             return _fail("no file was given")
         name = os.path.basename(str(path))
@@ -1372,10 +1476,28 @@ class TelegramMonitor:
         self._pair_thread.start()
         return True
 
-    def begin_pairing(self) -> Optional[str]:
-        """Issue a code and start watching for ``/pair``. None when we cannot."""
+    def begin_pairing(self) -> str:
+        """Issue a code, or a refusal marker when it cannot be issued safely.
+
+        A code is refused while a chat is already paired. Today a second code
+        would be accepted and silently overwrite the saved chat, which is the
+        takeover path: whoever holds a fresh code moves the channel and the
+        owner's phone just goes quiet. Moving it stays possible, but it has to
+        be deliberate: unpair first, which is one click.
+
+        A code is also refused without an active subscription, and that is
+        checked before the token for a reason: _ensure_client() already answers
+        None for a lapsed account, so testing it first would report "no token"
+        to someone whose token is fine and whose plan simply ended.
+        """
+        if not self._entitled():
+            log.info("[Telegram] Pairing refused: no active subscription")
+            return PAIR_REFUSED_NO_SUBSCRIPTION
         if self._ensure_client() is None:
-            return None
+            return PAIR_REFUSED_NO_TOKEN
+        if (self._safe_config().chat_id or "").strip():
+            log.info("[Telegram] Pairing refused: a chat is already paired")
+            return PAIR_REFUSED_ALREADY_PAIRED
         ttl_s, reusable = self._pairing_policy()
         code = self._pairing.begin(ttl_s=ttl_s, reusable=reusable)
         self._ensure_poller()
@@ -1459,6 +1581,13 @@ class TelegramMonitor:
             if not (pairing_wanted or inbound_wanted):
                 return
             if self._ensure_client() is None:
+                if self._is_subscribed is not None and not self._entitled():
+                    # A paid feature that lapsed. Stay alive but silent and
+                    # retry slowly, so a renewal resumes the bot on its own
+                    # instead of needing a restart. The entitlement cache is
+                    # shorter than this wait, so every pass asks again.
+                    stop_event.wait(PAIR_POLL_MAX_S)
+                    continue
                 return
             updates = self._client.get_updates(offset=offset)
             if stop_event.is_set():
@@ -1499,17 +1628,44 @@ class TelegramMonitor:
         for update in updates or []:
             message = update.get("message") or {}
             chat_id = (message.get("chat") or {}).get("id")
-            if self._pairing.submit(message.get("text") or "", chat_id, now):
+            text = message.get("text") or ""
+            if not self._is_private_chat(message.get("chat")):
+                # A group shares one chat id between every member, so pairing
+                # there would hand the agent to all of them. The code is left
+                # unspent, so an honest paste into the wrong chat costs nothing
+                # but one message.
+                if chat_id not in (None, "") and _PAIR_CMD_RE.match(text.strip()):
+                    if self._client:
+                        self._client.send_text(str(chat_id), PAIR_GROUP_REFUSED)
+                    log.info("[Telegram] Refused a pairing attempt from a group chat")
+                continue
+            if self._pairing.submit(text, chat_id, now):
                 # Remembered so the same update is not also offered to the
                 # prompt path, which would answer "that code is not valid any
                 # more" one message after "Paired".
                 self._pair_update_id = update.get("update_id")
                 paired_chat = str(chat_id)
+                # Read before the save: this is the chat that is about to lose
+                # the channel, if any.
+                previous = (self._safe_config().chat_id or "").strip()
                 try:
                     telegram_config.set_chat_id(paired_chat)
                     telegram_config.set_enabled(True)
                 except Exception as e:
                     log.error("[Telegram] Could not save the paired chat: %s", type(e).__name__)
+                if previous and not self._same_chat(paired_chat, previous):
+                    # Moving the channel is allowed but never silent: the chat
+                    # that just lost it is told, so a takeover cannot be
+                    # mistaken for the phone simply going quiet.
+                    if self._client:
+                        try:
+                            self._client.send_text(previous, PAIR_MOVED_NOTICE)
+                        except Exception as e:
+                            log.error(
+                                "[Telegram] Could not notice the old chat: %s",
+                                type(e).__name__,
+                            )
+                    log.info("[Telegram] The paired chat changed to another chat")
                 if self._client:
                     self._client.send_text(paired_chat, "Paired. Cortex will report runs here.")
                 if self._on_paired:
@@ -1526,6 +1682,27 @@ class TelegramMonitor:
     # A prompt may start a run. It may never approve a permission card or
     # answer a question: those stay in Cortex, on the PC. Everything below is
     # a refusal first and a feature second.
+
+    @staticmethod
+    def _is_private_chat(chat) -> bool:
+        """True only for a one-to-one chat with the bot.
+
+        Telegram ids are positive in a private chat and negative in groups,
+        supergroups and channels, so both signals are read: the type is
+        authoritative when Telegram sends it, and the sign still catches a
+        group when an update omits it.
+        """
+        if not isinstance(chat, dict):
+            return False
+        kind = chat.get("type")
+        if kind in ("group", "supergroup", "channel"):
+            return False
+        if kind == "private":
+            return True
+        try:
+            return int(chat.get("id")) > 0
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _same_chat(candidate: str, paired: str) -> bool:
@@ -1748,6 +1925,16 @@ class TelegramMonitor:
         if not paired:
             return 0
         moment = time.time() if now is None else now
+        if not self._entitled():
+            # Checked once per batch, after the cheap settings tests. Nothing
+            # is sent back: replying would need the very network access the
+            # gate is refusing, and a bot that keeps answering "you cannot use
+            # me" is still a bot that answers. One line per window in the log,
+            # so the reason is findable without a flood.
+            if moment - self._last_sub_warn > INBOUND_RATE_WINDOW_S:
+                self._last_sub_warn = moment
+                log.info("[Telegram] Ignored prompts: no active subscription")
+            return 0
         accepted = 0
         for update in updates or []:
             if skip and update.get("update_id") in skip:
@@ -1758,6 +1945,11 @@ class TelegramMonitor:
                 continue
             if not self._same_chat(str(chat_id), paired):
                 # Silence, exactly like a stranger with a pairing code.
+                continue
+            if not self._is_private_chat(message.get("chat")):
+                # The chat id matches, but in a group every member shares it,
+                # so any of them could drive the agent. Prompts stay one-to-one.
+                log.info("[Telegram] Ignored a prompt from a group chat")
                 continue
             sender = message.get("from") or {}
             if sender.get("is_bot"):
@@ -2218,12 +2410,35 @@ _shared: Optional[TelegramMonitor] = None
 _shared_lock = threading.Lock()
 
 
+def _subscription_verdict() -> bool:
+    """Whether the signed-in account may use Telegram.
+
+    Exactly the check OCR, embeddings and web search use:
+    CortexAPIClient.has_subscription(). Keeping one verdict for the whole app is
+    the point: a plan that lapses freezes everything together, and a renewal
+    unfreezes everything together, so this bot can never run on a rule of its
+    own.
+
+    Answers from the saved account copy (no network, no blocking) and refreshes
+    behind the scenes, so the freeze happens on the same tick as the rest of
+    Cortex.
+
+    Fail closed: an account that cannot be read is not an entitled one.
+    """
+    try:
+        from src.core.cortex_api import get_api_client
+        return bool(get_api_client().has_subscription())
+    except Exception as e:
+        log.error("[Telegram] Could not read the subscription: %s", type(e).__name__)
+        return False
+
+
 def get_monitor() -> TelegramMonitor:
     global _shared
     if _shared is None:
         with _shared_lock:
             if _shared is None:
-                _shared = TelegramMonitor()
+                _shared = TelegramMonitor(is_subscribed=_subscription_verdict)
     return _shared
 
 

@@ -1948,6 +1948,14 @@ scope: project
                 "enabled": cfg.enabled,
                 "paired": bool(cfg.chat_id),
                 "hasToken": tg.has_token(),
+                # Telegram ships with the subscription, so `subscribed` is the
+                # app's single entitlement check (has_subscription()), the same
+                # one OCR, embeddings and web search read. There is no
+                # Telegram-only rule and no second state to report: the card
+                # locks when the plan lapses and unlocks when it renews. Read
+                # from the saved account copy, so this never blocks the GUI
+                # thread. Absent field (older page) is treated as allowed.
+                "subscribed": self._telegram_subscribed(),
                 "events": sorted(cfg.events),
                 "quietEnabled": cfg.quiet_enabled,
                 "quietStart": cfg.quiet_start,
@@ -1962,6 +1970,21 @@ scope: project
         except Exception as exc:
             log.warning(f"[MemoryManager] getTelegramSettings failed: {exc}")
             return "{}"
+
+    def _telegram_subscribed(self) -> bool:
+        """Whether this account may use Telegram at all, for the settings page.
+
+        The same call every other gated feature makes: has_subscription(). It
+        answers from the saved account copy, so this never blocks the GUI thread
+        and still works offline. Fail closed, the same direction the monitor's
+        own gate takes.
+        """
+        try:
+            from src.core.cortex_api import get_api_client
+            return bool(get_api_client().has_subscription())
+        except Exception as exc:
+            log.debug(f"[MemoryManager] Telegram subscription verdict unavailable: {exc}")
+            return False
 
     @pyqtSlot(str, result=str)
     def saveTelegramToken(self, token: str) -> str:
@@ -2021,7 +2044,13 @@ scope: project
 
     @pyqtSlot(result=str)
     def startTelegramPairing(self) -> str:
-        """Issue a pairing code and start watching for /pair. Empty on failure."""
+        """Issue a pairing code and start watching for /pair.
+
+        Returns the code, or a ``!`` marker when pairing was refused (no token,
+        a chat already paired, or no active subscription), so the panel can say
+        which it was instead of reporting every refusal as a missing token.
+        Empty only on an exception.
+        """
         try:
             from src.services.telegram_monitor import get_monitor
             code = get_monitor().begin_pairing()
@@ -2038,6 +2067,10 @@ scope: project
             monitor = get_monitor()
             if not monitor.has_chat():
                 return "unpaired"
+            # The monitor would drop the message anyway, so say why here rather
+            # than report "queued" for something that can never arrive.
+            if not self._telegram_subscribed():
+                return "!no-subscription"
             monitor.send_test()
             return "queued"
         except Exception as exc:

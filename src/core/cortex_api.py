@@ -745,6 +745,13 @@ class CortexAPIClient:
         except Exception:
             return False
 
+    # One entitlement gate, deliberately. Telegram used to consult a stricter
+    # sibling of has_subscription() (a billed plan, trial excluded), which meant
+    # two different answers to "may this account use the product" and a feature
+    # that froze on a different schedule from the rest of Cortex. Every feature
+    # now reads has_subscription(): a lapsed plan locks them together, and a
+    # renewal unlocks them together. Do not add a second verdict here.
+
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     def close(self):
