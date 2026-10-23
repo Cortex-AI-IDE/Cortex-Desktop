@@ -2904,13 +2904,12 @@ def _mcp_web_tool_names() -> List[str]:
     """
     try:
         from src.services.mcp_manager import get_mcp_manager
-        names: List[str] = []
-        for d in get_mcp_manager().get_tool_definitions():
-            n = d.get("function", {}).get("name", "")
-            if any(k in n.lower() for k in ("search", "fetch", "crawl", "browse", "extract")):
-                names.append(n)
-        return names
-    except Exception:
+        from src.ai.mcp_web import web_tool_names
+        return web_tool_names(
+            d.get("function", {}).get("name", "")
+            for d in get_mcp_manager().get_tool_definitions())
+    except Exception as e:
+        log.debug(f"[MCP] web tool lookup failed, no redirect offered: {e}")
         return []
 
 
