@@ -14,6 +14,7 @@ and the same lessons (see MACOS-PORT.md). Two of those lessons are load-bearing:
 Build with:  python -m PyInstaller cortex-macos.spec --noconfirm
 Output:      dist/Cortex.app
 """
+import importlib.util
 import os
 import re
 
@@ -25,6 +26,44 @@ from PyInstaller.utils.hooks import (
 
 block_cipher = None
 ROOT = os.path.abspath('.')
+
+
+def collect_package_modules(package):
+    """Every module under a package, namespace packages included.
+
+    collect_submodules() goes through pkgutil.iter_modules(), which only sees a
+    directory as a package when it holds __init__.py. src/agent/src and
+    src/agent/src/tools have none, so on CPython 3.14 collect_submodules(
+    'src.agent') returns 1 name instead of 140 and the bundled app ships with no
+    agent tools at all. Walking the filesystem has no such rule.
+    """
+    try:
+        spec = importlib.util.find_spec(package)
+    except (ImportError, ValueError):
+        return []
+    if spec is None or not spec.submodule_search_locations:
+        return []
+
+    names = set()
+    for base in spec.submodule_search_locations:
+        base = os.path.abspath(base)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(
+                d for d in dirnames if d != '__pycache__' and d.isidentifier()
+            )
+            rel = os.path.relpath(dirpath, base)
+            parts = [] if rel == '.' else rel.split(os.sep)
+            if any(not part.isidentifier() for part in parts):
+                continue
+            prefix = '.'.join([package] + parts)
+            for filename in sorted(filenames):
+                if not filename.endswith('.py'):
+                    continue
+                stem = filename[:-3]
+                if not stem.isidentifier():
+                    continue
+                names.add(prefix if stem == '__init__' else f'{prefix}.{stem}')
+    return sorted(names)
 
 
 def _read_version() -> str:
@@ -192,16 +231,21 @@ hiddenimports += collect_submodules('pypdfium2_raw')
 pdfium_libs = collect_dynamic_libs('pypdfium2_raw')
 
 # Every Cortex src.* submodule, so a lazy importlib.import_module call resolves
-# in the frozen app exactly as it does in development.
-hiddenimports += collect_submodules('src.ai')
-hiddenimports += collect_submodules('src.core')
-hiddenimports += collect_submodules('src.ui')
-hiddenimports += collect_submodules('src.utils')
-hiddenimports += collect_submodules('src.config')
-hiddenimports += collect_submodules('src.coordinator')
-hiddenimports += collect_submodules('src.plugin')
-hiddenimports += collect_submodules('src.services')
-hiddenimports += collect_submodules('src.agent')
+# in the frozen app exactly as it does in development. Filesystem walk, not
+# collect_submodules(): see collect_package_modules() above for why the
+# import-based collector loses 139 of the 140 src.agent modules.
+_COLLECT_PACKAGES = ('src.ai', 'src.core', 'src.ui', 'src.utils', 'src.config',
+                     'src.coordinator', 'src.plugin', 'src.services', 'src.agent',
+                     # src.engine is loaded by string inside
+                     # agent_bridge._load_engine_tool's try/except, which logs a
+                     # warning and falls back, so a miss here is silent.
+                     'src.engine')
+for _pkg in _COLLECT_PACKAGES:
+    _mods = collect_package_modules(_pkg)
+    print(f"INFO: collected {len(_mods):>4} modules from {_pkg}")
+    hiddenimports += _mods
+
+hiddenimports = sorted(set(hiddenimports))
 
 a = Analysis(
     [os.path.join(ROOT, 'src', 'main.py')],
