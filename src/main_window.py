@@ -11771,6 +11771,7 @@ class CortexMainWindow(QMainWindow):
         )
         connections = (
             (self._ai_agent.exploreFile, monitor.on_explore_file),
+            (self._ai_agent.tool_activity, monitor.on_tool_activity),
             (self._ai_agent.thinking_started, lambda: monitor.on_thinking(True)),
             (self._ai_agent.thinking_stopped, lambda: monitor.on_thinking(False)),
             (self._ai_agent.task_progress_update, monitor.on_task_progress),

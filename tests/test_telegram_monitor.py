@@ -373,12 +373,24 @@ def test_pair_updates_bind_and_answer_once(no_settings_writes):
     assert monitor._handle_pair_updates(updates, now=1.0) is True
     assert paired == ["42"]
     sends = transport.payloads("sendMessage")
-    assert len(sends) == 1
-    assert sends[0]["chat_id"] == "42"
-    assert "Paired" in sends[0]["text"]
+    # Two sends: the first chat is told its code was wrong, the second pairs.
+    # The wrong attempt no longer passes in silence, because the owner reading
+    # that silence had no way to tell a typo from a dead bot.
+    assert len(sends) == 2
+    assert sends[0]["chat_id"] == "99"
+    assert sends[0]["text"] == tm.PAIR_WRONG_CODE
+    assert sends[1]["chat_id"] == "42"
+    assert "Paired" in sends[1]["text"]
 
 
-def test_a_stranger_gets_no_reply(no_settings_writes):
+def test_a_wrong_code_is_answered_inside_the_pairing_window(no_settings_writes):
+    """A stranger, however, is answered only while a code is outstanding.
+
+    This replaces the old absolute rule ("a wrong code is never answered").
+    That rule hid the bot from a stranger, but it also hid the owner's typo,
+    and the owner is the one who just pressed Show code. The window is now
+    bounded and closes with the code, so nothing is confirmed once it lapses.
+    """
     transport = FakeTransport()
     monitor = tm.TelegramMonitor(
         client=tm.TelegramClient(transport, sleep=lambda _s: None)
@@ -386,7 +398,9 @@ def test_a_stranger_gets_no_reply(no_settings_writes):
     monitor.pairing.begin(now=0.0)
     updates = [{"update_id": 1, "message": {"chat": {"id": 99}, "text": "/pair WRONGCOD"}}]
     assert monitor._handle_pair_updates(updates, now=1.0) is False
-    assert transport.calls == []
+    assert transport.payloads("sendMessage") == [
+        {"chat_id": "99", "text": tm.PAIR_WRONG_CODE, "disable_notification": False}
+    ]
 
 
 def test_an_unlimited_code_never_expires():
@@ -1357,17 +1371,20 @@ def test_largest_photo_picks_the_biggest_and_ignores_junk():
     ])["file_id"] == "b"
 
 
-def test_voice_and_files_are_named_as_other_media():
+def test_files_and_video_are_named_as_other_media():
+    # A voice note is transcribed now, so it is not "other media" any more.
+    # Everything else stays refused, and the reply has to say which.
     monitor, transport, prompts = make_inbound()
     monitor._handle_inbound_updates(
-        [inbound_update(None, voice={"file_id": "v", "duration": 3})],
+        [inbound_update(None, document={"file_id": "d", "file_size": 10})],
         make_cfg(inbound_enabled=True),
         now=10001.0,
     )
     assert prompts == []
     reply = inbound_texts(transport)[0]
-    assert "Only text and pictures reach Cortex" in reply
-    assert "voice" in reply.lower()
+    assert reply == tm.INBOUND_MEDIA_REPLY
+    assert "Files" in reply
+    assert "voice notes" in reply
 
 
 def test_a_strangers_photo_is_not_answered():

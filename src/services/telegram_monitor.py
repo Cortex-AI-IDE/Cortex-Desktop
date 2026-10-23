@@ -117,6 +117,22 @@ PAIR_GROUP_REFUSED = (
     "Group members share one chat, so anyone in it could run prompts."
 )
 
+# A wrong code used to be answered with nothing at all, on the reasoning that an
+# error reply confirms the bot exists. That reasoning only holds for a stranger.
+# It is wrong for the owner, who has just pressed Show code: their own typo
+# produced total silence, which reads as a broken bot rather than a bad paste.
+# These are said only inside an active pairing window, so the stranger rule is
+# intact everywhere else.
+PAIR_WRONG_CODE = (
+    "That code does not match. Check the code shown in Cortex and send it "
+    "again as /pair CODE."
+)
+PAIR_NEEDS_PREFIX = "Send the code as /pair CODE, for example /pair AB3D7K9Q."
+
+# How many failed attempts get an answer. Past this the window goes silent
+# again: whoever is typing has had every hint this side can give.
+MAX_PAIR_ANSWERS = 5
+
 PAIR_POLL_S = 2.0
 
 # A long-lived code (30 or 90 days) must not mean one request every 2 s for
@@ -187,6 +203,8 @@ CONFIRM_EMOJI = "\u2705"
 
 INBOUND_HELP = (
     "Send a message and Cortex runs it as a prompt.\n"
+    "A picture or a voice note works too: the caption or the transcript "
+    "becomes the prompt.\n"
     "/status   what Cortex is doing now\n"
     "/help     this message\n"
     "Approvals and questions are still answered in Cortex, on the PC."
@@ -251,8 +269,41 @@ INBOUND_NO_VISION_REPLY = (
     "run. Switch to a vision model in Cortex, or send the request as text."
 )
 
+# A Telegram voice note is Opus in an OGG container, roughly 1-4 KB per
+# second. The cap matches the picture cap: room for a few minutes of speech,
+# small enough that a burst cannot pile up multi-megabyte blobs in memory.
+INBOUND_MAX_VOICE_BYTES = 4 * 1024 * 1024
+
+# Voice notes are transcribed by the same server call the mic button uses,
+# which is slow and billed (Malayalam needed tens of seconds in testing).
+# Past this length the honest move is to refuse before downloading: a
+# 40-minute note would hold the queue and spend money on nothing usable.
+INBOUND_MAX_VOICE_SECONDS = 180
+
+# Telegram delivers voice notes as OGG/Opus and does not re-encode them.
+INBOUND_VOICE_MIME = "audio/ogg"
+
+INBOUND_VOICE_TOO_LONG = (
+    "That voice note is {seconds} seconds long. Cortex transcribes up to "
+    "{limit} seconds, so send the rest as a second note or type it."
+)
+
+INBOUND_VOICE_TOO_BIG = (
+    "That voice note is too large. Cortex reads voice notes up to {limit} MB."
+)
+
+INBOUND_VOICE_FAILED = (
+    "Cortex could not fetch that voice note. Send it again, or type the "
+    "request."
+)
+
+INBOUND_VOICE_EMPTY = (
+    "Cortex could not hear any words in that voice note. Try again closer to "
+    "the microphone, or type the request."
+)
+
 INBOUND_MEDIA_REPLY = (
-    "Only text and pictures reach Cortex. Voice notes, files, stickers and "
+    "Only text, pictures and voice notes reach Cortex. Files, stickers and "
     "video are not read. Send the request as text."
 )
 
@@ -288,6 +339,33 @@ def run_in_flight(
         return True
     moment = time.monotonic() if now is None else now
     return (moment - since) < grace_s
+
+
+def voiced_update(message: dict, text: str) -> dict:
+    """A text message standing in for the voice note it was transcribed from.
+
+    Keeping the original chat, sender, update id and date is the whole point:
+    the transcript then re-enters ``_handle_inbound_updates`` and meets the
+    same gates as typing - paired chat, private chat, human sender, length,
+    staleness, rate limit and the busy queue. None of that is re-implemented
+    for voice, so the two paths cannot drift apart.
+    """
+    return {
+        "update_id": message.get("update_id"),
+        "message": {
+            "message_id": message.get("message_id"),
+            "chat": message.get("chat") or {},
+            "from": message.get("from") or {},
+            "date": message.get("date"),
+            "text": text,
+            # Marks this as the second pass through the prompt path. The note
+            # was already checked for age when it was queued; transcription
+            # can take most of a minute, and that wait is not a backlog. Without
+            # this a slow Malayalam transcript would age past the stale limit
+            # and be dropped after being understood correctly.
+            "voice_transcript": True,
+        },
+    }
 
 # How much of the final answer rides along with the "finished" message. The cap
 # is applied BEFORE any regex: several whole-text passes over a multi-megabyte
@@ -508,6 +586,77 @@ def clip(text: object, limit: int = MAX_FIELD) -> str:
     return value
 
 
+def cap(text: object, limit: int = MAX_TEXT) -> str:
+    """Length-capped text that keeps its line breaks.
+
+    ``clip`` collapses whitespace, which is right for one field read off the
+    model and wrong for a card built here. Editing a card through ``clip``
+    delivered the same text as a single paragraph, so the first send kept its
+    lines and every refresh after it lost them.
+    """
+    try:
+        value = "" if text is None else str(text)
+    except Exception:
+        return ""
+    if len(value) > limit:
+        return value[: limit - 1] + "\u2026"
+    return value
+
+
+# The phone card is plain text, so the tool has to be named in words. Before
+# this the card said "Reading" for every explore tool (Read, Grep and Glob all
+# arrived the same way) and the file was the only thing that identified it.
+_TOOL_LABELS = {
+    "read": "Read",
+    "grep": "Grep",
+    "glob": "Find",
+    "ls": "List",
+    "list_directory": "List",
+    "web_search": "Web",
+    "web_fetch": "Fetch",
+    "semantic_search": "Search",
+    "edit_file": "Edit",
+    "write_file": "Write",
+    "run_command": "Run",
+}
+# File-changing activity names. "Read" and friends also arrive on
+# ``tool_activity``; counting them there would double every read, because the
+# explore signal already carries them.
+_EDIT_ACTIVITIES = frozenset({"edit_file", "write_file"})
+_SHELL_ACTIVITIES = frozenset({"run_command"})
+_RECENT_LIMIT = 3
+_PATH_LIMIT = 64
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def short_path(path: object, project: str = "") -> str:
+    """Project-relative, forward-slashed and capped.
+
+    The absolute path is what made the card unreadable: it opened with
+    ``C:\\Users\\...`` and the 120-char clip then cut the filename off the end,
+    so the only part worth reading was the part that disappeared.
+    """
+    try:
+        text = str(path or "").replace("\\", "/").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    name = project.strip() if project else ""
+    marker = f"/{name}/" if name else ""
+    if marker and marker in text:
+        text = text.split(marker, 1)[1]
+    elif text.count("/") > 2:
+        text = "/".join(text.split("/")[-3:])
+    if len(text) > _PATH_LIMIT:
+        keep = _PATH_LIMIT - 1
+        text = "\u2026" + text[-keep:]
+    return text
+
+
 def plain_summary(text: object, limit: int = SUMMARY_MAX_CHARS) -> str:
     """Telegram-ready plain text from one finished answer.
 
@@ -624,6 +773,17 @@ def is_quiet(when, start: str, end: str) -> bool:
 def make_pair_code(rng=None) -> str:
     chooser = rng or secrets
     return "".join(chooser.choice(PAIR_ALPHABET) for _ in range(PAIR_LEN))
+
+
+def _looks_like_bare_code(text: str) -> bool:
+    """True for a pasted code with the /pair prefix left off.
+
+    This is the mistake Settings invites: the panel shows the code on its own,
+    so it is easy to paste just that. Recognising the shape lets the bot teach
+    the format instead of ignoring the message.
+    """
+    token = (text or "").strip().upper()
+    return len(token) == PAIR_LEN and all(ch in PAIR_ALPHABET for ch in token)
 
 
 # ---------------------------------------------------------------------------
@@ -826,7 +986,7 @@ class TelegramClient:
         params: dict = {
             "chat_id": chat_id,
             "message_id": int(message_id),
-            "text": clip(text, MAX_TEXT) if parse_mode is None else text,
+            "text": cap(text, MAX_TEXT) if parse_mode is None else text,
         }
         if parse_mode:
             params["parse_mode"] = parse_mode
@@ -978,6 +1138,9 @@ class PairingManager:
         # None while a code has no deadline, so 0.0 can never be mistaken for
         # "expired at the epoch".
         self._expires_at: Optional[float] = None
+        # Failed attempts answered since this code was issued. Reset per code so
+        # a fresh Show code gets its own handful of hints.
+        self._answers = 0
 
     @property
     def reusable(self) -> bool:
@@ -1001,6 +1164,7 @@ class PairingManager:
                 self._reusable = bool(reusable)
             self._code = code
             self._expires_at = None if self._ttl is None else moment + self._ttl
+            self._answers = 0
         return code
 
     def _expired(self, moment: float) -> bool:
@@ -1019,6 +1183,7 @@ class PairingManager:
         with self._lock:
             self._code = None
             self._expires_at = None
+            self._answers = 0
 
     def submit(self, text: str, chat_id, now: Optional[float] = None) -> bool:
         """True when ``text`` carries the pending code.
@@ -1047,6 +1212,32 @@ class PairingManager:
                 self._expires_at = None
             return True
 
+    def answer_for_miss(self, text: str, chat_id, now: Optional[float] = None) -> Optional[str]:
+        """The reply a failed attempt should get, or None to stay silent.
+
+        Silence is still the rule for a stranger: no code outstanding means no
+        answer, so someone who merely found the bot learns nothing. Inside an
+        active pairing window the owner is the one typing, and their own typo
+        must not look like a dead bot. The count is bounded so the window cannot
+        be turned into a free oracle.
+        """
+        if chat_id in (None, ""):
+            return None
+        if not isinstance(text, str):
+            return None
+        stripped = text.strip()
+        bare = _looks_like_bare_code(stripped)
+        if not bare and not _PAIR_CMD_RE.match(stripped):
+            return None
+        moment = time.time() if now is None else now
+        with self._lock:
+            if not self._code or self._expired(moment):
+                return None
+            self._answers += 1
+            if self._answers > MAX_PAIR_ANSWERS:
+                return None
+        return PAIR_NEEDS_PREFIX if bare else PAIR_WRONG_CODE
+
 
 # ---------------------------------------------------------------------------
 # Live run state
@@ -1058,6 +1249,10 @@ class RunState:
     project: str = ""
     started_at: float = 0.0
     activity: str = ""
+    # The last few tool calls, oldest first. One line was not a picture of the
+    # run: it was overwritten by every call, so the card only ever showed the
+    # newest and the owner could not tell what had actually happened.
+    recent: list = field(default_factory=list)
     files_read: int = 0
     files_edited: int = 0
     context_used: int = 0
@@ -1093,6 +1288,7 @@ class TelegramMonitor:
         on_prompt: Optional[Callable[[str], None]] = None,
         is_busy: Optional[Callable[[], bool]] = None,
         is_subscribed: Optional[Callable[[], bool]] = None,
+        voice_language: Optional[Callable[[], str]] = None,
     ) -> None:
         self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
         self._stop = threading.Event()
@@ -1142,6 +1338,15 @@ class TelegramMonitor:
         # by the poller thread, popped by the GUI thread when the run ends, so
         # every touch is under _lock.
         self._queued_prompts: deque = deque()
+        # Voice notes wait here while they are transcribed. One worker drains
+        # them in order, so two notes keep the sequence they were spoken in.
+        self._voice_queue: "queue.Queue" = queue.Queue()
+        self._voice_thread: Optional[threading.Thread] = None
+        # Injected in tests; None means use src.core.voice_input, the same
+        # call the mic button makes. See _take_voice().
+        self._transcribe: Optional[Callable] = None
+        # None falls back to the language already chosen next to the mic.
+        self._voice_language = voice_language
         self._run = RunState()
         self._pairing = PairingManager()
         self.stats: dict = {"sent": 0, "edited": 0, "dropped": 0, "failed": 0, "prompts": 0}
@@ -1220,6 +1425,17 @@ class TelegramMonitor:
             log.error("[Telegram] Could not build transport: %s", type(e).__name__)
             return None
         return self._client
+
+    def invalidate_client(self) -> None:
+        """Drop the cached transport so the next call reads the current token.
+
+        Pasting a new token without unpairing used to leave the old bot in
+        place: the client is cached with the token it was built from, and only
+        revoke_pairing ever dropped it. A replaced token then took effect only
+        after a restart, which looks exactly like a bot that ignores messages.
+        """
+        self._client = None
+        self._client_probe = 0.0
 
     def start(self) -> None:
         if self._worker and self._worker.is_alive():
@@ -1313,6 +1529,10 @@ class TelegramMonitor:
 
     def on_explore_file(self, raw_json) -> None:
         self.enqueue({"kind": "explore", "raw": raw_json})
+
+    def on_tool_activity(self, name, info, phase) -> None:
+        """Edits and commands, already JSON. Parsed on the worker, never here."""
+        self.enqueue({"kind": "tool", "name": name, "info": info, "phase": phase})
 
     def on_thinking(self, active: bool) -> None:
         self.enqueue({"kind": "thinking", "active": bool(active)})
@@ -1501,6 +1721,10 @@ class TelegramMonitor:
         ttl_s, reusable = self._pairing_policy()
         code = self._pairing.begin(ttl_s=ttl_s, reusable=reusable)
         self._ensure_poller()
+        # The code itself never reaches the log. This line exists so the next
+        # "it did nothing" report can be answered from the file instead of
+        # guessed at: issued, then paired, or issued and never answered.
+        log.info("[Telegram] Pairing code issued (reusable=%s)", bool(reusable))
         return code
 
     def set_prompt_handler(
@@ -1668,14 +1892,22 @@ class TelegramMonitor:
                     log.info("[Telegram] The paired chat changed to another chat")
                 if self._client:
                     self._client.send_text(paired_chat, "Paired. Cortex will report runs here.")
+                log.info("[Telegram] Paired with a chat")
                 if self._on_paired:
                     try:
                         self._on_paired(paired_chat)
                     except Exception as e:
                         log.error("[Telegram] on_paired callback failed: %s", type(e).__name__)
                 return True
-            # A wrong code or a stranger gets nothing at all. Silence is the
-            # point: an error reply confirms the bot exists.
+            # Silence is still the default, but not while a code is outstanding
+            # from this desktop: the owner typing their own code wrong must be
+            # told, or a typo looks exactly like a dead bot. answer_for_miss
+            # keeps a stranger silent and the number of answers bounded.
+            reply = self._pairing.answer_for_miss(text, chat_id, now)
+            if reply:
+                if self._client:
+                    self._client.send_text(str(chat_id), reply)
+                log.info("[Telegram] A pairing attempt did not match the pending code")
         return False
 
     # -- inbound prompts ---------------------------------------------------
@@ -1728,14 +1960,20 @@ class TelegramMonitor:
         return now - sent_at > INBOUND_STALE_S
 
     def _allow_rate(self, now: float) -> bool:
-        """True when one more prompt fits inside the minute. Poller thread only."""
+        """True when one more prompt fits inside the minute.
+
+        Called from the poller for typed text and from the voice worker once a
+        transcript is ready, so the window is updated under the lock: two
+        threads counting the same minute must not add up to two minutes.
+        """
         cutoff = now - INBOUND_RATE_WINDOW_S
-        while self._inbound_times and self._inbound_times[0] <= cutoff:
-            self._inbound_times.popleft()
-        if len(self._inbound_times) >= INBOUND_RATE_MAX:
-            return False
-        self._inbound_times.append(now)
-        return True
+        with self._lock:
+            while self._inbound_times and self._inbound_times[0] <= cutoff:
+                self._inbound_times.popleft()
+            if len(self._inbound_times) >= INBOUND_RATE_MAX:
+                return False
+            self._inbound_times.append(now)
+            return True
 
     def _react(self, chat_id: str, message_id, emoji: str) -> bool:
         """Best effort acknowledgement. Never raises."""
@@ -1904,6 +2142,151 @@ class TelegramMonitor:
             return False
         return True
 
+    def set_voice_transcriber(self, fn) -> None:
+        """Replace the transcription call. Tests use this; the app never does."""
+        self._transcribe = fn
+
+    def _voice_lang(self) -> str:
+        """The language chosen next to the mic, so the phone transcribes the
+        same way the desktop does. No second dropdown, no second default."""
+        if self._voice_language is not None:
+            try:
+                return str(self._voice_language() or "en")
+            except Exception:
+                return "en"
+        try:
+            from src.config.settings import get_settings
+            return str(
+                get_settings().get("ui", "voice_language", default="en") or "en"
+            )
+        except Exception:
+            return "en"
+
+    def _accept_voice(
+        self,
+        chat_id: str,
+        message_id,
+        voice: dict,
+        message: dict,
+        now: float,
+    ) -> bool:
+        """Queue one voice note for transcription. True when it was taken.
+
+        Every refusal that needs no network happens here, on the poller: a
+        note that is too long, too old, too large, or arrives while nothing is
+        taking prompts is answered immediately instead of costing a download.
+        """
+        if self._on_prompt is None:
+            self._reply(chat_id, "Cortex is not ready to take prompts.", message_id)
+            return False
+        if self._stale(message, now):
+            # Same answer a stale text message gets. Refused here rather than
+            # after transcription: there is no point paying to transcribe a
+            # note that predates this session.
+            if now - self._last_stale_warn > INBOUND_RATE_WINDOW_S:
+                self._last_stale_warn = now
+                self._reply(chat_id, INBOUND_STALE_REPLY, message_id)
+            log.info("[Telegram] Dropped a voice note sent before this session")
+            return False
+        try:
+            seconds = int(voice.get("duration") or 0)
+        except (TypeError, ValueError):
+            seconds = 0
+        if seconds > INBOUND_MAX_VOICE_SECONDS:
+            self._reply(
+                chat_id,
+                INBOUND_VOICE_TOO_LONG.format(
+                    seconds=seconds, limit=INBOUND_MAX_VOICE_SECONDS
+                ),
+                message_id,
+            )
+            log.info("[Telegram] Refused a voice note: %ss is over the limit", seconds)
+            return False
+        try:
+            declared = int(voice.get("file_size") or 0)
+        except (TypeError, ValueError):
+            declared = 0
+        if declared > INBOUND_MAX_VOICE_BYTES:
+            self._reply(
+                chat_id,
+                INBOUND_VOICE_TOO_BIG.format(
+                    limit=INBOUND_MAX_VOICE_BYTES // (1024 * 1024)
+                ),
+                message_id,
+            )
+            return False
+        file_id = voice.get("file_id")
+        if not file_id:
+            self._reply(chat_id, INBOUND_VOICE_FAILED, message_id)
+            return False
+        # Eyes now: the transcript is tens of seconds away, and silence in
+        # between is indistinguishable from a message that never arrived.
+        self._react(chat_id, message_id, ACK_EMOJI)
+        self._voice_queue.put((chat_id, message_id, str(file_id), message))
+        self._start_voice_worker()
+        return True
+
+    def _start_voice_worker(self) -> None:
+        """Start the transcriber if it is not up. Idempotent and cheap."""
+        if self._voice_thread is not None and self._voice_thread.is_alive():
+            return
+        self._voice_thread = threading.Thread(
+            target=self._voice_loop, name="telegram-voice", daemon=True
+        )
+        self._voice_thread.start()
+
+    def _voice_loop(self) -> None:
+        """One worker, so transcripts keep the order the notes arrived in."""
+        while True:
+            chat_id, message_id, file_id, message = self._voice_queue.get()
+            try:
+                self._take_voice(chat_id, message_id, file_id, message)
+            except Exception as e:
+                # One unusable note must not stop every note after it.
+                log.error("[Telegram] Voice note failed: %s", type(e).__name__)
+            finally:
+                self._voice_queue.task_done()
+
+    def _take_voice(self, chat_id: str, message_id, file_id, message: dict) -> None:
+        """Download, transcribe, then re-enter the ordinary prompt path.
+
+        ``download_photo`` is used for the bytes because it is the generic
+        getFile + bounded download: nothing in it is JPEG-specific.
+        """
+        if not self._entitled():
+            # The plan can lapse between the queue and here.
+            return
+        client = self._ensure_client()
+        if client is None:
+            self._reply(chat_id, INBOUND_VOICE_FAILED, message_id)
+            return
+        data = client.download_photo(file_id, INBOUND_MAX_VOICE_BYTES)
+        if not data:
+            self._reply(chat_id, INBOUND_VOICE_FAILED, message_id)
+            return
+        transcribe = self._transcribe
+        if transcribe is None:
+            from src.core.voice_input import transcribe_bytes
+            transcribe = transcribe_bytes
+        text, error = transcribe(data, INBOUND_VOICE_MIME, [], self._voice_lang())
+        if error:
+            # The server's own sentence: it already names a missing
+            # subscription, a too-long recording or a transport failure.
+            self._reply(chat_id, str(error), message_id)
+            return
+        text = (text or "").strip()
+        if not text:
+            self._reply(chat_id, INBOUND_VOICE_EMPTY, message_id)
+            return
+        try:
+            config = self._config_loader()
+        except Exception as e:
+            log.error("[Telegram] Config read failed for a voice note: %s",
+                      type(e).__name__)
+            return
+        log.info("[Telegram] Voice note transcribed (%d chars)", len(text))
+        self._handle_inbound_updates([voiced_update(message, text)], config)
+
     def _handle_inbound_updates(
         self,
         updates,
@@ -1958,6 +2341,12 @@ class TelegramMonitor:
             message_id = message.get("message_id")
             text = message.get("text")
             photo = largest_photo(message.get("photo"))
+            voice = message.get("voice") or message.get("audio")
+            if not isinstance(text, str) and photo is None and isinstance(voice, dict):
+                # Queued, not transcribed here: the server call takes seconds
+                # and this thread is also the heartbeat and the Stop path.
+                self._accept_voice(paired, message_id, voice, message, moment)
+                continue
             if not isinstance(text, str) and photo is None:
                 self._refuse_unsupported(paired, message, message_id, moment)
                 continue
@@ -1982,7 +2371,7 @@ class TelegramMonitor:
                     message_id,
                 )
                 continue
-            if self._stale(message, moment):
+            if not message.get("voice_transcript") and self._stale(message, moment):
                 # Silence here reads as "broken": the message was typed while
                 # nothing was polling, so the phone must be told to send again.
                 # One reply per window, because the backlog can hold a hundred.
@@ -2139,6 +2528,8 @@ class TelegramMonitor:
             self._send(chat_id, self._format_approval(event), config, urgent=True)
         elif kind == "explore":
             self._handle_explore(event.get("raw"))
+        elif kind == "tool":
+            self._handle_tool(event)
         elif kind == "thinking":
             self._run.activity = "Thinking" if event.get("active") else self._run.activity
             self._run.dirty = True
@@ -2176,17 +2567,73 @@ class TelegramMonitor:
         # regexed: this is the exact shape of the tool-activity freeze.
         if not isinstance(raw, str) or len(raw) > 8192:
             return
-        path = ""
+        path, tool = "", ""
         try:
             payload = json.loads(raw)
             if isinstance(payload, dict):
-                path = clip(payload.get("path") or "", 120)
+                path = clip(payload.get("path") or "", 400)
+                tool = clip(payload.get("tool") or "", 40)
         except Exception:
             return
-        if path:
-            self._run.activity = f"Reading {path}"
-            self._run.files_read += 1
-            self._run.dirty = True
+        if not path:
+            return
+        self._run.files_read += 1
+        label = _TOOL_LABELS.get(tool.lower(), clip(tool, 20).capitalize() or "Read")
+        self._note(f"{label} · {short_path(path, self._run.project)}")
+
+    def _handle_tool(self, event: dict) -> None:
+        """Edits and shell commands, the tools the explore signal never sees."""
+        if clip(event.get("phase") or "", 20) != "complete":
+            return
+        name = clip(event.get("name") or "", 40)
+        is_edit = name in _EDIT_ACTIVITIES
+        if not is_edit and name not in _SHELL_ACTIVITIES:
+            return
+        self._run.files_edited += 1 if is_edit else 0
+        label = _TOOL_LABELS.get(name, name or "Tool")
+        detail = ""
+        raw = event.get("info")
+        if isinstance(raw, str) and 0 < len(raw) <= 8192:
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                if is_edit:
+                    detail = short_path(payload.get("file_path") or "", self._run.project)
+                else:
+                    detail = clip(payload.get("command") or "", 40)
+        self._note(f"{label} · {detail}" if detail else label)
+
+    def _note(self, line: str) -> None:
+        """Keep the last few lines, no consecutive repeats, newest last."""
+        line = clip(line, 96)
+        if not line:
+            return
+        if self._run.recent and self._run.recent[-1] == line:
+            return
+        self._run.recent.append(line)
+        del self._run.recent[:-_RECENT_LIMIT]
+        self._run.activity = line
+        self._run.dirty = True
+
+    def _tally(self) -> str:
+        """One honest line of counters. Empty when nothing has happened yet.
+
+        ``files_read`` counts calls, not files, so it is labelled "reads".
+        Saying "24 files read" when a file was read 24 times was simply wrong.
+        """
+        parts = []
+        if self._run.files_read:
+            parts.append(_plural(self._run.files_read, "read"))
+        if self._run.files_edited:
+            parts.append(_plural(self._run.files_edited, "edit"))
+        if self._run.context_used and self._run.context_limit:
+            parts.append(
+                f"{format_tokens(self._run.context_used)} / "
+                f"{format_tokens(self._run.context_limit)} context"
+            )
+        return " · ".join(parts)
 
     def _handle_progress(self, event: dict) -> None:
         done, total = event.get("done"), event.get("total")
@@ -2222,8 +2669,9 @@ class TelegramMonitor:
         lines = [f"Finished in {format_duration(elapsed)}"]
         if self._run.project:
             lines.append(self._run.project)
-        if self._run.files_read or self._run.files_edited:
-            lines.append(f"Files {self._run.files_read} read, {self._run.files_edited} edited")
+        tally = self._tally()
+        if tally:
+            lines.append(tally)
         status = "\n".join(lines)
         # ``event["text"]`` is the assistant's last reply, the same string the
         # chat panel renders. That string is Markdown and Telegram renders none
@@ -2278,20 +2726,19 @@ class TelegramMonitor:
 
     def _status_text(self) -> str:
         elapsed = self._clock() - self._run.started_at if self._run.started_at else 0.0
-        lines = [f"Cortex is working  ({format_duration(elapsed)})"]
+        lines = [f"Cortex is working \u00b7 {format_duration(elapsed)}"]
         if self._run.project:
             lines.append(self._run.project)
-        if self._run.activity:
-            lines.append(self._run.activity)
-        if self._run.files_read or self._run.files_edited:
-            lines.append(f"Files {self._run.files_read} read, {self._run.files_edited} edited")
-        if self._run.context_used and self._run.context_limit:
-            lines.append(
-                f"Context {format_tokens(self._run.context_used)} / {format_tokens(self._run.context_limit)}"
-            )
+        if self._run.recent:
+            lines.append("")
+            lines.extend(self._run.recent)
+        tally = self._tally()
+        if tally:
+            lines.append("")
+            lines.append(tally)
         waiting = self.queued_count()
         if waiting:
-            lines.append(f"{waiting} prompt(s) queued behind this run")
+            lines.append(f"{waiting} queued behind this run")
         return "\n".join(lines)
 
     def _format_question(self, payload) -> str:

@@ -15,7 +15,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 from PyQt6.QtCore import QObject, QUrl, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QDesktopServices
@@ -1988,16 +1988,34 @@ scope: project
 
     @pyqtSlot(str, result=str)
     def saveTelegramToken(self, token: str) -> str:
-        """Store the bot token in KeyManager. Returns ok / invalid / error."""
+        """Store the bot token in KeyManager. Returns ok / invalid / error.
+
+        The cached transport is dropped either way. It holds the token it was
+        built from, so without this a token replaced in place (Remove bot, paste
+        a new one, no unpair) kept talking to the old bot until a restart, which
+        looks like a bot that ignores messages.
+        """
         try:
             from src.services import telegram_config as tg
+            from src.services.telegram_monitor import get_monitor
             if not (token or "").strip():
                 tg.clear_token()
+                self._drop_cached_transport(get_monitor)
                 return "ok"
-            return "ok" if tg.set_token(token) else "invalid"
+            saved = tg.set_token(token)
+            self._drop_cached_transport(get_monitor)
+            return "ok" if saved else "invalid"
         except Exception as exc:
             log.warning(f"[MemoryManager] saveTelegramToken failed: {exc}")
             return "error"
+
+    @staticmethod
+    def _drop_cached_transport(get_monitor: Callable) -> None:
+        """Forget the built client. Never lets a cleanup failure undo a save."""
+        try:
+            get_monitor().invalidate_client()
+        except Exception as exc:
+            log.warning(f"[MemoryManager] invalidate_client failed: {exc}")
 
     @pyqtSlot(str, result=str)
     def saveTelegramSettings(self, payload: str) -> str:
