@@ -155,6 +155,10 @@
     // at startup) keeps the list current, since skills can be added or
     // edited on disk while this window is sitting there.
     if (id === 'skills' && bridge) loadSkills();
+    // Telegram state lives in settings + KeyManager, so read it on open
+    // rather than at startup: the pairing state can change while this
+    // window is open (the code expires, or /pair arrives).
+    if (id === 'telegram' && bridge) loadTelegram();
     // Fetch version when About section is shown
     if (id === 'about' && bridge) {
       callBridge(["getVersion"], []).then(v => {
@@ -652,6 +656,98 @@
       });
   };
 
+  /* ═══════════ Telegram ═══════════
+     These controls deliberately stay out of SETTINGS_MAP. Python's
+     setSetting() splits a dotted key on the FIRST dot only, so a nested path
+     such as telegram.quiet_hours.start would be stored under a key literally
+     named "quiet_hours.start". The token is different again: it goes to
+     KeyManager, never to settings.json. So this section sends one JSON
+     payload and lets telegram_config decide where each part belongs. */
+
+  const TG_EVENT_IDS = {
+    started: "tgEvStarted",
+    blocked: "tgEvBlocked",
+    finished: "tgEvFinished",
+    failed: "tgEvFailed",
+  };
+
+  /* Reads after "Valid ...". The keys mirror PAIR_EXPIRY_OPTIONS in
+     src/services/telegram_config.py; an unknown key falls back to "for 1 hour". */
+  const TG_EXPIRY_PHRASE = {
+    "60m": "for 1 hour",
+    "24h": "for 24 hours",
+    "7d": "for 7 days",
+    "30d": "for 30 days",
+    "90d": "for 90 days",
+    unlimited: "until you cancel it",
+  };
+
+  function tgHint(text, isError) {
+    const el = $("tgPairHint");
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? "#f85149" : "";
+  }
+
+  function applyTelegramSettings(data) {
+    if (!data || typeof data !== "object") return;
+    const enabled = $("tgEnabled");
+    if (enabled) enabled.checked = !!data.enabled;
+    const events = data.events || [];
+    for (const [name, id] of Object.entries(TG_EVENT_IDS)) {
+      const el = $(id);
+      if (el) el.checked = events.includes(name);
+    }
+    const quiet = $("tgQuietEnabled");
+    if (quiet) quiet.checked = !!data.quietEnabled;
+    if (data.quietStart && $("tgQuietStart")) $("tgQuietStart").value = data.quietStart;
+    if (data.quietEnd && $("tgQuietEnd")) $("tgQuietEnd").value = data.quietEnd;
+
+    /* Only trust a value the <select> actually offers, or the browser blanks
+       the control and the user sees an empty dropdown. */
+    const expiry = $("tgPairExpiry");
+    if (expiry) {
+      const wanted = String(data.pairExpiry || "60m");
+      const offered = Array.from(expiry.options).map((option) => option.value);
+      expiry.value = offered.includes(wanted) ? wanted : "60m";
+    }
+    const reusable = $("tgPairReusable");
+    if (reusable) reusable.checked = !!data.pairReusable;
+
+    /* The token itself is never sent back to the page. */
+    const field = $("tgToken");
+    if (field && !field.value) {
+      field.placeholder = data.hasToken ? "Saved. Paste a new one to replace it." : "8123456789:AAH...";
+    }
+    if (!data.hasToken) tgHint("No token saved yet.", true);
+    else if (!data.paired) tgHint("Token saved. Show a code, then send /pair CODE to your bot.", false);
+    else tgHint("Paired. Notifications go to the chat that paired.", false);
+  }
+
+  function loadTelegram() {
+    callBridge(["getTelegramSettings"], [])
+      .then((raw) => applyTelegramSettings(typeof raw === "string" ? JSON.parse(raw) : raw))
+      .catch(() => tgHint("Telegram settings unavailable.", true));
+  }
+
+  function saveTelegramSettings() {
+    const events = Object.entries(TG_EVENT_IDS)
+      .filter(([, id]) => $(id) && $(id).checked)
+      .map(([name]) => name);
+    const payload = {
+      enabled: !!($("tgEnabled") && $("tgEnabled").checked),
+      events: events,
+      quietEnabled: !!($("tgQuietEnabled") && $("tgQuietEnabled").checked),
+      quietStart: $("tgQuietStart") ? $("tgQuietStart").value : "22:00",
+      quietEnd: $("tgQuietEnd") ? $("tgQuietEnd").value : "07:00",
+      pairExpiry: $("tgPairExpiry") ? $("tgPairExpiry").value : "60m",
+      pairReusable: !!($("tgPairReusable") && $("tgPairReusable").checked),
+    };
+    callBridge(["saveTelegramSettings"], [JSON.stringify(payload)])
+      .then((result) => showToast(result === "ok" ? "Telegram settings saved" : "Could not save Telegram settings"))
+      .catch(() => showToast("Could not save Telegram settings"));
+  }
+
   /* ═══════════ DOM READY ═══════════ */
   document.addEventListener("DOMContentLoaded", () => {
 
@@ -668,6 +764,78 @@
     $("skillsSearch")?.addEventListener("input", (e) => onSkillSearchInput(e.target.value));
     $("skillsSearch")?.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { e.target.value = ""; onSkillSearchInput(""); }
+    });
+
+    /* ── Telegram ── */
+    ["tgEnabled", "tgEvStarted", "tgEvBlocked", "tgEvFinished", "tgEvFailed",
+     "tgQuietEnabled", "tgQuietStart", "tgQuietEnd",
+     "tgPairExpiry", "tgPairReusable"].forEach((id) => {
+      $(id)?.addEventListener("change", () => saveTelegramSettings());
+    });
+
+    $("tgSaveToken")?.addEventListener("click", () => {
+      const field = $("tgToken");
+      callBridge(["saveTelegramToken"], [field ? field.value : ""]).then((result) => {
+        if (result === "ok") {
+          if (field) field.value = "";
+          showToast("Token saved");
+          loadTelegram();
+        } else if (result === "invalid") {
+          tgHint("That does not look like a BotFather token.", true);
+        } else {
+          tgHint("Could not save the token.", true);
+        }
+      }).catch(() => tgHint("Could not save the token.", true));
+    });
+
+    $("tgPair")?.addEventListener("click", () => {
+      callBridge(["startTelegramPairing"], [], 20000).then((code) => {
+        if (!code) { tgHint("Add a bot token first.", true); return; }
+        const el = $("tgPairCode");
+        if (el) el.textContent = code;
+        /* Describe what the Python side was actually told to do. The policy
+           controls are saved the moment they change, so reading them here is
+           accurate rather than optimistic. */
+        const expiry = $("tgPairExpiry") ? $("tgPairExpiry").value : "60m";
+        const phrase = TG_EXPIRY_PHRASE[expiry] || TG_EXPIRY_PHRASE["60m"];
+        const reusable = !!($("tgPairReusable") && $("tgPairReusable").checked);
+        const tail = reusable
+          ? " It keeps working until then, so another device can pair later."
+          : " It works once.";
+        tgHint("Send /pair " + code + " to your bot. Valid " + phrase + "." + tail, false);
+      }).catch(() => tgHint("Could not start pairing.", true));
+    });
+
+    $("tgTest")?.addEventListener("click", () => {
+      callBridge(["testTelegramMessage"], []).then((result) => {
+        if (result === "queued") showToast("Test message queued");
+        else if (result === "unpaired") tgHint("Pair a chat first.", true);
+        else tgHint("Could not send the test message.", true);
+      }).catch(() => tgHint("Could not send the test message.", true));
+    });
+
+    $("tgUnpair")?.addEventListener("click", () => {
+      callBridge(["unpairTelegram"], []).then((result) => {
+        if (result !== "ok") { tgHint("Could not unpair.", true); return; }
+        const el = $("tgPairCode");
+        if (el) el.textContent = "--------";
+        showToast("Unpaired");
+        /* The reload re-reads the saved state, so the hint it sets is the
+           truth rather than an optimistic guess made here. */
+        loadTelegram();
+      }).catch(() => tgHint("Could not unpair.", true));
+    });
+
+    $("tgForget")?.addEventListener("click", () => {
+      callBridge(["forgetTelegramBot"], []).then((result) => {
+        if (result !== "ok") { tgHint("Could not remove the bot.", true); return; }
+        const code = $("tgPairCode");
+        if (code) code.textContent = "--------";
+        const field = $("tgToken");
+        if (field) field.value = "";
+        showToast("Bot removed");
+        loadTelegram();
+      }).catch(() => tgHint("Could not remove the bot.", true));
     });
 
     /* ── Nav search ── */

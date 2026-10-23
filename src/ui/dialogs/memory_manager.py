@@ -1931,6 +1931,118 @@ scope: project
         except Exception:
             return "[]"
 
+    # ── Telegram run notifications ──────────────────────────────────────────
+    # These cannot ride the generic SETTINGS_MAP path: setSetting splits a
+    # dotted key on the FIRST dot only, so "telegram.quiet_hours.start" would
+    # be stored under a key literally named "quiet_hours.start". The token
+    # also has to go through telegram_config, which puts it in KeyManager
+    # instead of settings.json.
+
+    @pyqtSlot(result=str)
+    def getTelegramSettings(self) -> str:
+        """Everything the Telegram section needs, except the token itself."""
+        try:
+            from src.services import telegram_config as tg
+            cfg = tg.load()
+            return json.dumps({
+                "enabled": cfg.enabled,
+                "paired": bool(cfg.chat_id),
+                "hasToken": tg.has_token(),
+                "events": sorted(cfg.events),
+                "quietEnabled": cfg.quiet_enabled,
+                "quietStart": cfg.quiet_start,
+                "quietEnd": cfg.quiet_end,
+                "pairExpiry": cfg.pair_expiry,
+                "pairReusable": cfg.pair_reusable,
+                "pairExpiryOptions": list(tg.PAIR_EXPIRY_OPTIONS),
+            })
+        except Exception as exc:
+            log.warning(f"[MemoryManager] getTelegramSettings failed: {exc}")
+            return "{}"
+
+    @pyqtSlot(str, result=str)
+    def saveTelegramToken(self, token: str) -> str:
+        """Store the bot token in KeyManager. Returns ok / invalid / error."""
+        try:
+            from src.services import telegram_config as tg
+            if not (token or "").strip():
+                tg.clear_token()
+                return "ok"
+            return "ok" if tg.set_token(token) else "invalid"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] saveTelegramToken failed: {exc}")
+            return "error"
+
+    @pyqtSlot(str, result=str)
+    def saveTelegramSettings(self, payload: str) -> str:
+        """Persist enabled / events / quiet hours. Returns ok or an error."""
+        try:
+            from src.services import telegram_config as tg
+            data = json.loads(payload or "{}")
+            tg.set_enabled(bool(data.get("enabled")))
+            tg.set_events(data.get("events") or [])
+            tg.set_quiet_hours(
+                bool(data.get("quietEnabled")),
+                str(data.get("quietStart") or ""),
+                str(data.get("quietEnd") or ""),
+            )
+            # Only when the page actually sent it: an older page must not
+            # silently reset a policy the user set from a newer one.
+            if "pairExpiry" in data or "pairReusable" in data:
+                tg.set_pairing(
+                    str(data.get("pairExpiry") or ""),
+                    bool(data.get("pairReusable")),
+                )
+            return "ok"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] saveTelegramSettings failed: {exc}")
+            return "error"
+
+    @pyqtSlot(result=str)
+    def startTelegramPairing(self) -> str:
+        """Issue a pairing code and start watching for /pair. Empty on failure."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            code = get_monitor().begin_pairing()
+            return code or ""
+        except Exception as exc:
+            log.warning(f"[MemoryManager] startTelegramPairing failed: {exc}")
+            return ""
+
+    @pyqtSlot(result=str)
+    def testTelegramMessage(self) -> str:
+        """Queue a test message. Never blocks this (GUI) thread."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            monitor = get_monitor()
+            if not monitor.has_chat():
+                return "unpaired"
+            monitor.send_test()
+            return "queued"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] testTelegramMessage failed: {exc}")
+            return "error"
+
+    @pyqtSlot(result=str)
+    def unpairTelegram(self) -> str:
+        """Revoke the pairing. The token stays, so re-pairing is one click."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            return "ok" if get_monitor().revoke_pairing() else "error"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] unpairTelegram failed: {exc}")
+            return "error"
+
+    @pyqtSlot(result=str)
+    def forgetTelegramBot(self) -> str:
+        """Revoke the pairing and delete the token: nothing is left behind."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            return "ok" if get_monitor().revoke_pairing(forget_token=True) else "error"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] forgetTelegramBot failed: {exc}")
+            return "error"
+
     @pyqtSlot(result=str)
     def getSettings(self) -> str:
         """Return ALL settings from ALL sections as nested JSON dict.

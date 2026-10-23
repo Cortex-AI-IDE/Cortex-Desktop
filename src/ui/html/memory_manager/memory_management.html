@@ -53,6 +53,7 @@
         <div class="nav-group">
           <div class="nav-group-label">Advanced</div>
           <button class="nav-item" data-section="terminal"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span>Terminal</span></button>
+          <button class="nav-item" data-section="telegram"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>Telegram</span></button>
           <button class="nav-item" data-section="about"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span>About Cortex</span></button>
         </div>
       </div>
@@ -1047,6 +1048,141 @@
               <p>Automatically copy selected text to clipboard.</p>
             </div>
             <label class="switch"><input type="checkbox" id="copyOnSelect"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- TELEGRAM -->
+      <section class="settings-section" data-section="telegram">
+        <div class="section-header">
+          <div>
+            <h1>Telegram</h1>
+            <p class="section-desc">Get a message when a run starts, stops to ask you something, finishes or fails. One way only: answers are typed in Cortex, not in Telegram.</p>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Bot token</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Token from BotFather</label>
+              <p>Kept in the encrypted vault, never in settings.json. Clear the field and save to forget it.</p>
+            </div>
+            <input type="password" class="setting-input" id="tgToken" placeholder="8123456789:AAH..." autocomplete="off" spellcheck="false">
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Save token</label>
+              <p>Checked against the BotFather shape before it is stored.</p>
+            </div>
+            <button class="setting-btn" id="tgSaveToken">Save token</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Pairing</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Show a pairing code</label>
+              <p>Then send <code>/pair CODE</code> to your bot. The two settings below decide how long it works and whether it can be used more than once.</p>
+            </div>
+            <button class="setting-btn primary" id="tgPair">Show code</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Code is valid for</label>
+              <p>After this the code stops being accepted. Pick a longer window if you will pair from another device later.</p>
+            </div>
+            <select class="setting-select" id="tgPairExpiry">
+              <option value="60m">1 hour</option>
+              <option value="24h">24 hours</option>
+              <option value="7d">7 days</option>
+              <option value="30d">30 days</option>
+              <option value="90d">90 days</option>
+              <option value="unlimited">No limit</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Reusable code</label>
+              <p>Off: the code is used up after one pairing. On: the same code keeps working until it expires, so you can pair a second device later. Anyone who has the code can pair, so keep the window short while this is on.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgPairReusable"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Pairing code</label>
+              <p id="tgPairHint">No code requested yet.</p>
+            </div>
+            <span class="setting-btn" id="tgPairCode" style="cursor:default;font-family:ui-monospace,monospace;font-size:16px;letter-spacing:2px;">--------</span>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Test message</label>
+              <p>Sends one now, ignoring quiet hours and the event list.</p>
+            </div>
+            <button class="setting-btn" id="tgTest">Test message</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Unpair</label>
+              <p>Forgets this chat and cancels any open pairing code, immediately. The bot token is kept, so pairing again needs no pasting.</p>
+            </div>
+            <button class="setting-btn danger-btn" id="tgUnpair">Unpair</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Remove bot</label>
+              <p>Unpairs and deletes the token from this computer. Nothing is left behind, and the BotFather token will be needed again.</p>
+            </div>
+            <button class="setting-btn danger-btn" id="tgForget">Remove bot</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>What to send</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Notifications on</label>
+              <p>Turn everything off without forgetting the pairing.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEnabled"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Run started</label>
+              <p>One message as a run begins.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvStarted"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Blocked on you</label>
+              <p>The run is waiting for an answer or an approval.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvBlocked"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Run finished</label>
+              <p>Duration, file counts, final state of the live message.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvFinished"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Run failed</label>
+              <p>The error message, short.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvFailed"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Quiet hours</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label>Silence progress notifications</label>
+              <p>Being blocked on you still comes through, otherwise the feature would be useless when it matters.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgQuietEnabled"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>From</label>
+              <p>Local time on this computer.</p>
+            </div>
+            <input type="time" class="setting-input" id="tgQuietStart" value="22:00">
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Until</label>
+              <p>A window that crosses midnight works.</p>
+            </div>
+            <input type="time" class="setting-input" id="tgQuietEnd" value="07:00">
           </div>
         </div>
       </section>

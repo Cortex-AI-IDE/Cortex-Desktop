@@ -162,6 +162,46 @@ def test_invalid_quiet_hours_fall_back_instead_of_raising(cfg):
     assert loaded.quiet_enabled is True
 
 
+def test_pairing_defaults_are_one_hour_single_use(cfg):
+    loaded = tg.load()
+    assert loaded.pair_expiry == "60m"
+    assert loaded.pair_reusable is False
+    assert loaded.pair_ttl_s == 3600.0
+
+
+@pytest.mark.parametrize("key,seconds", sorted(tg.PAIR_EXPIRY_SECONDS.items()))
+def test_every_expiry_preset_round_trips(cfg, key, seconds):
+    tg.set_pairing(key, False)
+    loaded = tg.load()
+    assert loaded.pair_expiry == key
+    assert loaded.pair_ttl_s == seconds
+
+
+def test_reusable_pairing_persists(cfg):
+    tg.set_pairing("90d", True)
+    loaded = tg.load()
+    assert (loaded.pair_expiry, loaded.pair_reusable) == ("90d", True)
+
+
+def test_unknown_expiry_falls_back_to_one_hour(cfg):
+    # A typo must never silently become the weakest setting.
+    tg.set_pairing("forever", True)
+    loaded = tg.load()
+    assert loaded.pair_expiry == "60m"
+    assert loaded.pair_ttl_s == 3600.0
+
+
+def test_expiry_key_ignores_case_and_spaces(cfg):
+    tg.set_pairing(" 30D ", False)
+    assert tg.load().pair_expiry == "30d"
+
+
+def test_reusable_only_true_for_a_real_true(cfg):
+    tg.set_pairing("24h", False)
+    tg.get_settings().set("telegram", "pairing", "reusable", "yes")
+    assert tg.load().pair_reusable is False
+
+
 def test_hand_edited_garbage_in_settings_json_does_not_raise(cortex_home, monkeypatch):
     (cortex_home / "settings.json").write_text(
         json.dumps(

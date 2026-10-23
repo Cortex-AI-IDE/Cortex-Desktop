@@ -49,6 +49,24 @@ EVENTS: tuple[str, ...] = ("started", "blocked", "finished", "failed")
 _DEFAULT_QUIET_START = "22:00"
 _DEFAULT_QUIET_END = "07:00"
 
+# Pairing code lifetime presets, as keys rather than seconds. A settings.json
+# holding "30d" stays readable, and the UI sends the same string straight back,
+# so there is exactly one vocabulary to keep in sync.
+PAIR_EXPIRY_OPTIONS: tuple[str, ...] = ("60m", "24h", "7d", "30d", "90d", "unlimited")
+
+# ``None`` means "no deadline": the code stays valid until it is used, replaced
+# or cancelled. That is a deliberate choice, not a missing value.
+PAIR_EXPIRY_SECONDS: dict[str, Optional[float]] = {
+    "60m": 3600.0,
+    "24h": 86400.0,
+    "7d": 604800.0,
+    "30d": 2592000.0,
+    "90d": 7776000.0,
+    "unlimited": None,
+}
+
+_DEFAULT_PAIR_EXPIRY = "60m"
+
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
@@ -67,10 +85,43 @@ class TelegramConfig:
     quiet_enabled: bool = False
     quiet_start: str = _DEFAULT_QUIET_START
     quiet_end: str = _DEFAULT_QUIET_END
+    pair_expiry: str = _DEFAULT_PAIR_EXPIRY
+    pair_reusable: bool = False
 
     def wants(self, event: str) -> bool:
         """True when this event should be sent at all (ignores quiet hours)."""
         return self.enabled and event in self.events
+
+    @property
+    def pair_ttl_s(self) -> Optional[float]:
+        """Seconds a pairing code stays valid, or None when it never expires.
+
+        An unknown key cannot reach here, ``_normalize_expiry`` already mapped
+        it, but the fallback keeps this total: a config built by hand in a test
+        must not raise.
+        """
+        if self.pair_expiry in PAIR_EXPIRY_SECONDS:
+            return PAIR_EXPIRY_SECONDS[self.pair_expiry]
+        return PAIR_EXPIRY_SECONDS[_DEFAULT_PAIR_EXPIRY]
+
+
+def _normalize_expiry(value: object) -> str:
+    """Return a key from ``PAIR_EXPIRY_OPTIONS``, or the default.
+
+    Same rule as the clock times: a hand-edited settings.json must not raise on
+    a GUI thread, and a typo must not silently become "unlimited".
+    """
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in PAIR_EXPIRY_SECONDS:
+            return key
+    if value not in (None, ""):
+        log.warning(
+            "[Telegram] Ignoring invalid pairing expiry %r, using %s",
+            value,
+            _DEFAULT_PAIR_EXPIRY,
+        )
+    return _DEFAULT_PAIR_EXPIRY
 
 
 def _normalize_time(value: object, fallback: str) -> str:
@@ -113,6 +164,12 @@ def load() -> TelegramConfig:
         quiet_end=_normalize_time(
             settings.get("telegram", "quiet_hours", "end", default=None),
             _DEFAULT_QUIET_END,
+        ),
+        pair_expiry=_normalize_expiry(
+            settings.get("telegram", "pairing", "expiry", default=None)
+        ),
+        pair_reusable=(
+            settings.get("telegram", "pairing", "reusable", default=False) is True
         ),
     )
 
@@ -180,3 +237,10 @@ def set_quiet_hours(enabled: bool, start: str, end: str) -> None:
         "telegram", "quiet_hours", "end",
         _normalize_time(end, _DEFAULT_QUIET_END),
     )
+
+
+def set_pairing(expiry: str, reusable: bool) -> None:
+    """Persist the pairing policy. Both values are validated before writing."""
+    settings = get_settings()
+    settings.set("telegram", "pairing", "expiry", _normalize_expiry(expiry))
+    settings.set("telegram", "pairing", "reusable", bool(reusable))

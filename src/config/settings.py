@@ -161,6 +161,16 @@ DEFAULT_SETTINGS = {
             "start": "22:00",
             "end": "07:00",
         },
+        # Pairing code policy. "expiry" is a preset key, not a number of
+        # seconds, so this file and the UI share one vocabulary. Known keys:
+        # 60m, 24h, 7d, 30d, 90d, unlimited (see telegram_config.py).
+        "pairing": {
+            "expiry": "60m",
+            # False: a code works once and is consumed. True: the same code
+            # keeps working until it expires, so a second device can pair
+            # later without generating a new one.
+            "reusable": False,
+        },
     },
     "thinking": {
         # Per-provider overrides (merged with thinking.py PROVIDER_THINKING_DEFAULTS)

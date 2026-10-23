@@ -3330,6 +3330,13 @@ class CortexMainWindow(QMainWindow):
             # Todo toggle (logs only - state managed by bridge/JS)
             self._ai_chat.toggle_todo_requested.connect(self._on_toggle_todo)
         
+        # ── Telegram run notifications (outbound only, v1) ──
+        # Deliberately OUTSIDE the native/webview branches above: in native
+        # chat (the mode actually shipped) those branches are skipped, and
+        # subscribing to run signals is the entire feature. Same trap as the
+        # skill indicator that never fired for exactly this reason.
+        self._init_telegram_notifications()
+
         # Interactive questions from agent to user
         # user_question_requested is handled by native_chat_bridge → signals.question → chat_panel.on_question
         # Do NOT also connect to _on_ai_question_requested, that creates duplicate question cards.
@@ -11706,6 +11713,58 @@ class CortexMainWindow(QMainWindow):
             open_custom_providers_dialog(self)
         except Exception as exc:
             log.error(f"Custom providers dialog failed: {exc}")
+
+    def _init_telegram_notifications(self) -> None:
+        """Subscribe the Telegram monitor to the agent's run signals.
+
+        Every slot on the monitor does one thing: put a small dict on a
+        bounded queue. No formatting, no JSON parsing, no regex, and each one
+        is safe to call from a worker thread, because a few of these signals
+        are emitted off the GUI thread. The monitor's own thread does the rest.
+        """
+        try:
+            from src.services.telegram_monitor import get_monitor
+            monitor = get_monitor()
+        except Exception as exc:
+            log.warning(f"[Telegram] Notifications unavailable: {exc}")
+            return
+
+        self._telegram_monitor = monitor
+        connections = (
+            (self._ai_agent.exploreFile, monitor.on_explore_file),
+            (self._ai_agent.thinking_started, lambda: monitor.on_thinking(True)),
+            (self._ai_agent.thinking_stopped, lambda: monitor.on_thinking(False)),
+            (self._ai_agent.task_progress_update, monitor.on_task_progress),
+            (self._ai_agent.context_budget_update, monitor.on_context_budget),
+            (self._ai_agent.agent_status_update, monitor.on_agent_status),
+            (self._ai_agent.user_question_requested, monitor.on_question),
+            (self._ai_agent.permission_requested, monitor.on_permission_requested),
+            (self._ai_agent.response_complete, monitor.on_finished),
+            (self._ai_agent.request_error, monitor.on_error),
+            (self._ai_agent.request_started, self._on_telegram_run_started),
+        )
+        for signal, slot in connections:
+            try:
+                signal.connect(slot)
+            except Exception as exc:
+                log.debug(f"[Telegram] Could not connect {signal}: {exc}")
+
+        monitor.ensure_running()
+        log.info("[Telegram] Run notifications wired")
+
+    def _on_telegram_run_started(self) -> None:
+        """Read the project name when the run starts, not when we wired this.
+
+        A bound method rather than a lambda over the project path, so a
+        project switch mid-session reports the project actually being worked on.
+        """
+        try:
+            root = self._project_manager.root
+        except Exception:
+            root = ""
+        monitor = getattr(self, "_telegram_monitor", None)
+        if monitor is not None:
+            monitor.on_request_started(os.path.basename(root or ""))
 
     def _show_memory_manager(self):
         """Open the Memory Manager dialog (AI → Memory Manager...).
