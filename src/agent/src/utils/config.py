@@ -560,6 +560,7 @@ def saveConfigWithLock(
                 })
         except FileNotFoundError:
             # File doesn't exist yet, no stale check needed
+            # silent-ok: there is nothing to have gone stale.
             pass
         except Exception as e:
             logForDebugging(f'Stale write check error: {e}', level='error')
@@ -584,6 +585,8 @@ def saveConfigWithLock(
     try:
         backupConfig(file)
     except:
+        # silent-ok: backupConfig catches its own failure and logs it, so this
+        # only fires if the backup helper itself is missing.
         pass
     
     # Write
@@ -644,6 +647,8 @@ def backupConfig(file: str) -> None:
             try:
                 os.unlink(os.path.join(backupDir, oldBackup))
             except:
+                # silent-ok: the prune is cosmetic; one un-deletable file just
+                # leaves more than five backups on disk.
                 pass
     except Exception as e:
         logForDebugging(f'Failed to backup config: {e}', level='error')
@@ -700,6 +705,9 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                     if os.path.exists(backupFile):
                         hasBackup = True
                 except:
+                    # silent-ok: this only shapes one analytics field; False
+                    # means "did not find one", which is also what a failed
+                    # probe means.
                     pass
                 
                 logEvent('cortex_config_parse_error', {
@@ -736,8 +744,12 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                         alreadyBackedUp = True
                         break
                 except:
+                    # silent-ok: one unreadable older backup just cannot match;
+                    # the loop keeps looking and the copy below still happens.
                     pass
         except:
+            # silent-ok: we could not read the corrupted file to dedupe it, so
+            # a second copy may be written; that costs disk, not data.
             pass
         
         if not alreadyBackedUp:
@@ -750,7 +762,14 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                 shutil.copy2(file, corruptedBackupPath)
                 logForDebugging(f'Corrupted config backed up to: {corruptedBackupPath}', level='error')
             except:
-                pass
+                # The corrupt file is about to be replaced by defaults, so a
+                # failed copy is the only chance to lose its contents. The
+                # earlier error line does not say the copy failed.
+                logForDebugging(
+                    f'Could not back up the corrupted config; its contents are '
+                    f'being discarded: {corruptedBackupPath}',
+                    level='error',
+                )
         
         # Notify user about corrupted config and available backup
         backupPath = findMostRecentBackup(file)
@@ -794,6 +813,8 @@ def findMostRecentBackup(file: str) -> Optional[str]:
         if backups:
             return os.path.join(backupDir, backups[-1])
     except:
+        # silent-ok: an unreadable backup directory falls through to the legacy
+        # location below, which is the pre-backup-dir layout.
         pass
     
     # Fallback to legacy location (next to the config file)
@@ -810,6 +831,8 @@ def findMostRecentBackup(file: str) -> Optional[str]:
         if os.path.exists(legacyBackup):
             return legacyBackup
     except:
+        # silent-ok: returns None, and the caller already tells the user "No
+        # backup file found for corrupted config", so the fact is not lost.
         pass
     
     return None
@@ -875,7 +898,14 @@ def getGlobalConfig() -> GlobalConfig:
             stat = os.stat(getGlobalCortexFile())
             stats = {'mtimeMs': stat.st_mtime * 1000, 'size': stat.st_size}
         except:
-            pass
+            # stats stays None, so lastReadFileStats is None and the
+            # stale-write check in saveConfigWithLock is skipped for this
+            # session. A second instance's write then goes undetected.
+            logForDebugging(
+                'Could not stat the global config; stale-write detection is '
+                'disabled until the next successful read',
+                level='warn',
+            )
         
         config = migrateConfigFields(
             getConfig(getGlobalCortexFile(), createDefaultGlobalConfig)

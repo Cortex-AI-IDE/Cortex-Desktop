@@ -41,6 +41,18 @@ class _Capture(logging.Handler):
         self.records.append(record)
 
 
+def _logged(capture: _Capture, prefix: str) -> list[str]:
+    """Messages this test's own lines produced.
+
+    Filtering by prefix keeps the assertion about ``warn_once`` itself. The
+    ``capture`` fixture patches ``silent._logger`` process-wide, so a
+    background thread that reports at the same moment lands its record in this
+    same handler. Counting every record made a correct implementation fail
+    intermittently, which is a property of the test, not of the guard.
+    """
+    return [r.getMessage() for r in capture.records if r.getMessage().startswith(prefix)]
+
+
 @pytest.fixture()
 def capture(monkeypatch: pytest.MonkeyPatch) -> _Capture:
     handler = _Capture()
@@ -56,22 +68,23 @@ def capture(monkeypatch: pytest.MonkeyPatch) -> _Capture:
 
 
 def test_warn_once_reports_the_first_occurrence_only(capture: _Capture) -> None:
-    for _ in range(100):
-        silent.warn_once("main_window.theme", "theme push failed")
+    lines = [silent.warn_once("main_window.theme", "theme push failed") for _ in range(100)]
 
-    assert len(capture.records) == 1, "a hot loop must not write 100 lines"
-    assert "main_window.theme" in capture.records[0].getMessage()
+    assert lines[0] == "[main_window.theme] theme push failed"
+    assert lines[1:] == [""] * 99, "a hot loop must not write 100 lines"
+    assert _logged(capture, "[main_window.theme]") == ["[main_window.theme] theme push failed"]
 
 
 def test_warn_once_separates_distinct_sites(capture: _Capture) -> None:
-    silent.warn_once("site.a", "a broke")
-    silent.warn_once("site.b", "b broke")
-    silent.warn_once("site.a", "a broke again")
+    first = silent.warn_once("site.a", "a broke")
+    second = silent.warn_once("site.b", "b broke")
+    repeated = silent.warn_once("site.a", "a broke again")
 
-    assert [r.getMessage() for r in capture.records] == [
-        "[site.a] a broke",
-        "[site.b] b broke",
-    ]
+    assert first == "[site.a] a broke"
+    assert second == "[site.b] b broke"
+    assert repeated == "", "the same site must not report twice"
+
+    assert _logged(capture, "[site.") == ["[site.a] a broke", "[site.b] b broke"]
 
 
 def test_warn_once_skips_work_entirely_when_already_seen(

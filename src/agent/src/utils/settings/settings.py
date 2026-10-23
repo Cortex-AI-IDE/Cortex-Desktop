@@ -6,9 +6,14 @@ Settings.
 import os
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple, Set
 from copy import deepcopy
+
+# logForDebugging and logError at the bottom of this file were no-op stubs, so
+# every reporting path in the module went nowhere. They write here now.
+_log = logging.getLogger('cortex.agent.settings')
 
 
 def _primary_config_home_dir() -> str:
@@ -242,8 +247,12 @@ def loadManagedFileSettings() -> Dict[str, Any]:
                 merged = mergeWith(merged, settings, settingsMergeCustomizer)
                 found = True
     except FileNotFoundError:
+        # silent-ok: no drop-in directory is the normal case; merged keeps
+        # whatever the base file supplied.
         pass
     except NotADirectoryError:
+        # silent-ok: same as above, a path that is not a directory has no
+        # entries to merge.
         pass
     except Exception as e:
         logError(e)
@@ -265,7 +274,11 @@ def getManagedFileSettingsPresence() -> Dict[str, bool]:
             for f in os.listdir(dropInDir)
         )
     except:
-        pass
+        # Callers read False as "no drop-in policy is deployed", which is the
+        # opposite of what an unreadable directory means. Say so.
+        logForDebugging(
+            f'Settings drop-in directory is unreadable: {dropInDir}', level='warn'
+        )
     
     return {'hasBase': hasBase, 'hasDropIns': hasDropIns}
 
@@ -335,7 +348,12 @@ def parseSettingsFileUncached(path: str) -> Dict[str, Any]:
         try:
             ruleWarnings = filterInvalidPermissionRules(data, path)
         except:
-            pass
+            # Dropping this means malformed permission rules reach schema
+            # validation unfiltered, and the warnings the user should see are
+            # lost, so the file loads with rules nobody checked.
+            logForDebugging(
+                f'Permission-rule filtering failed for {path}', level='warn'
+            )
         
         # Validate against schema
         try:
@@ -477,8 +495,14 @@ def getSettingsForSourceUncached(source: SettingSource) -> Optional[SettingsJson
                         settingsMergeCustomizer,
                     )
             except:
-                pass
-    
+                # The inline SDK settings are dropped and the file wins
+                # instead. The caller has no error channel here, so the log
+                # line is the only place this can surface.
+                logForDebugging(
+                    'Inline flag settings could not be parsed; dropped',
+                    level='warn',
+                )
+
     return fileSettings
 
 
@@ -549,6 +573,7 @@ def updateSettingsForSource(
                     content = f.read()
             except FileNotFoundError:
                 # File doesn't exist, fall through to merge with empty settings
+                # silent-ok: first write to a source that has no file yet.
                 pass
             except Exception as e:
                 raise
@@ -605,7 +630,13 @@ def updateSettingsForSource(
                     getOriginalCwd(),
                 )
             except:
-                pass
+                # The settings file was written but the ignore rule was not,
+                # so a local settings file can be committed by the next `git
+                # add -A`. Silent until now.
+                logForDebugging(
+                    'Could not add the local settings file to .gitignore',
+                    level='warn',
+                )
     
     except Exception as e:
         error = Exception(f'Failed to read raw settings from {filePath}: {e}')
@@ -739,7 +770,14 @@ def loadSettingsFromDisk() -> SettingsWithErrors:
                                 formatZodError(result.error, 'remote managed settings')
                             )
                     except:
-                        pass
+                        # The highest-priority policy source just vanished and
+                        # the next source silently wins. That is a policy
+                        # downgrade, so it can never be quiet.
+                        logForDebugging(
+                            'Remote managed settings could not be parsed; '
+                            'falling back to a lower-priority policy source',
+                            level='error',
+                        )
                 
                 # 2. Admin-only MDM (HKLM / macOS plist)
                 if not policySettings:
@@ -825,7 +863,12 @@ def loadSettingsFromDisk() -> SettingsWithErrors:
                                 settingsMergeCustomizer,
                             )
                     except:
-                        pass
+                        # Merged inline settings are lost here too, and the
+                        # final error list would otherwise claim a clean load.
+                        logForDebugging(
+                            'Inline flag settings could not be merged; dropped',
+                            level='warn',
+                        )
         
         elapsed = time.time() * 1000 - startTime
         logForDiagnosticsNoPII('info', 'settings_load_completed', {
@@ -1024,9 +1067,13 @@ def rawSettingsContainsKey(key: str) -> bool:
         
         except FileNotFoundError:
             # File not found is expected
+            # silent-ok: the probe is "does any settings source set this key",
+            # and a source with no file sets nothing.
             pass
         except json.JSONDecodeError:
             # Invalid JSON, skip
+            # silent-ok: an unparseable source cannot contain the key either,
+            # so the probe's False is still correct for this file.
             pass
         except Exception as error:
             handleFileSystemError(error, filePath)
@@ -1039,13 +1086,14 @@ def rawSettingsContainsKey(key: str) -> bool:
 # ============================================================
 
 def logForDebugging(msg: str, level: str = 'info') -> None:
-    """Stub logging"""
-    pass
+    # Was a no-op stub, so every reporting call site in this module (five
+    # before the W3 sweep, eleven after) went nowhere. 'warn' is accepted as
+    # well as 'warning'; an unknown name falls back to INFO.
+    _log.log(getattr(logging, level.upper(), logging.INFO), msg)
 
 
 def logError(error: Exception) -> None:
-    """Stub error logging"""
-    pass
+    _log.error('%s', error)
 
 
 def logForDiagnosticsNoPII(level: str, message: str, metadata: Dict = None) -> None:

@@ -227,8 +227,26 @@ def test_agent_bridge_py_is_clean() -> None:
 # ---------------------------------------------------------------------------
 
 # Measured 2026-10-23 with ``_silent_handlers`` over every ``.py`` under src/.
-# 313 handlers in 94 files, across the app, the engine and the vendored
+# 272 handlers in 90 files, across the app, the engine and the vendored
 # bundled skills.
+#
+# The fifth batch closed the four files the fourth one stopped short of (41
+# handlers): settings/settings.py 11, config.py 10, terminal_session.py 10,
+# webview_panel.py 10. A third of them were reporting-shaped rather than
+# tolerance-shaped, and three of those had teeth:
+#
+#   * ``config.py`` failed a copy of the corrupted config and then reset it to
+#     defaults anyway, so the file's contents were gone with nothing saying so.
+#   * ``terminal_session`` reported a session closed while ``pty.terminate``
+#     had failed, leaving a shell no one was tracking; and a failed
+#     ``psutil.wait_procs`` skipped the kill escalation entirely.
+#   * ``webview_panel`` failed ``reveal_boot_hidden`` on a post-boot load,
+#     which is a panel that stays flat dark with its content painted into it.
+#
+# ``settings.py`` needed one extra fix to be honest: its ``logForDebugging``
+# and ``logError`` were no-op stubs at the bottom of the file, so a ``silent-ok``
+# would have been the only truthful marker there. They now write to
+# ``cortex.agent.settings``.
 #
 # The fourth batch took the five largest files to zero (74 handlers):
 # compact.py 17, xterm_terminal.py 17, memory_manager.py 15, sidebar.py 13,
@@ -283,12 +301,12 @@ REMAINING: dict[str, int] = {
     "src/agent/src/tools/grep_tool/grep_tool.py": 8,
     "src/agent/src/tools/sementic_search/sementic_search_tool.py": 5,
     "src/agent/src/utils/abort_controller.py": 1,
-    "src/agent/src/utils/config.py": 10,
+    "src/agent/src/utils/config.py": 0,
     "src/agent/src/utils/fs_operations.py": 2,
     "src/agent/src/utils/ide.py": 2,
     "src/agent/src/utils/markdown_config_loader.py": 1,
     "src/agent/src/utils/model/aliases.py": 2,
-    "src/agent/src/utils/settings/settings.py": 11,
+    "src/agent/src/utils/settings/settings.py": 0,
     "src/agent/src/utils/signal.py": 1,
     "src/agent/src/utils/thinking.py": 3,
     "src/ai/agent_safety.py": 1,
@@ -332,14 +350,14 @@ REMAINING: dict[str, int] = {
     "src/core/semantic_search.py": 7,
     "src/core/siliconflow_embeddings.py": 1,
     "src/core/spreadsheet_reader.py": 3,
-    "src/core/terminal_session.py": 10,
+    "src/core/terminal_session.py": 0,
     "src/services/mcp_manager.py": 7,
     "src/services/update_checker.py": 3,
     "src/ui/color_themes.py": 2,
     "src/ui/components/editor.py": 4,
     "src/ui/components/sidebar.py": 0,
     "src/ui/components/sidebar_bridge.py": 0,
-    "src/ui/components/webview_panel.py": 10,
+    "src/ui/components/webview_panel.py": 0,
     "src/ui/components/xterm_terminal.py": 0,
     "src/ui/dialogs/health_map.py": 5,
     "src/ui/dialogs/memory_manager.py": 0,

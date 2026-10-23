@@ -76,6 +76,8 @@ def _cache_large_file_uri(file_path: str, content: str) -> str:
             if existing == data:
                 return out.as_uri()
     except Exception:
+        # silent-ok: the dedupe read is an optimisation only; falling through
+        # to the write below is the correct behaviour when it cannot tell.
         pass
     out.write_bytes(data)
     return out.as_uri()
@@ -303,8 +305,14 @@ class WebviewPanel(QWidget):
         try:
             storage_path = str(Path.home() / ".cortex" / "webengine_storage")
             profile.setPersistentStoragePath(storage_path)
-        except Exception:
-            pass
+        except Exception as e:
+            # Without this the profile stays on its default path, so Monaco
+            # settings and everything else that should survive a restart are
+            # silently per-session.
+            log.warning(
+                "[WebviewPanel] persistent storage path not set (%s); "
+                "editor state will not survive a restart", e,
+            )
 
         self._view = QWebEngineView()
         self._page = _LoggingWebEnginePage(self._view)
@@ -392,6 +400,8 @@ class WebviewPanel(QWidget):
                     if self._tmp_html.exists():
                         self._tmp_html.unlink()
                 except Exception:
+                    # silent-ok: an exit hook; leaving one temp file behind
+                    # costs nothing and there is no user left to tell.
                     pass
             from src.utils.exit_hooks import register as _register_exit_hook
             _register_exit_hook(_cleanup_tmp)
@@ -537,16 +547,24 @@ class WebviewPanel(QWidget):
             from src.core import boot_state
             if not boot_state.is_booting():
                 self.reveal_boot_hidden()
-        except Exception:
-            pass
+        except Exception as e:
+            # This is the only path that reveals a page loaded after boot, so
+            # a failure here is a panel that stays flat dark with content
+            # painted into it, i.e. the blank-editor symptom.
+            log.warning(
+                "[WebviewPanel] post-boot reveal failed (%s); the editor may "
+                "stay boot-hidden", e,
+            )
 
         # Silent-blank detection: ask the page whether Chromium obtained a
         # GPU context. No-op when software rendering is already active.
         try:
             from src.ui.render_health import probe_page
             probe_page(self._view.page(), "editor")
-        except Exception:
-            pass
+        except Exception as e:
+            # Lose the GPU-context evidence for this load, which is what the
+            # compatibility-mode diagnosis reads.
+            log.debug("[WebviewPanel] render probe skipped: %s", e)
 
         # The editor came back. Reset its crash budget, which used to be
         # permanent: three crashes anywhere in a session and the editor never
@@ -555,8 +573,10 @@ class WebviewPanel(QWidget):
         try:
             from src.ui.webengine_recovery import note_page_loaded
             note_page_loaded("editor", self._view)
-        except Exception:
-            pass
+        except Exception as e:
+            # The recovery budget then never resets, so the third crash in a
+            # session silently stops auto-recovery for good.
+            log.debug("[WebviewPanel] recovery budget not reset: %s", e)
 
         # Replay JS issued before the page existed (see _safe_run_js).
         _queued = getattr(self, '_pending_js_calls', None)
@@ -664,6 +684,8 @@ class WebviewPanel(QWidget):
             from src.ui.render_health import record_render_failure
             record_render_failure("editor.html", f"render process {status_name} (exit {exit_code})")
         except Exception:
+            # silent-ok: the crash itself is already logged at CRITICAL on the
+            # line above; only the render_health row is lost.
             pass
         # Mark page dead so we stop sending JS. Future opens will queue until reload.
         self._page_loaded = False
@@ -980,6 +1002,8 @@ class WebviewPanel(QWidget):
                 try:
                     self._open_timer.stop()
                 except Exception:
+                    # silent-ok: QtTimer.stop only fails on a deleted C++
+                    # object, and the reference is dropped on the next line.
                     pass
                 self._open_timer = None
             if hasattr(self, '_open_queue'):
@@ -1145,8 +1169,14 @@ class WebviewPanel(QWidget):
                 if self._open_timer is not None:
                     try:
                         self._open_timer.stop()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # A pump that is still armed will fire against a queue
+                        # this branch is about to mutate, so it can open a file
+                        # twice or race the click it was meant to front-run.
+                        log.debug(
+                            "[WebviewPanel] could not stop the open pump "
+                            "before a priority open: %s", e,
+                        )
                     self._open_timer = None
 
                 args = self._open_queue.pop(file_path, None)
@@ -1400,8 +1430,12 @@ class WebviewPanel(QWidget):
                 data = json.loads(result) if isinstance(result, str) and result else {}
                 path = data.get("path") or ""
                 content = data.get("content")
-            except Exception:
-                pass
+            except Exception as e:
+                # The callback then reports "no content" for the file, which
+                # reads as an empty document rather than a broken reply.
+                log.debug(
+                    "[WebviewPanel] active-file mirror reply unparseable: %s", e,
+                )
             if not path:
                 _finish(self._active_file_path, None)
                 return

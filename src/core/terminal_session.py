@@ -146,6 +146,8 @@ def _write_if_changed(path: str, text: str, encoding: str = "utf-8") -> None:
             if f.read() == text:
                 return
     except OSError:
+        # silent-ok: an unreadable file is exactly the case where we do want
+        # to write, which is the next line.
         pass
     with open(path, "w", encoding=encoding) as f:
         f.write(text)
@@ -559,8 +561,13 @@ class TerminalSession:
         if pty is not None:
             try:
                 pty.terminate(force=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                # The session is reported closed either way, so a shell that
+                # refused to die leaves a process nobody is tracking.
+                log.warning(
+                    "[AI-TERM] session %d: kill failed (%s); the shell may "
+                    "still be running", self.id, type(exc).__name__,
+                )
             log.info("[AI-TERM] session %d closed", self.id)
 
     # ── output ────────────────────────────────────────────────────────
@@ -609,8 +616,14 @@ class TerminalSession:
         for cb in subs:
             try:
                 cb(data)
-            except Exception:
-                pass
+            except Exception as exc:
+                # One broken subscriber used to look exactly like a shell that
+                # stopped producing output. Name it, at DEBUG because this is
+                # per output chunk.
+                log.debug(
+                    "[AI-TERM] session %d: output subscriber %r raised %s",
+                    self.id, cb, type(exc).__name__,
+                )
 
     def _feed(self, data: str):
         """Split output into text and markers. Caller holds the lock."""
@@ -681,6 +694,8 @@ class TerminalSession:
             try:
                 self._subscribers.remove(cb)
             except ValueError:
+                # silent-ok: unsubscribing twice is not an error, and the list
+                # is already in the wanted state.
                 pass
 
     # ── input ─────────────────────────────────────────────────────────
@@ -715,8 +730,13 @@ class TerminalSession:
         self._size = (cols, rows)
         try:
             self.pty.setwinsize(rows, cols)
-        except Exception:
-            pass
+        except Exception as exc:
+            # The recorded size and the real one now disagree, which is what a
+            # wrapped or clipped full-screen program looks like.
+            log.debug(
+                "[AI-TERM] session %d: resize to %dx%d failed: %s",
+                self.id, cols, rows, type(exc).__name__,
+            )
 
     def _gcm_running(self) -> bool:
         """Is Git Credential Manager (git's HTTPS sign-in window) running
@@ -731,6 +751,8 @@ class TerminalSession:
                     if c.name().lower().startswith("git-credential-manager"):
                         return True
                 except Exception:
+                    # silent-ok: a child that will not report its name is not
+                    # the sign-in window; the scan just moves on.
                     continue
         except Exception:
             return False
@@ -752,16 +774,29 @@ class TerminalSession:
             try:
                 c.terminate()
             except Exception:
-                pass
+                # Survives to the kill pass below, so this is not the last
+                # word on it.
+                log.debug("[AI-TERM] session %d: terminate failed for pid %s",
+                          self.id, c.pid)
         try:
             _gone, alive = psutil.wait_procs(kids, timeout=2)
             for c in alive:
                 try:
                     c.kill()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    # Ctrl+C did not stop this process and neither did kill:
+                    # it keeps running after a Stop the user asked for.
+                    log.warning(
+                        "[AI-TERM] session %d: pid %s survived interrupt: %s",
+                        self.id, c.pid, type(exc).__name__,
+                    )
+        except Exception as exc:
+            # No escalation at all, so anything that ignored terminate() is
+            # still running.
+            log.warning(
+                "[AI-TERM] session %d: could not escalate the interrupt: %s",
+                self.id, type(exc).__name__,
+            )
 
     # ── handover ──────────────────────────────────────────────────────
     def _set_awaiting(self, kind: str, prompt: str, on_wait):
@@ -1048,6 +1083,9 @@ class TerminalSession:
                 try:
                     os.remove(tmp)
                 except OSError:
+                    # silent-ok: the shell already ran the script; a leftover
+                    # file in the temp directory costs nothing and this is on
+                    # the per-command path.
                     pass
 
 
