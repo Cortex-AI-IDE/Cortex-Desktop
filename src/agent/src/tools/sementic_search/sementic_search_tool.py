@@ -12,7 +12,7 @@ import os
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal, TypedDict
+from typing import Any, Dict, List, Optional, Literal, Tuple, TypedDict
 
 # ============================================================
 # LOCAL IMPORTS
@@ -101,6 +101,57 @@ def get_cwd() -> str:
 def expand_path(p: str) -> str:
     """Expand ~ and resolve to absolute path."""
     return str(Path(p).expanduser().resolve())
+
+
+def _norm_path(p: str) -> str:
+    """Case-folded absolute path, for comparison only (no filesystem access)."""
+    return os.path.normcase(os.path.abspath(p))
+
+
+def _is_within(child: str, parent: str) -> bool:
+    """Is *child* at or below *parent*? Separator-aware, so a sibling whose
+    name merely starts with the parent's name is not accepted."""
+    child_norm = _norm_path(child)
+    parent_norm = _norm_path(parent)
+    return child_norm == parent_norm or child_norm.startswith(parent_norm + os.sep)
+
+
+def resolve_search_scope(
+    path: Optional[str],
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """Split the tool's ``path`` argument into (index root, scope, error).
+
+    ``path`` is documented as "Path to search within", so it is a filter, not
+    the root of a new index. Using it as the root built a second index at
+    ``<subdir>/.cortex/semantic_index`` and re-embedded files the project
+    index already held, which cost real embedding tokens on every such call,
+    evicted the project singleton, and made ``relative_path`` meaningless.
+
+    Returns:
+        (project_root, scope, error). ``scope`` is None when the whole project
+        is to be searched. ``error`` is a caller-facing message when the path
+        cannot be honoured; the caller must not index in that case.
+    """
+    project_root = get_cwd()
+
+    if not path:
+        return project_root, None, None
+
+    scope = expand_path(path)
+    if os.path.isfile(scope):
+        scope = os.path.dirname(scope)
+
+    if _norm_path(scope) == _norm_path(project_root):
+        return project_root, None, None
+
+    if not _is_within(scope, project_root):
+        return project_root, None, (
+            f"Path is outside the project root, so it has no index: {path}. "
+            f"Semantic search is scoped to {project_root}. "
+            f"Omit 'path' to search the whole project."
+        )
+
+    return project_root, scope, None
 
 
 def plural(n: int, singular: str, plural_form: Optional[str] = None) -> str:
@@ -407,15 +458,11 @@ class SementicSearchTool:
         include_context = inp.get("include_context", True)
         context_lines_val = inp.get("context_lines", DEFAULT_CONTEXT_LINES)
         
-        # Resolve project root
-        if path:
-            project_root = expand_path(path)
-        else:
-            project_root = get_cwd()
-        
-        # If the path is a file, use its parent directory as root
-        if os.path.isfile(project_root):
-            project_root = os.path.dirname(project_root)
+        # ``path`` is a search scope, not the index root. The root always comes
+        # from the workspace, so a subdirectory cannot spawn a second index.
+        project_root, search_scope, scope_error = resolve_search_scope(path)
+        if scope_error:
+            return {"error": scope_error}
         
         # ── Report progress ──
         if progress_callback:
@@ -463,7 +510,12 @@ class SementicSearchTool:
             loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(
                 None,
-                lambda: searcher.search(query=query, top_k=top_k, min_similarity=min_similarity)
+                lambda: searcher.search(
+                    query=query,
+                    top_k=top_k,
+                    min_similarity=min_similarity,
+                    scope_path=search_scope,
+                )
             )
         except Exception as e:
             return {"error": f"Search failed: {e}"}

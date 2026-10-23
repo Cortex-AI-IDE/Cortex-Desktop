@@ -75,6 +75,11 @@ class SemanticSearch:
             project_root: Root directory of the project
         """
         self.project_root = Path(project_root).resolve()
+        # Normalised once, then compared per cache entry on every search.
+        # normcase/abspath never touch the filesystem, which is the point:
+        # Path.resolve() per entry would be thousands of syscalls per query.
+        self._root_norm = os.path.normcase(str(self.project_root))
+        self._foreign_warned = False
         self.index_dir = self.project_root / ".cortex" / "semantic_index"
         self.index_path = self.index_dir / "index.json"
         
@@ -124,6 +129,75 @@ class SemanticSearch:
         self._cloud_check_time = now
         return False
     
+    @staticmethod
+    def _path_within(file_path: str, root_norm: str) -> bool:
+        """Is ``file_path`` at or below ``root_norm`` (an already-normalised root)?"""
+        if not file_path:
+            return False
+        try:
+            normalised = os.path.normcase(os.path.abspath(file_path))
+        except (TypeError, ValueError, OSError):
+            return False
+        return normalised == root_norm or normalised.startswith(
+            root_norm + os.sep
+        )
+
+    def _within_root(self, file_path: str) -> bool:
+        """Is ``file_path`` inside this project's root?
+
+        Separator-aware, so ``cortex_opensource_old`` is not accepted as a
+        child of ``cortex_opensource``, which a plain ``startswith(root)``
+        would do. Case-insensitive on Windows via :func:`os.path.normcase`.
+
+        Deliberately no filesystem access: this runs once per cache entry on
+        every search, and ``Path.resolve()`` there would be thousands of
+        syscalls per query. Keys written by :meth:`index_file` are already
+        resolved.
+        """
+        return self._path_within(file_path, self._root_norm)
+
+    def _prune_outside_root(self) -> int:
+        """Drop cache and metadata entries that belong to another project.
+
+        The index is per-project (``<root>/.cortex/semantic_index``) and it
+        used to be trusted blindly. ``index_project`` only added and updated
+        keys and never removed one, so an index that had ever been seeded with
+        a parent or sibling tree kept those rows through every rebuild,
+        ``force=True`` included. Measured in this repo before the fix: 1700 of
+        3619 rows pointed at ``cortex_desktop`` while the index belonged to
+        ``cortex_opensource``, and searches returned that code with high
+        scores.
+
+        Pruning at load makes search honest immediately. Pruning again before
+        a rebuild is what removes the rows from disk on the next save.
+
+        Returns:
+            How many entries were dropped, so the caller can report it.
+        """
+        foreign = [
+            key for key in self.embeddings_cache if not self._within_root(key)
+        ]
+        for key in foreign:
+            self.embeddings_cache.pop(key, None)
+            self.file_metadata.pop(key, None)
+
+        # Metadata can outlive the vectors: a JSON index pruned by hand, or a
+        # partially written binary pair. Clearing only the cache would leave
+        # snippets from another project sitting in get_stats()/previews.
+        orphans = [
+            key for key in self.file_metadata if not self._within_root(key)
+        ]
+        for key in orphans:
+            self.file_metadata.pop(key, None)
+
+        dropped = len(foreign) + len(orphans)
+        if dropped:
+            log.warning(
+                f"[SemanticSearch] Dropped {dropped} index entries outside "
+                f"{self.project_root}"
+            )
+        return dropped
+
     def index_file(self, file_path: str, force: bool = False) -> bool:
         """
         Index a single file.
@@ -139,7 +213,17 @@ class SemanticSearch:
             return False
         
         file_path = str(Path(file_path).resolve())
-        
+
+        # The single insertion point, so refusing here is what stops a foreign
+        # row coming back after a prune: a background index of the wrong root,
+        # a .cortex folder copied from another checkout, or a direct call.
+        if not self._within_root(file_path):
+            log.warning(
+                f"[SemanticSearch] Refusing to index a file outside "
+                f"{self.project_root}: {file_path}"
+            )
+            return False
+
         # Check if already indexed and not modified
         if not force and file_path in self.embeddings_cache:
             meta = self.file_metadata.get(file_path, {})
@@ -216,7 +300,11 @@ class SemanticSearch:
             'indexed': 0,
             'skipped': 0,
             'errors': 0,
-            'total_tokens': 0
+            'total_tokens': 0,
+            # Rows that belonged to another project and were removed. Reported
+            # rather than silently dropped: "my index shrank" needs a reason
+            # in the log, and this is the only place it can appear.
+            'pruned_foreign': self._prune_outside_root(),
         }
         
         # Find all source files in ONE tree walk, pruning excluded
@@ -328,7 +416,13 @@ class SemanticSearch:
         
         return stats
     
-    def search(self, query: str, top_k: int = 10, min_similarity: float = None) -> List[SearchResult]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        min_similarity: float = None,
+        scope_path: Optional[str] = None,
+    ) -> List[SearchResult]:
         """
         Search codebase semantically.
         
@@ -336,6 +430,9 @@ class SemanticSearch:
             query: Search query (natural language)
             top_k: Number of results to return
             min_similarity: Minimum similarity threshold (auto-adjusted based on backend)
+            scope_path: Optional directory to restrict results to, inside the
+                project root. Filtering happens before ranking, so entries
+                outside the scope cannot consume a ``top_k`` slot.
         
         Returns:
             List of SearchResult objects
@@ -371,10 +468,54 @@ class SemanticSearch:
         # per-entry cosine_similarity() re-converted BOTH vectors to numpy
         # on every call (1500+ list→array copies per search).
         similarities = []
+        # Optional sub-directory scope. Normalised once, for the same reason as
+        # the root: this is compared against every candidate.
+        scope_norm = None
+        if scope_path:
+            try:
+                scope_norm = os.path.normcase(os.path.abspath(scope_path))
+            except (TypeError, ValueError, OSError):
+                log.warning(
+                    f"[SemanticSearch] Ignoring unusable scope path: {scope_path!r}"
+                )
+
+        # Containment before ranking, not after. A foreign row can outscore a
+        # real one; filtering after the sort would let it eat a result slot
+        # and then vanish, so the caller quietly got fewer answers than top_k
+        # with no explanation. _prune_outside_root() normally leaves nothing
+        # here; this is the guarantee that survives a hand-edited index or a
+        # cache mutated between load and search.
+        root_candidates = [
+            (path, embedding)
+            for path, embedding in self.embeddings_cache.items()
+            if self._within_root(path)
+        ]
+        # Scope is applied separately from containment. Folding it into the
+        # list above made every scoped search report its in-project exclusions
+        # as foreign entries, which reads like index corruption.
+        if scope_norm is None:
+            candidates = root_candidates
+        else:
+            candidates = [
+                (path, embedding)
+                for path, embedding in root_candidates
+                if self._path_within(path, scope_norm)
+            ]
+            log.debug(
+                f"[SemanticSearch] Scope {scope_path} kept {len(candidates)} of "
+                f"{len(root_candidates)} in-project entries"
+            )
+        ignored_foreign = len(self.embeddings_cache) - len(root_candidates)
+        if ignored_foreign and not self._foreign_warned:
+            self._foreign_warned = True
+            log.warning(
+                f"[SemanticSearch] Ignored {ignored_foreign} index entries "
+                f"outside {self.project_root} while searching"
+            )
         if _HAS_NUMPY:
             q = _np.asarray(query_embedding, dtype=_np.float32)
             qn = float(_np.linalg.norm(q))
-            for file_path, embedding in self.embeddings_cache.items():
+            for file_path, embedding in candidates:
                 e = _np.asarray(embedding, dtype=_np.float32)  # no-op for packed entries
                 if e.shape != q.shape:
                     continue
@@ -384,7 +525,7 @@ class SemanticSearch:
                     meta = self.file_metadata.get(file_path, {})
                     similarities.append((file_path, sim, meta.get('content_snippet', '')))
         else:
-            for file_path, embedding in self.embeddings_cache.items():
+            for file_path, embedding in candidates:
                 sim = self.embeddings_provider.cosine_similarity(query_embedding, embedding)
                 if sim >= min_similarity:
                     meta = self.file_metadata.get(file_path, {})
@@ -723,6 +864,9 @@ class SemanticSearch:
                     raise ValueError(f"{len(keys)} names for {mat.shape[0]} vectors")
                 self.embeddings_cache = {k: mat[i] for i, k in enumerate(keys)}
                 self.file_metadata = meta.get('metadata', {})
+                # Never trust the disk copy: this index may have been seeded
+                # with another project's tree before containment existed.
+                self._prune_outside_root()
                 log.info(f"Loaded index with {len(self.embeddings_cache)} embeddings")
                 return
             except Exception as e:
@@ -750,6 +894,8 @@ class SemanticSearch:
             }
             self.file_metadata = data.get('metadata', {})
 
+            # Same containment pass as the binary path above.
+            self._prune_outside_root()
             log.info(f"Loaded index with {len(self.embeddings_cache)} embeddings")
 
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
