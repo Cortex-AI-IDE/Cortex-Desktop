@@ -73,7 +73,9 @@ def send_paths(paths: Iterable[str], wait: float = 0.0) -> bool:
                 finally:
                     conn.close()
             except Exception:
-                pass  # not listening yet, or a key from an earlier run
+                # silent-ok: retry loop; the listener may not be up yet, and
+                # this line would repeat every 250 ms for the whole wait.
+                pass
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.25)

@@ -32,6 +32,18 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 from PyQt6.QtWidgets import QTextBrowser
 
 
+@pytest.fixture(autouse=True)
+def _detailed_view(monkeypatch):
+    """Restore cards unfolded, so they are built as soon as they are restored.
+
+    In the compact view a restored group builds its cards on first open
+    (tests/test_lazy_activity_restore.py); these tests are about what a card
+    looks like once built, not when it is built.
+    """
+    import src.ui.chat_panel as cp
+    monkeypatch.setattr(cp, "compact_activity", lambda: False)
+
+
 def _card_in_group(qtbot, tool_type="terminal", data=None):
     """A MessageWidget holding one rich card inside a ToolGroup."""
     from src.ui.chat_panel import MessageWidget

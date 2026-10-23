@@ -19,6 +19,8 @@ import logging
 import os
 import signal as _signal
 
+from src.utils.silent import swallow as _swallow
+
 log = logging.getLogger(__name__)
 
 
@@ -32,7 +34,7 @@ def kill_process_group(pid: int, sig: int = getattr(_signal, "SIGKILL", 9)) -> N
         try:
             os.kill(pid, sig)
         except OSError:
-            pass
+            _swallow("signal a process")
         return
     try:
         pgid = os.getpgid(pid)
@@ -44,7 +46,7 @@ def kill_process_group(pid: int, sig: int = getattr(_signal, "SIGKILL", 9)) -> N
         try:
             os.kill(pid, sig)
         except OSError:
-            pass
+            _swallow("signal a process")
         return
     try:
         os.killpg(pgid, sig)
@@ -52,4 +54,4 @@ def kill_process_group(pid: int, sig: int = getattr(_signal, "SIGKILL", 9)) -> N
         try:
             os.kill(pid, sig)
         except OSError:
-            pass
+            _swallow("kill a process group")

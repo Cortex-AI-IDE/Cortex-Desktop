@@ -4828,6 +4828,10 @@ class CortexMainWindow(QMainWindow):
         """
         import threading
 
+        # Off the GUI thread nobody is waiting on this read, so it may take
+        # as long as it takes and its answer always lands in the cache.
+        timeout = self._WORKTREE_READ_TIMEOUT if _is_gui_thread() else None
+
         # Unchanged file -> serve the last read. _push_changes_to_sidebar
         # re-resolves EVERY row on every AI edit, and each row came through
         # here: one os.stat replaces a full read plus a thread spawn (30 rows
@@ -4855,7 +4859,7 @@ class CortexMainWindow(QMainWindow):
 
         worker = threading.Thread(target=_read, daemon=True, name="worktree-read")
         worker.start()
-        worker.join(self._WORKTREE_READ_TIMEOUT)
+        worker.join(timeout)
 
         if "text" in result:
             if stamp is not None:
@@ -5266,18 +5270,30 @@ class CortexMainWindow(QMainWindow):
         window at 2026-09-13 20:27 (stack in _git_baseline_from_git). Now the
         list is drawn at once from the stored originals, a worker thread
         warms the git cache, and the list is redrawn from it.
+
+        The first draw also skips the worktree reads and line counts: with
+        no cache yet, each of 100 rows read its file (OneDrive, up to 150 ms
+        a row) and ran difflib on the GUI thread, 1.3-9 s of frozen boot
+        screen on every start (2026-10-23 log, stack in
+        _read_worktree_content). The rows show without counts until the
+        worker has warmed all three caches, then the redraw is cache hits.
         """
         import threading as _thr
         import time as _t
         self._changes_git_offline = []
+        self._changes_quick_draw = True
         try:
             self._push_changes_to_sidebar()
         finally:
+            self._changes_quick_draw = False
             missing = list(dict.fromkeys(self._changes_git_offline))
             self._changes_git_offline = None
         gen = getattr(self, "_changes_prefetch_gen", 0) + 1
         self._changes_prefetch_gen = gen
-        if not missing:
+        rows = [(k, v) for k, v in list((getattr(self, "_diff_data_store", None) or {}).items())
+                if isinstance(v, (tuple, list)) and len(v) >= 2 and v[1]
+                and self._changes_path_in_open_project(k)]
+        if not missing and not rows:
             return
         if not getattr(self, "_changes_prefetch_wired", False):
             self._changes_prefetched.connect(self._push_changes_to_sidebar)
@@ -5295,6 +5311,23 @@ class CortexMainWindow(QMainWindow):
                                f"baseline prewarm failed for {p}: {e}")
             log.info(f"[CHANGES] git baselines for {len(missing)} file(s) ready in "
                      f"{(_t.perf_counter() - t0) * 1000:.0f} ms (off the GUI thread)")
+            # Same resolution _push_changes_to_sidebar does per row, so its
+            # redraw finds the worktree text and the counts already cached.
+            t1 = _t.perf_counter()
+            for key, val in rows:
+                if getattr(self, "_changes_prefetch_gen", 0) != gen:
+                    return
+                if not os.path.exists(key):
+                    continue
+                try:
+                    original, modified = self._resolve_changes_pair(key, val[0], val[1])
+                    if modified and original != modified:
+                        self._compute_diff_counts(original, modified)
+                except Exception as e:
+                    _warn_once("main_window.diff_prewarm.counts",
+                               f"change count prewarm failed for {key}: {e}")
+            log.info(f"[CHANGES] worktree reads and counts for {len(rows)} row(s) ready in "
+                     f"{(_t.perf_counter() - t1) * 1000:.0f} ms (off the GUI thread)")
             if getattr(self, "_changes_prefetch_gen", 0) == gen:
                 self._changes_prefetched.emit()
 
@@ -5373,6 +5406,15 @@ class CortexMainWindow(QMainWindow):
                 else:
                     # Never committed, or its deletion already is: nothing to show.
                     pruned.append(key)
+                continue
+            if getattr(self, "_changes_quick_draw", False):
+                # Project open: names now, counts after the prefetch worker
+                # (see _refresh_changes_background). No keys = no counts drawn.
+                changes.append({
+                    "path": key,
+                    "name": os.path.basename(key),
+                    "edit_type": "A" if not original else "M",
+                })
                 continue
             # Re-resolve against git HEAD so list counts match Source Control,
             # even when the cache still holds a stale mid-edit original.
@@ -8107,6 +8149,10 @@ class CortexMainWindow(QMainWindow):
             self._webview_panel.setVisible(False)
             sizes = [0, total]
         else:
+            # W7: hiding the panel releases the dev server's port. Leaving the
+            # process running behind a hidden panel means the next `serve` hits
+            # EADDRINUSE and the agent reads it as "the server never started".
+            widget.stop_dev_server()
             widget.setVisible(False)
             self._webview_panel.setVisible(True)
             # Restore the editor to full width. Just zeroing sizes[1] is
@@ -8143,14 +8189,26 @@ class CortexMainWindow(QMainWindow):
         log.info(f"[LivePreview] open_live_preview_for_file: {file_path}")
         self._toggle_live_preview(show=True, file_path=file_path)
 
-    def _on_agent_live_preview(self, action: str, path: str, resp: dict) -> None:
+    # How long the agent is willing to wait for a dev server before the
+    # panel gives up and reports the tail of its output instead.
+    _DEV_SERVER_READY_TIMEOUT = 90.0
+    # A screenshot taken in the same event-loop turn as the navigation grabs
+    # a surface the compositor has not drawn yet and comes back blank. One
+    # short delay, not a poll: the page is already loaded, only the frame commit
+    # is pending.
+    _SCREENSHOT_SETTLE_MS = 400
+
+    def _on_agent_live_preview(self, action: str, args: dict, resp: dict) -> None:
         """Agent LivePreview tool handler, runs on the UI thread (queued
         signal from the agent bridge). Fills `resp` and sets resp['event']
         so the waiting agent thread can return the tool result.
 
-        Contract: resp['event'] MUST be set on every path, including
-        exceptions, a missed set() costs the agent a 15s timeout."""
-        log.info(f"[LivePreview] agent tool: action={action!r} path={path!r}")
+        Contract: resp['event'] MUST be set exactly once on every path,
+        including exceptions, a missed set() costs the agent a full timeout.
+        `serve` and `screenshot` finish later than this call returns, they set
+        the event from a timer callback instead (same as `read` does from
+        toPlainText's callback)."""
+        log.info(f"[LivePreview] agent tool: action={action!r} args={args!r}")
         try:
             panel = getattr(self, '_live_preview_panel', None)
             if panel is None:
@@ -8158,29 +8216,35 @@ class CortexMainWindow(QMainWindow):
                 resp["event"].set()
                 return
             if action == "open":
-                self.open_live_preview_for_file(path)
-                resp["result"] = (f"Live Preview opened: {path}. The panel auto-reloads on "
-                                  f"file changes. Use action='console' to check for JS errors "
-                                  f"and action='read' to see the rendered text.")
+                self.open_live_preview_for_file(str(args.get("path", "")))
+                resp["result"] = (
+                    f"Live Preview opened: {args.get('path', '')}. The panel auto-reloads on "
+                    f"file changes. Use action='console' to check for JS errors, "
+                    f"action='read' for the rendered text and action='screenshot' to see it.")
                 resp["event"].set()
             elif action == "close":
+                panel.stop_dev_server()
                 self._toggle_live_preview(show=False)
-                resp["result"] = "Live Preview closed."
+                resp["result"] = "Live Preview closed and any dev server was stopped."
+                resp["event"].set()
+            elif action == "serve":
+                self._agent_live_preview_serve(panel, args, resp)
+            elif action == "stop":
+                had = panel.has_dev_server()
+                panel.stop_dev_server()
+                resp["result"] = ("Dev server stopped, port released." if had
+                                  else "No dev server was running.")
+                resp["event"].set()
+            elif action == "status":
+                resp["result"] = self._agent_live_preview_status(panel)
                 resp["event"].set()
             elif action == "console":
-                msgs = panel.get_console_messages()
-                if not panel.current_path():
-                    resp["result"] = "No page is loaded in Live Preview (use action='open' first)."
-                elif not msgs:
-                    resp["result"] = ("Console is clean, no JS errors, warnings or logs since "
-                                      "the page loaded.")
-                else:
-                    lines = [f"[{m['level']}] line {m['line']}: {m['message']}" for m in msgs]
-                    resp["result"] = f"Console output ({len(msgs)} entries):\n" + "\n".join(lines)
+                resp["result"] = self._agent_live_preview_console(panel)
                 resp["event"].set()
             elif action == "read":
-                if not panel.current_path():
-                    resp["result"] = "No page is loaded in Live Preview (use action='open' first)."
+                if not panel.has_page():
+                    resp["result"] = ("Nothing is loaded in Live Preview "
+                                      "(use action='open' or action='serve' first).")
                     resp["event"].set()
                     return
                 # toPlainText is async, resolve resp from its callback.
@@ -8188,12 +8252,15 @@ class CortexMainWindow(QMainWindow):
                     text = (text or "").strip()
                     if len(text) > 20000:
                         text = text[:20000] + "\n… [truncated at 20000 chars]"
-                    resp["result"] = (f"Rendered page text of {panel.current_path()}:\n{text}"
+                    target = panel.current_url() or panel.current_path()
+                    resp["result"] = (f"Rendered page text of {target}:\n{text}"
                                       if text else
                                       "Page rendered but has no visible text (blank page, "
                                       "check action='console' for JS errors).")
                     resp["event"].set()
                 panel.get_page_text(_deliver)
+            elif action == "screenshot":
+                self._agent_live_preview_screenshot(panel, args, resp)
             else:
                 resp["error"] = f"Unknown LivePreview action: {action!r}"
                 resp["event"].set()
@@ -8201,6 +8268,139 @@ class CortexMainWindow(QMainWindow):
             log.error(f"[LivePreview] agent tool failed: {exc}")
             resp["error"] = str(exc)
             resp["event"].set()
+
+    def _agent_live_preview_console(self, panel) -> str:
+        """Console entries formatted for the model."""
+        msgs = panel.get_console_messages()
+        if not panel.has_page():
+            return "Nothing is loaded in Live Preview (use action='open' or 'serve' first)."
+        if not msgs:
+            return ("Console is clean, no JS errors, warnings or logs since "
+                    "the page loaded.")
+        lines = [f"[{m['level']}] line {m['line']}: {m['message']}" for m in msgs]
+        return f"Console output ({len(msgs)} entries):\n" + "\n".join(lines)
+
+    def _agent_live_preview_status(self, panel) -> str:
+        """What the panel currently holds, and whether a server is behind it."""
+        target = panel.current_url() or panel.current_path()
+        if not target:
+            return "Live Preview is empty (no file and no dev server)."
+        kind = "dev server URL" if panel.current_url() else "local file"
+        parts = [f"Live Preview is showing the {kind}: {target}",
+                 f"Panel visible: {bool(panel.isVisible())}"]
+        output = panel.dev_server_output(tail=10)
+        if output:
+            parts.append("Dev server is running. Last output:\n" + output)
+        return "\n".join(parts)
+
+    def _agent_live_preview_serve(self, panel, args: dict, resp: dict) -> None:
+        """Start the project's dev server, then hand its URL to the panel.
+
+        The wait runs on a worker thread because a cold `npm run dev` takes
+        seconds: doing it here would freeze the window, which is the exact
+        failure class W16 and W17 were about. A timer polls the finished
+        `url` on the UI thread and only then touches the widgets.
+        """
+        import threading
+
+        from src.core.dev_server import detect_dev_command
+
+        command = str(args.get("command", "") or "").strip()
+        root = getattr(self, "_current_project_path", None) or os.getcwd()
+        if not command:
+            command = detect_dev_command(root) or ""
+        if not command:
+            resp["error"] = (
+                "LivePreview serve: no 'command' given and none could be detected. "
+                "Pass one explicitly, e.g. command='npm run dev'.")
+            resp["event"].set()
+            return
+        try:
+            # cwd is the project root, never the app's own working directory:
+            # the packaged app runs from the install folder.
+            server = panel.start_dev_server(command, cwd=root, port=args.get("port"))
+        except Exception as exc:
+            resp["error"] = f"LivePreview serve: could not start {command!r}: {exc}"
+            resp["event"].set()
+            return
+        self._live_preview_wait_timer = QTimer(self)
+        self._live_preview_wait_timer.setInterval(150)
+        deadline = time.monotonic() + self._DEV_SERVER_READY_TIMEOUT
+        timer = self._live_preview_wait_timer
+
+        def _finish(message: str, error: bool = False) -> None:
+            timer.stop()
+            if error:
+                resp["error"] = message
+            else:
+                resp["result"] = message
+            resp["event"].set()
+
+        def _tick() -> None:
+            if server.url:
+                self._toggle_live_preview(show=True)
+                panel.load_url(server.url, label=command)
+                _finish(f"Dev server running at {server.url} (command: {command}). "
+                        f"Use action='console', 'read' and 'screenshot' to verify it.")
+                return
+            if server.error or not server.running:
+                _finish(server.error or f"{command!r} exited before it started listening.",
+                        error=True)
+                return
+            if time.monotonic() >= deadline:
+                panel.stop_dev_server()
+                _finish(server.error or
+                        f"Dev server did not answer within "
+                        f"{self._DEV_SERVER_READY_TIMEOUT:.0f}s. Output:\n"
+                        f"{server.output(30)}", error=True)
+
+        timer.timeout.connect(_tick)
+        timer.start()
+        threading.Thread(target=server.wait_ready,
+                         args=(self._DEV_SERVER_READY_TIMEOUT,),
+                         name="devserver-ready", daemon=True).start()
+
+    def _agent_live_preview_screenshot(self, panel, args: dict, resp: dict) -> None:
+        """Capture the panel and hand the image back for the model to look at.
+
+        Grabs once, after one settle delay: `grab()` is a synchronous surface
+        read, so repeating it would reintroduce the cost the render-health
+        probe measured at 10.7s.
+        """
+        import base64
+
+        try:
+            max_width = int(args.get("max_width") or 1280)
+        except Exception:
+            max_width = 1280
+        max_width = max(320, min(max_width, 2048))
+        if not panel.isVisible():
+            self._toggle_live_preview(show=True)
+
+        def _capture() -> None:
+            try:
+                data, err = panel.capture_screenshot(max_width=max_width)
+            except Exception as exc:
+                data, err = None, f"Capture failed: {exc}"
+            if not data:
+                resp["error"] = err or "Capture produced no image."
+                resp["event"].set()
+                return
+            target = panel.current_url() or panel.current_path()
+            resp["image"] = {
+                "filename": "live-preview.jpg",
+                "b64": base64.b64encode(data).decode("ascii"),
+            }
+            resp["result"] = (
+                f"Captured the Live Preview panel showing {target} "
+                f"({len(data) // 1024} KB JPEG). The image is attached to this turn. "
+                f"Judge it: layout, alignment, spacing, colour, contrast, clipped or "
+                f"overlapping text, missing content, error pages. If something is wrong, "
+                f"fix it and capture again before reporting the work as done.")
+            resp["event"].set()
+
+        QTimer.singleShot(self._SCREENSHOT_SETTLE_MS, _capture)
+
 
     def _on_editor_term_moved(self):
         """When user drags the editor↔terminal splitter handle, auto-show the terminal
@@ -9676,7 +9876,18 @@ class CortexMainWindow(QMainWindow):
             return
             
         log.info("🧹 Cleaning up old project state...")
-        
+
+        # 0. Release the old project's dev server before anything else. It runs
+        # in the old project's directory with the old project's node_modules, so
+        # keeping it alive across a switch shows the next project's code as the
+        # previous project's output, and holds its port.
+        try:
+            if getattr(self, '_live_preview_panel', None) is not None:
+                self._live_preview_panel.stop_dev_server()
+                log.info("   ✓ Stopped dev server")
+        except Exception as _ds_exc:
+            log.warning(f"   dev server cleanup failed: {_ds_exc}")
+
         # 1. Close all editor tabs
         self._editor_tabs.close_all_tabs()
         log.info("   ✓ Closed all editor tabs")
@@ -10089,6 +10300,14 @@ class CortexMainWindow(QMainWindow):
         # if self._live_server and self._live_server.is_running:
         #     self._live_server.stop()
         self._live_server = None
+
+        # W7: the preview's dev server outlives the panel unless it is stopped
+        # here, so closing the project leaves a node process holding a port.
+        try:
+            if getattr(self, '_live_preview_panel', None) is not None:
+                self._live_preview_panel.stop_dev_server()
+        except Exception as _ds_exc:
+            log.warning(f"[PROJECT_CLOSE] dev server cleanup failed: {_ds_exc}")
 
         # Clear all state
         self._current_project_path = None
@@ -11268,6 +11487,14 @@ class CortexMainWindow(QMainWindow):
         # Stop Live Server (removed in AI-first mode)
         if False and self._live_server and self._live_server.is_running:
             self._live_server.stop()
+
+        # W7: the preview's dev server is a child process. Without this the app
+        # exits and leaves node holding its port until the user finds it.
+        try:
+            if getattr(self, '_live_preview_panel', None) is not None:
+                self._live_preview_panel.stop_dev_server()
+        except Exception as _ds_exc:
+            log.warning(f"[SHUTDOWN] dev server cleanup failed: {_ds_exc}")
 
     
         # 6. FINAL DB FLUSH, Guarantee all chat history is persisted to SQLite.

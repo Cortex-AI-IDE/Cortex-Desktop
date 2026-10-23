@@ -202,350 +202,34 @@ from PyQt6.QtCore import QUrl
 _MERMAID_DIR = os.path.dirname(os.path.abspath(__file__))
 MERMAID_HTML_PATH = os.path.join(_MERMAID_DIR, "html", "ai_chat", "mermaid.html")
 
-# Mermaid fences are located by chat_text.find_mermaid_spans, the single source
-# of truth shared with the turn-end card builder. The two DOTALL patterns that
-# used to live here had no line anchor, so a message that merely MENTIONED a
-# ```mermaid fence in prose, or quoted that token inside a plain code block,
-# was treated as a diagram opener and the rest of the message was swallowed as
-# diagram code (chat console: UnknownDiagramError, 2026-10-22).
-
-
-def _strip_mermaid_for_streaming(text: str) -> tuple[str, bool]:
-    """Remove mermaid fences from streaming display text.
-
-    Returns (cleaned_text, had_mermaid). Offsets come from
-    :func:`src.ui.chat_text.find_mermaid_spans`, which reports only real,
-    line-anchored fences whose body actually parses as a diagram, so prose is
-    never removed from the live view.
-    """
-    # PERF 2026-08-16: fast path. The scan is O(n) over the whole buffer every
-    # streaming tick; mermaid is rare, so a cheap substring probe skips it for
-    # the overwhelming majority of ticks. (.strip() keeps the return shape.)
-    if 'mermaid' not in text.lower():
-        return text.strip(), False
-    spans = find_mermaid_spans(text)
-    if not spans:
-        return text.strip(), False
-    kept = []
-    pos = 0
-    for start, end, _code, _complete in spans:
-        kept.append(text[pos:start])
-        pos = end
-    kept.append(text[pos:])
-    return ''.join(kept).strip(), True
-
-
-# Some models emit an invented "<questions>[{...}]</questions>" TEXT block
-# (AskUserQuestion's exact arg JSON) instead of calling the tool, the raw
-# JSON then rendered as prose. Strip it from display; on_turn_done parses it
-# and shows a real interactive QuestionCard instead.
-_RE_QUESTIONS_COMPLETE = re.compile(r'<questions>\s*(\[.*?\])\s*</questions>', re.DOTALL)
-_RE_QUESTIONS_OPEN = re.compile(r'<questions>.*$', re.DOTALL)
-
-
-def _strip_questions_for_streaming(text: str) -> str:
-    """Hide raw <questions> JSON blocks (complete or still streaming)."""
-    if '<questions' not in text:
-        return text
-    text = _RE_QUESTIONS_COMPLETE.sub('', text)
-    text = _RE_QUESTIONS_OPEN.sub('', text)
-    return text.strip()
-
-# Pre-compiled patterns for replacing code fences during streaming.
-# Qt's setMarkdown() mangles fenced code blocks (shows language hint as text).
-# Replace with a styled placeholder during streaming; _render_prose creates
-# real CodeBlockWidget on turn_done.
-_RE_CODE_COMPLETE = re.compile(r'```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n(.*?)```', re.DOTALL)
-_RE_CODE_OPEN = re.compile(r'```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n(.*)$', re.DOTALL)
-
-# Small memo so re-highlighting the same code body every stream flush is cheap
-# (completed fences have stable content → cache hit after first highlight).
-_STREAM_HL_CACHE: dict[tuple[str, str, str], str] = {}
-
-# Throttle state for the STILL-OPEN fence (the one that grows every tick and
-# therefore never hits _STREAM_HL_CACHE): (lang, bg) → (code_at_last_full_hl,
-# code_html_at_last_full_hl).  Between full re-highlights (every +400 chars)
-# the delta is appended as plain escaped text — momentarily uncolored while
-# streaming, fully colored on the next full pass and in the final render.
-# Without this, pygments re-ran on the ENTIRE growing code body every tick
-# (O(n) pygments per tick → O(n²) over the block), one of the worst costs in
-# the old per-tick pipeline for long code blocks.
-_OPEN_FENCE_HL_STATE: dict[tuple[str, str], tuple[str, str]] = {}
-_OPEN_FENCE_HL_DELTA = 400  # chars of growth before a full re-highlight
-
-def _highlight_for_stream(code: str, lang: str, is_open: bool = False) -> str:
-    """Syntax-highlight code → QTextBrowser HTML, cached. Falls back to
-    plain escaped text if the highlighter is unavailable.
-
-    Cache key includes the active theme bg, highlight colors are baked
-    inline per-theme, so a dark-rendered entry must not be served after a
-    live switch to light (invisible white comments on the warm page).
-
-    ``is_open=True`` (fence still streaming) enables incremental mode:
-    reuse the last full highlight and append the new tail escaped, doing a
-    full pygments pass only every ``_OPEN_FENCE_HL_DELTA`` chars."""
-    key = (lang, T['bg'])
-    if is_open:
-        st = _OPEN_FENCE_HL_STATE.get(key)
-        if st is not None:
-            prev_code, prev_html = st
-            if code.startswith(prev_code) and \
-                    len(code) - len(prev_code) < _OPEN_FENCE_HL_DELTA:
-                import html as _html
-                return prev_html + _html.escape(code[len(prev_code):])
-    cache_key = (lang, code, T['bg'])
-    cached = _STREAM_HL_CACHE.get(cache_key)
-    if cached is not None:
-        out = cached
-    else:
-        try:
-            from src.ui.syntax_highlight import highlight_code as _hl
-            out = _hl(code, lang)
-        except Exception:
-            import html as _html
-            out = _html.escape(code)
-        # Cap cache size so it can't grow unbounded across a long session.
-        if len(_STREAM_HL_CACHE) > 200:
-            _STREAM_HL_CACHE.clear()
-        _STREAM_HL_CACHE[cache_key] = out
-    if is_open:
-        _OPEN_FENCE_HL_STATE[key] = (code, out)
-    return out
-
-def _extract_code_fences_for_streaming(text: str) -> tuple[str, dict[str, str]]:
-    """Extract fenced code blocks, replace with sentinels. Returns (text, map).
-    The sentinels survive Qt's setMarkdown() round-trip so we can splice styled
-    <pre> blocks back into the final HTML.
-
-    Code bodies are SYNTAX-HIGHLIGHTED here (same highlighter used by the final
-    render) so colors appear progressively DURING streaming, not only at the
-    end. Tables are likewise styled live via _fix_prose_tables in _flush_prose.
-    """
-    import html as _html
-    _map: dict[str, str] = {}
-    _counter = [0]
-    _open_flag = [False]  # True while stashing the still-open trailing fence
-    def _stash(m):
-        idx = _counter[0]; _counter[0] += 1
-        lang = m.group(1) or ""
-        code = m.group(2).rstrip('\n')
-        # The still-open trailing fence uses incremental highlighting
-        # (full pygments pass only every +400 chars) instead of
-        # re-highlighting the entire growing body on every tick.
-        code_html = _highlight_for_stream(code, lang, is_open=_open_flag[0])
-        # Live markup draws the SAME card CodeBlockWidget draws at turn end:
-        # header strip (lang left, chevron + Copy right) above the code body.
-        # The old bare <pre> made a fence look like a plain coloured box for
-        # the whole turn, then snap into a card once _render_prose_batched
-        # replaced it ("code block must be inside a card in live too").
-        # This is markup only: Copy/chevron become real controls when
-        # _render_single_prose swaps the block for a CodeBlockWidget.
-        lang_label = (
-            f'<span style="color:{T["muted"]};font-family:{T["font_mono"]};'
-            f'font-size:10px;font-weight:600;">{_html.escape(lang.upper())}</span>'
-            if lang else '')
-        header = (
-            f'<table width="100%" cellspacing="0" cellpadding="0">'
-            f'<tr>'
-            f'<td align="left" style="padding:4px 8px;background:{T["bg_raised"]};'
-            f'border:1px solid {T["border"]};'
-            f'border-bottom:1px solid {T["border_dim"]};">{lang_label}</td>'
-            f'<td align="right" style="padding:4px 6px;background:{T["bg_raised"]};'
-            f'border:1px solid {T["border"]};border-left:none;'
-            f'border-bottom:1px solid {T["border_dim"]};">'
-            f'<span style="color:{T["text_dim"]};font-size:12px;">\u25be</span>'
-            f'<span style="color:{T["text_dim"]};font-size:10px;'
-            f'font-family:{T["font_ui"]};'
-            f'border:1px solid {T["border_dim"]};background:{T["bg"]};">'
-            f'&nbsp;Copy&nbsp;</span></td>'
-            f'</tr></table>')
-        styled = (header +
-                  f'<pre style="margin:0 0 8px 0;padding:10px 14px 12px 14px;'
-                  f'background:{T["bg"]};border:1px solid {T["border"]};border-top:none;'
-                  f'white-space:pre;'
-                  f'font-family:{T["font_mono"]};font-size:12px;'
-                  f'color:{T["text"]};">'
-                  f'{code_html}</pre>')
-        key = f'«FENCE{idx}»'
-        _map[key] = styled
-        return key
-    _open_flag[0] = False
-    text = _RE_CODE_COMPLETE.sub(_stash, text)
-    _open_flag[0] = True
-    text = _RE_CODE_OPEN.sub(_stash, text)
-    return text, _map
-
-def _restore_code_fences(html: str, fence_map: dict[str, str]) -> str:
-    """Splice styled <pre> blocks back into HTML, replacing sentinels.
-
-    A fenced block is BLOCK-level, but the sentinel is a bare text token: when
-    it sits alone on its line mistune wraps it in ``<p>«FENCE0»</p>``, and a
-    plain string replace produced ``<p><pre>…</pre></p>``.  Qt's rich text
-    engine cannot nest a block inside a paragraph, so it flattened the code
-    block into the surrounding prose: the fence rendered as inline text with
-    no card, border or scroll area ("the code block displays like plan
-    instead of a pre card", reported 2026-10-22).  A fence that shares a
-    paragraph with prose (``` right after a sentence, no blank line) flattened
-    the same way.
-
-    Paragraphs holding a sentinel are therefore rebuilt: the paragraph is
-    closed before the block, and any prose after it is reopened in its own
-    paragraph.  Sentinels outside a paragraph still get the plain replace.
-    """
-    if not html or not fence_map:
-        return html
-
-    keys = tuple(fence_map)
-    if not any(k in html for k in keys):
-        return html
-
-    def _rebuild_para(m: "re.Match") -> str:
-        inner = m.group(1)
-        if not any(k in inner for k in keys):
-            return m.group(0)
-        parts = re.split('(' + '|'.join(re.escape(k) for k in keys) + ')', inner)
-        out: list[str] = []
-        for part in parts:
-            if not part or not part.strip():
-                continue
-            if part in fence_map:
-                out.append(fence_map[part])
-            else:
-                out.append('<p>' + part.strip() + '</p>')
-        return '\n'.join(out)
-
-    html = re.sub(r'<p>([\s\S]*?)</p>', _rebuild_para, html)
-
-    # Sentinels that never landed inside a paragraph (list items, table cells).
-    for key, styled in fence_map.items():
-        if key in html:
-            html = html.replace(key, styled)
-    return html
-
-
-def _find_fence_close_boundary(buf: str) -> int:
-    """Offset just past the last line that CLOSES a code fence, else -1.
-
-    A completed fence is a safe seal point even without a following blank
-    line (models often emit ````` ``` ````\\nNext para` directly): the prefix
-    ends with a closed fence = well-formed markdown on its own.  The old
-    paragraph-only sealer missed these, keeping finished code blocks inside
-    the live buffer and inflating every later tick.
-    """
-    off = 0
-    boundary = -1
-    in_fence = False
-    for ln in buf.split('\n'):
-        s = ln.lstrip()
-        if s.startswith('```'):
-            if in_fence:
-                in_fence = False
-                boundary = off + len(ln) + 1  # include this line's newline
-            else:
-                in_fence = True
-        off += len(ln) + 1
-    if boundary >= len(buf):
-        boundary = -1  # fence closed at the very end: nothing after it yet
-    return boundary
-
-
-_TABLE_ROW_RE = re.compile(r'^[ \t]*\|')
-_TABLE_SEP_RE = re.compile(r'^[ \t]*\|?[\s\-:|]+\|?$')
-
-
-def _split_open_block_for_seal(buf: str, tail_target: int) -> tuple:
-    """Fallback seal split for a live buffer that grew past the hard cap
-    with NO paragraph or fence-close boundary (one giant open code fence,
-    one giant table, or one open mermaid diagram).
-
-    Returns ``(split_off, prefix_extra, tail_extra)`` or ``(-1, "", "")``.
-    ``prefix_extra`` is appended to the prefix (e.g. a synthetic fence
-    close) and ``tail_extra`` prepended to the tail (fence opener / table
-    header) so BOTH halves are well-formed markdown — critical because the
-    turn-end renderer renders each sealed segment independently.
-
-    The split keeps the tail ≤ ``tail_target`` chars so the per-tick live
-    re-render stays bounded forever; the one-time cost of rendering the big
-    sealed prefix is paid once, off the hot path.
-    """
-    lines = buf.split('\n')
-    offs = []
-    off = 0
-    for ln in lines:
-        offs.append(off)
-        off += len(ln) + 1
-
-    in_fence = False
-    fence_open_off = -1
-    fence_lang = ""
-    mermaid_open_off = -1
-    for i, ln in enumerate(lines):
-        s = ln.lstrip()
-        if s.startswith('```'):
-            if not in_fence:
-                in_fence = True
-                fence_open_off = offs[i]
-                fence_lang = s[3:].strip()
-                if fence_lang.lower() == 'mermaid':
-                    mermaid_open_off = offs[i]
-            else:
-                in_fence = False
-                fence_open_off = -1
-
-    # 1) Open mermaid: seal everything BEFORE the diagram opener.  The tail
-    #    (the diagram) is stripped from the live display anyway and becomes
-    #    a MermaidDiagramCard on turn end.
-    if in_fence and mermaid_open_off > 0:
-        return mermaid_open_off, "", ""
-
-    # 2) Open non-mermaid fence: split at a line boundary, close the prefix
-    #    fence and reopen it on the tail.
-    if in_fence and fence_open_off >= 0:
-        want = len(buf) - tail_target
-        if want <= fence_open_off:
-            return -1, "", ""  # fence itself still small; let it grow
-        split_at = -1
-        for i in range(len(lines) - 1, -1, -1):
-            if offs[i] <= want and offs[i] > fence_open_off:
-                split_at = offs[i]
-                break
-        if split_at < 0:
-            return -1, "", ""
-        opener = '```' + fence_lang
-        return split_at, "\n```", opener + "\n"
-
-    # 3) Open table (buffer ends in a long run of pipe rows): split at a row
-    #    boundary and repeat the header + separator on the tail.
-    n = len(lines)
-    while n > 0 and not lines[n - 1].strip():
-        n -= 1  # ignore trailing blank lines (buffer ends with "\n")
-    run = 0
-    while run < n and _TABLE_ROW_RE.match(lines[n - 1 - run]):
-        run += 1
-    if run >= 20:
-        tbl_start = n - run
-        sep_idx = -1
-        for j in range(tbl_start, min(tbl_start + 3, n)):
-            if _TABLE_SEP_RE.match(lines[j].strip()) and '-' in lines[j]:
-                sep_idx = j
-                break
-        if sep_idx > tbl_start:
-            header = '\n'.join(lines[tbl_start:sep_idx + 1])
-            want = len(buf) - tail_target
-            split_at = -1
-            for i in range(n - 1, sep_idx, -1):
-                if offs[i] <= want and offs[i] > offs[sep_idx]:
-                    split_at = offs[i]
-                    break
-            if split_at > 0:
-                return split_at, "", header + "\n"
-
-    # 4) Plain text with no blank line (rare): raw line-boundary split.
-    want = len(buf) - tail_target
-    for i in range(n - 1, -1, -1):
-        if offs[i] <= want:
-            return offs[i], "", ""
-    return -1, "", ""
+# ── Streaming text pipeline ───────────────────────────────────────────────────
+# Mermaid/question stripping, fence extraction, live code-card highlighting and
+# the seal-boundary splitters now live in src/ui/stream_text.py. They are pure
+# string functions with no widget of their own, so that module imports and runs
+# without a QApplication (W1) and tests can exercise them directly.
+#
+# The names are re-exported here because every call site below, and several
+# tests, import them from this module. Re-exporting rather than rewriting those
+# call sites keeps the move mechanical: the risk is a bad import, not a
+# behaviour change.
+from src.ui.stream_text import (  # noqa: F401  (re-exported for call sites)
+    _OPEN_FENCE_HL_DELTA,
+    _OPEN_FENCE_HL_STATE,
+    _RE_CODE_COMPLETE,
+    _RE_CODE_OPEN,
+    _RE_QUESTIONS_COMPLETE,
+    _RE_QUESTIONS_OPEN,
+    _STREAM_HL_CACHE,
+    _TABLE_ROW_RE,
+    _TABLE_SEP_RE,
+    _extract_code_fences_for_streaming,
+    _find_fence_close_boundary,
+    _highlight_for_stream,
+    _restore_code_fences,
+    _split_open_block_for_seal,
+    _strip_mermaid_for_streaming,
+    _strip_questions_for_streaming,
+)
 
 
 class _ProseRenderThread(QThread):
@@ -3654,6 +3338,7 @@ class ActivityGroup(CollapsibleCard):
         self._order: list = []
         self._thoughts = 0
         self._diffs: dict = {}          # filename -> [added, removed]
+        self._deferred = None           # saved blocks not built yet (restore)
         self._live = True
         # Line up with the AI's text: prose blocks carry their own ~18px
         # document padding, the activity line has none.
@@ -3677,6 +3362,7 @@ class ActivityGroup(CollapsibleCard):
             f"QWidget#activityBody {{ background: transparent; border-left: 1px solid {T['border']}; }}")
         self.header.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.header.setAccessibleName("Show the steps")
+        self.body.installEventFilter(self)
         self._style()
         self._refresh()
 
@@ -3707,9 +3393,15 @@ class ActivityGroup(CollapsibleCard):
             if a1.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
                 self.toggle()
                 return True
+        # Whatever opens the body (a click, a key, code that expands it),
+        # the deferred cards must exist before it is painted.
+        if (a0 is self.body and a1 is not None and self._deferred
+                and a1.type() == QEvent.Type.Show):
+            self._build_deferred()
         return super().eventFilter(a0, a1)
 
     def _on_expanded(self):
+        self._build_deferred()
         # Cards built while the body was hidden measured a zero width; let
         # them fit to the real one now.
         for w in self.body.findChildren(QWidget):
@@ -3721,6 +3413,63 @@ class ActivityGroup(CollapsibleCard):
     def add_block(self, w):
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.body_layout.addWidget(w)
+
+    def defer_block(self, bd: dict):
+        """Restore: tally a saved block now, build its card on first open.
+
+        A restored group starts collapsed, yet its thoughts, tool cards and
+        diffs were all built up front: ~360 widgets for one long agentic
+        reply, none of them visible. That was most of the boot freeze
+        (2026-10-23 log: 12 messages restored in 13.8s, every batch 1.2-2.4s,
+        stacks inside DiffCard / tool card construction while the boot
+        animation stood still). The header only needs the tally, so the
+        cards wait for the first open, and serialize() saves the stored
+        blocks as they came.
+        """
+        if self._deferred is None:
+            self._deferred = []
+        self._deferred.append(bd)
+        bt = bd.get("type")
+        if bt == "thoughts":
+            self.note_thought()
+        elif bt == "diff":
+            self.note_diff(bd.get("filename", ""), bd.get("added", 0), bd.get("removed", 0))
+        elif bt == "tools":
+            # Same tally as the built path in MessageWidget.from_serialized.
+            for idx, td in enumerate(bd.get("items", [])):
+                _name = td.get("name", "")
+                if (td.get("tool_type") and isinstance(td.get("data"), dict)) or _name:
+                    self.note_tool_start(f"d{id(bd)}_{idx}", _name, td.get("arg", ""))
+
+    def deferred_blocks(self):
+        """The saved blocks still waiting to be built, or None."""
+        return self._deferred
+
+    def _build_deferred(self):
+        pending, self._deferred = self._deferred, None
+        if not pending:
+            return
+        try:
+            # Built unfolded into a scratch reply, then moved here, so the
+            # cards are the same ones a detailed-view restore draws.
+            tmp = MessageWidget.from_serialized(
+                {"role": "assistant", "blocks": pending}, _restoring=True, _fold=False)
+            if tmp is None:
+                return
+            widgets = []
+            for i in range(tmp._card_v.count()):
+                item = tmp._card_v.itemAt(i)
+                w = item.widget() if item else None
+                if w is not None:
+                    widgets.append(w)
+            for w in widgets:
+                tmp._card_v.removeWidget(w)
+                self.add_block(w)
+            tmp.deleteLater()
+        except Exception as e:
+            # Keep the blocks: the next save must still write them.
+            self._deferred = pending
+            log.warning(f"[ChatRestore] building a folded activity group failed: {e}")
 
     def blocks(self) -> list:
         out = []
@@ -3789,6 +3538,43 @@ class ActivityGroup(CollapsibleCard):
     @staticmethod
     def _base(path):
         return str(path or "").replace("\\", "/").rstrip("/").split("/")[-1]
+
+    # The header is a single non-wrapping line. Cap the words so the
+    # +N/-M badges appended after them stay on screen instead of being
+    # clipped mid-badge ("edited FIX-PLAN.md +").
+    _HEADER_MAX_CHARS = 74
+
+    @staticmethod
+    def _cap(text, limit):
+        """Trim `text` to `limit` characters, ending on an ellipsis."""
+        text = str(text or "")
+        if len(text) <= limit:
+            return text
+        return text[:max(1, limit - 1)].rstrip(" ,") + "\u2026"
+
+    @classmethod
+    def _fit_parts(cls, parts, limit):
+        """Fit the summary on one line, keeping the last part whole.
+
+        Parts are dropped whole from the middle, never cut mid-word, and the
+        final part (usually "edited <file>", the one the +N/-M badges belong
+        to) is always kept:
+
+            ran 6 commands, read 3 files, searched 4 times... edited X.md
+        """
+        text = ", ".join(parts)
+        if len(text) <= limit or len(parts) <= 2:
+            return cls._cap(text, limit)
+        last = parts[-1]
+        head_budget = limit - len(last) - len("\u2026 ")
+        kept = []
+        for part in parts[:-1]:
+            if kept and len(", ".join(kept + [part])) > head_budget:
+                break
+            kept.append(part)
+        if not kept:
+            return cls._cap(text, limit)
+        return ", ".join(kept) + "\u2026 " + last
 
     def _running_phrase(self):
         for tid in reversed(self._order):
@@ -3882,19 +3668,35 @@ class ActivityGroup(CollapsibleCard):
             import html as _h
             failed = sum(1 for t in self._tools.values() if t[3] == "fail")
             parts = self.summary_parts()
+            full = ", ".join(parts)
+            # Reserve the badge width FIRST: the +N/-M spans are appended
+            # after the words, so a long summary pushed them past the header
+            # edge and clipped them mid-badge.
+            show_diffs = bool(self._diffs) and not (self._live and self._running_phrase())
+            added = sum(v[0] for v in self._diffs.values()) if show_diffs else 0
+            removed = sum(v[1] for v in self._diffs.values()) if show_diffs else 0
+            reserve = 0
+            if added:
+                reserve += len(f" +{added}")
+            if removed:
+                reserve += len(f" \u2212{removed}")
+            if failed:
+                reserve += len(f" \u00b7 {failed} failed")
+            budget = max(24, self._HEADER_MAX_CHARS - reserve)
             if self._live:
-                text = self._running_phrase() or (", ".join(parts) if parts else "Thinking")
-                text = text[:1].upper() + text[1:] + "\u2026"
+                text = self._running_phrase() or (self._fit_parts(parts, budget) if parts else "Thinking")
+                text = text[:1].upper() + text[1:]
+                if not text.endswith("\u2026"):
+                    text += "\u2026"
             else:
-                text = ", ".join(parts) if parts else "Worked"
+                text = self._fit_parts(parts, budget) if parts else "Worked"
                 text = text[:1].upper() + text[1:]
             html_txt = _h.escape(text)
             # Double-quoted style attributes: the font_mono token itself
             # contains single quotes ('Ubuntu Mono', ...).
             mono = str(T['font_mono']).replace('"', "'")
-            if self._diffs and not (self._live and self._running_phrase()):
-                a = sum(v[0] for v in self._diffs.values())
-                r = sum(v[1] for v in self._diffs.values())
+            if show_diffs:
+                a, r = added, removed
                 if a:
                     html_txt += f' <span style="color:{T["green"]};font-family:{mono};font-size:12px;">+{a}</span>'
                 if r:
@@ -3902,7 +3704,12 @@ class ActivityGroup(CollapsibleCard):
             if failed:
                 html_txt += f' <span style="color:{T["red"]};">&middot; {failed} failed</span>' 
             self.label.setText(html_txt)
-            self.header.setAccessibleDescription(text)
+            # The cap only affects what is drawn: the whole tally stays
+            # available on hover and to screen readers.
+            tip = full if len(full) > len(text) else ""
+            self.header.setToolTip(tip)
+            self.label.setToolTip(tip)
+            self.header.setAccessibleDescription(full or text)
             if self._spin is not None:
                 if self._live:
                     self._spin.show()
@@ -5929,12 +5736,17 @@ class MessageWidget(QWidget):
                     continue
                 if isinstance(w, ActivityGroup):
                     try:
-                        _flat.extend(w.blocks())
+                        # Never opened since restore: its cards were not
+                        # built, so save the blocks it was restored from.
+                        _flat.extend(w.deferred_blocks() or w.blocks())
                     except RuntimeError:
                         _swallow("fold an activity group's cards into the saved timeline")
                 else:
                     _flat.append(w)
             for w in _flat:
+                if isinstance(w, dict):
+                    blocks.append(w)    # a deferred block, already saved form
+                    continue
                 try:
                     # Check if the C++ object is still alive
                     w.objectName()
@@ -6066,7 +5878,8 @@ class MessageWidget(QWidget):
         return {"role": "assistant", "blocks": blocks, "ts": self.created_ts}
 
     @staticmethod
-    def from_serialized(data: dict, _restoring: bool = False) -> "MessageWidget | None":
+    def from_serialized(data: dict, _restoring: bool = False,
+                        _fold: bool = True) -> "MessageWidget | None":
         """Reconstruct a MessageWidget from serialized data.
 
         Args:
@@ -6074,6 +5887,9 @@ class MessageWidget(QWidget):
                 the caller will batch-refit all widgets after insertion.
                 This eliminates hundreds of per-widget timer callbacks during
                 chat history restore (major performance win).
+            _fold: False builds every card unfolded, whatever the chat
+                activity setting; ActivityGroup uses it to build its
+                deferred cards.
         """
         # Strip NULL bytes from all string fields, LLMs sometimes embed \x00
         for key in ('content', 'text', 'html'):
@@ -6167,7 +5983,7 @@ class MessageWidget(QWidget):
         # talking to the user ("Checking the deploy script now."), so they
         # stay visible text; the steps between them fold into activity lines.
         # The detailed view keeps turning them into thoughts, as before.
-        _compact = compact_activity()
+        _compact = compact_activity() if _fold else False
         _last_act = max((i for i, b in enumerate(_blocks)
                          if b.get("type") in ("tools", "diff")), default=-1)
         if _last_act > 0 and not _compact:
@@ -6194,6 +6010,14 @@ class MessageWidget(QWidget):
 
         for bd in _blocks:
             bt = bd.get("type")
+            # Folded and collapsed: tally it now, build it on first open
+            # (ActivityGroup.defer_block). A diff with nothing to draw is
+            # skipped exactly as the built path below skips it.
+            if _restoring and _compact and (
+                    bt in ("thoughts", "tools")
+                    or (bt == "diff" and bd.get("filename") and bd.get("hunk_lines"))):
+                _group().defer_block(bd)
+                continue
             if bt == "thoughts":
                 _g = _group()
                 tb = msg.new_thoughts(into=_g)
@@ -16202,8 +16026,25 @@ class ChatPanel(QWidget):
             # whole IDE looked hung on startup. 2 per batch keeps every
             # freeze window short and lets the event loop breathe between
             # batches (singleShot(0) chain below).
+            _hidden_for_restore = False
+            try:
+                if self.container.isVisible():
+                    self.container.hide()
+                    _hidden_for_restore = True
+            except RuntimeError:
+                _swallow("hide the chat column for the restore build")
+
             BATCH_SIZE = 2
             _restore_t0 = time.time()
+            # Time actually spent building widgets, accumulated per batch. The
+            # "Restore complete ... in Nms" line below measures WALL CLOCK, and
+            # this queue is shared with the rest of startup, so that number was
+            # read as "restore is slow" when it mostly meant "the GUI thread was
+            # busy elsewhere". Measured 2026-10-23 on conv 43c4b317 (430 msgs,
+            # 10.8MB timeline): the same 12 messages build in 200-500ms in an
+            # isolated harness, while the app reported 7878ms. Logging both
+            # separately stops the next session chasing the wrong number.
+            _work_total = [0.0]
             log.info(f"[ChatRestore] Starting restore: {load_count} messages, batch_size={BATCH_SIZE}")
             _restored_bodies = []
 
@@ -16212,7 +16053,16 @@ class ChatPanel(QWidget):
                 # reaches the flag only because it goes through
                 # globals().update(); this path assigned a local instead.
                 global _RESTORING_ACTIVE
+                # Rebound in the finalize branch below. Without this the
+                # assignment makes the name local to _process_batch and the
+                # read before it raises UnboundLocalError.
+                nonlocal _hidden_for_restore
                 if self._restore_superseded(_epoch, "Chat restore"):
+                    # Superseded (chat cleared / project switched): never leave
+                    # the column hidden, the replacement chat lives in it.
+                    if _hidden_for_restore:
+                        self.container.show()
+                        _hidden_for_restore = False
                     return
                 _batch_t0 = time.time()
                 # Worst message in this batch: (ms, index, chars, block types)
@@ -16275,6 +16125,7 @@ class ChatPanel(QWidget):
                 # Per-batch timing: when a startup is slow, the log must show
                 # WHICH messages were expensive, not just that restore ran.
                 _batch_ms = (time.time() - _batch_t0) * 1000
+                _work_total[0] += _batch_ms
                 if _batch_ms > 1000:
                     _w_ms, _w_i, _w_size, _w_types = _slow_msg
                     log.warning(
@@ -16290,6 +16141,14 @@ class ChatPanel(QWidget):
                     QTimer.singleShot(0, lambda: _process_batch(batch_end))
                 else:
                     # All done, finalize
+                    # Show the column again BEFORE measuring anything: a hidden
+                    # widget tree is skipped by Qt's layout engine, so the
+                    # geometry the refit pass reads below only exists once it is
+                    # visible. One layout pass happens here instead of one per
+                    # batch during the build.
+                    if _hidden_for_restore:
+                        self.container.show()
+                        _hidden_for_restore = False
                     self.container.updateGeometry()
                     self.col.invalidate()
                     self.scroll.viewport().update()
@@ -16310,12 +16169,18 @@ class ChatPanel(QWidget):
                     self._lazy_load_armed = False
                     self._finalize_restore_scroll()
                     log.info(f"[ChatRestore] Restore complete: {load_count} messages loaded "
-                             f"in {(time.time() - _restore_t0) * 1000:.0f}ms total")
+                             f"in {(time.time() - _restore_t0) * 1000:.0f}ms total "
+                             f"({_work_total[0]:.0f}ms building widgets, "
+                             f"{(time.time() - _restore_t0) * 1000 - _work_total[0]:.0f}ms "
+                             f"waiting on the GUI thread)")
                     self._emit_restore_finished()
 
             QTimer.singleShot(50, lambda: _process_batch(0))
             # Safety timeout
             QTimer.singleShot(30000, lambda: (
+                # A column left hidden here is a blank chat, the worst outcome
+                # this restore can produce, so visibility is restored first.
+                self.container.show() if _hidden_for_restore else None,
                 self._spinner_overlay.hide_overlay(),
                 setattr(self, '_restoring', False),
                 globals().update(_RESTORING_ACTIVE=False),
@@ -16326,6 +16191,11 @@ class ChatPanel(QWidget):
         except Exception as e:
             log.error(f"[ChatRestore] CRASH in load_timeline_async: {e}")
             import traceback; traceback.print_exc()
+            # Same reason as the safety timeout: never leave the column hidden.
+            try:
+                self.container.show()
+            except RuntimeError:
+                _swallow("un-hide the chat column after a restore crash")
             try:
                 self.load_timeline(data)
             except Exception as e2:

@@ -74,6 +74,31 @@ def _sanitize(name: str) -> str:
     return _NAME_RE.sub("_", name)[:48] or "server"
 
 
+def tool_input_schema(tool: Any) -> Optional[Dict[str, Any]]:
+    """The JSON schema a tool declares for its arguments, or None.
+
+    The MCP Python SDK renamed this field from ``inputSchema`` to
+    ``input_schema`` (pydantic ``model_fields`` on the installed version:
+    name, title, description, input_schema, ...). Reading only the old name
+    returned None for every tool, so every MCP tool was advertised to the model
+    with ``{"type": "object", "properties": {}}``: no parameter names at all.
+    The tools still ran because the model guessed from the description and the
+    validation error, which is why this stayed invisible for so long.
+
+    Both spellings are read, newest first, and a pydantic model is dumped to a
+    plain dict because that is what the OpenAI-style definition needs.
+    """
+    for attr in ("input_schema", "inputSchema"):
+        schema = getattr(tool, attr, None)
+        if schema:
+            dump = getattr(schema, "model_dump", None)
+            if callable(dump):
+                return dump(exclude_none=True)
+            if isinstance(schema, dict):
+                return schema
+    return None
+
+
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -1091,7 +1116,7 @@ class MCPManager:
             if state.status != "connected":
                 continue
             for tool in state.tools:
-                schema = getattr(tool, "inputSchema", None) or \
+                schema = tool_input_schema(tool) or \
                     {"type": "object", "properties": {}}
                 defs.append({
                     "type": "function",
@@ -1126,7 +1151,7 @@ class MCPManager:
                 tools.append({
                     "name": _sanitize(t.name),
                     "description": t.description or "",
-                    "inputSchema": getattr(t, "inputSchema", None) or {},
+                    "inputSchema": tool_input_schema(t) or {},
                     "annotations": ann.model_dump(exclude_none=True) if ann is not None else {},
                 })
             out.append({"name": name, "title": state.title,
@@ -1182,7 +1207,7 @@ class MCPManager:
             return None
         for t in state.tools:
             if _sanitize(t.name) == tool:
-                return getattr(t, "inputSchema", None)
+                return tool_input_schema(t)
         return None
 
     def call_tool_full(self, qualified_name: str, args: Dict[str, Any],
@@ -1227,7 +1252,7 @@ class MCPManager:
         real_tool = next((t for t in state.tools if _sanitize(t.name) == tool), None)
         real = real_tool.name if real_tool is not None else tool
 
-        schema = getattr(real_tool, "inputSchema", None) if real_tool is not None else None
+        schema = tool_input_schema(real_tool) if real_tool is not None else None
         unknown = _unknown_arguments(schema, args)
         if unknown:
             valid = ", ".join(sorted((schema or {}).get("properties", {}))) or "(none)"

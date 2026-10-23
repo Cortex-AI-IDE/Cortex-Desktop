@@ -186,8 +186,8 @@ def _apply_git_env(restricted: bool) -> None:
         empty_hooks = Path.home() / ".cortex" / "empty-git-hooks"
         try:
             empty_hooks.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
+        except Exception as e:  # a missing hooks dir leaves ~/.cortex unwritable
+            log.warning(f"[Trust] could not create {empty_hooks}: {e}")
         pairs = [(k, v if v is not None else str(empty_hooks)) for k, v in _GIT_OVERRIDES]
         os.environ["GIT_CONFIG_COUNT"] = str(len(pairs))
         for i, (k, v) in enumerate(pairs):

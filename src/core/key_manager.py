@@ -317,8 +317,10 @@ class KeyManager:
                 salt = self._salt_file.read_bytes()
                 if len(salt) == self.SALT_SIZE:
                     return salt
-            except Exception:
-                pass
+            except Exception as e:
+                # Falling through regenerates the salt, which makes every key
+                # already encrypted with the old one unreadable. Never silent.
+                log.warning(f"[KeyManager] could not read the salt file {self._salt_file}: {e}")
         
         # Generate new salt
         salt = secrets.token_bytes(self.SALT_SIZE)
@@ -640,8 +642,10 @@ class KeyManager:
                     self._vault_cache = None
                     deleted = True
                     log.info(f"[KeyManager] Deleted {provider} key from encrypted file")
-            except Exception:
-                pass
+            except Exception as e:
+                # The vault copy may already be gone, leaving the key in the
+                # encrypted file after the caller was told it was deleted.
+                log.warning(f"[KeyManager] could not remove {provider} from the encrypted file: {e}")
             
             return deleted
             

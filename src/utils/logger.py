@@ -1,4 +1,4 @@
-﻿"""
+"""
 Logger utility for Cortex AI IDE
 
 Hourly log rotation with clean filenames:
@@ -322,12 +322,32 @@ _shared_file_handler = None
 _shared_console_handler = None
 
 
+def _resolve_log_dir() -> Path:
+    """Directory holding cortex.log.
+
+    Default is ``~/.cortex/logs/``, shared across all projects so that every
+    diagnosis looks in one place. ``CORTEX_LOG_DIR`` overrides it.
+
+    Why the override exists: the test suite deliberately exercises failure
+    paths, and those fixtures log at CRITICAL ("tool exploded", "disk went
+    away", "DeadView has no attribute reload"). Without an override every
+    pytest run appended those fake catastrophes to the user's real log, so a
+    clean suite looked like a crashing app and real errors were harder to
+    find. ``tests/conftest.py`` points this at the gitignored
+    ``.cortex/test-logs/``.
+    """
+    override = os.environ.get("CORTEX_LOG_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / ".cortex" / "logs"
+
+
 def _get_shared_handlers():
     global _shared_file_handler, _shared_console_handler
     if _shared_file_handler is None:
-        # Always log to ~/.cortex/logs/ (shared across all projects)
+        # ~/.cortex/logs/ unless CORTEX_LOG_DIR says otherwise.
         # Project-specific context is in .cortex/memory/ (MEMORY.md, checkpoints)
-        log_dir = Path.home() / ".cortex" / "logs"
+        log_dir = _resolve_log_dir()
 
         def _make_file_handler(directory, name="cortex.log"):
             directory.mkdir(parents=True, exist_ok=True)
@@ -427,7 +447,7 @@ def search_logs(keyword: str, hours: int = 1, level: str = None, max_results: in
     """
     import glob as _glob
     
-    log_dir = Path.home() / ".cortex" / "logs"
+    log_dir = _resolve_log_dir()
     if not log_dir.exists():
         return []
     
@@ -472,7 +492,7 @@ def get_log_summary(hours: int = 1) -> dict:
     import glob as _glob
     from collections import Counter
     
-    log_dir = Path.home() / ".cortex" / "logs"
+    log_dir = _resolve_log_dir()
     if not log_dir.exists():
         return {"error": "No log directory found"}
     

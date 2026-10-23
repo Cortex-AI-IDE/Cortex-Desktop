@@ -366,8 +366,10 @@ class CrashStore:
                         if row['metadata']:
                             try:
                                 existing_meta = json.loads(row['metadata'])
-                            except (json.JSONDecodeError, TypeError):
-                                pass
+                            except (json.JSONDecodeError, TypeError) as e:
+                                # Resetting to {} below overwrites the stored
+                                # metadata, so unparseable JSON is real data loss.
+                                log.warning(f"[CrashPersist] unreadable metadata on message {row['id']}: {e}")
                         existing_meta["thinking"] = thinking_text
                         cursor.execute(
                             "UPDATE chat_messages SET metadata = ? WHERE id = ?",
@@ -421,8 +423,10 @@ class CrashStore:
                         if row["metadata"]:
                             try:
                                 msg["metadata"] = json.loads(row["metadata"])
-                            except (json.JSONDecodeError, TypeError):
-                                pass
+                            except (json.JSONDecodeError, TypeError) as e:
+                                # The message is returned without its metadata,
+                                # so thoughts and tool cards vanish silently.
+                                log.warning(f"[CrashPersist] dropped metadata on restored message: {e}")
                         messages.append(msg)
                     return messages
                 finally:

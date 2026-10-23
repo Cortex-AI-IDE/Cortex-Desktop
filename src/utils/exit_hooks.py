@@ -14,6 +14,8 @@ import atexit
 import threading
 from typing import Callable, List
 
+from src.utils.silent import swallow as _swallow
+
 _hooks: List[Callable[[], None]] = []
 _lock = threading.Lock()
 _ran = False
@@ -31,7 +33,7 @@ def _run_once_atexit(fn: Callable[[], None]) -> None:
         try:
             fn()
         except Exception:
-            pass
+            _swallow("run an exit hook")
 
 
 def run_all() -> None:
@@ -44,4 +46,4 @@ def run_all() -> None:
         try:
             fn()
         except Exception:
-            pass
+            _swallow("run an exit hook")

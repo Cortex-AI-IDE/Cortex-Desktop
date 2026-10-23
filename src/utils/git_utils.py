@@ -166,7 +166,7 @@ def get_diff_stats(repo_dir: str, staged: bool = False) -> Dict[str, Dict[str, i
                 stats[fpath] = stats.get(fpath, {"added": 0, "deleted": 0})
                 stats[fpath]["added"] += added
                 stats[fpath]["deleted"] += deleted
-            except (ValueError, IndexError):
+            except (ValueError, IndexError):  # silent-ok: numstat prints "-\t-" for binary files
                 continue
     # If this is the unstaged call, also fetch staged and merge
     if not staged:

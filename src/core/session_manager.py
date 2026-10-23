@@ -49,5 +49,5 @@ class SessionManager(QObject):
         try:
             if SESSION_FILE.exists():
                 SESSION_FILE.unlink()
-        except Exception:
-            pass
+        except Exception as e:  # clear() would report success while the file stays
+            log.warning(f"Cannot clear session file {SESSION_FILE}: {e}")

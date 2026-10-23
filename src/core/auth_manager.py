@@ -359,8 +359,8 @@ class AuthManager:
         if self._callback_server:
             try:
                 self._callback_server.shutdown()
-            except Exception:
-                pass
+            except Exception as e:  # a failed shutdown leaves :18923 bound
+                log.debug(f"[AuthManager] callback server did not shut down cleanly: {e}")
             self._callback_server = None
 
     def _wait_for_callback(self, generation: int):

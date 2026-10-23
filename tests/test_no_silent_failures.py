@@ -69,7 +69,11 @@ _REPORTERS = re.compile(
 
 def _silent_handlers(path: Path) -> list[tuple[int, str]]:
     """Return (lineno, source) for every undeclared bare-pass handler."""
-    source = path.read_text(encoding="utf-8")
+    # utf-8-sig, not utf-8: a UTF-8 BOM is legal Python source and CPython
+    # imports such files happily, but a plain utf-8 read keeps the BOM as
+    # U+FEFF and ast.parse rejects it. 16 files under src/ carry one, so
+    # reading without the sig made them permanently invisible to this guard.
+    source = path.read_text(encoding="utf-8-sig")
     lines = source.splitlines()
     tree = ast.parse(source, filename=str(path))
     offenders: list[tuple[int, str]] = []
@@ -188,3 +192,273 @@ def test_agent_bridge_py_is_clean() -> None:
     read and the file stat before a write, and the checkpoint deletion.
     """
     _check("src/ai/agent_bridge.py")
+
+
+# ---------------------------------------------------------------------------
+# The rest of src/: a ratchet, not a sweep.
+#
+# W3 closed 419 handlers in the four entry points. The remaining files under
+# ``src/`` carry 405 more, and they are deliberately *not* being rewritten in
+# one pass. Two reasons, both measured rather than assumed:
+#
+# 1. A 405-site mechanical edit across 110 files has to touch all 110 files,
+#    and this project's Edit path has already been observed flipping CRLF/LF
+#    per file (see the ``_write_keep_eol`` note in the repo memory). The
+#    churn from a bad pass is larger than the defect being fixed, and the
+#    defect is Cosmetic: nothing behaves differently either way.
+# 2. Many of the 405 are correct silences in the same sense the ``silent-ok``
+#    marker exists for. Converting them all to ``_swallow()`` would be
+#    mechanical compliance, not diagnosis.
+#
+# So this file freezes what is left and fails on any *increase*. That is the
+# part that actually protects the codebase: a new ``except: pass`` cannot be
+# quietly added anywhere under ``src/`` without this test naming the file.
+#
+# **Converting sites is how the ratchet is clicked forward.** Lower the number
+# for that file as part of the same change; never raise one, and never add a
+# file to this dict. A new entry means new swallowed failures.
+# ---------------------------------------------------------------------------
+
+# Measured 2026-10-23 with ``_silent_handlers`` over every ``.py`` under src/.
+# 410 handlers in 106 files, across the app, the engine and the vendored
+# bundled skills.
+#
+# The total was 387 earlier the same day, and the rise is measurement catching
+# up, not new debt. Seven files (23 handlers) start with a UTF-8 BOM, the scan
+# read them as plain utf-8, and ``_scan_all`` treated the resulting
+# SyntaxError as "clean". ``logger.py`` alone hid 14, and the files that were
+# hidden sat in ``event_bus``, ``git_manager``, ``security_audit`` and
+# ``filesystem_security``. Every file that was already listed still matches
+# its number exactly, so nothing was mis-swept; the scan was blind.
+#
+# Two sweep batches have closed the 11 files below; between them they held four
+# defects that lied to the user: a salt read that would silently regenerate the
+# key salt, an encrypted-file delete that reported success while leaving the
+# key, a chat lookup that created a duplicate row on a transient read error, and
+# a ``clear()`` that reported success with the session file still on disk.
+REMAINING: dict[str, int] = {
+    "src/agent/src/hooks/use_diff_in_ide.py": 1,
+    "src/agent/src/project_memory/cross_project_memory.py": 2,
+    "src/agent/src/project_memory/memory_consolidation.py": 1,
+    "src/agent/src/project_memory/semantic_search.py": 4,
+    "src/agent/src/services/compact/auto_compact.py": 3,
+    "src/agent/src/services/compact/compact.py": 17,
+    "src/agent/src/skills/bundled/audit-reference-originality/scripts/build_evidence_inventory.py": 2,
+    "src/agent/src/skills/bundled/skill-creator/eval-viewer/generate_review.py": 8,
+    "src/agent/src/skills/bundled/skill-creator/scripts/aggregate_benchmark.py": 1,
+    "src/agent/src/skills/bundled/skill-creator/scripts/run_eval.py": 1,
+    "src/agent/src/skills/bundled/slack-gif-creator/core/validators.py": 1,
+    "src/agent/src/skills/cortex_skill.py": 4,
+    "src/agent/src/skills/load_skills_dir.py": 2,
+    "src/agent/src/tools/file_edit_tool/file_edit_tool.py": 3,
+    "src/agent/src/tools/file_read_tool/file_read_tool.py": 8,
+    "src/agent/src/tools/file_read_tool/limits.py": 1,
+    "src/agent/src/tools/file_write_tool/file_write_tool.py": 6,
+    "src/agent/src/tools/grep_tool/grep_tool.py": 8,
+    "src/agent/src/tools/sementic_search/sementic_search_tool.py": 5,
+    "src/agent/src/utils/abort_controller.py": 1,
+    "src/agent/src/utils/config.py": 10,
+    "src/agent/src/utils/fs_operations.py": 2,
+    "src/agent/src/utils/ide.py": 2,
+    "src/agent/src/utils/markdown_config_loader.py": 1,
+    "src/agent/src/utils/model/aliases.py": 2,
+    "src/agent/src/utils/model/deprecation.py": 1,
+    "src/agent/src/utils/permissions/filesystem_security.py": 1,
+    "src/agent/src/utils/settings/settings.py": 11,
+    "src/agent/src/utils/signal.py": 1,
+    "src/agent/src/utils/thinking.py": 3,
+    "src/ai/agent_safety.py": 1,
+    "src/ai/model_limits.py": 1,
+    "src/ai/model_registry.py": 4,
+    "src/ai/project_context.py": 5,
+    "src/ai/provider_catalog.py": 1,
+    "src/ai/providers/__init__.py": 3,
+    "src/ai/providers/alibaba_provider.py": 7,
+    "src/ai/providers/anthropic_provider.py": 4,
+    "src/ai/providers/deepseek_provider.py": 4,
+    "src/ai/providers/mimo_provider.py": 7,
+    "src/ai/providers/mistral_provider.py": 6,
+    "src/ai/providers/openai_provider.py": 1,
+    "src/ai/providers/openrouter_provider.py": 7,
+    "src/ai/providers/siliconflow_provider.py": 4,
+    "src/ai/remote_models.py": 3,
+    "src/ai/stream_offload.py": 1,
+    "src/ai/streaming.py": 1,
+    "src/ai/tool_result_storage.py": 3,
+    "src/ai/usage_tracker.py": 2,
+    "src/config/settings.py": 1,
+    "src/coordinator/coordinator_system.py": 2,
+    "src/core/background_worker.py": 5,
+    "src/core/codebase_index.py": 1,
+    "src/core/cortex_api.py": 4,
+    "src/core/database.py": 8,
+    "src/core/dev_server.py": 1,
+    "src/core/edit_impact.py": 1,
+    "src/core/event_bus.py": 1,
+    "src/core/file_associations.py": 3,
+    "src/core/gpu_compat.py": 2,
+    "src/core/live_server.py": 3,
+    "src/core/loop_engine/reviewer.py": 1,
+    "src/core/loop_engine/test_integrity.py": 1,
+    "src/core/project_health.py": 4,
+    "src/core/pty_backend.py": 3,
+    "src/core/security_audit.py": 1,
+    "src/core/security_toolkit/defense.py": 3,
+    "src/core/security_toolkit/recon.py": 5,
+    "src/core/security_toolkit/scope.py": 5,
+    "src/core/security_toolkit/web_probe.py": 1,
+    "src/core/semantic_search.py": 7,
+    "src/core/siliconflow_embeddings.py": 1,
+    "src/core/spreadsheet_reader.py": 3,
+    "src/core/terminal_session.py": 10,
+    "src/services/mcp_manager.py": 7,
+    "src/services/update_checker.py": 3,
+    "src/ui/color_themes.py": 2,
+    "src/ui/components/editor.py": 4,
+    "src/ui/components/find_replace.py": 2,
+    "src/ui/components/sidebar.py": 13,
+    "src/ui/components/sidebar_bridge.py": 12,
+    "src/ui/components/webview_panel.py": 10,
+    "src/ui/components/windows_terminal.py": 3,
+    "src/ui/components/xterm_terminal.py": 17,
+    "src/ui/dialogs/health_map.py": 5,
+    "src/ui/dialogs/memory_manager.py": 15,
+    "src/ui/dialogs/update_dialog.py": 6,
+    "src/ui/editor_theme.py": 1,
+    "src/ui/fonts.py": 4,
+    "src/ui/icons.py": 1,
+    "src/ui/native_chat_bridge.py": 4,
+    "src/ui/native_menu.py": 4,
+    "src/ui/render_health.py": 4,
+    "src/ui/secondary_ui.py": 1,
+    "src/ui/spinner.py": 2,
+    "src/ui/spinner_overlay.py": 4,
+    "src/ui/table_normalize.py": 1,
+    "src/ui/theme_remap.py": 4,
+    "src/ui/tool_cards.py": 2,
+    "src/ui/ui_stall_detector.py": 1,
+    "src/ui/webengine_recovery.py": 2,
+    "src/utils/logger.py": 14,
+    "src/utils/pyinstaller_hooks/hook-winpty.py": 1,
+    "src/utils/runtime_hook_certifi.py": 4,
+    "src/utils/runtime_hook_encodings.py": 1,
+    "src/utils/runtime_hook_noconsole.py": 1,
+}
+
+
+def _scan_all(src_root: Path | None = None) -> dict[str, int]:
+    """Count undeclared silent handlers in every ``.py`` under ``src/``.
+
+    A file this cannot parse is an error, never a zero. It used to ``continue``
+    on ``SyntaxError``, which quietly counted any file with a UTF-8 BOM (legal
+    Python; 16 files under ``src/`` have one) as clean without reading it.
+    ``src/utils/logger.py`` hid 14 handlers that way for this guard's whole
+    life, and the ones it hid were pointed at ``event_bus``, ``git_manager``
+    and ``filesystem_security``.
+
+    ``src_root`` exists so a test can point the scan at a throwaway tree and
+    prove both halves of that contract: a BOM does not hide a file, and a
+    genuinely broken file fails the scan instead of passing it.
+    """
+    base = ROOT / "src" if src_root is None else src_root
+    rel_root = ROOT if src_root is None else src_root
+    found: dict[str, int] = {}
+    unreadable: list[str] = []
+    for path in base.rglob("*.py"):
+        if "__pycache__" in path.as_posix():
+            continue
+        try:
+            offenders = _silent_handlers(path)
+        except (SyntaxError, UnicodeDecodeError, OSError) as exc:
+            unreadable.append(f"{path.relative_to(rel_root).as_posix()}: {exc}")
+            continue
+        if offenders:
+            found[path.relative_to(rel_root).as_posix()] = len(offenders)
+    if unreadable:
+        raise AssertionError(
+            "Cannot scan the whole tree, so this guard cannot vouch for it.\n"
+            "An unparseable file must never be reported as clean:\n  "
+            + "\n  ".join(unreadable)
+        )
+    return found
+
+
+def _regressions(found: dict[str, int], budget: dict[str, int]) -> list[str]:
+    """Return one line per file that exceeds its recorded allowance."""
+    problems: list[str] = []
+    for rel, count in sorted(found.items()):
+        allowed = budget.get(rel)
+        if allowed is None:
+            problems.append(f"{rel}: {count} swallowed handler(s), file is not in the baseline")
+        elif count > allowed:
+            problems.append(f"{rel}: {count} swallowed handlers, baseline allows {allowed}")
+    return problems
+
+
+def test_no_new_swallowed_exceptions_anywhere() -> None:
+    """The ratchet. Adding an ``except: pass`` anywhere under src/ fails here.
+
+    Fixing one is allowed and encouraged: lower that file's number in
+    ``REMAINING`` in the same change. Raising a number is not a fix.
+    """
+    found = _scan_all()
+    problems = _regressions(found, REMAINING)
+    if problems:
+        listing = "\n".join(f"  {p}" for p in problems)
+        raise AssertionError(
+            "New swallowed exception(s) under src/.\n"
+            "Log it, or mark it `# silent-ok: <reason>`. If you are reporting\n"
+            "progress in the other direction, lower the matching number in\n"
+            "REMAINING instead.\n" + listing
+        )
+
+
+def test_the_ratchet_catches_a_regression() -> None:
+    """A ratchet that cannot fail is decoration, so prove it fires."""
+    assert _regressions({"a.py": 3}, {"a.py": 2}), "an increase must be reported"
+    assert _regressions({"new.py": 1}, {}), "an unrecorded file must be reported"
+    assert not _regressions({"a.py": 1}, {"a.py": 2}), "progress must pass"
+    assert not _regressions({"a.py": 2}, {"a.py": 2}), "unchanged must pass"
+
+
+def test_the_recorded_total_is_not_understated() -> None:
+    """The baseline may never claim fewer handlers than really exist.
+
+    Progress is the one direction that needs a human edit, so the total is
+    checked separately from the per-file ratchet: a stale, too-high number
+    here means somebody converted sites without recording it, and the next
+    session would read an inflated figure as fact.
+    """
+    found = _scan_all()
+    assert sum(found.values()) <= sum(REMAINING.values()), (
+        f"src/ now holds {sum(found.values())} swallowed handlers but the "
+        f"baseline records {sum(REMAINING.values())}"
+    )
+
+
+def test_a_bom_does_not_hide_a_file(tmp_path: Path) -> None:
+    """A UTF-8 BOM is legal Python source, and it used to hide a whole file.
+
+    16 files under ``src/`` start with one. ``logger.py`` was read as plain
+    utf-8, ``ast.parse`` rejected the BOM, ``_scan_all`` treated the resulting
+    SyntaxError as clean, and 14 handlers stayed invisible for the life of
+    this guard. If this fails, the guard is blind again.
+    """
+    bommed = tmp_path / "bommed.py"
+    bommed.write_bytes(
+        b"\xef\xbb\xbf"
+        b"def f():\n"
+        b"    try:\n"
+        b"        pass\n"
+        b"    except Exception:\n"
+        b"        pass\n"
+    )
+    assert len(_silent_handlers(bommed)) == 1, "the BOM hid a real handler"
+    assert _scan_all(tmp_path) == {"bommed.py": 1}
+
+
+def test_an_unparseable_file_fails_the_scan(tmp_path: Path) -> None:
+    """A file the scan cannot read must never be counted as a clean file."""
+    (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="Cannot scan"):
+        _scan_all(tmp_path)

@@ -42,6 +42,7 @@ if _AGENT_SRC not in sys.path:
 from src.utils.logger import get_logger  
 from src.ai.streaming import get_streaming_emitter
 from src.ai.stream_offload import aiter_offloaded
+from src.ai.tool_args import prepare_tool_args
 from src.ai.agent_safety import (
     AgentSafetyGuard,
     PERSISTENT_DIRECTIVES,
@@ -59,6 +60,49 @@ from src.ai.session_task import (
 from src.ai.model_limits import ModelLimits
 import urllib.error
 import urllib.request
+
+
+# ── TodoWrite completion guard ─────────────────────────────────────────
+# A todo phrased with one of these verbs is allowed to reach COMPLETE without
+# having mutated a file, because the work it names does not produce one.
+#
+# This exists because the guard used to be an inline tuple that was missing
+# the verbs for work that produces no edit, so a genuine "Load the MCP tool
+# definitions" todo was reverted to IN_PROGRESS with
+# "[BLOCKED: No mutations, do actual work first]" on 2026-10-23. The list is
+# prefix-matched on purpose: "Check the deploy" and "Checking the deploy" both
+# start with "check", and adding inflections would be endless.
+_READ_ONLY_VERB_PREFIXES = (
+    # inspection and analysis
+    "test", "verify", "analyze", "analyse", "read", "review", "check",
+    "scan", "map", "index", "research", "investigate", "explore",
+    "understand", "list", "summarize", "summarise", "describe",
+    "categorize", "categorise", "classify", "organize", "organise",
+    "outline", "document", "report", "draft", "audit", "compare",
+    "survey", "assess", "evaluate", "inspect", "trace", "profile",
+    # acting on something that already exists, without editing a source file
+    "load", "call", "run", "invoke", "open", "start", "launch", "execute",
+    "query", "fetch", "search", "find", "locate", "measure", "benchmark",
+    # producing a result that is not a file mutation
+    "deliver", "answer", "explain", "confirm", "validate",
+    # kept from the original list even though it reads like a mutation: the
+    # guard existed to stop a reply claiming work it never did, and changing
+    # that classification is a separate decision from the false blocks above.
+    "write",
+)
+
+
+def _todo_is_implementation(content: str) -> bool:
+    """True when completing this todo should require a file mutation.
+
+    Prefix-matched, lowercased. An empty todo counts as implementation: the
+    guard is a cheat detector, and a blank task has no read-only verb to
+    justify it.
+    """
+    text = (content or "").strip().lower()
+    if not text:
+        return True
+    return not any(text.startswith(prefix) for prefix in _READ_ONLY_VERB_PREFIXES)
 
 # ============================================================
 # SKILLS & RULES INTEGRATION
@@ -577,7 +621,7 @@ class _ToolLimitsLike(Protocol):
 # ============================================================
 from src.ai.circuit_breaker import ToolCircuitBreaker
 from src.ai.tool_executor import ToolExecutionEngine
-from src.core.task_graph import TaskGraph, TaskNode, TaskStatus
+from src.core.task_graph import TaskGraph
 
 
 # ============================================================
@@ -2264,6 +2308,17 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "file_path": {"type": "string", "description": "File path"},
                     "offset":    {"type": "integer", "description": "Start line (1-indexed, optional)"},
                     "limit":     {"type": "integer", "description": "Max lines to read (optional)"},
+                    # Declared because FileReadTool honours it: the bridge passes
+                    # the whole args dict (`_real_read_tool.call(args, ...)`), so
+                    # `pages` always worked, but an undeclared field is one the
+                    # model cannot discover and W15 would have rejected.
+                    "pages":     {
+                        "type": "string",
+                        "description": (
+                            'PDF page range: "1-5", "3", "10-20". '
+                            "PDFs only, at most 20 pages per call."
+                        ),
+                    },
                 },
                 "required": ["file_path"],
             },
@@ -2388,6 +2443,34 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "path":             {"type": "string",  "description": "Directory or file to search"},
                     "glob":             {"type": "string",  "description": "File glob filter e.g. *.py"},
                     "case_insensitive": {"type": "boolean", "description": "Case-insensitive (default false)"},
+                    # The rest are the engine's own GrepInput fields. They were
+                    # always forwarded (`real_grep_tool.call(args, ...)` passes
+                    # the whole dict) but never declared, so the model could not
+                    # discover them and W15's validation would have rejected
+                    # them. `output_mode` in particular has a test that proves
+                    # it works end to end.
+                    "output_mode":      {
+                        "type": "string",
+                        "enum": ["content", "files_with_matches", "count"],
+                        "description": (
+                            "'content' returns matching lines (default), "
+                            "'files_with_matches' returns only the file names, "
+                            "'count' returns per-file counts"
+                        ),
+                    },
+                    "head_limit":       {"type": "integer", "description": "Max results to return"},
+                    "offset":           {"type": "integer", "description": "Results to skip, for paging"},
+                    "show_line_numbers": {"type": "boolean", "description": "Prefix lines with line numbers in content mode"},
+                    "context":          {"type": "integer", "description": "Lines of context around each match"},
+                    # The engine's three other context spellings. GrepTool reads
+                    # all four (grep_tool.py:1026-1029) and gives `context`
+                    # precedence, so declaring them adds capability without
+                    # ambiguity. Undeclared they were rejected by W15.
+                    "context_lines":    {"type": "integer", "description": "Lines of context around each match (same as context)"},
+                    "before_context":   {"type": "integer", "description": "Lines of context before each match"},
+                    "after_context":    {"type": "integer", "description": "Lines of context after each match"},
+                    "multiline":        {"type": "boolean", "description": "Let the pattern span lines"},
+                    "type":             {"type": "string",  "description": "File type filter, e.g. py"},
                 },
                 "required": ["pattern"],
             },
@@ -2408,6 +2491,11 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "output_mode":     {"type": "string",  "enum": ["ranked", "content", "files_with_matches"], "description": "Output format: 'ranked' shows scores+titles, 'content' shows snippets, 'files_with_matches' shows only paths"},
                     "file_extension":  {"type": "string",  "description": "Filter by file extension (e.g. 'py', 'js', 'ts')"},
                     "force_reindex":   {"type": "boolean", "description": "Force rebuild the semantic index before searching"},
+                    # Honoured by SementicSearchTool (sementic_search_tool.py:407-408,
+                    # used at :493-494) but never declared, so the model could not
+                    # turn context off and W15 would have rejected the pair.
+                    "include_context": {"type": "boolean", "description": "Include surrounding code context for each hit (default true)"},
+                    "context_lines":   {"type": "integer", "description": "Lines of context around each hit (default 3)"},
                 },
                 "required": ["query"],
             },
@@ -2621,25 +2709,44 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "function": {
             "name": "LivePreview",
             "description": (
-                "Render and TEST a local HTML file inside Cortex's own Live Preview panel "
-                "(embedded Chromium, no external browser needed). Use this to verify web pages "
-                "you build: action='open' shows the file to the user side-by-side with the IDE and "
-                "loads it; action='read' returns the rendered page's visible text (post-JavaScript "
-                "DOM, what a user actually sees, not the source); action='console' returns the "
-                "page's JavaScript console output (errors, warnings, logs) since the last load, "
-                "check it after 'open' to catch broken scripts; action='close' hides the panel. "
-                "The panel auto-reloads whenever you Edit/Write the file, so after changing an "
-                "already-open file just call 'console'/'read' again to re-test. Typical flow: "
-                "Write file → open → console (any JS errors?) → read (is the content right?) → "
-                "fix with Edit → console/read again."
+                "Render and TEST UI inside Cortex's own Live Preview panel (embedded "
+                "Chromium, no external browser needed). Two modes, a single .html file "
+                "or the project's real dev server. "
+                "action='open' shows an HTML file (needs 'path'); "
+                "action='serve' starts the project's dev server and shows it (optional "
+                "'command', auto-detected from package.json/manage.py, and optional "
+                "'port'), giving real hot reload for Vite/Next/Django apps; "
+                "action='stop' stops that dev server and releases its port; "
+                "action='status' reports what is loaded and whether the server is up; "
+                "action='screenshot' captures what is ON SCREEN and returns the image to "
+                "you, which is the only way to see layout, colour, spacing and clipping, "
+                "things DOM text cannot show; "
+                "action='read' returns the rendered visible text (post-JavaScript DOM); "
+                "action='console' returns JS console output (errors, warnings) since the "
+                "last load, always check it after loading; "
+                "action='close' hides the panel and stops any dev server. "
+                "VERIFICATION RULE: a UI change is UNVERIFIED until you have captured it. "
+                "After writing or editing UI code, call screenshot and look at the result "
+                "before telling the user it is done. If the capture shows a problem, fix it "
+                "and capture again. Typical flow: serve or open, console (any JS errors?), "
+                "read (is the content right?), screenshot (does it LOOK right?), fix, "
+                "screenshot again."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["open", "read", "console", "close"],
+                    "action": {"type": "string",
+                               "enum": ["open", "read", "console", "close",
+                                        "serve", "stop", "status", "screenshot"],
                                "description": "What to do with the Live Preview panel"},
                     "path":   {"type": "string",
                                "description": "Absolute or project-relative path to the .html file (required for action='open')"},
+                    "command": {"type": "string",
+                                "description": "Dev-server command for action='serve', e.g. 'npm run dev'. Omit to auto-detect from the project's package.json or manage.py"},
+                    "port":    {"type": "integer",
+                                "description": "Port the dev server will use, for action='serve'. Optional; it is discovered from the server's output or its listening socket when omitted"},
+                    "max_width": {"type": "integer",
+                                  "description": "Widest pixel size of the screenshot, default 1280. Lower it if the image is being rejected for size"},
                 },
                 "required": ["action"],
             },
@@ -2722,7 +2829,7 @@ ASK_BLOCKED_TOOLS = frozenset({
     'SecurityScan',
 })
 PLAN_ALLOWED_TOOLS = frozenset({
-    'TodoWrite', 'EnterPlanMode', 'ExitPlanMode', 'PlanBuild',
+    'TodoWrite', 'EnterPlanMode', 'ExitPlanMode',
     'Read', 'Grep', 'Glob', 'LS', 'BashOutput',
     # The registered tool is spelled 'SementicSearch'. Listing only the
     # correct spelling here meant the name never matched, so planning
@@ -3136,13 +3243,6 @@ _TOOL_TO_ACTIVITY_NAME: Dict[str, str] = {
     "AskUserQuestion": "ask_user",
     "WebSearch":  "web_search",
     "WebFetch":   "web_fetch",
-    "TeamCreate": "team_create",
-    "TeamDelete": "team_delete",
-    "TaskCreate": "task_create",
-    "TaskUpdate": "task_update",
-    "TaskList":   "task_list",
-    "TaskGet":    "task_get",
-    "TaskStop":   "task_stop",
     "Loop":       "run_loop",
     "Skill":      "load_skill",
     "SecurityScan": "security_scan",
@@ -3677,10 +3777,13 @@ class CortexAgentBridge(QObject):
     files_deleted_by_agent   = pyqtSignal(list)  # abs paths the agent sent to Recycle Bin, close their editor tabs
     session_saved_to_memory  = pyqtSignal(bool)  # True=summary saved to a checkpoint, New Chat flow can now clear
     # LivePreview tool → main_window (must run on the UI thread).
-    # (action, path, response), response is a dict {'event': threading.Event,
+    # (action, args, response), response is a dict {'event': threading.Event,
     # 'result': ..., 'error': ...}; the UI slot fills it and sets the event,
     # the agent thread waits on it with a timeout.
-    live_preview_tool_request = pyqtSignal(str, str, object)
+    # `args` is the tool's own argument dict (path / command / port), passed
+    # whole because `serve` needs three fields and one string cannot carry
+    # them without inventing a serialisation the UI would have to parse back.
+    live_preview_tool_request = pyqtSignal(str, dict, object)
 
     # ── Internal state ──────────────────────────────────────────
     def __init__(self, **kwargs: Any):
@@ -3795,7 +3898,6 @@ class CortexAgentBridge(QObject):
         self._disabled_tools: Set[str] = self._tool_circuit_breaker._disabled_tools  # pyright: ignore[reportPrivateUsage]
         self._tool_total_calls: Dict[str, int] = self._tool_circuit_breaker._total_calls  # pyright: ignore[reportPrivateUsage]
         self._session_tasks: Dict[str, Dict[str, Any]] = {}  # task_id -> task payload
-        self._teams: Dict[str, Dict[str, Any]] = {}  # team_id -> team payload
 
         # ── Test verification state ────────────────────────────────────────
         # Stores recent tool results for verification enforcement.
@@ -6657,7 +6759,11 @@ Required behavior:
                                 
                                 # Get license key from server subscription
                                 sub_info = api.get_subscription()
-                                log.info(f"[PROXY] Subscription info: {sub_info}")
+                                log.info(
+                                    "[PROXY] Subscription info: fields="
+                                    + (str(sorted(sub_info.keys())) if isinstance(sub_info, dict)
+                                       else type(sub_info).__name__)
+                                )
                                 license_key = ""
                                 if sub_info:
                                     license_key = sub_info.get("license_key", "")
@@ -6735,7 +6841,13 @@ Required behavior:
                                     if msg_dict.get("content") or msg_dict.get("tool_calls") or msg_dict.get("tool_call_id"):
                                         proxy_messages.append(msg_dict)
                                 
-                                log.info(f"[PROXY] Calling proxy: model={model_id}, messages={len(proxy_messages)}, license_key={license_key[:20]}...")
+                                log.info(
+                                    f"[PROXY] Calling proxy: model={model_id}, "
+                                    f"messages={len(proxy_messages)}, "
+                                    f"tools={len(active_tool_defs) if active_tool_defs else 0}, "
+                                    f"license_key_present={bool(license_key)}, "
+                                    f"license_key_length={len(license_key)}"
+                                )
                                 proxy_result = api.proxy_chat(
                                     model=model_id,
                                     messages=proxy_messages,
@@ -6743,7 +6855,18 @@ Required behavior:
                                     temperature=0.7,
                                     tools=active_tool_defs if active_tool_defs else None,
                                 )
-                                log.info(f"[PROXY] Proxy result: {proxy_result}")
+                                # Never log the body: it carries the model's answer,
+                                # which is the user's content. Status plus shape is
+                                # all a diagnosis needs.
+                                _proxy_status = (proxy_result.get("status")
+                                                 if isinstance(proxy_result, dict) else None)
+                                _proxy_choices = (len(proxy_result.get("choices") or [])
+                                                  if isinstance(proxy_result, dict) else 0)
+                                _proxy_bytes = len(str(proxy_result)) if proxy_result is not None else 0
+                                log.info(
+                                    f"[PROXY] Proxy result: status={_proxy_status}, "
+                                    f"choices={_proxy_choices}, bytes={_proxy_bytes}"
+                                )
                                 if proxy_result and proxy_result.get("status") == "success":
                                     # Extract response from proxy
                                     choices = proxy_result.get("choices", [])
@@ -9135,14 +9258,6 @@ Required behavior:
                             self._safe_emit(self.exploreFile, _explore_json)
                         except Exception:
                             _swallow()
-            # ── PlanBuild hook: emit plan_created when a plan is successfully created ──
-            if tool_name == "PlanBuild" and 'plan_id' in (result_payload if isinstance(result_payload, dict) else {}):
-                try:
-                    plan_json = json.dumps(dict(result_payload))
-                    self._safe_emit(self.plan_created, plan_json)
-                    log.info(f"[PLANBUILD] Plan created: {result_payload.get('title', 'unknown')}")
-                except Exception as _plan_err:
-                    log.debug(f"[PLANBUILD] Failed to emit plan_created: {_plan_err}")
         else:
             result_str = f"Error: {result.error}"
             if not _silent:
@@ -9771,8 +9886,9 @@ Required behavior:
     # There were two mechanisms here: this table, and a five-branch `elif` chain
     # on the tool name that ran after it for every name the table missed.
     # Nothing failed when a tool was added to one and forgotten in the other, so
-    # the chain quietly accumulated the bridge-native tools and nine entries
-    # that no schema has ever offered. A model that calls an unhandled name gets
+    # the chain quietly accumulated the bridge-native tools and entries that no
+    # schema has ever offered (five Task*, two Team*, PlanBuild and a pre-`mcp__`
+    # stub, all deleted 2026-10-23). A model that calls an unhandled name gets
     # "Unknown tool", which reads like a transient error and gets retried.
     #
     # Adding a tool now means adding four things, and the drift test in
@@ -9813,29 +9929,38 @@ Required behavior:
         "SemanticSearch": "_dispatch_semantic_search",
     }
 
+    #: Alias -> the tool whose *schema* describes it. Sits beside the handler
+    #: aliases because the two must move together: an alias with no schema
+    #: mapping would be validated against nothing. A test asserts every entry
+    #: resolves to the same handler as the tool it points at.
+    _TOOL_ALIAS_SCHEMA: Dict[str, str] = {
+        "PowerShell": "Bash",
+        "SemanticSearch": "SementicSearch",
+    }
+
+    #: Tool name -> its ``parameters`` object, built once from _TOOL_SCHEMAS.
+    #: This is the schema the model was offered, so it is the only authority on
+    #: what a call may contain (W15).
+    _TOOL_ARG_SPECS: Dict[str, Dict[str, Any]] = {
+        (d.get("function") or {}).get("name", ""): (d.get("function") or {}).get(
+            "parameters"
+        )
+        or {}
+        for d in _TOOL_SCHEMAS
+        if (d.get("function") or {}).get("name")
+    }
+    # MCPToolSearch has its own schema because it is offered only when the MCP
+    # definitions are deferred, so it is not in _TOOL_SCHEMAS above. Without
+    # this it would be dispatched with validation silently skipped.
+    _TOOL_ARG_SPECS.setdefault(
+        MCP_SEARCH_TOOL, _MCP_SEARCH_SCHEMA["function"]["parameters"]
+    )
+
     #: Dynamic families. A user's MCP servers are arbitrary, so these names
     #: cannot be listed: `mcp__<server>__<tool>`.
     _TOOL_PREFIX_HANDLERS: Tuple[Tuple[str, str], ...] = (
         ("mcp__", "_dispatch_mcp_external"),
     )
-
-    #: Handlers whose tool is in no schema, so it can never be called. These are
-    #: a half-built task/team/plan feature plus one pre-`mcp__` stub. They are
-    #: quarantined rather than deleted: deleting is a product decision, and the
-    #: bodies are the only implementation that exists. The point of listing them
-    #: is that the set is exact, so a tenth unreachable handler fails the drift
-    #: test instead of joining them silently.
-    _UNOFFERED_TOOL_HANDLERS: Dict[str, str] = {
-        "TaskCreate": "_dispatch_task_create",
-        "TaskUpdate": "_dispatch_task_update",
-        "TaskList": "_dispatch_task_list",
-        "TaskGet": "_dispatch_task_get",
-        "TaskStop": "_dispatch_task_stop",
-        "TeamCreate": "_dispatch_team_create",
-        "TeamDelete": "_dispatch_team_delete",
-        "PlanBuild": "_dispatch_plan_build",
-        "MCP": "_dispatch_mcp",
-    }
 
     @staticmethod
     def resolve_tool_handler(tool_name: str) -> Optional[str]:
@@ -9876,6 +10001,29 @@ Required behavior:
             LS    → BridgeLSTool.execute()
         """
         try:
+            # ── W15: the schema is the door ───────────────────────────────
+            # Checked here, before every gate and handler, because a call whose
+            # arguments do not match the schema cannot succeed anywhere: it
+            # either fails deep inside a handler or is silently coerced and
+            # returns the wrong thing (the `selector` screenshot bug). MCP tools
+            # are skipped: their schema belongs to the user's server and arrives
+            # with the definition, not from _TOOL_SCHEMAS.
+            if not any(
+                tool_name.startswith(p) for p, _ in self._TOOL_PREFIX_HANDLERS
+            ):
+                _spec_name = self._TOOL_ALIAS_SCHEMA.get(tool_name, tool_name)
+                args, _arg_error = prepare_tool_args(
+                    tool_name, args or {}, self._TOOL_ARG_SPECS.get(_spec_name)
+                )
+                if _arg_error:
+                    log.warning(f"[TOOL-ARGS] {_arg_error[:300]}")
+                    return ToolResult(
+                        tool_id=tool_id,
+                        result=None,
+                        success=False,
+                        error=_arg_error,
+                    )
+
             # ── Autonomy gate (Phase 8) ────────────────────────────────────
             try:
                 from src.core.autonomy_manager import get_autonomy_manager
@@ -10265,26 +10413,70 @@ Required behavior:
         result.tool_id = tool_id
         return result
 
-    async def _dispatch_live_preview(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """Render/test HTML in the Live Preview panel.
+    _LIVE_PREVIEW_ACTIONS = ("open", "read", "console", "close",
+                             "serve", "stop", "status", "screenshot")
+    # A dev server needs seconds to boot (npm install on first run can take
+    # much longer than the 15s a UI round trip is allowed), and a screenshot
+    # does a synchronous surface read. Everything else stays on the short leash.
+    _LIVE_PREVIEW_TIMEOUTS = {"serve": 120.0, "screenshot": 60.0, "read": 20.0}
 
-        UI tool: render/test HTML in the Live Preview panel. All Qt widget
+    def _live_preview_bad_args(self, action: str, args: Dict[str, Any]) -> Optional[str]:
+        """Validate a LivePreview call before it reaches the UI thread.
+
+        Separated from the dispatch body so the sandbox gate for `serve` is
+        reviewable on its own: that branch runs a command, so it must pass the
+        same check Bash passes, not a weaker one because it arrives through a
+        different tool.
+        """
+        if action not in self._LIVE_PREVIEW_ACTIONS:
+            return (f"LivePreview: unknown action {action!r} "
+                    f"(use {'/'.join(self._LIVE_PREVIEW_ACTIONS)})")
+        if action == "open" and not str(args.get("path", "") or "").strip():
+            return "LivePreview open: 'path' is required"
+        port = args.get("port")
+        if port is not None:
+            try:
+                if not (1 <= int(port) <= 65535):
+                    raise ValueError
+            except Exception:
+                return f"LivePreview: 'port' must be an integer 1-65535, got {port!r}"
+        if action != "serve":
+            return None
+        command = str(args.get("command", "") or "").strip()
+        if not command:
+            return None  # UI side auto-detects from the project
+        if self._sandbox_manager is None:
+            try:
+                from src.core.sandbox_manager import get_sandbox_manager
+                self._sandbox_manager = get_sandbox_manager()
+            except Exception:
+                _swallow()
+        if self._sandbox_manager and self._sandbox_manager.is_enabled():
+            allowed, reason = self._sandbox_manager.is_command_allowed(command)
+            if not allowed:
+                return f"[Sandbox] Dev server command blocked: {reason}"
+        return None
+
+    async def _dispatch_live_preview(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
+        """Render/test UI in the Live Preview panel, including a dev server.
+
+        UI tool: render/test UI in the Live Preview panel. All Qt widget
         access must happen on the UI thread, so the request is shipped over a
         queued signal and this (agent) thread waits on an Event the UI slot sets
-        when done. Executor keeps the event loop free while waiting; 15s timeout
-        so a stuck UI can never deadlock the agent.
+        when done. Executor keeps the event loop free while waiting; the
+        timeout is per action so a server boot is not mistaken for a hang.
+
+        `screenshot` additionally feeds the captured image into conversation
+        history through the same path the Read tool uses for native vision, so
+        the model actually sees the pixels on its next turn.
         """
         import threading as _threading
         _action = str(args.get("action", "")).strip().lower()
         _path = str(args.get("path", "") or "")
-        if _action not in ("open", "read", "console", "close"):
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error=f"LivePreview: unknown action {_action!r} "
-                                    f"(use open/read/console/close)")
+        _bad = self._live_preview_bad_args(_action, args)
+        if _bad:
+            return ToolResult(tool_id=tool_id, result=None, success=False, error=_bad)
         if _action == "open":
-            if not _path:
-                return ToolResult(tool_id=tool_id, result=None, success=False,
-                                  error="LivePreview open: 'path' is required")
             if not os.path.isabs(_path) and self._project_root:
                 _path = os.path.join(self._project_root, _path)
             _deny = self._access.check(_path, "read")
@@ -10293,17 +10485,32 @@ Required behavior:
             if not os.path.isfile(_path):
                 return ToolResult(tool_id=tool_id, result=None, success=False,
                                   error=f"LivePreview open: file not found: {_path}")
+        _args = dict(args)
+        _args["action"] = _action
+        if _action == "open":
+            _args["path"] = _path
         _resp: Dict[str, Any] = {"event": _threading.Event(), "result": None, "error": None}
-        self._safe_emit(self.live_preview_tool_request, _action, _path, _resp)
+        self._safe_emit(self.live_preview_tool_request, _action, _args, _resp)
+        _timeout = self._LIVE_PREVIEW_TIMEOUTS.get(_action, 15.0)
         _done = await asyncio.get_event_loop().run_in_executor(
-            None, _resp["event"].wait, 15)
+            None, _resp["event"].wait, _timeout)
         if not _done:
             return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="LivePreview: UI did not respond within 15s "
-                                    "(panel unavailable?)")
+                              error=f"LivePreview: UI did not respond within {_timeout:.0f}s "
+                                    f"(panel unavailable? a dev server that never printed a "
+                                    f"port will also time out here)")
         if _resp["error"]:
             return ToolResult(tool_id=tool_id, result=None, success=False,
                               error=str(_resp["error"]))
+        _image = _resp.get("image") or {}
+        if _image.get("b64"):
+            try:
+                self._inject_image_history(
+                    str(_image.get("filename") or "live-preview.jpg"),
+                    str(_image["b64"]),
+                )
+            except Exception:
+                _swallow()
         return ToolResult(tool_id=tool_id, result=_resp["result"], success=True)
 
     async def _dispatch_mcp_external(
@@ -12848,19 +13055,7 @@ Required behavior:
                 # Skip validation for non-implementation tasks
                 # These are analysis/research tasks that legitimately complete
                 # without file mutations (e.g. reading code, building an index)
-                _is_implementation = not any(
-                    _content.startswith(x) for x in 
-                    (
-                        "test", "verify", "analyze", "read", "review", "check",
-                        # Analysis & research tasks, no mutations expected
-                        "scan", "map", "deliver", "index", "research",
-                        "investigate", "explore", "understand", "list",
-                        "summarize", "describe", "categorize", "classify",
-                        "organize", "outline", "document", "report",
-                        "draft", "write", "audit", "compare", "survey",
-                        "assess", "evaluate", "inspect", "trace", "profile",
-                    )
-                )
+                _is_implementation = _todo_is_implementation(_content)
                 
                 if _is_implementation and _mutation_count == 0:
                     # Only block if the session has NO mutations at all.
@@ -13759,367 +13954,10 @@ Required behavior:
             "formatted": formatted[:50000],
         })
 
-    # ============================================================
-    # TASK V2 DISPATCHERS
-    # ============================================================
-
-    async def _dispatch_task_create(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TaskCreate tool - create a new structured task.
-        Supports hierarchical fields: parentId, dependsOn, estimatedEffort.
-        """
-        subject = args.get("subject", "")
-        description = args.get("description", "")
-        active_form = args.get("activeForm", "")
-
-        if not subject:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TaskCreate requires 'subject' parameter")
-        if not description:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TaskCreate requires 'description' parameter")
-
-        # Generate task ID
-        import uuid
-        task_id = f"task-{uuid.uuid4().hex[:8]}"
-
-        # Hierarchical fields
-        parent_id = args.get("parentId")
-        depends_on = args.get("dependsOn", [])
-        estimated_effort = args.get("estimatedEffort")
-
-        # Prevent circular dependencies before creating
-        if depends_on and task_id in depends_on:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="Task cannot depend on itself")
-
-        # Store task in session
-        task: Dict[str, Any] = {
-            "id": task_id,
-            "subject": subject,
-            "description": description,
-            "activeForm": active_form or f"Working on: {subject}",
-            "status": "pending",
-            "owner": None,
-            "blocks": [],
-            "blockedBy": list(depends_on),
-            "parentId": parent_id,
-            "dependsOn": list(depends_on),
-            "estimatedEffort": estimated_effort,
-            "tags": [],
-            "createdAt": _get_current_timestamp(),
-        }
-
-        # Add to session task list
-        self._session_tasks[task_id] = task
-
-        # Sync with hierarchical task graph
-        node = TaskNode(
-            id=task_id,
-            subject=subject,
-            description=description,
-            status=TaskStatus.PENDING,
-            active_form=active_form or f"Working on: {subject}",
-            parent_id=parent_id,
-            depends_on=list(depends_on),
-            estimated_effort=estimated_effort,
-        )
-        self._task_graph.add_node(node)
-
-        # Emit event
-        try:
-            from src.core.event_bus import get_event_bus, EventType, EventData
-            bus = get_event_bus()
-            bus.publish(EventType.TASK_GRAPH_UPDATED, EventData(source_component="agent_bridge"))
-        except Exception:
-            _swallow()
-
-        log.info(f"[TASK] Created task {task_id}: {subject}" +
-                 f"{' parent=' + parent_id if parent_id else ''}" +
-                 f"{' deps=' + str(depends_on) if depends_on else ''}")
-
-        return ToolResult(tool_id=tool_id, result={
-            "taskId": task_id,
-            "task": task,
-            "message": f"Task '{subject}' created with ID {task_id}"
-        })
-
-    async def _dispatch_task_update(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TaskUpdate tool - update task status, owner, or dependencies.
-        Also syncs with hierarchical task graph.
-        """
-        task_id = args.get("taskId", "")
-        status = args.get("status")
-        owner = args.get("owner")
-        blocks = args.get("blocks")
-        blocked_by = args.get("blockedBy")
-        parent_id = args.get("parentId")  # "" means clear parent
-        depends_on = args.get("dependsOn")
-        estimated_effort = args.get("estimatedEffort")
-
-        if not task_id:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TaskUpdate requires 'taskId' parameter")
-
-        # Get task from session
-        if task_id not in self._session_tasks:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error=f"Task {task_id} not found")
-
-        task = self._session_tasks[task_id]
-
-        # Update flat task dict
-        if status:
-            task["status"] = status
-        if owner is not None:
-            task["owner"] = owner
-        if blocks is not None:
-            task["blocks"] = blocks
-        if blocked_by is not None:
-            task["blockedBy"] = blocked_by
-        if parent_id is not None:
-            task["parentId"] = parent_id if parent_id else None
-        if depends_on is not None:
-            task["dependsOn"] = list(depends_on)
-        if estimated_effort is not None:
-            task["estimatedEffort"] = estimated_effort
-        task["updatedAt"] = _get_current_timestamp()
-
-        # Sync with hierarchical task graph
-        if self._task_graph.has_node(task_id):
-            updates: Dict[str, Any] = {}
-            if status:
-                updates["status"] = TaskStatus.from_str(status)
-            if owner is not None:
-                updates["owner"] = owner
-            if parent_id is not None:
-                updates["parent_id"] = parent_id if parent_id else None
-            if depends_on is not None:
-                updates["depends_on"] = list(depends_on)
-            if estimated_effort is not None:
-                updates["estimated_effort"] = estimated_effort
-            if updates:
-                self._task_graph.update_node(task_id, **updates)
-
-        # Emit event
-        try:
-            from src.core.event_bus import get_event_bus, EventType, EventData
-            bus = get_event_bus()
-            bus.publish(EventType.TASK_GRAPH_UPDATED, EventData(source_component="agent_bridge"))
-        except Exception:
-            _swallow()
-
-        log.info(f"[TASK] Updated task {task_id}: status={status or 'unchanged'}")
-
-        return ToolResult(tool_id=tool_id, result={
-            "taskId": task_id,
-            "task": task,
-            "message": f"Task {task_id} updated"
-        })
-
-    async def _dispatch_task_list(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TaskList tool - list all tasks in session.
-        """
-        status_filter = args.get("status", "all")
-
-        tasks = list(self._session_tasks.values())
-
-        if status_filter != "all":
-            tasks = [t for t in tasks if t.get("status") == status_filter]
-
-        log.info(f"[TASK] Listed {len(tasks)} tasks (filter={status_filter})")
-
-        # Include task graph summary
-        graph_section = self._task_graph.build_prompt_section() if self._task_graph else ""
-
-        return ToolResult(tool_id=tool_id, result={
-            "tasks": tasks,
-            "count": len(tasks),
-            "filter": status_filter,
-            "graph": graph_section,
-        })
-
-    async def _dispatch_task_get(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TaskGet tool - get details of a specific task.
-        """
-        task_id = args.get("taskId", "")
-
-        if not task_id:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TaskGet requires 'taskId' parameter")
-
-        if task_id not in self._session_tasks:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error=f"Task {task_id} not found")
-
-        task = self._session_tasks[task_id]
-
-        # Include hierarchical context
-        children = []
-        rollup = {}
-        if self._task_graph and self._task_graph.has_node(task_id):
-            child_nodes = self._task_graph.get_direct_children(task_id)
-            children = [{"id": c.id, "subject": c.subject, "status": c.status.value}
-                        for c in child_nodes]
-            rollup = self._task_graph.get_rollup_status(task_id)
-
-        return ToolResult(tool_id=tool_id, result={
-            "task": task,
-            "children": children,
-            "rollup": rollup,
-        })
-
-    async def _dispatch_task_stop(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TaskStop tool - stop a running task.
-        """
-        task_id = args.get("taskId", "")
-
-        if not task_id:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TaskStop requires 'taskId' parameter")
-
-        if task_id not in self._session_tasks:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error=f"Task {task_id} not found")
-
-        task = self._session_tasks[task_id]
-        task["status"] = "cancelled"
-        task["stoppedAt"] = _get_current_timestamp()
-
-        log.info(f"[TASK] Stopped task {task_id}")
-
-        return ToolResult(tool_id=tool_id, result={
-            "taskId": task_id,
-            "status": "cancelled",
-            "message": f"Task {task_id} stopped"
-        })
-
-    # ============================================================
-    # MCP DISPATCHER
-    # ============================================================
-
-    async def _dispatch_mcp(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle MCP tool - execute a tool from an MCP server.
-        """
-        server_name = args.get("serverName", "")
-        tool_name = args.get("toolName", "")
-        arguments = args.get("arguments", {})
-
-        if not server_name:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="MCP requires 'serverName' parameter")
-        if not tool_name:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="MCP requires 'toolName' parameter")
-
-        log.info(f"[MCP] Tool call: {server_name}.{tool_name}")
-
-        return ToolResult(tool_id=tool_id, result={
-            "serverName": server_name,
-            "toolName": tool_name,
-            "arguments": arguments,
-            "result": None,
-            "message": (
-                f"MCP tool '{tool_name}' on server '{server_name}'. "
-                f"MCP servers need to be configured in settings. "
-                f"Use the built-in tools (Read, Write, Bash, etc.) for file and command operations."
-            )
-        })
-
-    # ============================================================
-    # TEAM/SWARM DISPATCHERS
-    # ============================================================
-
-    async def _dispatch_team_create(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TeamCreate tool - create a multi-agent team.
-        """
-        name = args.get("name", "")
-        description = args.get("description", "")
-        teammates = args.get("teammates", [])
-
-        if not name:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TeamCreate requires 'name' parameter")
-
-        # Generate team ID
-        import uuid
-        team_id = f"team-{uuid.uuid4().hex[:8]}"
-
-        # Create team structure
-        team: Dict[str, Any] = {
-            "id": team_id,
-            "name": name,
-            "description": description,
-            "teammates": [],
-            "status": "active",
-            "createdAt": _get_current_timestamp(),
-        }
-
-        # Add teammates
-        for i, tm in enumerate(teammates):
-            teammate_id = f"agent-{uuid.uuid4().hex[:6]}"
-            team["teammates"].append({
-                "id": teammate_id,
-                "name": tm.get("name", f"agent-{i+1}"),
-                "role": tm.get("role", "general"),
-                "status": "idle",
-            })
-
-        # Store team
-        self._teams[team_id] = team
-
-        log.info(f"[TEAM] Created team {team_id}: {name} with {len(teammates)} teammates")
-
-        return ToolResult(tool_id=tool_id, result={
-            "teamId": team_id,
-            "team": team,
-            "message": f"Team '{name}' created with {len(teammates)} agents"
-        })
-
-    async def _dispatch_team_delete(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle TeamDelete tool - delete a team.
-        """
-        team_name = args.get("teamName", "")
-
-        if not team_name:
-            return ToolResult(tool_id=tool_id, result=None, success=False,
-                              error="TeamDelete requires 'teamName' parameter")
-
-        # Find team by name
-        for tid, team in list(self._teams.items()):
-            if team.get("name") == team_name:
-                del self._teams[tid]
-                log.info(f"[TEAM] Deleted team {tid}: {team_name}")
-                return ToolResult(tool_id=tool_id, result={
-                    "teamId": tid,
-                    "message": f"Team '{team_name}' deleted"
-                })
-
-        return ToolResult(tool_id=tool_id, result=None, success=False,
-                          error=f"Team '{team_name}' not found")
-
-    async def _dispatch_plan_build(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle PlanBuild tool, create a structured plan .md file and return plan data.
-        Delegates to the PlanBuild tool in src/agent/src/tools/PlanBuildTool/.
-        """
-        try:
-            import importlib
-            module = importlib.import_module('src.agent.src.tools.plan_build_tool.plan_build_tool')
-            plan_result = await module.call(args, None)
-            if isinstance(plan_result, dict) and 'data' in plan_result:
-                return ToolResult(tool_id=tool_id, result=plan_result['data'])
-            return ToolResult(tool_id=tool_id, result=plan_result)
-        except Exception as e:
-            log.error(f"[PLANBUILD] Dispatch failed: {e}")
-            return ToolResult(tool_id=tool_id, result=None, success=False, error=str(e))
+    # Task*/Team*/PlanBuild dispatchers were removed 2026-10-23 (FIX-PLAN W4).
+    # No schema ever offered those names, so no model could call them. The
+    # drift test in tests/test_tool_dispatch.py still fails on a handler whose
+    # tool nobody is offered, so a tenth one cannot reappear silently.
 
     # ── Subscription-required helper ─────────────────────────────
 

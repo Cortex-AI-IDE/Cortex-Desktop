@@ -170,6 +170,8 @@ def save_snapshot(bridge) -> None:
             try:
                 os.unlink(_tmp)
             except OSError:
+                # silent-ok: cleanup of the temp file left by a fallback write
+                # that already succeeded; a stray file costs nothing.
                 pass
         log.info(f"[SESSION] Saved snapshot to {storage_path} "
                  f"({len(snapshot['session_tasks'])} tasks, "
@@ -237,4 +239,5 @@ def _emit_event_deferred(event_type: str) -> None:
             from src.core.event_bus import EventData
             bus.publish(event_type_enum, EventData(source_component="agent_session_manager"))
     except Exception:
-        pass  # Event bus unavailable, non-critical
+        # silent-ok: event bus unavailable, and this event is advisory only
+        pass

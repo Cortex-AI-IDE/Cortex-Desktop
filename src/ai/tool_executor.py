@@ -36,17 +36,8 @@ _TOOL_TO_ACTIVITY: Dict[str, str] = {
     "LS": "list_directory",
     "WebFetch": "web_fetch",
     "WebSearch": "web_search",
-    "TaskCreate": "task_create",
-    "TaskUpdate": "task_update",
-    "TaskList": "task_list",
-    "TaskGet": "task_get",
-    "TaskStop": "task_stop",
     "AskUserQuestion": "ask_user",
-    "PlanBuild": "plan_build",
     "TodoWrite": "todo_write",
-    "MCP": "mcp_tool",
-    "TeamCreate": "team_create",
-    "TeamDelete": "team_delete",
 }
 
 ParsedToolCall = Tuple[str, str, Any]  # (tool_name, tool_id, args)

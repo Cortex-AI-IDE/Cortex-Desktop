@@ -163,14 +163,18 @@ class ChatHistoryManager:
                 _exists = self.db.get_conversation(conversation_id)
                 if _exists:
                     return conversation_id
-            except Exception:
-                pass
+            except Exception as e:
+                # Falling through creates the conversation, so a transient read
+                # error turns into a duplicate row for the same id.
+                log.warning(f"[ChatPersist] could not look up {conversation_id}: {e}")
             # Explicitly requested ID not in DB, create it (New Chat flow)
             try:
                 self.create_conversation(project_path, conversation_id=conversation_id)
                 log.info(f"[ChatPersist] Created missing active conversation {conversation_id}")
-            except Exception:
-                pass
+            except Exception as e:
+                # The id is returned either way, so the caller believes a row
+                # exists that does not. Persisting this chat would then no-op.
+                log.warning(f"[ChatPersist] could not create conversation {conversation_id}: {e}")
             return conversation_id
 
         # No specific ID requested, find conversation for this project.

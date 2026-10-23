@@ -18,6 +18,8 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtCore import QFileSystemWatcher
 
+from src.utils.silent import swallow
+
 log = logging.getLogger(__name__)
 
 
@@ -65,6 +67,11 @@ class LivePreviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_path: str = ""
+        # Set when the panel is showing a dev-server URL instead of a file.
+        # The two are mutually exclusive: a URL has no on-disk file to watch,
+        # and a file has no server to reload from.
+        self._current_url: str = ""
+        self._dev_server = None  # src.core.dev_server.DevServer, lazily created
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file_changed)
         # Directory watch survives the file's absence (delete+recreate saves)
@@ -130,6 +137,7 @@ class LivePreviewPanel(QWidget):
         path = os.path.abspath(path)
         log.info(f"[LivePreview] load_file: {path}")
         self._stop_watching()
+        self._current_url = ""
         self._current_path = path
         self._label.setText(Path(path).name)
         self._label.setToolTip(path)
@@ -140,6 +148,135 @@ class LivePreviewPanel(QWidget):
             self._show_message(f"File not found:\n{path}")
             return
         self._view.setUrl(QUrl.fromLocalFile(path))
+
+    def load_url(self, url: str, label: str = "") -> None:
+        """Display a running dev server instead of a file.
+
+        File watching is stopped rather than left armed: the file on disk is
+        not what is on screen any more, so a reload triggered by a save would
+        silently replace the app with a stale HTML file.
+        """
+        if not url:
+            return
+        log.info(f"[LivePreview] load_url: {url}")
+        self._stop_watching()
+        self._current_path = ""
+        self._current_url = url
+        self._label.setText(label or url)
+        self._label.setToolTip(url)
+        self._page.console_messages.clear()
+        self._view.setUrl(QUrl(url))
+
+    def current_url(self) -> str:
+        return self._current_url
+
+    def has_page(self) -> bool:
+        """True when something is loaded, either a file or a server URL."""
+        return bool(self._current_path or self._current_url)
+
+    # ── Dev server (W7) ──────────────────────────────────────────────────
+
+    def start_dev_server(self, command: str, cwd: str = "", port=None):
+        """Start a dev server and return it. Caller owns `cwd`.
+
+        `cwd` must be the project root, not the app's working directory: the
+        packaged app's CWD is the install directory, so an inherited CWD would
+        start the server against the wrong `package.json` on an end-user machine
+        and look correct on a dev box.
+        """
+        from src.core.dev_server import DevServer
+
+        self.stop_dev_server()
+        server = DevServer(command=command, cwd=cwd or os.getcwd(), port=port)
+        server.start()
+        self._dev_server = server
+        return server
+
+    def stop_dev_server(self) -> None:
+        """Stop the dev server if one is running. Safe to call at any time."""
+        server = self._dev_server
+        self._dev_server = None
+        if server is not None:
+            try:
+                server.stop()
+            except Exception:
+                swallow("LivePreview could not stop the dev server")
+
+    def has_dev_server(self) -> bool:
+        """True when a dev-server process is attached to the panel.
+
+        Not the same as "it printed something": a silent server (buffered
+        output, the exact case the port scan exists for) produces no lines at
+        all, so deciding this from `dev_server_output()` would report a running
+        server as absent.
+        """
+        return self._dev_server is not None
+
+    def dev_server_output(self, tail: int = 40) -> str:
+        server = self._dev_server
+        if server is None:
+            return ""
+        try:
+            return server.output(tail)
+        except Exception:
+            return ""
+
+    # ── Screenshot (W8) ──────────────────────────────────────────────────
+
+    def capture_screenshot(self, max_width: int = 1280, quality: int = 70):
+        """Capture the rendered page as JPEG bytes for the model to look at.
+
+        Returns ``(bytes, error)``. ``widget.grab()`` is a synchronous surface
+        read on the GUI thread, so this is only ever called from an explicit
+        tool request, never on a timer, and the result is downscaled: the same
+        call in the render health probe cost 10.7s at full window size.
+
+        This captures Qt's own widget surface. The pixels are the panel's, so
+        anything the WebEngine compositor has not committed yet is absent; a
+        blank capture therefore means "nothing rendered", not "capture broken".
+        """
+        if not self.has_page():
+            return None, "Nothing is loaded in Live Preview. Use action='open' or action='serve' first."
+        if not self._view.isVisible():
+            return None, "Live Preview is hidden, so it cannot be captured. Open it first."
+        try:
+            pixmap = self._view.grab()
+        except Exception as exc:
+            return None, f"Capture failed: {exc}"
+        if pixmap is None or pixmap.isNull():
+            return (
+                None,
+                "Capture produced an empty image. The page may not have finished "
+                "rendering; wait a moment and try again.",
+            )
+        try:
+            from io import BytesIO
+
+            from PIL import Image
+            from PyQt6.QtGui import QImage
+        except Exception as exc:
+            return None, f"Pillow is unavailable, cannot encode the capture: {exc}"
+        try:
+            image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB32)
+            width, height = image.width(), image.height()
+            if width <= 0 or height <= 0:
+                return None, "Capture produced a zero-sized image."
+            buffer = image.constBits()
+            buffer.setsize(image.sizeInBytes())
+            # QImage rows are padded to a 4-byte boundary. Format_RGB32 is
+            # 32bpp, so bytesPerLine already equals width*4 and Pillow's
+            # stride of 0 (auto) agrees with QImage's.
+            pil = Image.frombuffer(
+                "RGB", (width, height), bytes(buffer), "raw", "BGRX", 0, 1
+            )
+            if max_width and width > max_width:
+                ratio = max_width / float(width)
+                pil = pil.resize((max_width, max(1, int(height * ratio))))
+            out = BytesIO()
+            pil.save(out, format="JPEG", quality=quality, optimize=True)
+            return out.getvalue(), None
+        except Exception as exc:
+            return None, f"Capture encoding failed: {exc}"
 
     def reload(self) -> None:
         """Manual/explicit reload of the current file."""
@@ -188,6 +325,15 @@ class LivePreviewPanel(QWidget):
         self._reload_timer.start()
 
     def _reload_now(self) -> None:
+        if self._current_url:
+            # Dev-server mode: the refresh button re-navigates. There is no
+            # file watch to re-arm, and HMR normally does this by itself.
+            self._page.console_messages.clear()
+            try:
+                self._view.setUrl(QUrl(self._current_url))
+            except RuntimeError:
+                return  # view destroyed during shutdown
+            return
         if not self._current_path:
             return
         self._arm_watch()
