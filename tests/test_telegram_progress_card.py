@@ -1,4 +1,4 @@
-"""The phone card must say which tool ran, on which file, and how many.
+"""The phone card must say which tool ran, on which file, and how much changed.
 
 Field report 2026-10-23, a live card on the phone read:
 
@@ -8,7 +8,7 @@ Field report 2026-10-23, a live card on the phone read:
     Files 24 read, 0 edited
     Context 227 / 866K
 
-Three separate problems, all in the formatting layer:
+Four separate problems, all in the formatting layer:
 
 1. Every explore tool (Read, Grep, Glob, WebSearch) printed as "Reading", so
    the card never said which tool was used.
@@ -17,6 +17,8 @@ Three separate problems, all in the formatting layer:
 3. "Files 24 read" counted calls, not files, and "0 edited" was structural:
    nothing ever incremented ``files_edited`` because the signal that carries
    edits was never connected.
+4. An edit said nothing about size. The owner asked for the filename plus the
+   added and removed line counts, and for no code at all.
 """
 
 import datetime as dt
@@ -104,8 +106,12 @@ def explore(monitor, path, tool="read"):
     monitor.on_explore_file(json.dumps({"path": path, "tool": tool}))
 
 
-def edit(monitor, path):
-    monitor.on_tool_activity("edit_file", json.dumps({"file_path": path}), "complete")
+def edit(monitor, path, old="a", new="b"):
+    monitor.on_tool_activity(
+        "edit_file",
+        json.dumps({"file_path": path, "old_string": old, "new_string": new}),
+        "complete",
+    )
 
 
 WINDOWS_PATH = (
@@ -115,39 +121,39 @@ WINDOWS_PATH = (
 
 
 # ---------------------------------------------------------------------------
-# Path shortening
+# Filename only, never a path
 # ---------------------------------------------------------------------------
 
 
-def test_short_path_strips_the_project_prefix():
-    assert tm.short_path(WINDOWS_PATH, "cortex_opensource") == (
-        "tests/test_telegram_monitor.py"
-    )
+def test_file_name_drops_the_whole_directory():
+    assert tm.file_name(WINDOWS_PATH) == "test_telegram_monitor.py"
 
 
-def test_short_path_keeps_the_tail_of_a_foreign_path():
-    assert tm.short_path("/opt/other/project/src/app/main.py", "cortex_opensource") == (
-        "src/app/main.py"
-    )
+def test_file_name_handles_forward_slashes():
+    assert tm.file_name("src/ui/chat_panel.py") == "chat_panel.py"
 
 
-def test_short_path_that_must_cut_keeps_the_filename():
-    out = tm.short_path("/very/long/" + "a" * 200 + "/file.py", "")
-    assert len(out) <= tm._PATH_LIMIT
-    assert out.endswith("/file.py")
+def test_file_name_ignores_a_trailing_separator():
+    assert tm.file_name("src/ui/dialogs/") == "dialogs"
 
 
-def test_short_path_of_nothing_is_empty():
-    assert tm.short_path(None, "proj") == ""
-    assert tm.short_path("", "proj") == ""
+def test_file_name_caps_a_giant_name():
+    out = tm.file_name("/x/" + "a" * 200 + ".py")
+    assert len(out) <= tm._NAME_LIMIT
+    assert out.endswith(".py")
 
 
-def test_short_path_survives_an_object_that_cannot_be_stringified():
+def test_file_name_of_nothing_is_empty():
+    assert tm.file_name(None) == ""
+    assert tm.file_name("") == ""
+
+
+def test_file_name_survives_an_object_that_cannot_be_stringified():
     class Exploding:
         def __str__(self):
             raise RuntimeError("no")
 
-    assert tm.short_path(Exploding()) == ""
+    assert tm.file_name(Exploding()) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +161,7 @@ def test_short_path_survives_an_object_that_cannot_be_stringified():
 # ---------------------------------------------------------------------------
 
 
-def test_the_card_names_the_tool_and_the_short_path():
+def test_the_card_names_the_tool_and_the_filename():
     monitor, transport, clock = make_monitor()
     monitor.on_request_started("cortex_opensource")
     pump(monitor, clock)
@@ -163,20 +169,30 @@ def test_the_card_names_the_tool_and_the_short_path():
     pump(monitor, clock)
 
     text = last_card(transport)
-    assert "Read \u00b7 tests/test_telegram_monitor.py" in text
+    assert "Read \u00b7 test_telegram_monitor.py" in text
     assert "Reading " not in text
     assert "C:\\Users" not in text
+    assert "tests/test_" not in text
 
 
 def test_a_grep_is_not_called_a_read():
     monitor, transport, clock = make_monitor()
     monitor.on_request_started("cortex_opensource")
-    explore(monitor, "C:\\p\\cortex_opensource\\src\\ui", tool="grep")
+    explore(monitor, "C:\\p\\cortex_opensource\\src\\ui\\sidebar.py", tool="grep")
     pump(monitor, clock)
 
     text = last_card(transport)
-    assert "Grep \u00b7 src/ui" in text
+    assert "Grep \u00b7 sidebar.py" in text
     assert "Read " not in text
+
+
+def test_a_glob_is_named_a_glob_and_keeps_its_pattern():
+    monitor, transport, clock = make_monitor()
+    monitor.on_request_started("proj")
+    explore(monitor, "**/*.py", tool="glob")
+    pump(monitor, clock)
+
+    assert "Glob \u00b7 **/*.py" in last_card(transport)
 
 
 def test_a_web_search_is_named_as_one():
@@ -186,7 +202,16 @@ def test_a_web_search_is_named_as_one():
     explore(monitor, "telegram voice note malayalam", tool="web_search")
     pump(monitor, clock)
 
-    assert "Web \u00b7 telegram voice note malayalam" in last_card(transport)
+    assert "Web Search \u00b7 telegram voice note malayalam" in last_card(transport)
+
+
+def test_a_semantic_search_shows_the_query_not_a_filename():
+    monitor, transport, clock = make_monitor()
+    monitor.on_request_started("proj")
+    explore(monitor, "where is the pairing gate", tool="semantic_search")
+    pump(monitor, clock)
+
+    assert "Search \u00b7 where is the pairing gate" in last_card(transport)
 
 
 def test_an_unknown_tool_is_still_named():
@@ -195,7 +220,7 @@ def test_an_unknown_tool_is_still_named():
     explore(monitor, "src/a.py", tool="securityscan")
     pump(monitor, clock)
 
-    assert "Securityscan \u00b7 src/a.py" in last_card(transport)
+    assert "Securityscan \u00b7 a.py" in last_card(transport)
 
 
 # ---------------------------------------------------------------------------
@@ -211,10 +236,10 @@ def test_the_card_shows_the_last_three_calls():
     pump(monitor, clock)
 
     text = last_card(transport)
-    assert "src/b.py" in text
-    assert "src/c.py" in text
-    assert "src/d.py" in text
-    assert "src/a.py" not in text
+    assert "b.py" in text
+    assert "c.py" in text
+    assert "d.py" in text
+    assert "a.py" not in text
 
 
 def test_reading_the_same_file_twice_is_one_line_but_two_reads():
@@ -225,37 +250,91 @@ def test_reading_the_same_file_twice_is_one_line_but_two_reads():
     pump(monitor, clock)
 
     text = last_card(transport)
-    assert text.count("Read \u00b7 src/a.py") == 1
+    assert text.count("Read \u00b7 a.py") == 1
     assert "2 reads" in text
 
 
 # ---------------------------------------------------------------------------
-# Edits are counted from the tool signal, which was never connected
+# Edits carry the filename and the line counts, never the code
 # ---------------------------------------------------------------------------
 
 
-def test_an_edit_is_counted_and_named():
+def test_an_edit_shows_the_filename_and_both_counts():
     monitor, transport, clock = make_monitor()
     monitor.on_request_started("cortex_opensource")
-    edit(monitor, "C:\\p\\cortex_opensource\\src\\ui\\chat_panel.py")
+    edit(
+        monitor,
+        "C:\\p\\cortex_opensource\\src\\ui\\chat_panel.py",
+        old="a\nb\nc",
+        new="x\ny",
+    )
     pump(monitor, clock)
 
     text = last_card(transport)
-    assert "Edit \u00b7 src/ui/chat_panel.py" in text
+    assert "Edit \u00b7 chat_panel.py +2 \u22123" in text
     assert "1 edit" in text
     assert "0 edited" not in text
 
 
-def test_a_write_is_counted_as_an_edit():
+def test_an_edit_never_carries_the_code_itself():
+    monitor, transport, clock = make_monitor()
+    monitor.on_request_started("proj")
+    edit(monitor, "src/a.py", old="SECRET_OLD", new="SECRET_NEW")
+    pump(monitor, clock)
+
+    text = last_card(transport)
+    assert "SECRET_OLD" not in text
+    assert "SECRET_NEW" not in text
+
+
+def test_a_pure_addition_has_no_minus():
+    monitor, transport, clock = make_monitor()
+    monitor.on_request_started("proj")
+    edit(monitor, "src/a.py", old="", new="x\ny")
+    pump(monitor, clock)
+
+    assert "Edit \u00b7 a.py +2" in last_card(transport)
+    assert "\u2212" not in last_card(transport)
+
+
+def test_an_edit_without_strings_still_names_the_file():
     monitor, transport, clock = make_monitor()
     monitor.on_request_started("proj")
     monitor.on_tool_activity(
-        "write_file", json.dumps({"file_path": "src/new.py"}), "complete"
+        "edit_file", json.dumps({"file_path": "src/a.py"}), "complete"
+    )
+    pump(monitor, clock)
+
+    assert "Edit \u00b7 a.py" in last_card(transport)
+
+
+def test_a_write_is_counted_as_an_edit_and_shows_added_lines():
+    monitor, transport, clock = make_monitor()
+    monitor.on_request_started("proj")
+    monitor.on_tool_activity(
+        "write_file",
+        json.dumps({"file_path": "src/new.py", "content": "a\nb\nc"}),
+        "complete",
     )
     pump(monitor, clock)
 
     assert monitor._run.files_edited == 1
-    assert "Write \u00b7 src/new.py" in last_card(transport)
+    assert "Write \u00b7 new.py +3" in last_card(transport)
+
+
+def test_a_shell_call_is_just_named():
+    """The owner asked for "Bash", not a command line full of paths."""
+    monitor, transport, clock = make_monitor()
+    monitor.on_request_started("proj")
+    monitor.on_tool_activity(
+        "run_command", json.dumps({"command": "python -m pytest tests -q"}), "complete"
+    )
+    pump(monitor, clock)
+
+    text = last_card(transport)
+    assert "Bash" in text
+    assert "pytest" not in text
+    assert monitor._run.files_edited == 0
 
 
 def test_reads_on_the_tool_signal_are_not_counted_twice():
@@ -294,18 +373,6 @@ def test_a_huge_tool_payload_still_counts_the_edit():
     assert monitor._run.recent == ["Edit"]
 
 
-def test_a_command_shows_what_ran():
-    monitor, transport, clock = make_monitor()
-    monitor.on_request_started("proj")
-    monitor.on_tool_activity(
-        "run_command", json.dumps({"command": "python -m pytest tests -q"}), "complete"
-    )
-    pump(monitor, clock)
-
-    assert "Run \u00b7 python -m pytest tests -q" in last_card(transport)
-    assert monitor._run.files_edited == 0
-
-
 # ---------------------------------------------------------------------------
 # The card keeps its shape across a refresh
 # ---------------------------------------------------------------------------
@@ -328,7 +395,7 @@ def test_an_edited_card_keeps_its_line_breaks():
     lines = last_card(transport).split("\n")
     assert lines[0].startswith("Cortex is working")
     assert "cortex_opensource" in lines
-    assert "Read \u00b7 tests/test_telegram_monitor.py" in lines
+    assert "Read \u00b7 test_telegram_monitor.py" in lines
     assert any("227K / 866K context" in line for line in lines)
 
 

@@ -751,7 +751,9 @@ def test_explore_path_becomes_the_live_activity():
     clock.advance(5)
     monitor.drain()
     assert monitor._run.files_read == 1
-    assert "src/main_window.py" in transport.payloads("editMessageText")[0]["text"]
+    # The filename only, by the owner's request; the folder is noise on a phone.
+    assert "Read \u00b7 main_window.py" in transport.payloads("editMessageText")[0]["text"]
+    assert "src/main_window.py" not in transport.payloads("editMessageText")[0]["text"]
 
 
 # ---------------------------------------------------------------------------

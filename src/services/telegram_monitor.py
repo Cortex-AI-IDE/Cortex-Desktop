@@ -608,17 +608,22 @@ def cap(text: object, limit: int = MAX_TEXT) -> str:
 # arrived the same way) and the file was the only thing that identified it.
 _TOOL_LABELS = {
     "read": "Read",
+    "read_file": "Read",
     "grep": "Grep",
-    "glob": "Find",
+    "glob": "Glob",
     "ls": "List",
     "list_directory": "List",
-    "web_search": "Web",
+    "web_search": "Web Search",
     "web_fetch": "Fetch",
     "semantic_search": "Search",
     "edit_file": "Edit",
     "write_file": "Write",
-    "run_command": "Run",
+    "run_command": "Bash",
 }
+# Tools whose detail is free text (a query or a pattern), not a file. A path
+# helper would mangle them: ``**/*.py`` reduced to ``*.py`` loses the point of
+# the glob, and a search phrase has no filename at all.
+_TEXT_DETAIL = frozenset({"web_search", "web_fetch", "semantic_search", "glob"})
 # File-changing activity names. "Read" and friends also arrive on
 # ``tool_activity``; counting them there would double every read, because the
 # explore signal already carries them.
@@ -630,6 +635,62 @@ _PATH_LIMIT = 64
 
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+_NAME_LIMIT = 40
+_DETAIL_LIMIT = 40
+
+
+def file_name(path: object) -> str:
+    """The bare filename, with no directory and no separators.
+
+    The card used to print the whole path. It opened with ``C:,`` then the
+    120-char clip cut the filename off the end, so the only part worth reading
+    was the part that disappeared. Which folder a file sits in is a question
+    about the repo; the phone only needs to know what was touched.
+    """
+    try:
+        text = str(path or "").replace(chr(92), "/").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    name = text.rstrip("/").rsplit("/", 1)[-1]
+    if len(name) > _NAME_LIMIT:
+        name = "\u2026" + name[-(_NAME_LIMIT - 1):]
+    return name
+
+
+def _line_count(text: object) -> int:
+    """Lines in one side of an edit.
+
+    ``old_string``/``new_string`` are already truncated by the bridge at 4,000
+    chars, so this is an estimate on a huge edit, never a whole-file count.
+    """
+    try:
+        value = "" if text is None else str(text)
+    except Exception:
+        return 0
+    if not value:
+        return 0
+    return value.count("\n") + 1
+
+
+def _change_counts(added: int, removed: int) -> str:
+    """``+12 \u22123``, or nothing when there is no change to report."""
+    parts = []
+    if added:
+        parts.append(f"+{added}")
+    if removed:
+        parts.append(f"\u2212{removed}")
+    return " ".join(parts)
+
+
+def _explore_detail(tool: str, path: str) -> str:
+    """What to print after the tool name: a filename, or the query itself."""
+    if (tool or "").lower() in _TEXT_DETAIL:
+        return clip(path, _DETAIL_LIMIT)
+    return file_name(path)
 
 
 def short_path(path: object, project: str = "") -> str:
@@ -2579,7 +2640,8 @@ class TelegramMonitor:
             return
         self._run.files_read += 1
         label = _TOOL_LABELS.get(tool.lower(), clip(tool, 20).capitalize() or "Read")
-        self._note(f"{label} · {short_path(path, self._run.project)}")
+        detail = _explore_detail(tool, path)
+        self._note(f"{label} · {detail}" if detail else label)
 
     def _handle_tool(self, event: dict) -> None:
         """Edits and shell commands, the tools the explore signal never sees."""
@@ -2591,7 +2653,13 @@ class TelegramMonitor:
             return
         self._run.files_edited += 1 if is_edit else 0
         label = _TOOL_LABELS.get(name, name or "Tool")
-        detail = ""
+        if name in _SHELL_ACTIVITIES:
+            # The owner's call: the phone says a shell ran, not what it ran.
+            # A command line is mostly paths and flags, the exact noise this
+            # card was cleaned of.
+            self._note(label)
+            return
+        detail, counts = "", ""
         raw = event.get("info")
         if isinstance(raw, str) and 0 < len(raw) <= 8192:
             try:
@@ -2599,10 +2667,16 @@ class TelegramMonitor:
             except Exception:
                 payload = None
             if isinstance(payload, dict):
-                if is_edit:
-                    detail = short_path(payload.get("file_path") or "", self._run.project)
+                detail = file_name(payload.get("file_path") or payload.get("path"))
+                if name == "write_file":
+                    counts = _change_counts(_line_count(payload.get("content")), 0)
                 else:
-                    detail = clip(payload.get("command") or "", 40)
+                    counts = _change_counts(
+                        _line_count(payload.get("new_string")),
+                        _line_count(payload.get("old_string")),
+                    )
+        if counts:
+            detail = f"{detail} {counts}".strip()
         self._note(f"{label} · {detail}" if detail else label)
 
     def _note(self, line: str) -> None:
