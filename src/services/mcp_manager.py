@@ -458,6 +458,31 @@ def _unknown_arguments(schema: Optional[Dict[str, Any]],
 _HTTP_TYPES = {"http", "streamable-http", "streamable_http", "streamablehttp"}
 
 
+def parse_import_text(text: str) -> Any:
+    """Parse what a user pasted into Settings -> MCP -> Import.
+
+    Besides a whole {"mcpServers": {...}} file, people paste ONE entry copied
+    out of such a block - `"ddg-search": {...}`, often with the trailing
+    comma - which is not a JSON document on its own and failed with
+    "Extra data: line 1 column 13 (char 12)" (2026-10-23). That shape is
+    wrapped in braces and parsed again; anything else that does not parse
+    gets an error saying which shapes are accepted.
+    """
+    text = (text or "").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as first:
+        if text.startswith('"'):
+            try:
+                return json.loads("{" + text.rstrip(",").rstrip() + "}")
+            except json.JSONDecodeError:
+                pass  # silent-ok: the original error below is the one to show
+        raise ValueError(
+            f"Not valid JSON ({first.msg}, line {first.lineno} column {first.colno}). "
+            'Paste a whole {"mcpServers": {...}} block, or one "name": {...} entry.'
+        ) from first
+
+
 def _is_server_entry(d: Any) -> bool:
     """A usable mcpServers entry: a command to launch, or a URL to connect to."""
     return isinstance(d, dict) and bool(d.get("command") or d.get("url")
@@ -1532,7 +1557,7 @@ class MCPManager:
 
     def import_json(self, text: str, scope: str = "global") -> int:
         """Import a standard {"mcpServers": {...}} blob. Returns servers added."""
-        data = json.loads(text)
+        data = parse_import_text(text)
         servers = data.get("mcpServers", data if isinstance(data, dict) else {})
         if not isinstance(servers, dict) or not servers:
             raise ValueError('No "mcpServers" object found in the JSON')
