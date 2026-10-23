@@ -280,33 +280,46 @@ class SidebarBridge(QObject):
         self._js_pending_calls.append(js_code)
         
         if self._js_throttle_timer is None:
-            def _flush_throttled():
-                self._js_throttle_timer = None
-                if not self._is_view_alive():
-                    return
-                calls = self._js_pending_calls
-                self._js_pending_calls = []
-                page = self._web_view.page()
-                for code in calls:
-                    try:
-                        snippet = code[:120] + ('...' if len(code) > 120 else '')
-                        page.runJavaScript(code)
-                    except RuntimeError as re:
-                        # C++ access violation, view is dead, stop further calls
-                        log.warning(f"[SidebarBridge] WebEngine died during JS call: {re}")
-                        # Re-queue remaining calls for next page load
-                        remaining = self._js_pending_calls
-                        self._js_pending_calls = []
-                        self._pending_js.extend(calls[calls.index(code):] + remaining)
-                        self._page_loaded = False
-                        return
-                    except Exception as e:
-                        log.warning(f"[SidebarBridge] JS call failed: {e}")
-            
             self._js_throttle_timer = QTimer()
             self._js_throttle_timer.setSingleShot(True)
-            self._js_throttle_timer.timeout.connect(_flush_throttled)
+            self._js_throttle_timer.timeout.connect(self._flush_js_queue)
             self._js_throttle_timer.start(self._js_throttle_ms)
+
+    def _flush_js_queue(self):
+        """Send the batch held by the throttle, or keep it for the next reload."""
+        self._js_throttle_timer = None
+        calls = self._js_pending_calls
+        if not calls:
+            return
+        if not self._is_view_alive():
+            # Keeping the batch is the whole point. The previous version left
+            # these in _js_pending_calls and returned, so they were never
+            # delivered and never re-sent when the renderer came back. The
+            # Explorer then stayed stale until a manual Refresh, with nothing
+            # in the log to explain it.
+            log.warning(
+                f"[SidebarBridge] Renderer dead, {len(calls)} JS call(s) "
+                f"kept for the next reload"
+            )
+            self._pending_js.extend(calls)
+            self._js_pending_calls = []
+            self._page_loaded = False
+            return
+        self._js_pending_calls = []
+        page = self._web_view.page()
+        for _idx, code in enumerate(calls):
+            try:
+                page.runJavaScript(code)
+            except RuntimeError as re:
+                # C++ access violation, view is dead, stop further calls
+                log.warning(f"[SidebarBridge] WebEngine died during JS call: {re}")
+                # Re-queue this call and everything after it for the reload.
+                self._pending_js.extend(calls[_idx:] + self._js_pending_calls)
+                self._js_pending_calls = []
+                self._page_loaded = False
+                return
+            except Exception as e:
+                log.warning(f"[SidebarBridge] JS call failed: {e}")
 
     def _flush_pending_js(self):
         """Execute all queued JS calls now that the page is loaded.
@@ -515,6 +528,11 @@ class SidebarBridge(QObject):
         # Remember WHICH folder changed, so the refresh re-reads only that
         # folder instead of the whole tree (kept while AI work suppresses it).
         self._changed_dirs.add(path)
+        # DEBUG so it costs nothing at normal log level, but running once with
+        # debug on tells "no event arrived" apart from "event arrived and was
+        # suppressed". That distinction was missing every time this was
+        # reported as "auto-refresh dead".
+        log.debug(f"[SidebarBridge] Directory changed: {path}")
         # Check both bridge-level and SidebarWidget-level _ai_active flags
         _parent = self.parent()
         _parent_ai_active = getattr(_parent, '_ai_active', False) if _parent else False
@@ -574,7 +592,6 @@ class SidebarBridge(QObject):
             self._arm_suppressed_retry()
             return
         self._pending_tree_refresh = False
-        log.info("[SidebarBridge] File watcher: refreshing sidebar")
         # Pick up directories created since the last scan, at ANY depth.
         # This used to scan only the project root's immediate children, so a
         # folder the agent scaffolded deeper (src/ui/components/widgets/) was
@@ -582,7 +599,12 @@ class SidebarBridge(QObject):
         self._sync_watch_dirs()
         changed = sorted(self._changed_dirs)
         self._changed_dirs.clear()
-        if changed and len(changed) <= 200:
+        _incremental = bool(changed) and len(changed) <= 200
+        log.info(
+            f"[SidebarBridge] File watcher: refreshing sidebar, "
+            f"{'refreshDirs(' + str(len(changed)) + ')' if _incremental else 'full tree load'}"
+        )
+        if _incremental:
             # Re-read only the folders that changed; the page skips any that
             # are not on screen. No whole-tree reload, so nothing flickers.
             self._call_js(f"SidebarBridge.refreshDirs({json.dumps(changed)})")
