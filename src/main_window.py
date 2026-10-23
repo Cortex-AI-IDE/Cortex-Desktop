@@ -10153,6 +10153,10 @@ class CortexMainWindow(QMainWindow):
         self._ai_agent.clear_active_file()
         
         self._sidebar.set_project(folder_path)
+        # Live Preview serves files from the project over http, not file://
+        # (src/ui/components/live_preview_panel.py, _url_for_file).
+        if getattr(self, "_live_preview_panel", None) is not None:
+            self._live_preview_panel.set_project_root(folder_path)
 
         # Rebuild CHANGES for THIS project only (cache is global; filter by root).
         try:

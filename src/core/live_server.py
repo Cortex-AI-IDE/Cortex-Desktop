@@ -60,9 +60,12 @@ class LiveServer:
     PORT_RANGE = range(5500, 5600)
     RELOAD_ENDPOINT = "/__cortex_live_reload"
 
-    def __init__(self, root_dir: str, html_file: str):
-        self._root_dir   = os.path.normpath(root_dir)
+    def __init__(self, root_dir: str, html_file: str, inject_reload: bool = True):
+        self._root_dir   = os.path.normpath(os.path.abspath(root_dir))
         self._html_file  = os.path.normpath(html_file)
+        # The Live Preview panel watches files and reloads by itself, so it
+        # turns the injected polling script off; the browser case keeps it.
+        self._inject_reload = inject_reload
         self._port: Optional[int] = None
         self._server: Optional[ThreadingHTTPServer] = None
         self._server_thread: Optional[threading.Thread] = None
@@ -248,6 +251,16 @@ class CortexLiveRequestHandler(BaseHTTPRequestHandler):
         log.debug(f"[LiveHTTP ERROR] {fmt % args}")
 
     def do_GET(self):
+        # Only requests addressed to this server by its loopback name. A web
+        # page elsewhere can point a hostname of its own at 127.0.0.1 (DNS
+        # rebinding) and then read these responses as same-origin; its Host
+        # header still carries that hostname, so it is refused here.
+        _port = self._live_server._port
+        _host = (self.headers.get("Host") or "").strip().lower()
+        if _host not in {f"127.0.0.1:{_port}", f"localhost:{_port}"}:
+            self.send_error(403, "Forbidden")
+            return
+
         parsed  = urlparse(self.path)
         url_path = parsed.path
 
@@ -278,8 +291,17 @@ class CortexLiveRequestHandler(BaseHTTPRequestHandler):
             os.path.join(self._live_server._root_dir, rel_path)
         )
 
-        # Security: prevent path traversal outside root
-        if not abs_path.startswith(self._live_server._root_dir):
+        # Security: prevent path traversal outside root. commonpath, not
+        # startswith: root C:\site would otherwise also serve C:\site-private
+        # through "/../site-private/...". realpath so a link inside the root
+        # cannot point out of it.
+        _root = os.path.normcase(os.path.realpath(self._live_server._root_dir))
+        _target = os.path.normcase(os.path.realpath(abs_path))
+        try:
+            _inside = os.path.commonpath([_root, _target]) == _root
+        except ValueError:  # different drives
+            _inside = False
+        if not _inside:
             self.send_error(403, "Forbidden")
             return
 
@@ -299,7 +321,7 @@ class CortexLiveRequestHandler(BaseHTTPRequestHandler):
             return
 
         # Inject live-reload script into HTML
-        if ext in {".html", ".htm"}:
+        if ext in {".html", ".htm"} and self._live_server._inject_reload:
             try:
                 html = raw.decode("utf-8", errors="replace")
                 script = _RELOAD_SCRIPT

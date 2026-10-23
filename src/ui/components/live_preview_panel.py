@@ -72,6 +72,11 @@ class LivePreviewPanel(QWidget):
         # and a file has no server to reload from.
         self._current_url: str = ""
         self._dev_server = None  # src.core.dev_server.DevServer, lazily created
+        # Local files are served over http://127.0.0.1 instead of opened as
+        # file:// (see the settings note below): an http page loads its own
+        # assets normally and cannot read file:// URLs at all.
+        self._file_server = None  # src.core.live_server.LiveServer
+        self._project_root: str = ""
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file_changed)
         # Directory watch survives the file's absence (delete+recreate saves)
@@ -116,6 +121,21 @@ class LivePreviewPanel(QWidget):
         self._view = QWebEngineView()
         self._page = _ConsoleCapturePage(self._view)
         self._view.setPage(self._page)
+        # The preview runs pages Cortex did not write: a cloned repo's
+        # index.html, a remote URL. Qt's default lets a file:// page fetch()
+        # ANY other local file, and a security review on 2026-10-23 read
+        # ~/.cortex/auth.json (the login session), settings.json and
+        # C:\Windows\win.ini from a page in this panel; it could then print
+        # them to the console the agent reads back. Turning the first
+        # setting off alone also stopped a file:// page loading its OWN CSS,
+        # scripts and images, so local files are no longer opened as file://
+        # at all: _url_for_file() serves them over http://127.0.0.1 from the
+        # project (or the file's folder), where assets load normally and
+        # file:// is out of reach. These two stay off for anything local.
+        from PyQt6.QtWebEngineCore import QWebEngineSettings as _S
+        _settings = self._view.settings()
+        _settings.setAttribute(_S.WebAttribute.LocalContentCanAccessFileUrls, False)
+        _settings.setAttribute(_S.WebAttribute.LocalContentCanAccessRemoteUrls, False)
         # Transparent page background, kills Chromium's gray-placeholder/
         # white first-composite flash before content loads (see
         # webview_panel.py note). Dark widget surface shows through.
@@ -147,7 +167,52 @@ class LivePreviewPanel(QWidget):
             log.warning(f"[LivePreview] file not found: {path}")
             self._show_message(f"File not found:\n{path}")
             return
-        self._view.setUrl(QUrl.fromLocalFile(path))
+        url = self._url_for_file(path)
+        if url:
+            self._view.setUrl(QUrl(url))
+
+    def set_project_root(self, root: str) -> None:
+        """Serve previewed files from this folder when they are inside it, so
+        a page's `../css/site.css` still resolves. Outside it, the file's own
+        folder is the root."""
+        self._project_root = os.path.abspath(root) if root else ""
+
+    def _url_for_file(self, path: str) -> str:
+        """http://127.0.0.1 URL for a local file, from the panel's own server.
+
+        Never a file:// URL (see the settings note in __init__). Returns ""
+        and shows the reason when the server cannot start.
+        """
+        from src.core.live_server import LiveServer
+        root = os.path.dirname(path)
+        proj = self._project_root
+        if proj:
+            try:
+                if os.path.commonpath([os.path.normcase(proj), os.path.normcase(path)]) == os.path.normcase(proj):
+                    root = proj
+            except ValueError:
+                pass  # silent-ok: different drives, so the file's folder is the root
+        srv = self._file_server
+        if srv is None or not srv.is_running or \
+                os.path.normcase(srv._root_dir) != os.path.normcase(os.path.normpath(root)):
+            self._stop_file_server()
+            srv = LiveServer(root, path, inject_reload=False)
+            try:
+                srv.start()
+            except Exception as e:
+                log.warning(f"[LivePreview] local preview server failed to start: {e}")
+                self._show_message(f"Could not start the local preview server:\n{e}")
+                return ""
+            self._file_server = srv
+        return srv.get_url(path)
+
+    def _stop_file_server(self) -> None:
+        srv, self._file_server = self._file_server, None
+        if srv is not None:
+            try:
+                srv.stop()
+            except Exception as e:
+                log.debug(f"[LivePreview] preview server stop failed: {e}")
 
     def load_url(self, url: str, label: str = "") -> None:
         """Display a running dev server instead of a file.
@@ -160,6 +225,7 @@ class LivePreviewPanel(QWidget):
             return
         log.info(f"[LivePreview] load_url: {url}")
         self._stop_watching()
+        self._stop_file_server()  # a dev server replaces the file being served
         self._current_path = ""
         self._current_url = url
         self._label.setText(label or url)
@@ -341,8 +407,11 @@ class LivePreviewPanel(QWidget):
         if not os.path.isfile(self._current_path):
             self._show_message(f"File not found:\n{self._current_path}")
             return
+        url = self._url_for_file(self._current_path)
+        if not url:
+            return
         try:
-            self._view.setUrl(QUrl.fromLocalFile(self._current_path))
+            self._view.setUrl(QUrl(url))
         except RuntimeError:
             return  # view destroyed during shutdown
 
