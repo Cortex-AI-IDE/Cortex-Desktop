@@ -267,7 +267,11 @@ class SemanticSearch:
                 'size': len(content),
                 'lines': content.count('\n') + 1,
                 'tokens_used': result.tokens_used,
-                'content_snippet': content[:500]  # Store first 500 chars for preview
+                'content_snippet': content[:500],  # Store first 500 chars for preview
+                # The model that actually produced THIS vector. A failed cloud
+                # call silently falls back to local TF-IDF, so it is not
+                # always the provider's configured model (see _entry_model).
+                'embed_model': result.model_name or '',
             }
             
             log.debug(f"✓ Indexed {file_path} ({len(result.embedding)} dims, {result.tokens_used} tokens)")
@@ -277,6 +281,78 @@ class SemanticSearch:
             log.error(f"Error indexing {file_path}: {e}")
             return False
     
+    # ── Embedding spaces ─────────────────────────────────────────────────
+    #
+    # Vectors from two models cannot be compared: the score is noise. The
+    # index never said which model produced an entry, and a cloud call that
+    # failed mid-index fell back to local TF-IDF without a word, so the
+    # index on this repo held 486 TF-IDF vectors among 1,440 Qwen ones, all
+    # labelled Qwen (2026-10-23). A cloud query could not find those 486
+    # files, and without a subscription a TF-IDF query could not find the
+    # other 1,440 - SementicSearch scoped to tests/ returned nothing.
+
+    from src.core.siliconflow_embeddings import SiliconFlowEmbeddings as _SF
+    _LOCAL_MODEL = _SF.LOCAL_MODEL          # the local space in use now
+    _LOCAL_LEGACY = 'tfidf-local'           # sparse entries indexed before versioning
+    del _SF
+
+    @classmethod
+    def _is_local(cls, model: str) -> bool:
+        return bool(model) and model.startswith(cls._LOCAL_LEGACY)
+
+    def _entry_model(self, path: str) -> str:
+        """The model this entry's vector came from; '' when unknown and dense.
+
+        Entries indexed before the model was recorded are classified once by
+        shape: the TF-IDF fallback fills one slot per vocabulary hit and is
+        mostly zeros, a cloud vector has none. A dense legacy entry stays ''
+        (unknown), which is compared with any non-local query as before.
+        """
+        meta = self.file_metadata.setdefault(path, {})
+        model = meta.get('embed_model')
+        if model is not None:
+            return model
+        model = ''
+        vec = self.embeddings_cache.get(path)
+        try:
+            if vec is not None and len(vec):
+                if _HAS_NUMPY:
+                    zero_frac = float((_np.asarray(vec) == 0).mean())
+                else:
+                    zero_frac = sum(1 for v in vec if v == 0) / len(vec)
+                if zero_frac > 0.5:
+                    model = self._LOCAL_LEGACY
+        except (TypeError, ValueError) as e:
+            log.debug(f"[SemanticSearch] could not classify {path}: {e}")
+        meta['embed_model'] = model
+        return model
+
+    @classmethod
+    def _same_space(cls, entry_model: str, query_model: str) -> bool:
+        if not entry_model:
+            return not cls._is_local(query_model)
+        return entry_model == query_model
+
+    def current_model(self) -> Optional[str]:
+        """The model new embeddings are meant to use now, or None if unknown.
+
+        Follows subscription access, not the outcome of one call, so a brief
+        proxy outage does not downgrade a cloud index to local vectors.
+        """
+        if getattr(self.embeddings_provider, 'backend', None) != 'siliconflow':
+            return None
+        if self._check_embeddings_access():
+            return self.embeddings_provider.model_name
+        return self._LOCAL_MODEL
+
+    def stale_model_count(self) -> int:
+        """Entries embedded with a model other than current_model()."""
+        current = self.current_model()
+        if current is None:
+            return 0
+        return sum(1 for p in list(self.embeddings_cache)
+                   if not self._same_space(self._entry_model(p), current))
+
     def index_project(self, force: bool = False) -> Dict[str, int]:
         """
         Index entire project.
@@ -378,19 +454,46 @@ class SemanticSearch:
         _SAVE_EVERY_SEC = 60
         _last_save = _time.monotonic()
 
+        # Drop entries the walk no longer produces. Indexing only ever added
+        # and updated, so deleted files stayed searchable forever: 402 rows
+        # for the src/agent modules removed in cdc6184, plus `Tool.py` beside
+        # the real `tool.py` (case-insensitive disk, case-sensitive keys).
+        # Skipped when the walk found nothing, so a missing or unreadable
+        # root cannot wipe the index.
+        stats['pruned_missing'] = 0
+        if files_to_index:
+            _walked = set(files_to_index)
+            for _k in [k for k in self.embeddings_cache if k not in _walked]:
+                self.embeddings_cache.pop(_k, None)
+                self.file_metadata.pop(_k, None)
+                stats['pruned_missing'] += 1
+            if stats['pruned_missing']:
+                log.info(f"[SemanticSearch] Removed {stats['pruned_missing']} entries for "
+                         f"files that are gone or no longer indexed")
+
+        # An unchanged file is still re-embedded when its vector came from
+        # another model than the one in use now (see _entry_model).
+        _current_model = self.current_model()
+        stats['converted'] = 0
+
         for i, file_path in enumerate(files_to_index):
             file_str = str(file_path)
-            
+
             # Incremental: skip files that haven't changed since last index
+            _other_model = False
             if not force and file_str in self.embeddings_cache:
                 meta = self.file_metadata.get(file_str, {})
                 current_mtime = self._get_mtime(file_str)
-                if meta.get('mtime') == current_mtime:
+                _other_model = (_current_model is not None and not self._same_space(
+                    self._entry_model(file_str), _current_model))
+                if meta.get('mtime') == current_mtime and not _other_model:
                     stats['skipped'] += 1
                     continue
-            
+
             # Index file
-            if self.index_file(file_str, force=force):
+            if self.index_file(file_str, force=force or _other_model):
+                if _other_model:
+                    stats['converted'] += 1
                 stats['indexed'] += 1
                 meta = self.file_metadata.get(file_str, {})
                 stats['total_tokens'] += meta.get('tokens_used', 0)
@@ -411,7 +514,9 @@ class SemanticSearch:
         # Final save index to disk
         self.save_index()
         
-        log.info(f"✓ Indexed {stats['indexed']} files, skipped {stats['skipped']}, {stats['errors']} errors")
+        log.info(f"✓ Indexed {stats['indexed']} files, skipped {stats['skipped']}, {stats['errors']} errors"
+                 + (f", {stats['converted']} re-embedded with {_current_model}"
+                    if stats['converted'] else ""))
         log.info(f"Total tokens used: {stats['total_tokens']:,}")
         
         return stats
@@ -445,13 +550,6 @@ class SemanticSearch:
             log.warning("No embeddings indexed yet")
             return []
         
-        # Auto-adjust threshold based on backend
-        if min_similarity is None:
-            # Check if cloud embeddings are available (subscription active)
-            if self._check_embeddings_access():
-                min_similarity = 0.3  # Cloud embeddings are dense semantic vectors
-            else:
-                min_similarity = 0.05  # TF-IDF local fallback (sparse, lower scores)
         
         # Generate query embedding
         log.debug(f"Searching for: {query}")
@@ -462,6 +560,12 @@ class SemanticSearch:
             return []
         
         query_embedding = query_result.embedding
+        # Threshold for the model that actually embedded the query, not for
+        # whether a subscription exists: a failed cloud call returns a local
+        # TF-IDF vector even with access, and TF-IDF scores run much lower.
+        if min_similarity is None:
+            min_similarity = (0.05 if self._is_local(getattr(query_result, 'model_name', ''))
+                              else 0.3)
         
         # Calculate similarities. With numpy: convert the query ONCE and do
         # the dot products directly on the stored float32 arrays, the old
@@ -504,6 +608,17 @@ class SemanticSearch:
             log.debug(
                 f"[SemanticSearch] Scope {scope_path} kept {len(candidates)} of "
                 f"{len(root_candidates)} in-project entries"
+            )
+        # Only vectors from the query's own model can be scored against it.
+        _q_model = getattr(query_result, 'model_name', '') or ''
+        _before = len(candidates)
+        candidates = [(path, embedding) for path, embedding in candidates
+                      if self._same_space(self._entry_model(path), _q_model)]
+        if len(candidates) < _before:
+            log.warning(
+                f"[SemanticSearch] Skipped {_before - len(candidates)} of {_before} "
+                f"entries embedded with another model than the query "
+                f"({_q_model or 'unknown'}); indexing again re-embeds them"
             )
         ignored_foreign = len(self.embeddings_cache) - len(root_candidates)
         if ignored_foreign and not self._foreign_warned:

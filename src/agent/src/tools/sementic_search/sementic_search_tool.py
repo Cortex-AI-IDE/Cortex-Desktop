@@ -451,7 +451,10 @@ class SementicSearchTool:
         query = inp.get("query", "")
         path = inp.get("path")
         top_k = inp.get("top_k", DEFAULT_TOP_K)
-        min_similarity = inp.get("min_similarity", DEFAULT_MIN_SIMILARITY)
+        # No default here: the searcher picks the threshold for the model that
+        # embedded the query (0.3 cloud, 0.05 local TF-IDF). A fixed 0.3 cut
+        # every local result, so search without a subscription found nothing.
+        min_similarity = inp.get("min_similarity")
         output_mode = inp.get("output_mode", "ranked")
         file_extension = inp.get("file_extension")
         force_reindex = inp.get("force_reindex", False)
@@ -477,8 +480,14 @@ class SementicSearchTool:
             
             searcher = get_semantic_searcher(project_root)
             
-            # Auto-index if no embeddings exist or force reindex
-            if force_reindex or not searcher.embeddings_cache:
+            # Auto-index if no embeddings exist, on force reindex, or when
+            # entries came from another embedding model than the one in use
+            # now (incremental: only those are re-embedded). Their vectors
+            # cannot be scored against this query, so skipping this left
+            # them unfindable.
+            _stale = getattr(searcher, "stale_model_count", None)
+            if (force_reindex or not searcher.embeddings_cache
+                    or (callable(_stale) and _stale() > 0)):
                 if progress_callback:
                     try:
                         progress_callback("Indexing project (this may take a moment on first run)...")

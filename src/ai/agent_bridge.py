@@ -2487,7 +2487,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "query":           {"type": "string",  "description": "Natural language query describing what code you're looking for (e.g. 'where is payment processing handled', 'retry mechanism implementation')"},
                     "path":            {"type": "string",  "description": "Directory to search within (default: project root)"},
                     "top_k":           {"type": "integer", "description": "Number of results to return (default: 10, max: 50)"},
-                    "min_similarity":  {"type": "number",  "description": "Minimum relevance threshold 0.0-1.0 (default: 0.3). Lower = more results, less precise."},
+                    "min_similarity":  {"type": "number",  "description": "Minimum relevance threshold 0.0-1.0. Default depends on the embedding model (0.3 cloud, 0.05 local). Lower = more results, less precise."},
                     "output_mode":     {"type": "string",  "enum": ["ranked", "content", "files_with_matches"], "description": "Output format: 'ranked' shows scores+titles, 'content' shows snippets, 'files_with_matches' shows only paths"},
                     "file_extension":  {"type": "string",  "description": "Filter by file extension (e.g. 'py', 'js', 'ts')"},
                     "force_reindex":   {"type": "boolean", "description": "Force rebuild the semantic index before searching"},

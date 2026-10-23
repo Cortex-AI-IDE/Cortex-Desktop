@@ -45,6 +45,12 @@ class SiliconFlowEmbeddings:
     
     # Fallback dimensions (for hash-based embedding)
     FALLBACK_DIMENSIONS = 384
+    # Name of the local TF-IDF space. Versioned because the index stores it
+    # per entry: vectors from a different weighting are not comparable, and
+    # a new name is what makes the index re-embed the old ones.
+    #   tfidf-local   1 + log(tf/max_tf), clamped at 0 (kept only top terms)
+    #   tfidf-local-2 log(1 + tf), every matched term counts
+    LOCAL_MODEL = 'tfidf-local-2'
     
     def __init__(self, model_name: str = None, api_key: str = None):
         """
@@ -273,7 +279,7 @@ class SiliconFlowEmbeddings:
         if not tokens:
             return EmbeddingResult(
                 success=True, embedding=[0.0] * dimensions,
-                model_name='tfidf-local', dimensions=dimensions,
+                model_name=self.LOCAL_MODEL, dimensions=dimensions,
             )
 
         # Term frequency, match tokens to vocab via:
@@ -316,13 +322,16 @@ class SiliconFlowEmbeddings:
         if not tf:
             return EmbeddingResult(
                 success=True, embedding=[0.0] * dimensions,
-                model_name='tfidf-local', dimensions=dimensions,
+                model_name=self.LOCAL_MODEL, dimensions=dimensions,
             )
 
-        # Normalize TF (log scaling)
-        max_tf = max(tf.values())
+        # Sublinear TF: log(1 + tf), positive for every matched term. The old
+        # 1 + log(tf / max_tf) went to zero or below for any term rarer than
+        # ~37% of the file's commonest one, and the max(0, .) below dropped
+        # it: agent_bridge.py kept a handful of words and lost "dispatch",
+        # so every local query scored 0.0 (2026-10-23).
         for k in tf:
-            tf[k] = 1.0 + _math.log(tf[k] / max_tf) if tf[k] > 0 else 0.0
+            tf[k] = _math.log1p(tf[k]) if tf[k] > 0 else 0.0
 
         # Build fixed-dim vector
         embedding = [0.0] * dimensions
@@ -336,7 +345,7 @@ class SiliconFlowEmbeddings:
 
         return EmbeddingResult(
             success=True, embedding=embedding,
-            model_name='tfidf-local', dimensions=dimensions,
+            model_name=self.LOCAL_MODEL, dimensions=dimensions,
         )
 
     def _hash_embedding(self, text: str, dimensions: int = None) -> EmbeddingResult:
