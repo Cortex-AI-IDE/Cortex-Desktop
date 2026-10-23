@@ -197,8 +197,9 @@ class MemoryManagerBridge(QObject):
             from src.core.auth_manager import get_auth_manager
             auth = get_auth_manager()
             auth.set_on_login_callback(self._on_login_complete)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Without this the dialog never refreshes after a sign-in.
+            log.debug(f"[MemoryManager] Could not register login callback: {exc}")
         
         # Initialize semantic search
         self._semantic_searcher = None
@@ -363,6 +364,8 @@ class MemoryManagerBridge(QObject):
             if app:
                 return app.applicationVersion() or "2.8.5"
         except Exception:
+            # silent-ok: Qt may not be up yet; the hardcoded fallback on the
+            # next line is the documented answer, not an accident.
             pass
         return "2.8.5"
 
@@ -668,6 +671,8 @@ scope: project
                 file_size = os.path.getsize(mem["path"])
                 total_size += file_size
             except Exception:
+                # silent-ok: a memory file deleted or locked mid-scan simply
+                # does not contribute bytes; the count above already included it.
                 pass
             
             mtime = mem.get("mtime", 0)
@@ -955,6 +960,8 @@ scope: project
                         from src.ui.fonts import notify_editor_font_changed
                         notify_editor_font_changed()
                     except Exception:
+                        # silent-ok: the value is already saved and logged above;
+                        # only the live push is lost, the next open picks it up.
                         pass
                 elif key == "ui.color_theme":
                     self._apply_color_theme(str(coerced))
@@ -963,6 +970,8 @@ scope: project
                         from src.ui.editor_prefs import notify_editor_prefs_changed
                         notify_editor_prefs_changed()
                     except Exception:
+                        # silent-ok: as with the font push, the setting is saved
+                        # and only the already-open editor misses the update.
                         pass
                 elif key == "layout.sidebar_position":
                     self._apply_sidebar_position(str(coerced))
@@ -973,6 +982,8 @@ scope: project
                         from src.ui.fonts import notify_terminal_font_changed
                         notify_terminal_font_changed()
                     except Exception:
+                        # silent-ok: same shape; the value is persisted and the
+                        # next terminal applies it.
                         pass
         except Exception as e:
             log.warning(f"[MemoryManager] setSetting failed: {e}")
@@ -1114,7 +1125,7 @@ scope: project
                 if _resolved:
                     model_id = _resolved
             except Exception:
-                pass  # alias layer unavailable: store the value as given
+                pass  # silent-ok: alias layer unavailable, so store the value as given
             if self._settings:
                 self._settings.set("ai", "model", model_id)
                 self._settings.set("ai", "model_label", model_label)
@@ -1508,6 +1519,8 @@ scope: project
             for _label, items, _tier, provider in get_model_groups():
                 counts[provider] = counts.get(provider, 0) + len(items)
         except Exception:
+            # silent-ok: only the "N models" caption on each provider row is
+            # lost; the dropdown itself is rendered from the same catalog above.
             pass
 
         out = []
@@ -1904,8 +1917,9 @@ scope: project
                 else:
                     val = self._settings.get("ui", key, default="")
                 return str(val) if val is not None else ""
-        except Exception:
-            pass
+        except Exception as exc:
+            # The page shows an empty field and the user may save that back.
+            log.debug(f"[MemoryManager] getSetting({key}) failed: {exc}")
         return ""
 
     @pyqtSlot(result=str)
@@ -1941,8 +1955,10 @@ scope: project
                                 ai[field] = ""
                     data["ai"] = ai
                 return json.dumps(data)
-        except Exception:
-            pass
+        except Exception as exc:
+            # The whole settings page renders from this payload. Returning "{}"
+            # shows every field empty, so this one is a warning, not a debug.
+            log.warning(f"[MemoryManager] getSettings failed, page gets no state: {exc}")
         return "{}"
 
     def _load_api_key(self, provider: str) -> str:
@@ -2099,7 +2115,7 @@ class MemoryManagerDialog(QDialog):
             log.warning("[MemoryManager] Safety fallback triggered, page load stalled")
             self._load_html_fallback()
         except RuntimeError:
-            pass  # dialog was closed/deleted before the timer fired
+            pass  # silent-ok: dialog was closed/deleted before the timer fired
 
     def _handle_login_complete(self, user_info):
         """Handle login complete on main thread, bring window to focus and refresh UI."""
@@ -2128,6 +2144,8 @@ class MemoryManagerDialog(QDialog):
                     hwnd = int(main_window.winId())
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                 except Exception:
+                    # silent-ok: raise_()/activateWindow() already ran; this is
+                    # only the Windows-specific "force to front" extra.
                     pass
 
             # Refresh the webview to show logged-in state
@@ -2255,6 +2273,8 @@ class MemoryManagerDialog(QDialog):
                 from src.ui.render_health import probe_page
                 probe_page(self._view.page(), "memory")
             except Exception:
+                # silent-ok: feeds blank-panel detection only; the page just
+                # reported a successful load.
                 pass
             _queued = getattr(self, '_pending_js', None)
             if _queued:
@@ -2267,6 +2287,8 @@ class MemoryManagerDialog(QDialog):
                 from src.ui.render_health import record_render_failure
                 record_render_failure("memory_management.html", "loadFinished(False)")
             except Exception:
+                # silent-ok: the user already gets a modal warning on the next
+                # line; this only loses the render-health counter.
                 pass
             QMessageBox.warning(self, "Memory Manager", "Failed to load memory management page.")
             return
@@ -2313,7 +2335,7 @@ class MemoryManagerDialog(QDialog):
             try:
                 self._push_state_to_page(payload)
             except RuntimeError:
-                pass  # dialog closed while the JS callback was in flight
+                pass  # silent-ok: dialog closed while the JS callback was in flight
         self._call_js(
             "typeof window.receiveMemoryState",
             _check_and_push,

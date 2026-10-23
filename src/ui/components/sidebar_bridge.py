@@ -114,6 +114,8 @@ class _FileContentSearchWorker(QThread):
                                     if len(results) >= 200:
                                         break
                     except (PermissionError, OSError):
+                        # silent-ok: one unreadable file in a content search;
+                        # the other files still produce their matches.
                         continue
                     if len(results) >= 200:
                         break
@@ -242,6 +244,8 @@ class SidebarBridge(QObject):
             if sip.isdeleted(self._web_view):
                 return False
         except Exception:
+            # silent-ok: sip just unavailable; the page probe below is the
+            # authoritative check and still runs.
             pass
         try:
             page = self._web_view.page()
@@ -930,6 +934,8 @@ class SidebarBridge(QObject):
             try:
                 ctypes.windll.user32.CloseClipboard()
             except Exception:
+                # silent-ok: already in the error path, and the clipboard being
+                # closed twice is not worth a second line.
                 pass
             return json.dumps([])
 
@@ -1063,6 +1069,8 @@ class SidebarBridge(QObject):
                 if result.returncode == 0:
                     branch = result.stdout.strip()
             except Exception:
+                # silent-ok: outside a git repo the branch is simply blank, and
+                # the status payload below carries that as an empty string.
                 pass
 
             # Get git version
@@ -1077,6 +1085,7 @@ class SidebarBridge(QObject):
                 if result.returncode == 0:
                     git_version = result.stdout.strip()
             except Exception:
+                # silent-ok: gitVersion is informational in the status payload.
                 pass
 
             # Get changed files
@@ -1130,8 +1139,10 @@ class SidebarBridge(QObject):
                         })
                         _file_paths_for_diff.append(path)
                         _file_indices[path] = file_idx
-            except Exception:
-                pass
+            except Exception as exc:
+                # A parse failure here shows the panel with no changed files,
+                # which reads as "nothing changed" rather than "git broke".
+                log.debug(f"[SidebarBridge] git status parse failed: {exc}")
 
             # PERFORMANCE: Batch git diff --numstat into a SINGLE call
             # instead of one subprocess per file. With 20 changed files,
@@ -1154,6 +1165,8 @@ class SidebarBridge(QObject):
                                     files[idx]['additions'] = int(add_str) if add_str != '-' else 0
                                     files[idx]['deletions'] = int(del_str) if del_str != '-' else 0
                 except Exception:
+                    # silent-ok: only the per-row +N/-M counts are lost; the
+                    # file list itself came from `git status` above.
                     pass
 
             result = json.dumps({
@@ -1450,11 +1463,11 @@ class SidebarBridge(QObject):
                 _prev.result_ready.disconnect()
                 _prev.error_occurred.disconnect()
             except (RuntimeError, TypeError):
-                pass  # Already disconnected
+                pass  # silent-ok: Already disconnected
             try:
                 _prev.deleteLater()   # finished: let Qt reclaim it
             except (RuntimeError, TypeError):
-                pass
+                pass  # silent-ok: the C++ object is already gone; Qt owns it
             self._git_worker = None
         try:
             self._git_refresh_pending = False
@@ -1495,6 +1508,8 @@ class SidebarBridge(QObject):
         try:
             self._call_js(f'updateGitFiles({json.dumps({"error": error, "branch": "", "files": []})})')
         except Exception:
+            # silent-ok: reporting the git failure to the page failed too, which
+            # means the view is gone; _call_js has its own queue for that case.
             pass
 
     @pyqtSlot()
@@ -1922,6 +1937,8 @@ class SidebarBridge(QObject):
             watcher.blockSignals(True)
             watcher.setParent(None)
         except Exception:
+            # silent-ok: the watcher is being destroyed on the next lines, so a
+            # half-detached one is unreachable anyway.
             pass
         try:
             from PyQt6 import sip
@@ -1932,6 +1949,8 @@ class SidebarBridge(QObject):
                 import gc
                 gc.collect()
             except Exception:
+                # silent-ok: last-resort teardown of a watcher that sip could
+                # not delete. Nothing left to fall back to.
                 pass
         return True
 

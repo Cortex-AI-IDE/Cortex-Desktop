@@ -14,6 +14,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebChannel import QWebChannel
 from src.utils.logger import get_logger
+from src.utils.silent import swallow as _swallow
 from .windows_terminal import PathResolverThread
 from .terminal_bridge import AsyncFileReader
 
@@ -297,8 +298,11 @@ class XTermWidget(QWidget):
         try:
             self._webview.page().renderProcessTerminated.connect(
                 self._on_render_crash)
-        except Exception:
-            pass
+        except Exception as e:
+            # Exactly the silence the comment above exists to prevent: without
+            # this hook a dead renderer blanks the panel with no log line.
+            log.warning("Could not hook renderProcessTerminated; renderer "
+                        "deaths will be silent: %s", e)
 
         # Setup the QWebChannel Bridge
         self._bridge = TerminalBridge(self)
@@ -341,6 +345,8 @@ class XTermWidget(QWidget):
                         f.write(line)
                     return
                 except Exception:
+                    # silent-ok: the next path in the fallback chain is the
+                    # whole point; a debug log has nowhere left to report to.
                     continue
         
         self._channel = QWebChannel(self)
@@ -392,6 +398,8 @@ class XTermWidget(QWidget):
                     if self._tmp_html.exists():
                         self._tmp_html.unlink()
                 except Exception:
+                    # silent-ok: exit-time temp cleanup; a leftover file in the
+                    # OS temp dir costs nothing and the app is already stopping.
                     pass
             from src.utils.exit_hooks import register as _register_exit_hook
             _register_exit_hook(_cleanup_tmp)
@@ -644,13 +652,18 @@ class XTermWidget(QWidget):
                 try:
                     c.terminate()
                 except Exception:
+                    # silent-ok: the kill escalation below is the real stop;
+                    # terminate failing only means it exited on its own.
                     pass
             gone, alive = psutil.wait_procs(victims, timeout=2)
             for c in alive:
                 try:
                     c.kill()          # escalate: TerminateProcess
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Last resort: the process survives ^C. Logged because the
+                    # user pressed the key and nothing happened.
+                    log.debug("[XTerm] ^C: kill failed for pid %s: %s",
+                              c.pid, exc)
             psutil.wait_procs(alive, timeout=2)
             log.info("[XTerm] ^C: foreground stop complete (%d process(es))",
                      len(victims))
@@ -761,6 +774,8 @@ class XTermWidget(QWidget):
             record_render_failure("terminal.html",
                                   f"render process {name} (exit {code})")
         except Exception:
+            # silent-ok: the crash itself is logged two lines above; this only
+            # loses the render-health counter, not the diagnosis.
             pass
         self._is_ready = False
         # Replay recent scrollback into the fresh xterm. The PTY is alive but
@@ -802,12 +817,16 @@ class XTermWidget(QWidget):
                 from src.ui.render_health import probe_page
                 probe_page(self._webview.page(), "terminal")
             except Exception:
+                # silent-ok: the probe only feeds blank-panel detection; the
+                # page reported a successful load just above.
                 pass
             # The page loaded, so a later crash deserves a fresh retry budget.
             try:
                 from src.ui.webengine_recovery import note_page_loaded
                 note_page_loaded("terminal", self._webview)
             except Exception:
+                # silent-ok: resets the reload budget; the page did load, so
+                # the only cost is that the next crash may not reload.
                 pass
             return
         log.error(
@@ -819,6 +838,7 @@ class XTermWidget(QWidget):
             from src.ui.render_health import record_render_failure
             record_render_failure("terminal.html", "loadFinished(False)")
         except Exception:
+            # silent-ok: the blank-terminal failure is already log.error'd above.
             pass
 
     def _flush_emit_buffer(self):
@@ -852,6 +872,8 @@ class XTermWidget(QWidget):
             with open(self._debug_log_path, 'a', encoding='utf-8') as f:
                 f.write(f"[{datetime.datetime.now()}] [SHELL] {msg}\n")
         except Exception:
+            # silent-ok: the debug log has no fallback channel of its own, and
+            # this helper is called from the shell-start path that must not die.
             pass
 
     def _start_shell(self):
@@ -1208,7 +1230,9 @@ class XTermWidget(QWidget):
                 " else { var ta = document.querySelector('.xterm-helper-textarea');"
                 " if (ta) ta.focus(); } } catch (e) {}")
         except Exception:
-            pass
+            # Clicking the terminal and getting no keyboard is a real symptom;
+            # once per site so a permanently dead view cannot flood the log.
+            _swallow("give the keyboard to xterm.js")
 
     def _on_kill_clicked(self):
         """Header ✕. It used to only stop the shell, leaving a dead tab (and
@@ -1224,7 +1248,8 @@ class XTermWidget(QWidget):
         try:
             self._webview.page().runJavaScript("window.__cxRefit && window.__cxRefit()")
         except Exception:
-            pass
+            # A terminal left at the wrong width wraps every long line wrong.
+            _swallow("refit xterm.js to the widget size")
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1326,6 +1351,8 @@ class XTermWidget(QWidget):
             try:
                 self._flush_ai_buffer()
             except Exception:
+                # silent-ok: flushing during teardown; the buffer is discarded
+                # a few lines later either way.
                 pass
         if hasattr(self, '_emit_timer') and self._emit_timer:
             self._emit_timer.stop()
@@ -1337,6 +1364,8 @@ class XTermWidget(QWidget):
             try:
                 self._ai_access.close()
             except Exception:
+                # silent-ok: teardown. The reference is dropped on the next
+                # line regardless, so a failure here cannot leak the handle.
                 pass
             self._ai_access = None
         # Shared AI session: stop showing it and end it. The manager starts a
@@ -1346,6 +1375,8 @@ class XTermWidget(QWidget):
                 self._session.unsubscribe(self._session_cb)
                 self._session.close()
             except Exception:
+                # silent-ok: teardown of a shared session; both fields are
+                # cleared below, and the manager starts a fresh one on demand.
                 pass
             self._session = None
             self._pty_process = None
@@ -1359,6 +1390,8 @@ class XTermWidget(QWidget):
                 self._pty_process.terminate()
                 self._pty_process = None
             except Exception:
+                # silent-ok: the PTY is being abandoned; a terminate failure
+                # leaves a dying child, not a broken terminal session.
                 pass
             
         # Kill QProcess
@@ -1373,6 +1406,8 @@ class XTermWidget(QWidget):
                     self._process.kill()
                     self._process.waitForFinished(1000)
             except Exception:
+                # silent-ok: QProcess teardown. The widget clears _process
+                # below, so a half-disconnected process is not reachable.
                 pass
             self._process = None
             

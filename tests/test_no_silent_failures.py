@@ -227,10 +227,15 @@ def test_agent_bridge_py_is_clean() -> None:
 # ---------------------------------------------------------------------------
 
 # Measured 2026-10-23 with ``_silent_handlers`` over every ``.py`` under src/.
-# 387 handlers in 99 files, across the app, the engine and the vendored
+# 313 handlers in 94 files, across the app, the engine and the vendored
 # bundled skills.
 #
-# The count was 410 before the third batch and 387 before that, and both moves
+# The fourth batch took the five largest files to zero (74 handlers):
+# compact.py 17, xterm_terminal.py 17, memory_manager.py 15, sidebar.py 13,
+# sidebar_bridge.py 12. Most were correct tolerances and now say why with
+# ``silent-ok``; about 20 report through ``_swallow``/``log`` instead.
+#
+# The count was 387 before that batch, 410 before the third batch and 387 before that, and both moves
 # were real. The rise to 410 was measurement catching up: seven files (23
 # handlers) start with a UTF-8 BOM, the scan read them as plain utf-8, and
 # ``_scan_all`` treated the resulting SyntaxError as "clean". ``logger.py``
@@ -263,7 +268,7 @@ REMAINING: dict[str, int] = {
     "src/agent/src/project_memory/memory_consolidation.py": 1,
     "src/agent/src/project_memory/semantic_search.py": 4,
     "src/agent/src/services/compact/auto_compact.py": 3,
-    "src/agent/src/services/compact/compact.py": 17,
+    "src/agent/src/services/compact/compact.py": 0,
     "src/agent/src/skills/bundled/audit-reference-originality/scripts/build_evidence_inventory.py": 2,
     "src/agent/src/skills/bundled/skill-creator/eval-viewer/generate_review.py": 8,
     "src/agent/src/skills/bundled/skill-creator/scripts/aggregate_benchmark.py": 1,
@@ -332,12 +337,12 @@ REMAINING: dict[str, int] = {
     "src/services/update_checker.py": 3,
     "src/ui/color_themes.py": 2,
     "src/ui/components/editor.py": 4,
-    "src/ui/components/sidebar.py": 13,
-    "src/ui/components/sidebar_bridge.py": 12,
+    "src/ui/components/sidebar.py": 0,
+    "src/ui/components/sidebar_bridge.py": 0,
     "src/ui/components/webview_panel.py": 10,
-    "src/ui/components/xterm_terminal.py": 17,
+    "src/ui/components/xterm_terminal.py": 0,
     "src/ui/dialogs/health_map.py": 5,
-    "src/ui/dialogs/memory_manager.py": 15,
+    "src/ui/dialogs/memory_manager.py": 0,
     "src/ui/dialogs/update_dialog.py": 6,
     "src/ui/editor_theme.py": 1,
     "src/ui/fonts.py": 4,

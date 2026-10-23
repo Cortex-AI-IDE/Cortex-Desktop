@@ -185,8 +185,10 @@ class SidebarWidget(QWidget):
             self._web_view.page().renderProcessTerminated.connect(
                 self._on_render_crash
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Without this hook a dead renderer leaves the sidebar blank for
+            # the rest of the session, with nothing in the log to say why.
+            log.warning("[Sidebar] could not hook renderProcessTerminated: %s", exc)
 
         self._web_view.loadFinished.connect(self._on_page_loaded)
 
@@ -223,7 +225,10 @@ class SidebarWidget(QWidget):
 
         for fn in self._pending_js_calls:
             try: fn()
-            except Exception: pass
+            except Exception as exc:
+                # One queued call failing must not drop the rest, but it is
+                # exactly the class of loss this queue exists to prevent.
+                log.debug(f"[Sidebar] queued JS call failed: {fn} -> {exc}")
         self._pending_js_calls.clear()
 
     def _on_render_crash(self, status, code):
@@ -244,6 +249,8 @@ class SidebarWidget(QWidget):
             from src.ui.render_health import record_render_failure
             record_render_failure("sidebar.html", f"render process {name} (exit {code})")
         except Exception:
+            # silent-ok: the crash itself is log.error'd above; only the
+            # render-health counter is lost.
             pass
         try:
             schedule_reload(self._web_view, "sidebar",
@@ -261,8 +268,9 @@ class SidebarWidget(QWidget):
             if getattr(self, '_web_view', None):
                 self._web_view.page().runJavaScript(
                     "if(window.__cortexReveal)window.__cortexReveal();")
-        except Exception:
-            pass
+        except Exception as exc:
+            # A missed reveal leaves the sidebar visibly boot-hidden.
+            log.debug(f"[Sidebar] boot reveal not applied: {exc}")
 
     def _push_health_map_flag(self):
         """Reveal the Project Health icon only if its feature flag is on.
@@ -285,8 +293,9 @@ class SidebarWidget(QWidget):
                 self._web_view.page().runJavaScript(
                     "window.__cortexSetHealthMapEnabled&&window.__cortexSetHealthMapEnabled(%s);"
                     % ("true" if enabled else "false"))
-        except Exception:
-            pass
+        except Exception as exc:
+            # Only the health-map icon stays hidden; the sidebar itself works.
+            log.debug(f"[Sidebar] health-map flag not pushed: {exc}")
 
     def set_side(self, side: str):
         """'left' or 'right': which window edge the sidebar is on. On the
@@ -312,8 +321,10 @@ class SidebarWidget(QWidget):
                 from src.core import boot_state
                 if not boot_state.is_booting():
                     self.reveal_boot_hidden()
-            except Exception:
-                pass
+            except Exception as exc:
+                # Unable to tell whether boot finished, so a user reload may
+                # stay hidden. Rare enough to log once per load.
+                log.debug(f"[Sidebar] boot_state check failed: {exc}")
         self.page_loaded.emit()  # notify main_window to hide startup overlay
         if ok:
             self._push_side()
@@ -323,6 +334,7 @@ class SidebarWidget(QWidget):
                 from src.ui.render_health import record_render_failure
                 record_render_failure("sidebar.html", "loadFinished(False)")
             except Exception:
+                # silent-ok: the load failure is log.error'd on the line above.
                 pass
             return
         # Silent-blank detection: ask the page whether Chromium obtained a
@@ -331,12 +343,16 @@ class SidebarWidget(QWidget):
             from src.ui.render_health import probe_page
             probe_page(self._web_view.page(), "sidebar")
         except Exception:
+            # silent-ok: feeds blank-panel detection only; the page reported a
+            # successful load immediately above.
             pass
         # The page loaded, so a later crash deserves a fresh retry budget.
         try:
             from src.ui.webengine_recovery import note_page_loaded
             note_page_loaded("sidebar", self._web_view)
         except Exception:
+            # silent-ok: resets the reload budget; the page loaded, so the only
+            # cost is that the next crash may not reload.
             pass
         # Re-apply the theme now the page exists. _apply_initial_theme()
         # runs BEFORE sidebar.html finishes loading, so the startup
@@ -388,7 +404,8 @@ class SidebarWidget(QWidget):
             self._web_view.page().runJavaScript(
                 "window._pendingFileOpens&&window._pendingFileOpens.length>0?window._pendingFileOpens.shift():null",
                 lambda r: self._bridge.openFile(r) if r and self._bridge else None)
-        except Exception: pass
+        except Exception:  # silent-ok: 100ms poll; a dead view is already gated by _is_view_alive
+            pass
 
     def _poll_lazy_load(self):
         if not self._bridge or not self._web_view: return
@@ -397,7 +414,8 @@ class SidebarWidget(QWidget):
             self._web_view.page().runJavaScript(
                 "window._pendingLazyLoads&&window._pendingLazyLoads.length>0?window._pendingLazyLoads.shift():null",
                 lambda r: self._bridge.loadSubDirectory(r) if r and self._bridge else None)
-        except Exception: pass
+        except Exception:  # silent-ok: 100ms poll; renderer death is handled by the recovery path
+            pass
 
     def _poll_bridge_calls(self):
         if not self._bridge or not self._web_view: return
@@ -406,7 +424,8 @@ class SidebarWidget(QWidget):
             self._web_view.page().runJavaScript(
                 "window._pendingBridgeCalls&&window._pendingBridgeCalls.length>0?JSON.stringify(window._pendingBridgeCalls.shift()):null",
                 lambda r: self._dispatch_bridge_call(r) if r else None)
-        except Exception: pass
+        except Exception:  # silent-ok: 100ms poll; the channel connect is what _poll exists to wait out
+            pass
 
     def _dispatch_bridge_call(self, json_str):
         import json as _json
@@ -423,7 +442,8 @@ class SidebarWidget(QWidget):
             self._web_view.page().runJavaScript(
                 "window._pendingNativeModals&&window._pendingNativeModals.length>0?JSON.stringify(window._pendingNativeModals.shift()):null",
                 lambda r: self._handle_native_modal(r) if r else None)
-        except Exception: pass
+        except Exception:  # silent-ok: 100ms poll; a failed modal fetch is retried next tick
+            pass
 
     def _delete_paths(self, paths):
         """Delete one or more paths, then rebuild the file tree ONCE.
