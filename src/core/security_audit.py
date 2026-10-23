@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from enum import Enum
 from src.utils.logger import get_logger
+from src.utils.silent import swallow as _swallow
 
 log = get_logger("security_audit")
 
@@ -304,6 +305,10 @@ class SecurityAuditLogger:
                             break
                             
                     except json.JSONDecodeError:
+                        # A dropped line is dropped audit evidence, so the skip
+                        # has to be visible in the log even though continuing is
+                        # the only sane response to one corrupt line.
+                        _swallow("parse an audit log line")
                         continue
                         
         except Exception as e:

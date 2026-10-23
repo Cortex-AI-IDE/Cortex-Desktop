@@ -543,8 +543,10 @@ class WindowsTerminalWidget(QWidget):
                 if self._process.state() != QProcess.ProcessState.NotRunning:
                     self._process.kill()
                     self._process.waitForFinished(1000)
-            except Exception:
-                pass
+            except Exception as exc:
+                # A terminal process that would not die is a leaked process, so
+                # teardown failure gets a line instead of vanishing.
+                log.debug("Terminal teardown failed: %s", exc)
             self._process = None
     
     def _on_process_finished(self):
@@ -779,7 +781,7 @@ class PathResolverThread(QThread):
                 try:
                     if os.path.exists(new_path) and new_path not in current_path:
                         current_path = new_path + ";" + current_path
-                except Exception:
+                except Exception:  # silent-ok: probing an optional interpreter directory for PATH
                     pass
             
             # Add Python to PATH
@@ -879,7 +881,7 @@ class PathResolverThread(QThread):
                     import datetime
                     f.write(f"[{datetime.datetime.now()}] [PathResolverThread] ERROR: {e}\n")
                     f.write(traceback.format_exc())
-            except Exception:
+            except Exception:  # silent-ok: the fallback debug write itself failed
                 pass
             # Emit the original path so the shell still starts
             self.resolved.emit(self._initial_path)

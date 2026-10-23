@@ -20,10 +20,15 @@ Example:
     {'safe': False, 'message': 'Dangerous file: .bashrc', 'reason': 'dangerous_file'}
 """
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Optional
+
+# Stdlib logger on purpose: this module is imported by the permission path, so
+# it must not gain a lazy import that could itself raise inside a check.
+logger = logging.getLogger("cortex.filesystem_security")
 
 
 # ============================================================================
@@ -403,9 +408,16 @@ def get_paths_for_permission_check(path: str) -> list[str]:
         resolved_path = os.path.realpath(absolute_path)
         if resolved_path != absolute_path:
             paths.append(resolved_path)
-    except (OSError, ValueError):
-        # If resolution fails, just use the original path
-        pass
+    except (OSError, ValueError) as exc:
+        # Resolution failed, so only the unresolved path gets checked. That is
+        # the weaker of the two checks: a symlink pointing at a protected file
+        # would be judged by its own path and pass. It cannot be resolved any
+        # other way, but it must not be silent.
+        logger.warning(
+            "Could not resolve symlinks for permission check on %r: %s",
+            path,
+            exc,
+        )
     
     return paths
 

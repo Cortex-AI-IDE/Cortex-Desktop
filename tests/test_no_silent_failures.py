@@ -62,6 +62,9 @@ _REPORTERS = re.compile(
     r"|_warn_once\b"
     r"|_bootstrap_warn\b"
     r"|_swallow\b"                    # src/utils/silent.swallow, the bulk path
+    r"|logForDebugging\b"             # engine's own helper, src/agent/src/utils/log.py
+    r"|logError\b"
+    r"|log_error\b"
     r"|logger\.\w+\b"
     r")"
 )
@@ -152,6 +155,10 @@ def test_declaration_forms_are_recognised() -> None:
         'except Exception as exc:\n    _bootstrap_warn("site", exc)',
         'except Exception:\n    _swallow()',
         'except Exception:\n    _swallow("retheme a card")',
+        'except Exception as exc:\n    logger.warning("x: %s", exc)',
+        'except Exception as exc:\n    logForDebugging(f"x: {exc}", level="warn")',
+        'except Exception as exc:\n    logError(exc)',
+        'except Exception as exc:\n    log_error(exc)',
     ):
         assert _REPORTERS.search(text), text
 
@@ -220,18 +227,32 @@ def test_agent_bridge_py_is_clean() -> None:
 # ---------------------------------------------------------------------------
 
 # Measured 2026-10-23 with ``_silent_handlers`` over every ``.py`` under src/.
-# 410 handlers in 106 files, across the app, the engine and the vendored
+# 387 handlers in 99 files, across the app, the engine and the vendored
 # bundled skills.
 #
-# The total was 387 earlier the same day, and the rise is measurement catching
-# up, not new debt. Seven files (23 handlers) start with a UTF-8 BOM, the scan
-# read them as plain utf-8, and ``_scan_all`` treated the resulting
-# SyntaxError as "clean". ``logger.py`` alone hid 14, and the files that were
-# hidden sat in ``event_bus``, ``git_manager``, ``security_audit`` and
-# ``filesystem_security``. Every file that was already listed still matches
-# its number exactly, so nothing was mis-swept; the scan was blind.
+# The count was 410 before the third batch and 387 before that, and both moves
+# were real. The rise to 410 was measurement catching up: seven files (23
+# handlers) start with a UTF-8 BOM, the scan read them as plain utf-8, and
+# ``_scan_all`` treated the resulting SyntaxError as "clean". ``logger.py``
+# alone hid 14, and the hidden files sat in ``event_bus``, ``git_manager``,
+# ``security_audit`` and ``filesystem_security``.
 #
-# Two sweep batches have closed the 11 files below; between them they held four
+# The third batch then closed exactly those seven files, because they were the
+# only entries nobody had ever read: every one of them had been invisible to
+# this guard for its whole life. All 14 in ``logger.py`` are unreportable by
+# construction (a logger cannot log its own failure), so they are declared with
+# a reason instead. The other nine were read individually; six were correct
+# tolerances and three were not:
+#
+#   * ``security_audit`` dropped a corrupt audit line without a word, which is
+#     dropped audit evidence, so the skip now reports once per site.
+#   * ``filesystem_security`` resolves symlinks so a link pointing at a
+#     protected file is judged by its target. When resolution failed it fell
+#     back to the raw path, i.e. the weaker check, silently. It now warns.
+#   * ``find_replace`` swallowed ``re.error``, so an invalid pattern made Find
+#     and Replace All do nothing at all, with no way to tell why.
+#
+# Two earlier sweep batches closed 11 files; between them they held four
 # defects that lied to the user: a salt read that would silently regenerate the
 # key salt, an encrypted-file delete that reported success while leaving the
 # key, a chat lookup that created a duplicate row on a transient read error, and
@@ -262,8 +283,6 @@ REMAINING: dict[str, int] = {
     "src/agent/src/utils/ide.py": 2,
     "src/agent/src/utils/markdown_config_loader.py": 1,
     "src/agent/src/utils/model/aliases.py": 2,
-    "src/agent/src/utils/model/deprecation.py": 1,
-    "src/agent/src/utils/permissions/filesystem_security.py": 1,
     "src/agent/src/utils/settings/settings.py": 11,
     "src/agent/src/utils/signal.py": 1,
     "src/agent/src/utils/thinking.py": 3,
@@ -294,7 +313,6 @@ REMAINING: dict[str, int] = {
     "src/core/database.py": 8,
     "src/core/dev_server.py": 1,
     "src/core/edit_impact.py": 1,
-    "src/core/event_bus.py": 1,
     "src/core/file_associations.py": 3,
     "src/core/gpu_compat.py": 2,
     "src/core/live_server.py": 3,
@@ -302,7 +320,6 @@ REMAINING: dict[str, int] = {
     "src/core/loop_engine/test_integrity.py": 1,
     "src/core/project_health.py": 4,
     "src/core/pty_backend.py": 3,
-    "src/core/security_audit.py": 1,
     "src/core/security_toolkit/defense.py": 3,
     "src/core/security_toolkit/recon.py": 5,
     "src/core/security_toolkit/scope.py": 5,
@@ -315,11 +332,9 @@ REMAINING: dict[str, int] = {
     "src/services/update_checker.py": 3,
     "src/ui/color_themes.py": 2,
     "src/ui/components/editor.py": 4,
-    "src/ui/components/find_replace.py": 2,
     "src/ui/components/sidebar.py": 13,
     "src/ui/components/sidebar_bridge.py": 12,
     "src/ui/components/webview_panel.py": 10,
-    "src/ui/components/windows_terminal.py": 3,
     "src/ui/components/xterm_terminal.py": 17,
     "src/ui/dialogs/health_map.py": 5,
     "src/ui/dialogs/memory_manager.py": 15,
@@ -338,7 +353,6 @@ REMAINING: dict[str, int] = {
     "src/ui/tool_cards.py": 2,
     "src/ui/ui_stall_detector.py": 1,
     "src/ui/webengine_recovery.py": 2,
-    "src/utils/logger.py": 14,
     "src/utils/pyinstaller_hooks/hook-winpty.py": 1,
     "src/utils/runtime_hook_certifi.py": 4,
     "src/utils/runtime_hook_encodings.py": 1,

@@ -193,8 +193,8 @@ def getDeprecatedModelInfo(
                     info['replacementModelId'] = replacement
                 return info
             return {'isDeprecated': False}
-    except Exception:
-        pass  # never let the remote layer break deprecation checks
+    except Exception:  # silent-ok: the remote deprecation layer is optional, the local table is authoritative
+        pass
 
     lowercaseModelId = modelId.lower()
 

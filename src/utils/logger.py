@@ -70,7 +70,7 @@ class _HourlyRotatingFileHandler(BaseRotatingHandler):
                 try:
                     if os.path.getsize(self.baseFilename) >= self.maxBytes:
                         return True
-                except OSError:
+                except OSError:  # silent-ok: cannot stat the log file, so do not rotate
                     pass
                 
                 return False
@@ -115,7 +115,7 @@ class _HourlyRotatingFileHandler(BaseRotatingHandler):
                     shutil.copy2(self.baseFilename, rotated_path)
                     with open(self.baseFilename, 'w', encoding=self.encoding) as f:
                         pass
-                except (PermissionError, OSError):
+                except (PermissionError, OSError):  # silent-ok: rotation failed twice, log grows but the app survives
                     # Give up — log will continue growing but won't crash
                     pass
             
@@ -142,7 +142,7 @@ class _HourlyRotatingFileHandler(BaseRotatingHandler):
             for old_file in backups[self.backupCount:]:
                 try:
                     os.remove(old_file)
-                except OSError:
+                except OSError:  # silent-ok: an undeletable old backup is not worth failing over
                     pass
 
 
@@ -168,7 +168,7 @@ class _StderrFilter:
         if not text or not text.strip():
             try:
                 self._original.write(text)
-            except OSError:
+            except OSError:  # silent-ok: stderr already gone in a frozen --noconsole build
                 pass
             return
         for pattern in self._DROP:
@@ -176,13 +176,13 @@ class _StderrFilter:
                 return  # silently drop
         try:
             self._original.write(text)
-        except OSError:
+        except OSError:  # silent-ok: the stderr handle is the thing that broke
             pass  # stderr handle broken (e.g. --noconsole build) — don't crash
 
     def flush(self):
         try:
             self._original.flush()
-        except OSError:
+        except OSError:  # silent-ok: the stderr handle is the thing that broke
             pass
 
     def fileno(self):
@@ -237,15 +237,15 @@ def install_stderr_filter():
                                 continue
                             try:
                                 _os.write(_orig_fd, line + b"\n")
-                            except OSError:
+                            except OSError:  # silent-ok: the saved original fd is broken
                                 pass  # orig fd broken — drop silently
-                except Exception:
+                except Exception:  # silent-ok: the fd reader thread must never raise into the app
                     pass
 
             _threading.Thread(target=_fd_reader, daemon=True,
                               name="StderrFilter").start()
             install_stderr_filter._fd_installed = True
-        except Exception:
+        except Exception:  # silent-ok: the fd filter is optional, Python-level stderr still filters
             pass  # non-critical: fd filter failed, Python-level still works
 
     # Layer 3: stdout-level filter (catches QWebChannel JSON messages on fd 1)
@@ -273,15 +273,15 @@ def install_stderr_filter():
                                 continue
                             try:
                                 _os.write(_orig_stdout, line + b"\n")
-                            except OSError:
+                            except OSError:  # silent-ok: the saved original stdout fd is broken
                                 pass
-                except Exception:
+                except Exception:  # silent-ok: the stdout reader thread must never raise into the app
                     pass
 
             _threading.Thread(target=_stdout_reader, daemon=True,
                               name="StdoutFilter").start()
             install_stderr_filter._stdout_installed = True
-        except Exception:
+        except Exception:  # silent-ok: the stdout filter is optional, Python-level filter still works
             pass
 
 
@@ -472,7 +472,7 @@ def search_logs(keyword: str, hours: int = 1, level: str = None, max_results: in
                         results.append(line.rstrip())
                         if len(results) >= max_results:
                             return results
-        except OSError:
+        except OSError:  # silent-ok: a log file that vanished between glob and open
             continue
     
     return results
@@ -520,7 +520,7 @@ def get_log_summary(hours: int = 1) -> dict:
                                     source = parts[2].split(":")[0].strip()
                                     source_errors[source] += 1
                             break
-        except OSError:
+        except OSError:  # silent-ok: a log file that vanished between glob and open
             continue
     
     return {

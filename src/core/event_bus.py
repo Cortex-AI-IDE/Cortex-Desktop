@@ -195,7 +195,7 @@ class ComponentEventBus(QObject):
         if event_type in self._subscribers:
             try:
                 self._subscribers[event_type].remove(callback)
-            except ValueError:
+            except ValueError:  # silent-ok: unsubscribing a callback that was never registered is a no-op
                 pass
                 
     @pyqtSlot(str, object)

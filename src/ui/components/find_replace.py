@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QTextCursor, QColor
 
+from src.utils.silent import swallow as _swallow
+
 
 class FindReplaceDialog(QDialog):
     """Find and Replace dialog for code editor."""
@@ -283,7 +285,7 @@ class FindReplaceManager:
                     return True
                     
             except re.error:
-                pass
+                _swallow("compile the search pattern")
         else:
             # Regular search
             if options.get('forward', True):
@@ -344,7 +346,7 @@ class FindReplaceManager:
                     cursor.endEditBlock()
                     
             except re.error:
-                pass
+                _swallow("compile the replace pattern")
         else:
             # Simple replace all
             search_flags = self._build_search_flags(options)
