@@ -139,6 +139,29 @@ DEFAULT_SETTINGS = {
         "only_when_unfocused": True,        # Only toast when IDE is not the active window
         "sound_alerts": False,              # Play a sound when tasks complete
     },
+    "telegram": {
+        # Outbound notifications only. The bot token is NOT here: settings.json
+        # is plaintext and _is_secret_field() would blank any *_token value on
+        # the way out. The token lives in KeyManager under the provider slug
+        # "telegram" (see src/services/telegram_config.py).
+        "enabled": False,
+        "chat_id": "",          # written by pairing, sent to Telegram as-is
+        # One flag per event the user chose. Off here and on in the UI means
+        # "the user turned it off", so defaults must match what ships on.
+        "events": {
+            "started": True,
+            "blocked": True,
+            "finished": True,
+            "failed": True,
+        },
+        # Local wall-clock window. Urgent events bypass it; see
+        # src/services/telegram_monitor.py.
+        "quiet_hours": {
+            "enabled": False,
+            "start": "22:00",
+            "end": "07:00",
+        },
+    },
     "thinking": {
         # Per-provider overrides (merged with thinking.py PROVIDER_THINKING_DEFAULTS)
         # Set to null to use defaults, or override specific fields
