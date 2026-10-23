@@ -171,6 +171,15 @@ DEFAULT_SETTINGS = {
             # later without generating a new one.
             "reusable": False,
         },
+        # Inbound prompts: a message typed in the paired chat becomes a user
+        # prompt in the chat panel. Off by default on purpose. Turning this on
+        # gives the phone a remote control for the agent, so an existing
+        # install must opt in rather than acquire that after an update.
+        # It cannot approve a permission card or answer a question: those
+        # still happen in Cortex, on the PC.
+        "inbound": {
+            "enabled": False,
+        },
     },
     "thinking": {
         # Per-provider overrides (merged with thinking.py PROVIDER_THINKING_DEFAULTS)

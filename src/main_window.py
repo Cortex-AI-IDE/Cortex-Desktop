@@ -814,6 +814,14 @@ class CortexMainWindow(QMainWindow):
     _store_update_ready = pyqtSignal(object)
     # CHANGES git baselines warmed on a worker thread (_refresh_changes_background)
     _changes_prefetched = pyqtSignal()
+    # A prompt that arrived from the paired Telegram chat, crossing from the
+    # monitor's poller thread to the GUI thread. Same reason as
+    # _update_check_ready: a signal emit is the only hop Qt queues for us, and
+    # a chat_panel slot must never run on a network thread.
+    _telegram_prompt_ready = pyqtSignal(str)
+    # caption, base64 image, mime. A picture is a second payload shape, so it
+    # gets its own signal rather than a tuple smuggled through the text one.
+    _telegram_image_ready = pyqtSignal(str, str, str)
 
     @staticmethod
     def _kill_orphaned_chromium():
@@ -9749,6 +9757,19 @@ class CortexMainWindow(QMainWindow):
     def _on_ai_stop_requested(self):
         """Handle stop request from AI (via web bridge)."""
         self._ai_agent.stop()
+        # A stopped run ends by cancelling its asyncio task, and a cancellation
+        # swallows the CancelledError before anything can emit response_complete.
+        # The phone would then be told "busy" for the rest of the session, so
+        # the stop itself has to be what frees it.
+        self._telegram_busy = False
+        # Prompts queued from the phone while that run was going must not fire
+        # now: Stop means stop. They are dropped, and the phone is told why.
+        monitor = getattr(self, "_telegram_monitor", None)
+        if monitor is not None:
+            try:
+                monitor.drop_queued_prompts()
+            except Exception as exc:
+                log.warning(f"[Telegram] Could not drop queued prompts: {exc}")
     
     def _on_toggle_autogen(self):
         """Toggle AutoGen multi-agent mode.
@@ -11730,6 +11751,24 @@ class CortexMainWindow(QMainWindow):
             return
 
         self._telegram_monitor = monitor
+        # Plain bools, not Qt state: the monitor's poller thread reads
+        # _telegram_busy to refuse a phone prompt while a run is going, and a
+        # worker must never touch a widget to find that out.
+        self._telegram_busy = False
+        self._telegram_busy_since = 0.0
+        self._telegram_prompt_ready.connect(self._on_telegram_prompt)
+        monitor.set_prompt_handler(
+            self._telegram_prompt_ready.emit,
+            is_busy=self._telegram_run_in_flight,
+        )
+        # A picture arrives as (caption, base64, mime) and is gated on the
+        # selected model being able to see, so a blind run is refused on the
+        # phone instead of starting and answering from nothing.
+        self._telegram_image_ready.connect(self._on_telegram_image)
+        monitor.set_image_handler(
+            self._telegram_image_ready.emit,
+            vision_ok=self._telegram_vision_ok,
+        )
         connections = (
             (self._ai_agent.exploreFile, monitor.on_explore_file),
             (self._ai_agent.thinking_started, lambda: monitor.on_thinking(True)),
@@ -11742,6 +11781,9 @@ class CortexMainWindow(QMainWindow):
             (self._ai_agent.response_complete, monitor.on_finished),
             (self._ai_agent.request_error, monitor.on_error),
             (self._ai_agent.request_started, self._on_telegram_run_started),
+            # A finished or failed run is what frees the phone to send again.
+            (self._ai_agent.response_complete, self._on_telegram_run_ended),
+            (self._ai_agent.request_error, self._on_telegram_run_ended),
         )
         for signal, slot in connections:
             try:
@@ -11750,6 +11792,9 @@ class CortexMainWindow(QMainWindow):
                 log.debug(f"[Telegram] Could not connect {signal}: {exc}")
 
         monitor.ensure_running()
+        # Inbound prompts need the poller up at launch, not only when a pairing
+        # code is issued. Off by default, so this is usually a no-op.
+        monitor.ensure_inbound()
         log.info("[Telegram] Run notifications wired")
 
     def _on_telegram_run_started(self) -> None:
@@ -11758,6 +11803,8 @@ class CortexMainWindow(QMainWindow):
         A bound method rather than a lambda over the project path, so a
         project switch mid-session reports the project actually being worked on.
         """
+        self._telegram_busy = True
+        self._telegram_busy_since = time.monotonic()
         try:
             root = self._project_manager.root
         except Exception:
@@ -11765,6 +11812,174 @@ class CortexMainWindow(QMainWindow):
         monitor = getattr(self, "_telegram_monitor", None)
         if monitor is not None:
             monitor.on_request_started(os.path.basename(root or ""))
+
+    def _on_telegram_run_ended(self, *_args) -> None:
+        """A run finished or failed, so the phone may send a prompt again."""
+        self._telegram_busy = False
+        # A prompt sent while that run was going waited in the monitor's queue.
+        # Delivered on the next event-loop turn rather than here: at this
+        # instant the finished turn is still unwinding, and starting the next
+        # one now would land on top of it.
+        QTimer.singleShot(0, self._flush_telegram_queue)
+
+    def _flush_telegram_queue(self) -> None:
+        """Run the oldest prompt that waited behind a run, one per turn."""
+        monitor = getattr(self, "_telegram_monitor", None)
+        if monitor is None:
+            return
+        try:
+            if not monitor.inbound_allowed():
+                # Prompts were switched off, or the chat was unpaired, while
+                # this one waited. Silence, exactly like an unpaired stranger.
+                monitor.clear_queued_prompts()
+                return
+        except Exception as exc:
+            log.warning(f"[Telegram] Could not read the inbound setting: {exc}")
+            return
+        if self._telegram_run_in_flight():
+            # Still busy: the next run end flushes again.
+            return
+        try:
+            item = monitor.pop_queued_prompt()
+        except Exception as exc:
+            log.warning(f"[Telegram] Could not read the prompt queue: {exc}")
+            return
+        if not item:
+            return
+        _chat_id, body, _message_id = item
+        log.info(f"[Telegram] Running a queued prompt ({len(body)} chars)")
+        self._deliver_telegram_prompt(body)
+
+    def _telegram_run_in_flight(self) -> bool:
+        """Is a run actually going, so a phone prompt must wait?
+
+        Read on the monitor's poller thread, so it only touches plain Python
+        state: no widget, no Qt call. The decision itself lives in
+        telegram_monitor.run_in_flight so it can be tested without a window.
+        """
+        busy = bool(getattr(self, "_telegram_busy", False))
+        if not busy:
+            return False
+        agent = getattr(self, "_ai_agent", None)
+        if agent is None:
+            return True
+        try:
+            from src.services.telegram_monitor import run_in_flight
+        except Exception:  # pragma: no cover - import must not break the poller
+            return True
+        # Stop was asked for, or the run ended: the phone is free again. Only
+        # a live run (chat() sets _run_active until the turn ends) holds it.
+        return run_in_flight(
+            busy=busy,
+            run_active=bool(getattr(agent, "_run_active", False)),
+            stopped=bool(getattr(agent, "_stop_requested", False)),
+            since=getattr(self, "_telegram_busy_since", 0.0),
+        )
+
+    def _on_telegram_prompt(self, text: str) -> None:
+        """Run one prompt that arrived from the paired Telegram chat.
+
+        Reached through ``_telegram_prompt_ready``, so this runs on the GUI
+        thread although the monitor's poller raised it. The prompt takes the
+        ordinary path (the very signal the input box emits), so the agent sees
+        it exactly as if it had been typed here, and every permission card and
+        question still appears on this screen. Telegram cannot approve either.
+        """
+        body = (text or "").strip()
+        if not body:
+            return
+        self._deliver_telegram_prompt(body)
+
+    def _deliver_telegram_prompt(self, body: str) -> bool:
+        """Hand one prompt to the input area. False when it could not go.
+
+        Shared by the live signal and by the queue flush, so a prompt that
+        waited behind a run takes exactly the same path as one sent while
+        Cortex was idle.
+        """
+        area = None
+        try:
+            area = getattr(getattr(self, "_ai_chat", None), "input_area", None)
+            if area is None:
+                log.warning("[Telegram] No chat panel to take the prompt")
+                return False
+            if self._telegram_run_in_flight():
+                log.info("[Telegram] Prompt not delivered: a run is still active")
+                return False
+            # The input box holds the user's own draft. _on_send clears paste
+            # state unless this flag is set, and a prompt from a phone must not
+            # wipe what is being typed on the PC.
+            area._sending_queued = True
+            log.info(f"[Telegram] Prompt from the paired chat ({len(body)} chars)")
+            area.send_requested.emit(body)
+            return True
+        except Exception as exc:
+            if area is not None:
+                area._sending_queued = False
+            log.error(f"[Telegram] Could not deliver the prompt: {exc}")
+            return False
+
+    def _telegram_vision_ok(self) -> bool:
+        """Whether the selected model can read a picture. Poller thread.
+
+        Plain attribute reads only: the monitor asks this from its own thread,
+        so it must never touch a widget. A failure reads as "no", because the
+        alternative is starting a run that cannot see the picture.
+        """
+        try:
+            agent = getattr(self, "_ai_agent", None)
+            check = getattr(agent, "_current_model_supports_vision", None)
+            return bool(check()) if callable(check) else False
+        except Exception as exc:
+            log.info("[Telegram] Vision check unavailable: %s", type(exc).__name__)
+            return False
+
+    def _on_telegram_image(self, caption: str, image_b64: str, mime: str) -> None:
+        """Run one picture that arrived from the paired Telegram chat.
+
+        The bytes take the same route as a pasted image: the input area's
+        pending list, then the ordinary send signal. Those lists are borrowed
+        and put back, so a prompt from a phone neither consumes nor injects
+        what is already attached in the box on this PC.
+        """
+        if not image_b64:
+            return
+        body = (caption or "").strip()
+        area = None
+        before_images = None
+        before_send = None
+        borrowed = False
+        try:
+            area = getattr(getattr(self, "_ai_chat", None), "input_area", None)
+            if area is None:
+                log.warning("[Telegram] No chat panel to take the picture")
+                return
+            if self._telegram_run_in_flight():
+                log.info("[Telegram] Picture dropped: a run is already active")
+                return
+            before_images = getattr(area, "_pending_images", None)
+            before_send = getattr(area, "_pending_send_images", None)
+            borrowed = True
+            # _on_send reads _pending_send_images for the user bubble and
+            # mirrors it into _pending_images, which _on_ai_chat_message then
+            # hands to the agent. Starting _pending_images empty is what keeps
+            # this PC's own attachments out of a phone prompt.
+            attachment = [{"data": image_b64, "index": 1}]
+            area._pending_images = []
+            area._pending_send_images = attachment
+            # Keeps the typed draft in the box: the user's own text is theirs.
+            area._sending_queued = True
+            log.info("[Telegram] Picture from the paired chat (%s, %d chars base64)",
+                     mime or "image", len(image_b64))
+            area.send_requested.emit(body)
+        except Exception as exc:
+            if area is not None:
+                area._sending_queued = False
+            log.error(f"[Telegram] Could not deliver the picture: {exc}")
+        finally:
+            if borrowed and area is not None:
+                area._pending_images = before_images if before_images is not None else []
+                area._pending_send_images = before_send if before_send is not None else []
 
     def _show_memory_manager(self):
         """Open the Memory Manager dialog (AI → Memory Manager...).

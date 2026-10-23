@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cortex Settings</title>
-  <link rel="stylesheet" href="./memory_management.css?v=12">
+  <link rel="stylesheet" href="./memory_management.css?v=13">
 </head>
 
 <body>
@@ -1057,36 +1057,58 @@
         <div class="section-header">
           <div>
             <h1>Telegram</h1>
-            <p class="section-desc">Get a message when a run starts, stops to ask you something, finishes or fails. One way only: answers are typed in Cortex, not in Telegram.</p>
+            <p class="section-desc">A run reports to your phone, and prompts you send in the paired chat come back and run on this PC. Approvals and questions still need this screen.</p>
           </div>
+        </div>
+
+        <div class="settings-card tg-status" id="tgStatus">
+          <div class="tg-status-head">
+            <span class="status-dot" id="tgStatusDot"></span>
+            <div>
+              <div class="tg-status-title" id="tgStatusTitle">Checking</div>
+              <p class="tg-status-text" id="tgStatusText">Reading the saved bot settings.</p>
+            </div>
+          </div>
+          <ol class="tg-steps">
+            <li class="tg-step" data-step="token"><span class="tg-step-num">1</span>Token</li>
+            <li class="tg-step" data-step="pair"><span class="tg-step-num">2</span>Pairing</li>
+            <li class="tg-step" data-step="prompts"><span class="tg-step-num">3</span>Prompts</li>
+          </ol>
         </div>
 
         <div class="settings-card">
           <h3>Bot token</h3>
+          <p class="tg-card-desc">How Cortex reaches Telegram at all. Nothing is sent until this is saved.</p>
           <div class="setting-row">
-            <div class="setting-info"><label>Token from BotFather</label>
-              <p>Kept in the encrypted vault, never in settings.json. Clear the field and save to forget it.</p>
+            <div class="setting-info"><label for="tgToken">Token from BotFather</label>
+              <p>Kept in the encrypted vault and never sent back to this page, so a saved token reads as dots. Paste a new one to replace it.</p>
             </div>
-            <input type="password" class="setting-input" id="tgToken" placeholder="8123456789:AAH..." autocomplete="off" spellcheck="false">
-          </div>
-          <div class="setting-row">
-            <div class="setting-info"><label>Save token</label>
-              <p>Checked against the BotFather shape before it is stored.</p>
+            <div class="setting-control">
+              <input type="password" class="setting-input" id="tgToken" placeholder="8123456789:AAH..." autocomplete="off" spellcheck="false">
+              <button class="setting-btn primary" id="tgSaveToken">Save</button>
             </div>
-            <button class="setting-btn" id="tgSaveToken">Save token</button>
           </div>
+          <div class="tg-note" id="tgTokenHint"></div>
         </div>
 
         <div class="settings-card">
           <h3>Pairing</h3>
+          <p class="tg-card-desc">A code links one chat to this PC. The code sits next to the button that makes it.</p>
           <div class="setting-row">
             <div class="setting-info"><label>Show a pairing code</label>
-              <p>Then send <code>/pair CODE</code> to your bot. The two settings below decide how long it works and whether it can be used more than once.</p>
+              <p>Then send <code>/pair CODE</code> to your bot from the phone.</p>
             </div>
             <button class="setting-btn primary" id="tgPair">Show code</button>
           </div>
           <div class="setting-row">
-            <div class="setting-info"><label>Code is valid for</label>
+            <div class="setting-info"><label>Pairing code</label>
+              <p>Type this after <code>/pair</code>. It appears here and in the message you send, nowhere else.</p>
+            </div>
+            <span class="tg-code" id="tgPairCode">--------</span>
+          </div>
+          <div class="tg-note" id="tgPairHint"></div>
+          <div class="setting-row">
+            <div class="setting-info"><label for="tgPairExpiry">Code is valid for</label>
               <p>After this the code stops being accepted. Pick a longer window if you will pair from another device later.</p>
             </div>
             <select class="setting-select" id="tgPairExpiry">
@@ -1104,34 +1126,22 @@
             </div>
             <label class="switch"><input type="checkbox" id="tgPairReusable"><span class="switch-slider"></span></label>
           </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Prompts from Telegram</h3>
+          <p class="tg-card-desc">The other direction: messages you send from the phone.</p>
           <div class="setting-row">
-            <div class="setting-info"><label>Pairing code</label>
-              <p id="tgPairHint">No code requested yet.</p>
+            <div class="setting-info"><label for="tgInbound">Allow prompts</label>
+              <p>Plain text sent to the paired chat runs here, as if you had typed it. A picture works too when the selected model can see images. A prompt that arrives during a run waits in a queue of three. Approvals and questions still need this screen, so nothing is decided for you. Off by default.</p>
             </div>
-            <span class="setting-btn" id="tgPairCode" style="cursor:default;font-family:ui-monospace,monospace;font-size:16px;letter-spacing:2px;">--------</span>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info"><label>Test message</label>
-              <p>Sends one now, ignoring quiet hours and the event list.</p>
-            </div>
-            <button class="setting-btn" id="tgTest">Test message</button>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info"><label>Unpair</label>
-              <p>Forgets this chat and cancels any open pairing code, immediately. The bot token is kept, so pairing again needs no pasting.</p>
-            </div>
-            <button class="setting-btn danger-btn" id="tgUnpair">Unpair</button>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info"><label>Remove bot</label>
-              <p>Unpairs and deletes the token from this computer. Nothing is left behind, and the BotFather token will be needed again.</p>
-            </div>
-            <button class="setting-btn danger-btn" id="tgForget">Remove bot</button>
+            <label class="switch"><input type="checkbox" id="tgInbound"><span class="switch-slider"></span></label>
           </div>
         </div>
 
         <div class="settings-card">
           <h3>What to send</h3>
+          <p class="tg-card-desc">One message per event. Quiet hours hold back everything except being blocked on you.</p>
           <div class="setting-row">
             <div class="setting-info"><label>Notifications on</label>
               <p>Turn everything off without forgetting the pairing.</p>
@@ -1146,7 +1156,7 @@
           </div>
           <div class="setting-row">
             <div class="setting-info"><label>Blocked on you</label>
-              <p>The run is waiting for an answer or an approval.</p>
+              <p>The run is waiting for an answer or an approval. Sent even in quiet hours.</p>
             </div>
             <label class="switch"><input type="checkbox" id="tgEvBlocked"><span class="switch-slider"></span></label>
           </div>
@@ -1156,33 +1166,56 @@
             </div>
             <label class="switch"><input type="checkbox" id="tgEvFinished"><span class="switch-slider"></span></label>
           </div>
+          <div class="setting-row tg-sub" id="tgSummaryRow">
+            <div class="setting-info"><label>Include the answer</label>
+              <p>Append Cortex's final answer to the finished message. It is capped so one run stays one message; anything longer says so and the full answer stays in Cortex. The answer can contain file paths and code.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgSummary"><span class="switch-slider"></span></label>
+          </div>
           <div class="setting-row">
             <div class="setting-info"><label>Run failed</label>
               <p>The error message, short.</p>
             </div>
             <label class="switch"><input type="checkbox" id="tgEvFailed"><span class="switch-slider"></span></label>
           </div>
-        </div>
-
-        <div class="settings-card">
-          <h3>Quiet hours</h3>
           <div class="setting-row">
-            <div class="setting-info"><label>Silence progress notifications</label>
-              <p>Being blocked on you still comes through, otherwise the feature would be useless when it matters.</p>
+            <div class="setting-info"><label>Quiet hours</label>
+              <p>Silence progress notifications between two local times. A window that crosses midnight works.</p>
             </div>
             <label class="switch"><input type="checkbox" id="tgQuietEnabled"><span class="switch-slider"></span></label>
           </div>
-          <div class="setting-row">
-            <div class="setting-info"><label>From</label>
+          <div class="setting-row tg-sub" id="tgQuietWindow">
+            <div class="setting-info"><label>Quiet window</label>
               <p>Local time on this computer.</p>
             </div>
-            <input type="time" class="setting-input" id="tgQuietStart" value="22:00">
+            <div class="tg-time">
+              <input type="time" class="setting-input" id="tgQuietStart" value="22:00" aria-label="Quiet hours start">
+              <span class="tg-time-sep">to</span>
+              <input type="time" class="setting-input" id="tgQuietEnd" value="07:00" aria-label="Quiet hours end">
+            </div>
           </div>
           <div class="setting-row">
-            <div class="setting-info"><label>Until</label>
-              <p>A window that crosses midnight works.</p>
+            <div class="setting-info"><label>Test message</label>
+              <p>Sends one now, ignoring quiet hours and the event list.</p>
             </div>
-            <input type="time" class="setting-input" id="tgQuietEnd" value="07:00">
+            <button class="setting-btn" id="tgTest">Test message</button>
+          </div>
+        </div>
+
+        <div class="settings-card tg-danger">
+          <h3>Disconnect</h3>
+          <p class="tg-card-desc">Both act immediately. Unpair keeps the token, Remove bot deletes it.</p>
+          <div class="setting-row">
+            <div class="setting-info"><label>Unpair</label>
+              <p>Forgets this chat and cancels any open pairing code, immediately. The bot token is kept, so pairing again needs no pasting.</p>
+            </div>
+            <button class="setting-btn danger-btn" id="tgUnpair">Unpair</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Remove bot</label>
+              <p>Unpairs and deletes the token from this computer. Nothing is left behind, and the BotFather token will be needed again.</p>
+            </div>
+            <button class="setting-btn danger-btn is-heavy" id="tgForget">Remove bot</button>
           </div>
         </div>
       </section>

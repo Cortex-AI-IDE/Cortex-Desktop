@@ -682,11 +682,108 @@
     unlimited: "until you cancel it",
   };
 
-  function tgHint(text, isError) {
-    const el = $("tgPairHint");
+  /* The token itself never reaches the page, so a saved one is shown as a dot
+     mask in the empty field. The value stays "" so the secret is not in the
+     DOM, and typing over the mask is the normal way to replace it. */
+  const TG_TOKEN_MASK = "\u2022".repeat(24);
+
+  /* True once the page has actually read the saved value. A switch that was
+     never populated must not be written back: an unrelated toggle on a page
+     whose load failed would otherwise report "off" for a setting the user has
+     on, and turn it off silently. */
+  let tgInboundKnown = false;
+  let tgSummaryKnown = false;
+  /* Mirrors getTelegramSettings().hasToken, so Save can tell "nothing typed"
+     apart from "user wants the token gone". */
+  let tgHasToken = false;
+  /* Mirrors getTelegramSettings().paired so the status card can be redrawn when
+     a toggle changes without re-reading the bridge. */
+  let tgPaired = false;
+
+  /* Inline feedback belongs next to the control that produced it. Every
+     message used to be written into the pairing hint, so a failed token save
+     showed up two cards below the Save button and read as a pairing problem. */
+  function setNote(id, text, kind) {
+    const el = $(id);
     if (!el) return;
-    el.textContent = text;
-    el.style.color = isError ? "#f85149" : "";
+    el.textContent = text || "";
+    el.classList.remove("is-error", "is-ok");
+    if (kind === "error") el.classList.add("is-error");
+    else if (kind === "ok") el.classList.add("is-ok");
+  }
+
+  function tgHint(text, isError) {
+    setNote("tgPairHint", text, isError ? "error" : "");
+  }
+
+  function tgTokenHint(text, isError) {
+    setNote("tgTokenHint", text, isError ? "error" : "");
+  }
+
+  /* One step carries "next" at a time, so the strip reads as a direction
+     instead of three equal badges. */
+  function tgSetStep(name, state) {
+    const el = document.querySelector('.tg-step[data-step="' + name + '"]');
+    if (!el) return;
+    el.classList.remove("is-done", "is-next");
+    if (state) el.classList.add(state);
+  }
+
+  function setPairCode(value) {
+    const el = $("tgPairCode");
+    if (!el) return;
+    el.textContent = value || "--------";
+    el.classList.toggle("is-set", !!value);
+  }
+
+  /* The status card is the only place that answers "where am I", so it is
+     written from the three real states rather than inferred per card. */
+  function renderTelegramStatus(hasToken, paired, inbound) {
+    const card = $("tgStatus");
+    if (card) card.classList.toggle("is-live", !!(hasToken && paired));
+
+    let heading = "Not connected";
+    let detail = "Paste a token from BotFather below. Nothing is sent until you do.";
+    if (hasToken && !paired) {
+      heading = "Token saved, no chat paired";
+      detail = "Show a code, then send /pair CODE to your bot from the phone.";
+    } else if (hasToken && paired) {
+      heading = "Connected";
+      detail = inbound
+        ? "Reports arrive on your phone, and prompts you send there run on this PC."
+        : "Reports arrive on your phone. Prompts are off, so messages you send are ignored.";
+    }
+
+    const title = $("tgStatusTitle");
+    if (title) title.textContent = heading;
+    const text = $("tgStatusText");
+    if (text) text.textContent = detail;
+
+    tgSetStep("token", hasToken ? "is-done" : "is-next");
+    tgSetStep("pair", paired ? "is-done" : hasToken ? "is-next" : "");
+    tgSetStep("prompts", !paired ? "" : inbound ? "is-done" : "is-next");
+  }
+
+  /* Two rows only mean something while the switch above them is on: the answer
+     is appended to a finished message, and a quiet window needs quiet hours.
+     They are disabled rather than merely dimmed, so a keyboard user cannot
+     change a value that nothing reads. */
+  function refreshTelegramDependents() {
+    const pairs = [
+      ["tgEvFinished", "tgSummaryRow", ["tgSummary"]],
+      ["tgQuietEnabled", "tgQuietWindow", ["tgQuietStart", "tgQuietEnd"]],
+    ];
+    pairs.forEach(([parentId, rowId, controlIds]) => {
+      const parent = $(parentId);
+      const row = $(rowId);
+      if (!parent || !row) return;
+      const off = !parent.checked;
+      row.classList.toggle("is-off", off);
+      controlIds.forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = off;
+      });
+    });
   }
 
   function applyTelegramSettings(data) {
@@ -713,21 +810,39 @@
     }
     const reusable = $("tgPairReusable");
     if (reusable) reusable.checked = !!data.pairReusable;
+    const inbound = $("tgInbound");
+    if (inbound) inbound.checked = !!data.inbound;
+    /* Defaults to on, which is what the server does for a missing key. */
+    const summary = $("tgSummary");
+    if (summary) summary.checked = data.summaryEnabled !== false;
 
-    /* The token itself is never sent back to the page. */
+    /* The token itself is never sent back to the page. A saved one shows as a
+       dot mask, so the field reads "filled" without the secret in the DOM. */
+    tgHasToken = !!data.hasToken;
+    tgPaired = !!data.paired;
     const field = $("tgToken");
     if (field && !field.value) {
-      field.placeholder = data.hasToken ? "Saved. Paste a new one to replace it." : "8123456789:AAH...";
+      field.placeholder = tgHasToken ? TG_TOKEN_MASK : "8123456789:AAH...";
     }
-    if (!data.hasToken) tgHint("No token saved yet.", true);
-    else if (!data.paired) tgHint("Token saved. Show a code, then send /pair CODE to your bot.", false);
-    else tgHint("Paired. Notifications go to the chat that paired.", false);
+    /* The saved state lives in the status card now, so a reload must not leave
+       a stale error from an earlier attempt sitting under the pairing row. */
+    tgHint("", false);
+    tgTokenHint("", false);
+    renderTelegramStatus(tgHasToken, !!data.paired, !!data.inbound);
+    refreshTelegramDependents();
+    tgInboundKnown = true;
+    tgSummaryKnown = true;
   }
 
   function loadTelegram() {
     callBridge(["getTelegramSettings"], [])
       .then((raw) => applyTelegramSettings(typeof raw === "string" ? JSON.parse(raw) : raw))
-      .catch(() => tgHint("Telegram settings unavailable.", true));
+      .catch(() => {
+        const title = $("tgStatusTitle");
+        if (title) title.textContent = "Status unavailable";
+        const text = $("tgStatusText");
+        if (text) text.textContent = "The saved bot settings could not be read. Reopen this page to try again.";
+      });
   }
 
   function saveTelegramSettings() {
@@ -743,6 +858,13 @@
       pairExpiry: $("tgPairExpiry") ? $("tgPairExpiry").value : "60m",
       pairReusable: !!($("tgPairReusable") && $("tgPairReusable").checked),
     };
+    if (tgInboundKnown) {
+      payload.inbound = !!($("tgInbound") && $("tgInbound").checked);
+    }
+    /* Same guard, same reason: never write a switch this page never read. */
+    if (tgSummaryKnown) {
+      payload.summaryEnabled = !!($("tgSummary") && $("tgSummary").checked);
+    }
     callBridge(["saveTelegramSettings"], [JSON.stringify(payload)])
       .then((result) => showToast(result === "ok" ? "Telegram settings saved" : "Could not save Telegram settings"))
       .catch(() => showToast("Could not save Telegram settings"));
@@ -769,30 +891,61 @@
     /* ── Telegram ── */
     ["tgEnabled", "tgEvStarted", "tgEvBlocked", "tgEvFinished", "tgEvFailed",
      "tgQuietEnabled", "tgQuietStart", "tgQuietEnd",
-     "tgPairExpiry", "tgPairReusable"].forEach((id) => {
+     "tgPairExpiry", "tgPairReusable", "tgInbound", "tgSummary"].forEach((id) => {
       $(id)?.addEventListener("change", () => saveTelegramSettings());
+    });
+
+    /* Turning prompts on is step 3, so the strip has to follow the switch
+       without waiting for a reload. Nothing is redrawn before pairing, because
+       step 3 does not apply yet. */
+    $("tgInbound")?.addEventListener("change", (event) => {
+      if (!tgPaired) return;
+      renderTelegramStatus(tgHasToken, tgPaired, !!event.target.checked);
+    });
+
+    /* The dependent row has to follow its parent switch immediately; waiting
+       for a reload would leave it dim and dead for a beat after the click. */
+    ["tgEvFinished", "tgQuietEnabled"].forEach((id) => {
+      $(id)?.addEventListener("change", refreshTelegramDependents);
     });
 
     $("tgSaveToken")?.addEventListener("click", () => {
       const field = $("tgToken");
-      callBridge(["saveTelegramToken"], [field ? field.value : ""]).then((result) => {
+      const typed = field ? field.value.trim() : "";
+      /* An empty field never reaches the bridge. saveTelegramToken("") clears
+         the vault, and the dot mask makes a stored token look filled, so a
+         stray click on Save would delete it with no warning. Removal has its
+         own button, Forget bot, which says so before it does anything. */
+      if (!typed) {
+        if (tgHasToken) {
+          tgTokenHint("A token is already saved. Paste a new one to replace it, or use Remove bot to delete it.", false);
+        } else {
+          tgTokenHint("Paste a token from BotFather first.", true);
+        }
+        return;
+      }
+      callBridge(["saveTelegramToken"], [typed]).then((result) => {
         if (result === "ok") {
-          if (field) field.value = "";
+          if (field) {
+            field.value = "";
+            field.placeholder = TG_TOKEN_MASK;
+          }
+          tgHasToken = true;
+          tgTokenHint("", false);
           showToast("Token saved");
           loadTelegram();
         } else if (result === "invalid") {
-          tgHint("That does not look like a BotFather token.", true);
+          tgTokenHint("That does not look like a BotFather token.", true);
         } else {
-          tgHint("Could not save the token.", true);
+          tgTokenHint("Could not save the token.", true);
         }
-      }).catch(() => tgHint("Could not save the token.", true));
+      }).catch(() => tgTokenHint("Could not save the token.", true));
     });
 
     $("tgPair")?.addEventListener("click", () => {
       callBridge(["startTelegramPairing"], [], 20000).then((code) => {
         if (!code) { tgHint("Add a bot token first.", true); return; }
-        const el = $("tgPairCode");
-        if (el) el.textContent = code;
+        setPairCode(code);
         /* Describe what the Python side was actually told to do. The policy
            controls are saved the moment they change, so reading them here is
            accurate rather than optimistic. */
@@ -809,16 +962,15 @@
     $("tgTest")?.addEventListener("click", () => {
       callBridge(["testTelegramMessage"], []).then((result) => {
         if (result === "queued") showToast("Test message queued");
-        else if (result === "unpaired") tgHint("Pair a chat first.", true);
-        else tgHint("Could not send the test message.", true);
-      }).catch(() => tgHint("Could not send the test message.", true));
+        else if (result === "unpaired") showToast("Pair a chat first.");
+        else showToast("Could not send the test message.");
+      }).catch(() => showToast("Could not send the test message."));
     });
 
     $("tgUnpair")?.addEventListener("click", () => {
       callBridge(["unpairTelegram"], []).then((result) => {
-        if (result !== "ok") { tgHint("Could not unpair.", true); return; }
-        const el = $("tgPairCode");
-        if (el) el.textContent = "--------";
+        if (result !== "ok") { showToast("Could not unpair."); return; }
+        setPairCode("");
         showToast("Unpaired");
         /* The reload re-reads the saved state, so the hint it sets is the
            truth rather than an optimistic guess made here. */
@@ -828,11 +980,16 @@
 
     $("tgForget")?.addEventListener("click", () => {
       callBridge(["forgetTelegramBot"], []).then((result) => {
-        if (result !== "ok") { tgHint("Could not remove the bot.", true); return; }
-        const code = $("tgPairCode");
-        if (code) code.textContent = "--------";
+        if (result !== "ok") { showToast("Could not remove the bot."); return; }
+        setPairCode("");
         const field = $("tgToken");
-        if (field) field.value = "";
+        if (field) {
+          field.value = "";
+          field.placeholder = "8123456789:AAH...";
+        }
+        /* Forget bot is now the only way the token leaves the vault, so clear
+           the flag here too; loadTelegram() confirms it either way. */
+        tgHasToken = false;
         showToast("Bot removed");
         loadTelegram();
       }).catch(() => tgHint("Could not remove the bot.", true));

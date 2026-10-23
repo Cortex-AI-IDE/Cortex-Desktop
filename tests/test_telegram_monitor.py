@@ -6,8 +6,12 @@ network and never depends on whether the developer happens to have a bot
 token in the vault.
 """
 
+import ast
+import base64
 import datetime as dt
+import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +31,15 @@ class FakeTransport:
         self.calls = []
         self._responses = list(responses or [])
         self._next_id = 100
+        # What a photo download hands back, and whether it should fail.
+        self.photo_bytes = b"\xff\xd8fakejpeg"
+        self.download_error = None
+
+    def download(self, file_path, max_bytes):
+        self.calls.append(("download", {"file_path": file_path, "max_bytes": max_bytes}))
+        if self.download_error is not None:
+            raise self.download_error
+        return self.photo_bytes
 
     def call(self, method, params):
         self.calls.append((method, dict(params)))
@@ -40,6 +53,8 @@ class FakeTransport:
             return {"ok": True, "result": {"message_id": self._next_id}}
         if method == "getUpdates":
             return {"ok": True, "result": []}
+        if method == "getFile":
+            return {"ok": True, "result": {"file_path": "photos/file_9.jpg", "file_size": 12}}
         return {"ok": True, "result": True}
 
     def methods(self):
@@ -312,7 +327,7 @@ def test_begin_pairing_uses_the_configured_expiry(monkeypatch, no_settings_write
         client=tm.TelegramClient(transport, sleep=lambda _s: None),
         config_loader=lambda: make_cfg(pair_expiry="30d"),
     )
-    monkeypatch.setattr(monitor, "_pair_loop", lambda *_a, **_k: None)
+    monkeypatch.setattr(monitor, "_poll_loop", lambda *_a, **_k: None)
 
     code = monitor.begin_pairing()
     assert code
@@ -330,7 +345,7 @@ def test_begin_pairing_honours_the_reusable_switch(monkeypatch, no_settings_writ
         client=tm.TelegramClient(transport, sleep=lambda _s: None),
         config_loader=lambda: make_cfg(pair_expiry="unlimited", pair_reusable=True),
     )
-    monkeypatch.setattr(monitor, "_pair_loop", lambda *_a, **_k: None)
+    monkeypatch.setattr(monitor, "_poll_loop", lambda *_a, **_k: None)
 
     code = monitor.begin_pairing()
     assert monitor.pairing.reusable is True
@@ -467,7 +482,6 @@ def test_each_standalone_event_sends_exactly_one_message():
         lambda m: m.on_request_started("proj"),
         lambda m: m.on_question({"question": "Which key?"}),
         lambda m: m.on_permission_requested("rm -rf build", "destructive"),
-        lambda m: m.on_finished("done"),
         lambda m: m.on_error("provider timed out"),
     ):
         monitor, transport, _clock = make_monitor()
@@ -477,7 +491,7 @@ def test_each_standalone_event_sends_exactly_one_message():
         assert monitor.stats["sent"] == 1
 
 
-def test_finished_edits_the_live_message_instead_of_sending():
+def test_finished_edits_the_live_message_instead_of_sending_the_status():
     monitor, transport, clock = make_monitor()
     monitor.on_request_started("proj")
     monitor.drain()
@@ -486,7 +500,40 @@ def test_finished_edits_the_live_message_instead_of_sending():
     monitor.drain()
     assert transport.methods().count("sendMessage") == 1
     assert transport.methods().count("editMessageText") == 1
-    assert "Finished in 1m 30s" in transport.payloads("editMessageText")[0]["text"]
+    edited = transport.payloads("editMessageText")[0]["text"]
+    assert "Finished in 1m 30s" in edited
+    assert "done" in edited
+
+
+def test_the_finished_message_carries_the_answer_as_html():
+    """One run is one message, and a table in it is a list, not pipes."""
+    monitor, transport, _clock = make_monitor()
+    monitor.on_finished("### Files\n\n| a | b |\n|---|---|\n| 1 | 2 |")
+    monitor.drain()
+
+    finished = transport.payloads("sendMessage")[-1]
+    assert finished["parse_mode"] == "HTML"
+    assert "|" not in finished["text"]
+    assert "•  <b>1</b> — 2" in finished["text"]
+    assert finished["text"].startswith("Finished in")
+
+
+def test_a_refused_entity_resends_the_same_chunk_as_plain_text():
+    refusal = {"ok": False, "error_code": 400, "description": "Bad Request: can't parse entities"}
+    client, transport = make_client([refusal])
+    client.send_html("42", ["<b>hello</b>"])
+
+    assert transport.methods().count("sendMessage") == 2
+    assert transport.payloads("sendMessage")[-1]["text"] == "hello"
+    assert "parse_mode" not in transport.payloads("sendMessage")[-1]
+
+
+def test_a_refused_entity_on_an_edit_falls_back_to_plain_text():
+    refusal = {"ok": False, "error_code": 400, "description": "Bad Request: can't parse entities tag"}
+    client, transport = make_client([refusal])
+    assert client.edit_text("42", 7, "<b>done</b>", parse_mode="HTML") is True
+    assert transport.payloads("editMessageText")[-1]["text"] == "done"
+    assert "parse_mode" not in transport.payloads("editMessageText")[-1]
 
 
 def test_ack_reaction_lands_once_per_run():
@@ -804,3 +851,818 @@ def test_showing_a_code_right_after_a_revoke_still_watches(monkeypatch):
     first.join(timeout=2.0)
     assert not first.is_alive()
     monitor.stop()
+
+
+# ---------------------------------------------------------------------------
+# Inbound prompts
+# ---------------------------------------------------------------------------
+# A prompt may start a run. Every test below is either "this reaches the
+# handler" or "this must never reach it", and the refusals matter more.
+
+
+def inbound_update(
+    text=None,
+    chat_id=42,
+    date=10000.0,
+    message_id=7,
+    is_bot=False,
+    **extra,
+):
+    message = {
+        "message_id": message_id,
+        "chat": {"id": chat_id},
+        "from": {"id": 1, "is_bot": is_bot},
+    }
+    if text is not None:
+        message["text"] = text
+    if date is not None:
+        message["date"] = date
+    message.update(extra)
+    return {"update_id": 1, "message": message}
+
+
+def make_inbound(config=None, handler=None, is_busy=None):
+    """A monitor wired to collect prompts from the paired chat."""
+    prompts = []
+
+    def collect(text):
+        prompts.append(text)
+
+    monitor, transport, _clock = make_monitor(
+        config=config or make_cfg(inbound_enabled=True),
+        on_prompt=collect if handler is None else handler,
+        is_busy=is_busy,
+    )
+    return monitor, transport, prompts
+
+
+def inbound_texts(transport):
+    return [p["text"] for p in transport.payloads("sendMessage")]
+
+
+def test_an_inbound_prompt_reaches_the_handler():
+    monitor, _transport, prompts = make_inbound()
+    accepted = monitor._handle_inbound_updates(
+        [inbound_update("refactor the sidebar")],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert accepted == 1
+    assert prompts == ["refactor the sidebar"]
+    assert monitor.stats["prompts"] == 1
+
+
+def test_inbound_is_off_unless_the_user_turns_it_on():
+    config = make_cfg(inbound_enabled=False)
+    monitor, transport, prompts = make_inbound(config=config)
+    assert monitor._handle_inbound_updates([inbound_update("do it")], config, now=10001.0) == 0
+    assert prompts == []
+    assert transport.calls == []
+
+
+def test_a_stranger_cannot_prompt():
+    monitor, transport, prompts = make_inbound()
+    accepted = monitor._handle_inbound_updates(
+        [inbound_update("rm -rf everything", chat_id=999)],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert accepted == 0
+    assert prompts == []
+    # Silence: a reply would confirm the bot is live.
+    assert transport.methods() == []
+
+
+def test_another_bot_cannot_drive_the_agent():
+    monitor, _transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("do it", is_bot=True)],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert prompts == []
+
+
+def test_a_textless_message_is_refused_with_a_reason():
+    monitor, transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update(None)], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("Only text" in text for text in inbound_texts(transport))
+
+
+def make_photo_inbound(vision=True, handler=None, is_busy=None):
+    """A monitor wired for pictures: fake bytes, a fake vision answer."""
+    images = []
+
+    def collect_image(caption, data, mime):
+        images.append((caption, data, mime))
+
+    monitor, transport, _clock = make_monitor(
+        config=make_cfg(inbound_enabled=True),
+        is_busy=is_busy,
+    )
+    monitor.set_image_handler(
+        collect_image if handler is None else handler,
+        vision_ok=lambda: vision,
+    )
+    return monitor, transport, images
+
+
+def test_a_photo_from_the_paired_chat_reaches_the_image_handler():
+    monitor, transport, images = make_photo_inbound()
+    accepted = monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc", "width": 800, "height": 600}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert accepted == 1
+    assert monitor.stats["prompts"] == 1
+    caption, data, mime = images[0]
+    assert caption == tm.INBOUND_PHOTO_CAPTION_DEFAULT
+    assert base64.b64decode(data) == b"\xff\xd8fakejpeg"
+    assert mime == "image/jpeg"
+    # The tick is what tells the phone it was taken.
+    assert "setMessageReaction" in transport.methods()
+
+
+def test_the_photo_never_takes_the_text_path():
+    monitor, _transport, images = make_photo_inbound()
+    seen = []
+    monitor._on_prompt = seen.append
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert seen == []
+    assert len(images) == 1
+
+
+def test_a_caption_becomes_the_prompt():
+    monitor, _transport, images = make_photo_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update(None, caption="fix this layout", photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert images[0][0] == "fix this layout"
+
+
+def test_the_largest_size_is_the_one_downloaded():
+    # Telegram sends the same picture at several sizes; the biggest is the
+    # only one whose text is worth reading.
+    monitor, transport, _images = make_photo_inbound()
+    photo = [
+        {"file_id": "small", "width": 90, "height": 67, "file_size": 900},
+        {"file_id": "big", "width": 800, "height": 600, "file_size": 90000},
+        {"file_id": "medium", "width": 320, "height": 240, "file_size": 9000},
+    ]
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=photo)], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    asked = [p["file_id"] for m, p in transport.calls if m == "getFile"]
+    assert asked == ["big"]
+
+
+def test_a_model_that_cannot_see_is_told_and_nothing_runs():
+    # The whole point of the gate: the phone learns why, and no run starts.
+    monitor, transport, images = make_photo_inbound(vision=False)
+    accepted = monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert accepted == 0
+    assert images == []
+    assert monitor.stats["prompts"] == 0
+    reply = inbound_texts(transport)[0]
+    assert "cannot read pictures" in reply
+    # Nothing was downloaded either: the gate runs before the fetch.
+    assert "getFile" not in transport.methods()
+    assert "download" not in transport.methods()
+
+
+def test_a_vision_check_that_raises_fails_closed():
+    monitor, transport, images = make_photo_inbound()
+
+    def boom():
+        raise RuntimeError("no bridge yet")
+
+    monitor._vision_ok = boom
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert images == []
+    assert "cannot read pictures" in inbound_texts(transport)[0]
+
+
+def test_no_image_handler_means_the_refusal_not_a_crash():
+    monitor, transport, _prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert "cannot read pictures" in inbound_texts(transport)[0]
+
+
+def test_an_oversized_photo_is_refused_before_the_download():
+    monitor, transport, images = make_photo_inbound()
+    huge = [{"file_id": "abc", "file_size": tm.INBOUND_MAX_IMAGE_BYTES + 1}]
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=huge)], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert images == []
+    assert "too large" in inbound_texts(transport)[0]
+    assert "getFile" not in transport.methods()
+
+
+def test_a_failed_download_is_explained_on_the_phone():
+    monitor, transport, images = make_photo_inbound()
+    transport.download_error = tm.TransportError("HTTP 404 on file download")
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert images == []
+    assert monitor.stats["prompts"] == 0
+    assert "could not fetch" in inbound_texts(transport)[0]
+
+
+def test_a_crafted_file_path_is_never_fetched():
+    # getFile's path is the one part of this request Telegram could craft, so
+    # a traversal or a second host is refused instead of sanitised.
+    monitor, transport, images = make_photo_inbound()
+    transport._responses = [
+        {"ok": True, "result": {"file_path": "../../etc/passwd"}},
+        {"ok": True, "result": {"file_path": "photos/file_9.jpg"}},
+    ]
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert images == []
+    assert "download" not in transport.methods()
+    assert "could not fetch" in inbound_texts(transport)[0]
+
+
+def test_a_picture_still_obeys_busy():
+    monitor, transport, images = make_photo_inbound(is_busy=lambda: True)
+    monitor._handle_inbound_updates(
+        [inbound_update(None, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert images == []
+    assert tm.INBOUND_BUSY_REPLY in inbound_texts(transport)
+
+
+# ---------------------------------------------------------------------------
+# Prompts that wait for the running turn
+# ---------------------------------------------------------------------------
+
+
+def queue_while_busy(monitor, text, now=10001.0):
+    return monitor._handle_inbound_updates(
+        [inbound_update(text)], make_cfg(inbound_enabled=True), now=now
+    )
+
+
+def test_a_prompt_sent_while_busy_is_queued_not_refused():
+    # Refusing threw away work the user had already typed on a phone.
+    monitor, transport, prompts = make_inbound(is_busy=lambda: True)
+    assert queue_while_busy(monitor, "run this next") == 1
+    assert prompts == []
+    assert monitor.queued_count() == 1
+    assert any("queued" in text for text in inbound_texts(transport))
+
+
+def test_a_queued_prompt_runs_in_the_order_it_was_sent():
+    monitor, _transport, _prompts = make_inbound(is_busy=lambda: True)
+    queue_while_busy(monitor, "first")
+    queue_while_busy(monitor, "second")
+    assert monitor.queued_count() == 2
+    assert monitor.pop_queued_prompt()[1] == "first"
+    assert monitor.pop_queued_prompt()[1] == "second"
+    assert monitor.pop_queued_prompt() is None
+
+
+def test_the_queue_is_bounded_and_the_phone_is_told():
+    monitor, transport, _prompts = make_inbound(is_busy=lambda: True)
+    for n in range(tm.INBOUND_QUEUE_MAX):
+        queue_while_busy(monitor, f"prompt {n}")
+    assert queue_while_busy(monitor, "one too many") == 0
+    assert monitor.queued_count() == tm.INBOUND_QUEUE_MAX
+    assert any("already waiting" in text for text in inbound_texts(transport))
+
+
+def test_stop_drops_the_queue_and_tells_the_phone():
+    monitor, transport, _prompts = make_inbound(is_busy=lambda: True)
+    queue_while_busy(monitor, "never mind")
+    assert monitor.drop_queued_prompts() == 1
+    assert monitor.queued_count() == 0
+    # The replies go out on their own thread, so give them a moment.
+    for _ in range(100):
+        if any("was not run" in text for text in inbound_texts(transport)):
+            break
+        time.sleep(0.01)
+    assert any("was not run" in text for text in inbound_texts(transport))
+
+
+def test_clearing_the_queue_says_nothing():
+    monitor, transport, _prompts = make_inbound(is_busy=lambda: True)
+    queue_while_busy(monitor, "silent")
+    before = len(inbound_texts(transport))
+    assert monitor.clear_queued_prompts() == 1
+    assert monitor.queued_count() == 0
+    assert len(inbound_texts(transport)) == before
+
+
+def test_queueing_needs_inbound_to_still_be_on():
+    # The flush refuses to run a queued prompt once prompts are switched off,
+    # so it has to be able to see that from the same settings read.
+    monitor, _transport, _prompts = make_inbound()
+    assert monitor.inbound_allowed() is True
+    off, _t, _p = make_inbound(config=make_cfg(inbound_enabled=False))
+    assert off.inbound_allowed() is False
+    unpaired, _t2, _p2 = make_inbound(config=make_cfg(inbound_enabled=True, chat_id=""))
+    assert unpaired.inbound_allowed() is False
+
+
+def test_status_reports_the_waiting_prompts():
+    monitor, transport, _prompts = make_inbound(is_busy=lambda: True)
+    queue_while_busy(monitor, "waiting one")
+    transport.calls.clear()
+    monitor._handle_inbound_updates(
+        [inbound_update("/status")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert any("queued behind this run" in text for text in inbound_texts(transport))
+
+
+def test_a_picture_still_obeys_the_stale_guard():
+    monitor, transport, images = make_photo_inbound()
+    old = inbound_update(None, photo=[{"file_id": "abc"}], date=10000.0)
+    monitor._handle_inbound_updates(
+        [old], make_cfg(inbound_enabled=True), now=10000.0 + tm.INBOUND_STALE_S + 5
+    )
+    assert images == []
+    assert tm.INBOUND_STALE_REPLY in inbound_texts(transport)
+
+
+def test_safe_file_path_accepts_only_what_telegram_sends():
+    assert tm.safe_file_path("photos/file_9.jpg") == "photos/file_9.jpg"
+    assert tm.safe_file_path("documents/a-b_c.png") == "documents/a-b_c.png"
+    for bad in ("", None, 42, "../x", "a/../../b", "//host/x", "/abs", "a\\b",
+                "a b", "https://evil.test/x", "x" * 300):
+        assert tm.safe_file_path(bad) is None
+
+
+def test_largest_photo_picks_the_biggest_and_ignores_junk():
+    assert tm.largest_photo(None) is None
+    assert tm.largest_photo([]) is None
+    assert tm.largest_photo([{"no_id": True}]) is None
+    assert tm.largest_photo([{"file_id": "a"}, "junk", {"file_id": "b",
+                                                        "file_size": 5}])["file_id"] == "b"
+    # No file_size: pixel area decides.
+    assert tm.largest_photo([
+        {"file_id": "a", "width": 10, "height": 10},
+        {"file_id": "b", "width": 100, "height": 100},
+    ])["file_id"] == "b"
+
+
+def test_voice_and_files_are_named_as_other_media():
+    monitor, transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update(None, voice={"file_id": "v", "duration": 3})],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert prompts == []
+    reply = inbound_texts(transport)[0]
+    assert "Only text and pictures reach Cortex" in reply
+    assert "voice" in reply.lower()
+
+
+def test_a_strangers_photo_is_not_answered():
+    # Whatever the format, an unpaired chat hears nothing at all.
+    monitor, transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update(None, chat_id=999, photo=[{"file_id": "abc"}])],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert prompts == []
+    assert transport.methods() == []
+
+
+def test_a_slash_command_is_never_a_prompt():
+    monitor, transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("/restart")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("Unknown command" in text for text in inbound_texts(transport))
+
+
+def test_start_explains_what_the_bot_can_do():
+    # Telegram sends /start by itself when the bot is first opened, so it must
+    # never arrive as a task.
+    monitor, transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("/start")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("/status" in text for text in inbound_texts(transport))
+
+
+def test_status_reports_idle_when_nothing_is_running():
+    monitor, transport, prompts = make_inbound(is_busy=lambda: False)
+    monitor._handle_inbound_updates(
+        [inbound_update("/status")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("idle" in text for text in inbound_texts(transport))
+
+
+def test_a_stale_pair_command_explains_itself():
+    monitor, transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("/pair ABCDEFGH")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("Show code" in text for text in inbound_texts(transport))
+
+
+def test_a_prompt_typed_before_cortex_started_is_not_run():
+    # Telegram keeps unread updates for 24 hours. Without this guard a task
+    # typed yesterday would fire the moment Cortex opens today.
+    monitor, _transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("old task", date=10001.0 - 86400)],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert prompts == []
+
+
+def test_a_message_without_a_date_is_still_accepted():
+    monitor, _transport, prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("no date", date=None)],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert prompts == ["no date"]
+
+
+def test_an_oversized_prompt_is_refused():
+    monitor, transport, prompts = make_inbound()
+    huge = "x" * (tm.INBOUND_MAX_CHARS + 1)
+    monitor._handle_inbound_updates(
+        [inbound_update(huge)], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("Too long" in text for text in inbound_texts(transport))
+
+
+def test_a_prompt_at_the_limit_is_accepted():
+    monitor, _transport, prompts = make_inbound()
+    exact = "y" * tm.INBOUND_MAX_CHARS
+    monitor._handle_inbound_updates(
+        [inbound_update(exact)], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == [exact]
+
+
+def test_the_rate_limit_stops_a_flood_and_warns_only_once():
+    monitor, transport, prompts = make_inbound()
+    config = make_cfg(inbound_enabled=True)
+    for index in range(tm.INBOUND_RATE_MAX):
+        monitor._handle_inbound_updates(
+            [inbound_update(f"task {index}", date=10000.0)],
+            config,
+            now=10000.0 + index * 0.1,
+        )
+    assert len(prompts) == tm.INBOUND_RATE_MAX
+
+    for index in range(3):
+        monitor._handle_inbound_updates(
+            [inbound_update(f"flood {index}", date=10000.0)],
+            config,
+            now=10000.0 + 1.0 + index,
+        )
+    assert len(prompts) == tm.INBOUND_RATE_MAX
+    warnings = [text for text in inbound_texts(transport) if "Too many" in text]
+    assert len(warnings) == 1
+
+
+def test_the_rate_limit_releases_after_a_minute():
+    monitor, _transport, prompts = make_inbound()
+    config = make_cfg(inbound_enabled=True)
+    for index in range(tm.INBOUND_RATE_MAX):
+        monitor._handle_inbound_updates(
+            [inbound_update(f"task {index}", date=10000.0)], config, now=10000.0
+        )
+    monitor._handle_inbound_updates(
+        [inbound_update("later", date=10000.0)],
+        config,
+        now=10000.0 + tm.INBOUND_RATE_WINDOW_S + 1.0,
+    )
+    assert prompts[-1] == "later"
+
+
+def test_a_busy_cortex_refuses_instead_of_queueing():
+    monitor, transport, prompts = make_inbound(is_busy=lambda: True)
+    monitor._handle_inbound_updates(
+        [inbound_update("do it")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    assert any("busy" in text.lower() for text in inbound_texts(transport))
+
+
+def test_a_failing_handler_does_not_stop_the_next_prompt():
+    seen = []
+
+    def boom(text):
+        seen.append(text)
+        raise RuntimeError("handler exploded")
+
+    monitor, transport, _prompts = make_inbound(handler=boom)
+    config = make_cfg(inbound_enabled=True)
+    assert monitor._handle_inbound_updates([inbound_update("one")], config, now=10001.0) == 0
+    monitor._handle_inbound_updates([inbound_update("two")], config, now=10002.0)
+    assert seen == ["one", "two"]
+    assert any("could not take" in text for text in inbound_texts(transport))
+
+
+def test_no_handler_means_the_prompt_is_refused():
+    monitor, transport, _clock = make_monitor(
+        config=make_cfg(inbound_enabled=True), on_prompt=None
+    )
+    assert (
+        monitor._handle_inbound_updates(
+            [inbound_update("do it")], make_cfg(inbound_enabled=True), now=10001.0
+        )
+        == 0
+    )
+    assert any("not ready" in text for text in inbound_texts(transport))
+
+
+def test_an_accepted_prompt_is_ticked_and_refused_ones_are_not():
+    monitor, transport, _prompts = make_inbound()
+    monitor._handle_inbound_updates(
+        [inbound_update("do it", message_id=9)],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    reactions = transport.payloads("setMessageReaction")
+    assert reactions, "an accepted prompt should be acknowledged"
+    assert reactions[-1]["reaction"][0]["emoji"] == tm.CONFIRM_EMOJI
+    assert reactions[-1]["message_id"] == 9
+
+    monitor._handle_inbound_updates(
+        [inbound_update("nope", chat_id=999, message_id=10)],
+        make_cfg(inbound_enabled=True),
+        now=10002.0,
+    )
+    assert len(transport.payloads("setMessageReaction")) == 1
+
+
+def test_ensure_inbound_needs_both_the_switch_and_a_paired_chat():
+    off, _t, _p = make_inbound(config=make_cfg(inbound_enabled=False))
+    assert off.ensure_inbound() is False
+    unpaired, _t2, _p2 = make_inbound(config=make_cfg(inbound_enabled=True, chat_id=""))
+    assert unpaired.ensure_inbound() is False
+
+
+def test_ensure_inbound_starts_the_poller_when_it_can():
+    monitor, _transport, _prompts = make_inbound()
+    assert monitor.ensure_inbound() is True
+    assert monitor._pair_thread is not None
+    monitor.stop()
+
+
+def test_revoking_forgets_the_inbound_rate_window(monkeypatch):
+    store = FakeStore().install(monkeypatch)
+    monitor, _transport = make_store_monitor(store)
+    monitor._inbound_times.append(1.0)
+    monitor.revoke_pairing()
+    assert len(monitor._inbound_times) == 0
+
+
+def test_a_reply_quotes_only_the_first_chunk():
+    client, transport = make_client()
+    client.send_text("42", "x" * 5000, reply_to=77)
+    sent = transport.payloads("sendMessage")
+    assert len(sent) > 1
+    assert sent[0]["reply_parameters"] == {"message_id": 77}
+    assert "reply_parameters" not in sent[1]
+
+
+def test_a_plain_send_carries_no_quote():
+    client, transport = make_client()
+    client.send_text("42", "hi")
+    assert "reply_parameters" not in transport.payloads("sendMessage")[0]
+
+
+def test_a_prompt_sent_while_cortex_was_closed_asks_to_send_again():
+    """Symptom this guards: type a prompt with Cortex shut, nothing happens.
+
+    The message is still queued at Telegram, so the next poll sees it, but it
+    is far too old to run. Silence there is indistinguishable from a broken
+    bot, so the phone is told to send it again.
+    """
+    monitor, transport, prompts = make_inbound()
+    too_late = 10000.0 + tm.INBOUND_STALE_S + 5.0
+    accepted = monitor._handle_inbound_updates(
+        [inbound_update("typed while you were closed")],
+        make_cfg(inbound_enabled=True),
+        now=too_late,
+    )
+    assert accepted == 0
+    assert prompts == []
+    assert inbound_texts(transport) == [tm.INBOUND_STALE_REPLY]
+
+
+def test_the_stale_reply_is_sent_once_per_window():
+    """A backlog can hold a hundred updates; it must not become a hundred replies."""
+    monitor, transport, _prompts = make_inbound()
+    config = make_cfg(inbound_enabled=True)
+    first = 10000.0 + tm.INBOUND_STALE_S + 5.0
+    monitor._handle_inbound_updates([inbound_update("one", message_id=1)], config, now=first)
+    monitor._handle_inbound_updates([inbound_update("two", message_id=2)], config, now=first + 1.0)
+    assert inbound_texts(transport).count(tm.INBOUND_STALE_REPLY) == 1
+
+
+def test_an_update_consumed_by_pairing_is_not_offered_as_a_prompt():
+    """After "Paired" a re-pair must not add "that code is not valid any more"."""
+    monitor, transport, prompts = make_inbound()
+    accepted = monitor._handle_inbound_updates(
+        [inbound_update("/pair ABCDEFGH")],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+        skip_update_ids={1},
+    )
+    assert accepted == 0
+    assert prompts == []
+    assert inbound_texts(transport) == []
+
+
+def test_pairing_records_the_update_it_consumed(no_settings_writes):
+    monitor, _transport, _prompts = make_inbound()
+    code = monitor.pairing.begin(ttl_s=60)
+    update = inbound_update("/pair " + code)
+    assert monitor._handle_pair_updates([update], now=1.0) is True
+    assert monitor._pair_update_id == update["update_id"]
+
+
+def test_a_poll_that_pairs_leaves_no_record_behind(no_settings_writes):
+    monitor, _transport, _prompts = make_inbound()
+    monitor._pair_update_id = 99
+    assert monitor._handle_pair_updates([inbound_update("not a code")], now=1.0) is False
+    assert monitor._pair_update_id is None
+
+
+def test_the_live_poll_loop_delivers_a_prompt():
+    """The whole reported path: getUpdates -> poller -> handler, on a thread."""
+    transport = FakeTransport(
+        responses=[{"ok": True, "result": [inbound_update("from the phone", date=time.time())]}]
+    )
+    prompts = []
+    monitor = tm.TelegramMonitor(
+        client=tm.TelegramClient(transport, sleep=lambda _s: None),
+        config_loader=lambda: make_cfg(inbound_enabled=True),
+        on_prompt=prompts.append,
+        is_busy=lambda: False,
+        poll_interval_s=0.01,
+    )
+    stop = threading.Event()
+    thread = threading.Thread(target=monitor._poll_loop, args=(stop,), daemon=True)
+    thread.start()
+    deadline = time.time() + 5.0
+    while time.time() < deadline and not prompts:
+        time.sleep(0.01)
+    stop.set()
+    thread.join(timeout=2.0)
+    assert prompts == ["from the phone"]
+    assert not thread.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# Busy detection: a stopped run must not hold the phone shut
+# ---------------------------------------------------------------------------
+
+
+def test_not_busy_when_no_flag_is_set():
+    assert tm.run_in_flight(busy=False, run_active=False, stopped=False, since=0.0) is False
+
+
+def test_busy_while_a_run_is_live():
+    now = 500.0
+    assert tm.run_in_flight(busy=True, run_active=True, stopped=False, since=now, now=now)
+
+
+def test_a_stopped_run_is_not_busy():
+    # The reported bug: Stop cancels the asyncio task, nothing emits
+    # response_complete, so a flag-only check refused every later prompt for
+    # the rest of the session.
+    now = 500.0
+    assert (
+        tm.run_in_flight(busy=True, run_active=False, stopped=True, since=now - 900.0, now=now)
+        is False
+    )
+
+
+def test_a_fresh_flag_is_trusted_before_the_turn_is_accepted():
+    # request_started fires a few milliseconds before chat() sets _run_active.
+    now = 500.0
+    assert tm.run_in_flight(busy=True, run_active=False, stopped=False, since=now - 0.5, now=now)
+
+
+def test_a_stale_flag_with_no_run_behind_it_self_heals():
+    now = 500.0
+    stale = now - tm.INBOUND_BUSY_GRACE_S - 1.0
+    assert tm.run_in_flight(busy=True, run_active=False, stopped=False, since=stale, now=now) is False
+
+
+def test_a_prompt_is_accepted_right_after_a_stop():
+    # Straight through the dispatcher, with the exact predicate the window
+    # hands the monitor.
+    since = 100.0
+    monitor, _transport, prompts = make_inbound(
+        is_busy=lambda: tm.run_in_flight(
+            busy=True, run_active=False, stopped=True, since=since
+        )
+    )
+    monitor._handle_inbound_updates(
+        [inbound_update("try again after the stop")],
+        make_cfg(inbound_enabled=True),
+        now=10001.0,
+    )
+    assert prompts == ["try again after the stop"]
+
+
+def test_a_prompt_waits_while_a_run_is_live():
+    monitor, transport, prompts = make_inbound(
+        is_busy=lambda: tm.run_in_flight(
+            busy=True, run_active=True, stopped=False, since=time.monotonic()
+        )
+    )
+    monitor._handle_inbound_updates(
+        [inbound_update("do this too")], make_cfg(inbound_enabled=True), now=10001.0
+    )
+    assert prompts == []
+    texts = inbound_texts(transport)
+    assert any("/status" in text for text in texts), texts
+
+
+def _main_window_tree():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "src" / "main_window.py").read_text(encoding="utf-8-sig", errors="replace")
+    return ast.parse(source)
+
+
+def _assignments(function):
+    found = set()
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Attribute):
+                    found.add((target.attr, getattr(node.value, "value", None)))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Attribute):
+            found.add((node.target.attr, getattr(node.value, "value", None)))
+    return found
+
+
+def test_the_stop_handler_frees_the_phone():
+    tree = _main_window_tree()
+    stop = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_on_ai_stop_requested"
+    )
+    assert ("_telegram_busy", False) in _assignments(stop)
+
+
+def test_the_monitor_is_handed_the_self_healing_busy_check():
+    tree = _main_window_tree()
+    text = ast.get_source_segment(
+        (Path(__file__).resolve().parents[1] / "src" / "main_window.py").read_text(
+            encoding="utf-8-sig", errors="replace"
+        ),
+        next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_telegram_run_in_flight"
+        ),
+    )
+    # The window must not decide this on its own flag again.
+    assert "_telegram_busy" in text
+    assert "run_in_flight" in text
+

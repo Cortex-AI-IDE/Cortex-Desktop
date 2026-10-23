@@ -2808,6 +2808,43 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "SendPhoto",
+            "description": (
+                "Send one image from disk to the user's phone through the Telegram "
+                "bot already paired with Cortex, so they can see it while away from "
+                "the PC. Use it for a screenshot, a rendered chart, a captured "
+                "diagram, or any image the user asked to receive. "
+                "It reports whether Telegram accepted the image: a failure comes "
+                "back as a sentence, not an exception. Pairing and the bot token "
+                "come from Settings, so there is nothing to configure here. "
+                "Limits: .png, .jpg, .jpeg or .webp, at most 10 MB, caption at most "
+                "1024 characters (it is displayed on a phone, so keep it a label, "
+                "not a report). Images only: a document or any other file type "
+                "cannot be sent with this tool, say so instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute or project-relative path of the image to send"
+                        ),
+                    },
+                    "caption": {
+                        "type": "string",
+                        "description": (
+                            "Optional text shown under the image on the phone"
+                        ),
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
 ]
 
 
@@ -2827,6 +2864,10 @@ ASK_BLOCKED_TOOLS = frozenset({
     # be a hole in exactly the promise the mode makes. Plan mode already
     # drops it by omission from PLAN_ALLOWED_TOOLS. It is an Agent-mode tool.
     'SecurityScan',
+    # SendPhoto puts a local file on the network. Ask mode's promise is that
+    # nothing executes and nothing leaves the machine, so it is Agent-mode
+    # only, the same reasoning as SecurityScan above.
+    'SendPhoto',
 })
 PLAN_ALLOWED_TOOLS = frozenset({
     'TodoWrite', 'EnterPlanMode', 'ExitPlanMode',
@@ -9917,6 +9958,7 @@ Required behavior:
         "BashOutput": "_dispatch_bash_output",
         "KillShell": "_dispatch_kill_shell",
         "LivePreview": "_dispatch_live_preview",
+        "SendPhoto": "_dispatch_send_photo",
         "Loop": "_dispatch_loop",
         "Skill": "_dispatch_skill",
         "SecurityScan": "_dispatch_security_scan",
@@ -10519,6 +10561,60 @@ Required behavior:
             except Exception:
                 _swallow()
         return ToolResult(tool_id=tool_id, result=_resp["result"], success=True)
+
+    async def _dispatch_send_photo(
+        self, tool_id: str, args: Dict[str, Any]
+    ) -> ToolResult:
+        """Send one image to the paired phone over the Telegram bot.
+
+        Read-only on disk, and the network part is off-thread: the monitor
+        bounds the upload and returns a dict instead of raising, so a dead bot
+        or a socket that never answers becomes an error string the model can
+        act on rather than a stalled turn.
+        """
+        _path = str(args.get("path", "") or "").strip()
+        if not _path:
+            return ToolResult(
+                tool_id=tool_id, result=None, success=False,
+                error="SendPhoto: 'path' is required",
+            )
+        if not os.path.isabs(_path) and self._project_root:
+            _path = os.path.join(self._project_root, _path)
+        _deny = self._access.check(_path, "read")
+        if _deny:
+            return ToolResult(tool_id=tool_id, result=None, success=False, error=_deny)
+        if not os.path.isfile(_path):
+            return ToolResult(
+                tool_id=tool_id, result=None, success=False,
+                error=f"SendPhoto: file not found: {_path}",
+            )
+        _caption = str(args.get("caption", "") or "")
+        try:
+            from src.services.telegram_monitor import get_monitor
+            _monitor = get_monitor()
+        except Exception as e:
+            return ToolResult(
+                tool_id=tool_id, result=None, success=False,
+                error=f"SendPhoto: Telegram is unavailable ({type(e).__name__})",
+            )
+        _outcome = await asyncio.get_event_loop().run_in_executor(
+            None, _monitor.send_photo, _path, _caption
+        )
+        if not (_outcome or {}).get("ok"):
+            _reason = (_outcome or {}).get("reason") or "not sent"
+            return ToolResult(
+                tool_id=tool_id, result=None, success=False,
+                error=f"SendPhoto: {_reason}",
+            )
+        return ToolResult(
+            tool_id=tool_id,
+            result={
+                "sent": True,
+                "message_id": _outcome.get("message_id"),
+                "path": _path,
+            },
+            success=True,
+        )
 
     async def _dispatch_mcp_external(
         self, tool_id: str, args: Dict[str, Any], tool_name: str

@@ -1955,6 +1955,9 @@ scope: project
                 "pairExpiry": cfg.pair_expiry,
                 "pairReusable": cfg.pair_reusable,
                 "pairExpiryOptions": list(tg.PAIR_EXPIRY_OPTIONS),
+                "inbound": cfg.inbound_enabled,
+                "summaryEnabled": cfg.summary_enabled,
+                "summaryMaxChars": cfg.summary_max_chars,
             })
         except Exception as exc:
             log.warning(f"[MemoryManager] getTelegramSettings failed: {exc}")
@@ -1993,6 +1996,24 @@ scope: project
                     str(data.get("pairExpiry") or ""),
                     bool(data.get("pairReusable")),
                 )
+            # Inbound is its own key for the same reason: a page that does not
+            # mention it must not switch it off (or on) behind the user.
+            if "inbound" in data:
+                enabled = bool(data.get("inbound"))
+                tg.set_inbound(enabled)
+                if enabled:
+                    # Take effect now instead of at the next restart. Starting
+                    # the poller is local: it never makes a network call here.
+                    try:
+                        from src.services.telegram_monitor import get_monitor
+                        get_monitor().ensure_inbound()
+                    except Exception as exc:
+                        log.debug(f"[MemoryManager] inbound poller not started: {exc}")
+            # Summary rides along with "finished". Same rule once more: a page
+            # that predates the switch never sends the key, so it cannot turn
+            # the answer off behind the user's back.
+            if "summaryEnabled" in data:
+                tg.set_summary(bool(data.get("summaryEnabled")))
             return "ok"
         except Exception as exc:
             log.warning(f"[MemoryManager] saveTelegramSettings failed: {exc}")

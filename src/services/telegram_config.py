@@ -67,6 +67,13 @@ PAIR_EXPIRY_SECONDS: dict[str, Optional[float]] = {
 
 _DEFAULT_PAIR_EXPIRY = "60m"
 
+# The finished message can carry the answer itself. Capped so one turn stays
+# one message: Telegram refuses anything over 4096 characters, and an answer
+# that arrives as five separate messages is worse than a summary.
+SUMMARY_DEFAULT_CHARS = 2500
+SUMMARY_MIN_CHARS = 200
+SUMMARY_MAX_CHARS = 3500
+
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
@@ -87,6 +94,15 @@ class TelegramConfig:
     quiet_end: str = _DEFAULT_QUIET_END
     pair_expiry: str = _DEFAULT_PAIR_EXPIRY
     pair_reusable: bool = False
+    # True only when the user turned on "Allow prompts from Telegram". Kept
+    # separate from ``enabled``: that flag means "report runs", this one means
+    # "may start a run", and they carry very different risk.
+    inbound_enabled: bool = False
+    # True when the final answer rides along with the "finished" message. On
+    # by default, because a phone that only says "Finished in 2m" is a pager.
+    # Off is a real choice: the answer can contain file paths and code.
+    summary_enabled: bool = True
+    summary_max_chars: int = SUMMARY_DEFAULT_CHARS
 
     def wants(self, event: str) -> bool:
         """True when this event should be sent at all (ignores quiet hours)."""
@@ -122,6 +138,26 @@ def _normalize_expiry(value: object) -> str:
             _DEFAULT_PAIR_EXPIRY,
         )
     return _DEFAULT_PAIR_EXPIRY
+
+
+def _normalize_max_chars(value: object) -> int:
+    """Return a summary length inside the safe band, or the default.
+
+    Clamped rather than trusted: a hand-edited settings.json must not be able to
+    ask for a 40 000 character edit, which Telegram would refuse outright, or
+    for a five character summary nobody can read. ``bool`` is rejected first
+    because ``int(True)`` is 1 and would silently become the minimum.
+    """
+    if value in (None, "") or isinstance(value, bool):
+        return SUMMARY_DEFAULT_CHARS
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        log.warning("[Telegram] Ignoring invalid summary length %r", value)
+        return SUMMARY_DEFAULT_CHARS
+    if number < SUMMARY_MIN_CHARS:
+        return SUMMARY_MIN_CHARS
+    return min(number, SUMMARY_MAX_CHARS)
 
 
 def _normalize_time(value: object, fallback: str) -> str:
@@ -170,6 +206,15 @@ def load() -> TelegramConfig:
         ),
         pair_reusable=(
             settings.get("telegram", "pairing", "reusable", default=False) is True
+        ),
+        inbound_enabled=(
+            settings.get("telegram", "inbound", "enabled", default=False) is True
+        ),
+        summary_enabled=(
+            settings.get("telegram", "summary", "enabled", default=True) is True
+        ),
+        summary_max_chars=_normalize_max_chars(
+            settings.get("telegram", "summary", "max_chars", default=None)
         ),
     )
 
@@ -239,8 +284,33 @@ def set_quiet_hours(enabled: bool, start: str, end: str) -> None:
     )
 
 
+def set_summary(enabled: bool, max_chars: Optional[int] = None) -> None:
+    """Persist whether the answer rides along with the finished message.
+
+    The length is left alone unless the caller supplies one, so the switch in
+    the UI can be flipped without it having to know the current cap.
+    """
+    settings = get_settings()
+    settings.set("telegram", "summary", "enabled", bool(enabled))
+    if max_chars is not None:
+        settings.set(
+            "telegram", "summary", "max_chars", _normalize_max_chars(max_chars)
+        )
+
+
 def set_pairing(expiry: str, reusable: bool) -> None:
     """Persist the pairing policy. Both values are validated before writing."""
     settings = get_settings()
     settings.set("telegram", "pairing", "expiry", _normalize_expiry(expiry))
     settings.set("telegram", "pairing", "reusable", bool(reusable))
+
+
+def set_inbound(enabled: bool) -> None:
+    """Allow (or stop) prompts arriving from the paired chat.
+
+    Deliberately its own writer: the Settings page saves the notification flags
+    on every change, and a shared payload would let an unticked box switch this
+    off, or an old page switch it on, without the user asking.
+    """
+    get_settings().set("telegram", "inbound", "enabled", bool(enabled))
+

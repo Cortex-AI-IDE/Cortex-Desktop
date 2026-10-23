@@ -65,6 +65,37 @@ def test_defaults_are_off_and_all_events_on(cfg):
     assert (loaded.quiet_start, loaded.quiet_end) == ("22:00", "07:00")
 
 
+def test_inbound_prompts_are_off_by_default(cfg):
+    # The switch that lets a phone start a run. An update must never turn it
+    # on for an existing install, so this default is part of the contract.
+    assert tg.load().inbound_enabled is False
+
+
+def test_inbound_round_trips_through_settings_json(cfg, cortex_home):
+    tg.set_inbound(True)
+    assert tg.load().inbound_enabled is True
+    assert '"inbound"' in _settings_text(cortex_home)
+
+    tg.set_inbound(False)
+    assert tg.load().inbound_enabled is False
+
+
+def test_inbound_is_independent_of_notifications(cfg):
+    # Reporting a run and starting one are different risks, so one switch must
+    # never move the other.
+    tg.set_enabled(False)
+    tg.set_inbound(True)
+    loaded = tg.load()
+    assert loaded.inbound_enabled is True
+    assert loaded.enabled is False
+
+    tg.set_enabled(True)
+    tg.set_inbound(False)
+    loaded = tg.load()
+    assert loaded.enabled is True
+    assert loaded.inbound_enabled is False
+
+
 def test_token_round_trips_through_key_manager(cfg):
     assert tg.set_token(VALID_TOKEN) is True
     assert tg.get_token() == VALID_TOKEN
