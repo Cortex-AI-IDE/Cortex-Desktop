@@ -78,6 +78,23 @@ MAX_RESULT_SIZE_CHARS = 12_000
 # Context lines to include around matches
 DEFAULT_CONTEXT_LINES = 3
 
+# How much indexing one search call may do before it answers.
+#
+# Both paths used to be unbounded (or unboundable) and both were a trap:
+# a heal of 350 stale entries held one tool call for 19 minutes, and a cold
+# index of this repo meant ~1,225 files at ~3.3s each, about 67 minutes.
+# One file is one network round-trip through the subscription proxy, so a
+# file count alone is not a bound either: 25 files on a bad connection is
+# still 82s. Time is the cap that actually holds, the count keeps a fast
+# connection from over-spending.
+#
+# The index is saved as the loop goes and a capped run stops where it is,
+# so the next search continues instead of starting over.
+COLD_INDEX_BUDGET = 12
+COLD_INDEX_SECONDS = 20.0
+STALE_HEAL_BUDGET = 6
+STALE_HEAL_SECONDS = 20.0
+
 
 # ============================================================
 # UTILITY FUNCTIONS
@@ -194,16 +211,48 @@ def _read_file_context(file_path: str, line_number: int, context_lines: int) -> 
         return ""
 
 
+def _build_index_notice(stats: Dict[str, Any]) -> Optional[str]:
+    """Explain, in the tool result, that the index is still being built.
+
+    A capped run returns answers from a partial index. Saying nothing made
+    a 5%-indexed project look like "this codebase has nothing about X",
+    which is worse than a slow call: the model believes the negative result.
+    """
+    if not isinstance(stats, dict) or not stats.get('capped'):
+        return None
+
+    embedded = stats.get('indexed', 0) or 0
+    skipped = stats.get('skipped', 0) or 0
+    errors = stats.get('errors', 0) or 0
+    total = stats.get('total_candidates')
+    pending = None
+    if isinstance(total, int) and total > 0:
+        pending = max(0, total - embedded - skipped - errors)
+
+    reason = stats.get('stop_reason') or 'max_files'
+    where = f", {pending} of {total} still pending" if pending else ""
+    return (
+        f"Index incomplete: {embedded} file(s) embedded in this call{where} "
+        f"(stopped by {reason}). These results cover only the indexed part, so "
+        f"treat a negative result as unproven. Run the search again to index "
+        f"more; the work is saved as it goes."
+    )
+
+
 def _format_results_for_llm(
     results: List[Dict[str, Any]],
     output_mode: OutputMode,
     query: str,
     index_stats: Optional[Dict[str, Any]] = None,
     search_time_ms: Optional[float] = None,
+    index_notice: Optional[str] = None,
 ) -> str:
     """Format search results into a human-readable string for the LLM."""
     if not results:
-        return f"No results found for '{query}'."
+        # The partial-index notice matters most here: an empty result set from
+        # a barely-built index must not read as "not in this codebase".
+        empty = f"No results found for '{query}'."
+        return f"{empty}\n\n{index_notice}" if index_notice else empty
 
     lines = []
     lines.append(f"# Semantic Search Results for: '{query}'")
@@ -216,6 +265,8 @@ def _format_results_for_llm(
         lines.append(f"Index: {index_stats.get('files_indexed', 0)} files indexed "
                       f"(model: {index_stats.get('model', 'unknown')}, "
                       f"{index_stats.get('dimensions', '?')} dims)")
+    if index_notice:
+        lines.append(f"⚠ {index_notice}")
     lines.append("")
 
     if output_mode == 'files_with_matches':
@@ -485,9 +536,23 @@ class SementicSearchTool:
             # now (incremental: only those are re-embedded). Their vectors
             # cannot be scored against this query, so skipping this left
             # them unfindable.
+            #
+            # Every branch is bounded, including the cold one. A cold index is
+            # the caller's first search, so it gets the larger of the two
+            # budgets, but "the caller asked for it" is not a reason to hold a
+            # tool call for 67 minutes; the index saves as it goes and the
+            # next search continues. A genuinely full rebuild of a large
+            # project belongs to start_background_indexing(force=True), not to
+            # a search.
             _stale = getattr(searcher, "stale_model_count", None)
-            if (force_reindex or not searcher.embeddings_cache
-                    or (callable(_stale) and _stale() > 0)):
+            _stale_count = _stale() if callable(_stale) else 0
+            _cold = force_reindex or not searcher.embeddings_cache
+            index_notice = None
+            if _cold or _stale_count > 0:
+                _budget, _seconds = (
+                    (COLD_INDEX_BUDGET, COLD_INDEX_SECONDS) if _cold
+                    else (STALE_HEAL_BUDGET, STALE_HEAL_SECONDS)
+                )
                 if progress_callback:
                     try:
                         progress_callback("Indexing project (this may take a moment on first run)...")
@@ -497,8 +562,14 @@ class SementicSearchTool:
                 # Run indexing in a thread to avoid blocking
                 loop = asyncio.get_running_loop()
                 stats = await loop.run_in_executor(
-                    None, lambda: searcher.index_project(force=force_reindex)
+                    None,
+                    lambda: searcher.index_project(
+                        force=force_reindex,
+                        max_files=_budget,
+                        max_seconds=_seconds,
+                    ),
                 )
+                index_notice = _build_index_notice(stats)
             else:
                 stats = searcher.get_stats()
         
@@ -567,6 +638,7 @@ class SementicSearchTool:
             query,
             index_stats=stats,
             search_time_ms=_search_time_ms,
+            index_notice=index_notice,
         )
         
         output = {
@@ -577,6 +649,7 @@ class SementicSearchTool:
             "results": formatted_results,
             "content": formatted_content,
             "indexStats": stats,
+            "indexNotice": index_notice,
             "searchTimeMs": round(_search_time_ms, 1),
         }
         

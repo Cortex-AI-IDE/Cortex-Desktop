@@ -284,3 +284,154 @@ def test_subscribed_threshold_returns_in_project_results(tmp_path):
 
     assert [r.file_path for r in results] == [str(inside_file)]
     assert results[0].similarity == pytest.approx(0.5, abs=1e-4)
+
+
+# ============================================================
+# 6. A heal of stale entries must be bounded
+# ============================================================
+
+def test_index_project_stops_at_max_files_and_reports_capped(tmp_path):
+    """One call must not re-embed a whole project.
+
+    Measured on this repo: 161 entries came from another embedding model,
+    3.3s each. Unbounded, the heal inside a single search held that call for
+    ~9 minutes (and 19 minutes at 350 entries), which reads as a hang. The
+    cap spreads the same work across calls, so this test pins both the bound
+    and the fact that progress is reported rather than silently truncated.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    for i in range(5):
+        (project / f"mod_{i}.py").write_text(f"VALUE = {i}\n", encoding="utf-8")
+
+    searcher = make_searcher(project)
+
+    stats = searcher.index_project(max_files=2)
+
+    assert stats["indexed"] == 2, "the cap must bound real embedding work"
+    assert stats.get("capped") is True, "a truncated run must say so"
+    assert len(searcher.embeddings_cache) == 2
+
+    # Re-entering continues from the saved index instead of starting over.
+    rest = searcher.index_project(max_files=2)
+
+    assert rest["indexed"] == 2
+    assert len(searcher.embeddings_cache) == 4
+
+
+def test_index_project_without_max_files_is_not_capped(tmp_path):
+    """The default stays unbounded, so an explicit rebuild still finishes."""
+    project = tmp_path / "project"
+    project.mkdir()
+    for i in range(3):
+        (project / f"mod_{i}.py").write_text(f"VALUE = {i}\n", encoding="utf-8")
+
+    searcher = make_searcher(project)
+
+    stats = searcher.index_project()
+
+    assert stats["indexed"] == 3
+    # Present but False: a stable shape means callers never need getattr.
+    assert stats["capped"] is False
+    assert stats["stop_reason"] is None
+    assert len(searcher.embeddings_cache) == 3
+
+
+def test_index_project_stops_at_max_seconds(tmp_path):
+    """A file count is not a time bound: one file is one network round-trip.
+
+    Measured on this repo, an embedding call through the subscription proxy
+    took 3.3s, so a 25-file cap was still 82s on a slow day. The time cap is
+    what actually holds, and it must name itself so the caller can tell a
+    fast cap (max_files) from a slow-network cap (max_seconds).
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    for i in range(5):
+        (project / f"mod_{i}.py").write_text(f"VALUE = {i}\n", encoding="utf-8")
+
+    searcher = make_searcher(project)
+
+    # Zero seconds: the first file is embedded, then the deadline is already
+    # past. Deterministic, and no test sleeps.
+    stats = searcher.index_project(max_seconds=0.0)
+
+    assert stats["indexed"] == 1, "one file, then the deadline stops the run"
+    assert stats["capped"] is True
+    assert stats["stop_reason"] == "max_seconds"
+    assert stats["total_candidates"] == 5, "the caller needs to know what is pending"
+
+
+def test_index_project_reports_total_candidates_when_capped(tmp_path):
+    """A capped run must say how much it did not reach, not just what it did."""
+    project = tmp_path / "project"
+    project.mkdir()
+    for i in range(4):
+        (project / f"mod_{i}.py").write_text(f"VALUE = {i}\n", encoding="utf-8")
+
+    searcher = make_searcher(project)
+
+    stats = searcher.index_project(max_files=1)
+
+    assert stats["stop_reason"] == "max_files"
+    assert stats["total_candidates"] == 4
+    pending = stats["total_candidates"] - stats["indexed"] - stats["skipped"] - stats["errors"]
+    assert pending == 3
+
+
+# ============================================================
+# 7. A partial index must say so in the tool result
+# ============================================================
+
+def test_index_notice_is_silent_when_the_run_completed():
+    """A complete index must not carry a warning, or it means nothing."""
+    from src.agent.src.tools.sementic_search.sementic_search_tool import (
+        _build_index_notice,
+    )
+
+    assert _build_index_notice({"capped": False, "indexed": 9}) is None
+    assert _build_index_notice({}) is None
+    assert _build_index_notice(None) is None
+
+
+def test_index_notice_counts_what_is_pending():
+    """The model must be able to tell 'not indexed yet' from 'not here'."""
+    from src.agent.src.tools.sementic_search.sementic_search_tool import (
+        _build_index_notice,
+    )
+
+    notice = _build_index_notice({
+        "capped": True,
+        "stop_reason": "max_seconds",
+        "indexed": 12,
+        "skipped": 30,
+        "errors": 1,
+        "total_candidates": 1200,
+    })
+
+    assert "incomplete" in notice.lower()
+    assert "1157 of 1200 still pending" in notice, notice
+    assert "max_seconds" in notice
+    assert "unproven" in notice, "a negative result from a partial index is not evidence"
+
+
+def test_empty_results_still_carry_the_partial_index_notice():
+    """'No results' from a 5%-built index must not read as 'not in this repo'."""
+    from src.agent.src.tools.sementic_search.sementic_search_tool import (
+        _format_results_for_llm,
+    )
+
+    notice = _build_notice_for_test()
+    text = _format_results_for_llm([], "ranked", "payment retry", index_notice=notice)
+
+    assert "No results found" in text
+    assert "Index incomplete" in text
+
+
+def _build_notice_for_test():
+    from src.agent.src.tools.sementic_search.sementic_search_tool import (
+        _build_index_notice,
+    )
+
+    return _build_index_notice({"capped": True, "indexed": 1, "total_candidates": 500})
+
