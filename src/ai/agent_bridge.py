@@ -3511,21 +3511,13 @@ class AgentWorker(QThread):
                     t for t in (self.bridge.current_todos or [])
                     if str(t.get('status', '')).upper() in ('PENDING', 'IN_PROGRESS')
                 ]
-                _lines = ["Continue the task. Remaining todos:"]
-                for _t in _pending:
-                    _lines.append(f"- {_t.get('content', _t.get('description', ''))}")
-                # Include tool availability so the agent knows which tools are usable
-                _disabled_set = getattr(self.bridge, '_disabled_tools', set())
-                _disabled_list = sorted(_disabled_set) if _disabled_set else []
-                _tool_info = ''
-                if _disabled_list:
-                    _tool_info = (
-                        f'\n\nNote: Some tools have been used extensively: {", ".join(_disabled_list)}. '
-                        f'You may still use them if needed for specific information.'
-                    )
-                _continuation_msg = '\n'.join(_lines) + _tool_info + (
-                    '\n\n[Conversation was auto-compacted and saved to a checkpoint. '
-                    'Continue from your checkpoint above. Re-read files if needed to verify context.]'
+                # Asks the model to tick off finished todos first, and lists
+                # tools that are rate-limited (src/ai/todo_progress.py).
+                from src.ai.todo_progress import continuation_message
+                _continuation_msg = continuation_message(
+                    _pending,
+                    getattr(self.bridge, '_disabled_tools', None) or (),
+                    compacted=bool(getattr(self.bridge, '_auto_continue_did_compact', False)),
                 )
                 log.info(f"[WORKER] Auto-continuing (cycle {self.bridge._auto_continue_cycle}) with continuation message ({len(_continuation_msg)} chars)")
                 response = await self.bridge.call_llm(
@@ -8161,14 +8153,22 @@ Required behavior:
                     _mutations_this_cycle = max(0, _current_session_mutations - self._last_cycle_session_mutations)
                     self._last_cycle_session_mutations = _current_session_mutations
 
-                    # Stale if: same content OR same/higher count of pending items
+                    # Stale if: same content OR same/higher count of pending
+                    # items, AND nothing was changed this cycle. A cycle of real
+                    # edits is progress even when the model has not ticked its
+                    # list yet (see src/ai/todo_progress.py for the false
+                    # cancel this caused).
+                    from src.ai.todo_progress import next_stale_count
                     _content_same = (_cur_fingerprint == self._last_pending_ids)
                     _count_same = (_cur_count >= getattr(self, '_last_pending_count', 0))
-                    # Both checks together = high confidence of no progress
-                    if _content_same or (_count_same and self._continue_cycle_count > 0):
-                        self._continue_cycle_count += 1
-                    else:
-                        self._continue_cycle_count = 1
+                    self._continue_cycle_count = next_stale_count(
+                        self._continue_cycle_count, content_same=_content_same,
+                        count_same=_count_same, mutations=_mutations_this_cycle)
+                    log.info(
+                        f'[BRIDGE] Cycle end: {_cur_count} todo(s) open, '
+                        f'{_mutations_this_cycle} mutation(s) this cycle, '
+                        f'stale count {self._continue_cycle_count}/{self._MAX_STALE_CYCLES}'
+                    )
                     self._last_pending_ids = _cur_fingerprint
                     self._last_pending_count = _cur_count
 
@@ -8251,6 +8251,9 @@ Required behavior:
                             # cycle, and left the same todos open until the run stopped.
                             _used, _limit = self._context_pressure(messages)
                             _compact_now = _used >= _limit
+                            # The continuation message only claims a compaction
+                            # that happened.
+                            self._auto_continue_did_compact = _compact_now
                             self._safe_emit(
                                 self.agent_status_update,
                                 'auto-continue',
@@ -8288,9 +8291,11 @@ Required behavior:
                             #     eventually fire when the AI spins on the same
                             #     todos without resolving them.
                             #
-                            #     _continue_cycle_count and _last_pending_ids
-                            #     are only reset when the fingerprint changes
-                            #     (see else-branch at line ~3660).
+                            #     _continue_cycle_count is reset by a cycle that
+                            #     changed something or a todo list that changed
+                            #     (todo_progress.next_stale_count); a run that
+                            #     keeps editing is bounded by
+                            #     _MAX_AUTO_CONTINUE_CYCLES instead.
                         # ── Reset circuit breaker state between cycles ──
                         # Tool failures in previous cycle are often due to context
                         # exhaustion, not real tool problems. A fresh cycle with
@@ -10229,8 +10234,11 @@ Required behavior:
                                 "and answer using only your existing knowledge."
                             )
                             log.info(f"[SUBSCRIPTION] Blocked {tool_name}, no subscription")
-                            self._safe_emit(self.tool_activity, activity,
-                                self._build_activity_info(activity, tool_name, args, _msg, "error"), "error")
+                            # No card emitted here: _execute_single_tool_inner
+                            # draws the error card for any failed result. An
+                            # emit here named an undefined `activity`, and the
+                            # NameError, swallowed below, let the blocked
+                            # tool run anyway.
                             return ToolResult(tool_id=tool_id, result=None, success=False, error=_msg)
                 except Exception:
                     _swallow()  # If check fails, let the tool try (it has its own fallback)

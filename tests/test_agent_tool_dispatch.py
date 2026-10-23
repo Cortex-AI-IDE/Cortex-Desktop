@@ -381,3 +381,31 @@ def test_git_failure_is_reported_not_swallowed(bridge: CortexAgentBridge) -> Non
     assert payload["exit_code"] != 0
     assert "not-a-real-subcommand" in payload["stderr"].lower() or \
         "not-a-real-subcommand" in payload["output"].lower()
+
+
+# --------------------------------------------------------------------------
+# subscription gate
+# --------------------------------------------------------------------------
+def test_web_tool_without_subscription_is_blocked_not_run(
+    bridge: CortexAgentBridge, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The block branch named an undefined `activity`; the NameError was
+    swallowed by the gate's own except, so the blocked tool ran anyway."""
+    import src.ai.agent_bridge as ab
+    import src.core.cortex_api as api
+
+    class _NoSub:
+        def has_subscription(self) -> bool:
+            return False
+
+    monkeypatch.setattr(api, "get_api_client", lambda: _NoSub())
+    monkeypatch.setattr(ab, "_mcp_web_tool_names", lambda: [])
+    ran = []
+    monkeypatch.setattr(bridge, "resolve_tool_handler",
+                        lambda name: ran.append(name) or None)
+
+    result = call(bridge, "WebFetch", {"url": "https://example.com"})
+
+    assert not result.success
+    assert "subscription" in (result.error or "")
+    assert ran == [], "the gate let a blocked tool through to dispatch"
