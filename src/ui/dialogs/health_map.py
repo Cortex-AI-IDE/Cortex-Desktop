@@ -422,7 +422,7 @@ class HealthMapDialog(QDialog):
             log.warning("[HealthMap] safety fallback triggered, page load stalled")
             self._load_html_fallback()
         except RuntimeError:
-            pass  # dialog closed before the timer fired
+            pass  # silent-ok: the dialog closed before the timer fired
 
     def _on_page_loaded(self, ok: bool):
         # BUG HISTORY (mermaid/chat panel): gating everything behind ok=True
@@ -438,7 +438,7 @@ class HealthMapDialog(QDialog):
                 from src.ui.render_health import probe_page
                 probe_page(self._page, "health")
             except Exception:
-                pass
+                pass  # silent-ok: render probing is diagnostics and must not block the page
             if self._pending_js:
                 queued, self._pending_js = self._pending_js, []
                 log.info(f"[HealthMap] replaying {len(queued)} queued JS call(s)")
@@ -449,7 +449,7 @@ class HealthMapDialog(QDialog):
                 from src.ui.render_health import record_render_failure
                 record_render_failure("health_map.html", "loadFinished(False)")
             except Exception:
-                pass
+                pass  # silent-ok: render probing is diagnostics and must not block the page
 
         self._apply_theme()
         self._bind_web_channel()
@@ -483,7 +483,7 @@ class HealthMapDialog(QDialog):
         try:
             self._push_state_to_page(payload)
         except RuntimeError:
-            pass  # dialog closed while the timer was in flight
+            pass  # silent-ok: the dialog closed while the timer was in flight
 
     def _push_state_to_page(self, payload: str):
         if not self._page_loaded:
@@ -580,7 +580,7 @@ class HealthMapDialog(QDialog):
                 if w.__class__.__name__ in ("MainWindow", "CortexMainWindow"):
                     return w
         except Exception:
-            pass
+            pass  # silent-ok: no main window found by walking up; the direct parent is used
         return self.parent()
 
     # -- public API ---------------------------------------------------------

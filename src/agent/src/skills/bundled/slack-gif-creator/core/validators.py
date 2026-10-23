@@ -46,7 +46,7 @@ def validate_gif(
                     img.seek(frame_count)
                     frame_count += 1
             except EOFError:
-                pass
+                pass  # silent-ok: EOF is how the frame walk terminates
 
             # Get duration
             try:

@@ -131,7 +131,7 @@ def enumerate_gpus() -> List[Dict]:
                             "date_raw": _query_raw(dev, "DriverDate"),
                         })
                 except OSError:
-                    continue
+                    continue  # silent-ok: this display adapter could not be queried
     except Exception:
         return []
     return gpus
@@ -158,7 +158,7 @@ def parse_driver_date(raw) -> Optional[_dt.datetime]:
             try:
                 return _dt.datetime.strptime(text, fmt)
             except ValueError:
-                continue
+                continue  # silent-ok: this format does not match; try the next one
     return None
 
 

@@ -99,7 +99,7 @@ def _write_cache(data: dict) -> None:
         tmp.write_text(json.dumps(data), encoding="utf-8")
         tmp.replace(_CACHE_PATH)
     except Exception:  # noqa: BLE001
-        pass
+        pass  # silent-ok: the cache is an optimisation; a failed write costs one refetch
 
 
 def accepted_model_ids(provider: Any) -> Optional[Set[str]]:

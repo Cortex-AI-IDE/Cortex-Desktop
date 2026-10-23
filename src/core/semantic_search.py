@@ -123,8 +123,8 @@ class SemanticSearch:
                 self._cloud_check_time = now
                 return True
         except Exception:
-            pass
-        
+            pass  # silent-ok: no cloud access, and the flag below records that
+
         self._has_cloud_access = False
         self._cloud_check_time = now
         return False
@@ -258,7 +258,7 @@ class SemanticSearch:
                     ut = get_usage_tracker()
                     ut.record_embedding_tokens(result.tokens_used)
                 except Exception:
-                    pass
+                    pass  # silent-ok: usage accounting is optional and must not fail an embed
 
             # Store in cache (packed float32, see _pack_embedding)
             self.embeddings_cache[file_path] = _pack_embedding(result.embedding)
@@ -438,7 +438,7 @@ class SemanticSearch:
                     if os.path.getsize(full) == 0:
                         continue
                 except OSError:
-                    continue
+                    continue  # silent-ok: a file that cannot be stat'd is not indexed
                 files_to_index.append(full)
 
         # Rate limit: small delay between API calls to avoid flooding
@@ -938,7 +938,7 @@ class SemanticSearch:
                 self.index_path.unlink()
                 log.info(f"Replaced the JSON index with the binary one in {self.index_dir}")
             except OSError:
-                pass
+                pass  # silent-ok: the old JSON index is already gone
 
         log.info(f"Saved index with {len(keys)} embeddings to {npy_path}")
 
@@ -962,7 +962,7 @@ class SemanticSearch:
             try:
                 p.unlink()
             except OSError:
-                pass
+                pass  # silent-ok: the stale binary shard is already gone
 
         log.info(f"Saved index with {len(self.embeddings_cache)} embeddings to {self.index_path}")
 
@@ -990,7 +990,7 @@ class SemanticSearch:
                     try:
                         os.replace(p, str(p) + ".corrupt")
                     except OSError:
-                        pass
+                        pass  # silent-ok: the rebuild below replaces the index either way
                 self.embeddings_cache = {}
                 self.file_metadata = {}
                 if not self.index_path.exists():
@@ -1020,7 +1020,7 @@ class SemanticSearch:
             try:
                 os.replace(self.index_path, str(self.index_path) + ".corrupt")
             except OSError:
-                pass
+                pass  # silent-ok: the rebuild below replaces the index either way
             self.embeddings_cache.clear()
         except Exception as e:
             log.error(f"Failed to load index: {e}")

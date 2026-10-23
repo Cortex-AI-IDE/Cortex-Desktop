@@ -229,7 +229,7 @@ def get_provider_thinking_config(provider: str) -> dict:
             base.update(custom)
             return base
     except Exception:
-        pass
+        pass  # silent-ok: falls back to the static defaults below
     return PROVIDER_THINKING_DEFAULTS.get(provider, {})
 
 
@@ -250,7 +250,7 @@ def get_thinking_loop_budget() -> int:
         if isinstance(custom_budget, int) and custom_budget > 0:
             return custom_budget
     except Exception:
-        pass
+        pass  # silent-ok: falls back to the module default below
     return THINKING_LOOP_DETECTION_BUDGET
 
 
@@ -412,7 +412,7 @@ def model_supports_thinking(provider: str, model_name: str) -> bool:
             if answer is not None:
                 return answer
     except Exception:
-        pass  # never let the remote layer break thinking detection
+        pass  # silent-ok: never let the remote layer break thinking detection
 
     # Check if provider is in our database
     if provider not in THINKING_SUPPORTED_MODELS:

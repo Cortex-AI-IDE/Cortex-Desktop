@@ -1345,7 +1345,7 @@ class CodeEditor(QPlainTextEdit):
             # Temporarily disconnect content_modified
             self.document().contentsChanged.disconnect(self.content_modified)
         except (TypeError, RuntimeError):
-            # Wasn't connected
+            # silent-ok: the signal was not connected, so there is nothing to disconnect
             pass
         
         # Set text - this WILL trigger highlightBlock() because we're not blocking
@@ -1356,7 +1356,7 @@ class CodeEditor(QPlainTextEdit):
         try:
             self.document().contentsChanged.connect(self.content_modified)
         except (TypeError, RuntimeError):
-            pass
+            pass  # silent-ok: reconnecting is best effort; the editor still holds the text
         
         log.debug(f"set_content: {len(text)} chars, triggering highlighting")
         
@@ -1818,7 +1818,7 @@ class CodeEditor(QPlainTextEdit):
                                 break
                             p = p.parent()
                     except Exception:
-                        pass
+                        pass  # silent-ok: no file path resolved; the copy still emits
                 self.code_copied.emit(sel_text, fp, sl, el)
         if key == Qt.Key.Key_Escape and self._inline_overlay.isVisible():
             self._hide_inline_overlay()
@@ -1939,7 +1939,7 @@ class CodeEditor(QPlainTextEdit):
                 if _t.time() - mw._last_stream_time < 2.0:
                     return
         except Exception:
-            pass
+            pass  # silent-ok: no main window to ask, so treat the editor as idle
 
         pos = self._last_hover_pos
         cursor = self.cursorForPosition(pos)

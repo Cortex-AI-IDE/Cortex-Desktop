@@ -34,4 +34,4 @@ try:
             binaries.append((os.path.join(winpty_dir, f), 'winpty'))
             
 except ImportError:
-    pass
+    pass  # silent-ok: winpty is not installed, so there is nothing to bundle

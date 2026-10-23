@@ -740,7 +740,7 @@ class OpenRouterProvider(BaseProvider):
                           for k, v in payload.items()}
                 log.info(f"[{self.DISPLAY_NAME}] AUTO payload keys: {_shape}")
             except Exception:
-                pass
+                pass  # silent-ok: payload diagnostics only
 
         # Apply persisted credit cap from prior 402 responses (survives across turns)
         if self._openrouter_credit_cap is not None:
@@ -783,7 +783,7 @@ class OpenRouterProvider(BaseProvider):
                     try:
                         retry_callback(attempt + 1, max_retries + 1, "error")
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken retry callback must not stop the retry
                 time.sleep(backoff)
 
             try:
@@ -833,7 +833,7 @@ class OpenRouterProvider(BaseProvider):
                             try:
                                 _raw_sock.settimeout(seconds)
                             except Exception:
-                                pass
+                                pass  # silent-ok: the socket may already be closed; the read proceeds
 
                     try:
                         _last_chunk_ts = time.time()
@@ -996,7 +996,7 @@ class OpenRouterProvider(BaseProvider):
                                 if _raw_sock2 is not None:
                                     _raw_sock2.settimeout(_saved_sock_timeout)
                             except Exception:
-                                pass
+                                pass  # silent-ok: restoring the timeout on a closed socket is harmless
 
                 else:
                     # Non-streaming
@@ -1069,7 +1069,7 @@ class OpenRouterProvider(BaseProvider):
                     try:
                         _resp_body = (e.response.text or "")[:1000]
                     except Exception:
-                        pass
+                        pass  # silent-ok: the error body is only used for quota detection
 
                 # ── Quota / credits exhausted, smart handling ────────────────────
                 _is_quota = any(kw in _resp_body.lower() for kw in (
@@ -1103,7 +1103,7 @@ class OpenRouterProvider(BaseProvider):
                         _err_json = json.loads(_resp_body)
                         _clean_msg = _err_json.get('error', {}).get('message', _resp_body)
                     except Exception:
-                        pass
+                        pass  # silent-ok: falls back to the raw body as the message
                     log.error(f"[{self.DISPLAY_NAME}] Quota/credits exhausted: %s", _clean_msg)
                     raise RuntimeError(
                         f"QUOTA_EXHAUSTED: {self.DISPLAY_NAME} credits insufficient, "
@@ -1183,7 +1183,7 @@ class OpenRouterProvider(BaseProvider):
                     if e.response is not None:
                         detail = (e.response.text or "")[:1000]
                 except Exception:
-                    pass
+                    pass  # silent-ok: the detail text is optional in the raised message
                 raise Exception(
                     f"OpenRouter request failed: {e}" + (f" | {detail}" if detail else "")
                 )

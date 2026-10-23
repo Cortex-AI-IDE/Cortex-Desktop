@@ -125,7 +125,7 @@ class PosixPty:
             packed = struct.pack("HHHH", int(rows), int(cols), 0, 0)
             fcntl.ioctl(self._fd, termios.TIOCSWINSZ, packed)
         except OSError:
-            pass
+            pass  # silent-ok: the pty may already be closed; the resize is cosmetic
 
     def terminate(self, force: bool = False) -> None:
         """Hang up the shell, the processes it started, and close the terminal."""
@@ -144,7 +144,7 @@ class PosixPty:
         try:
             os.close(self._fd)
         except OSError:
-            pass
+            pass  # silent-ok: the fd is already closed
 
     def _signal(self, sig: int) -> None:
         """Signal the whole session, so background children go too."""
@@ -154,7 +154,7 @@ class PosixPty:
             try:
                 os.kill(self._pid, sig)
             except OSError:
-                pass
+                pass  # silent-ok: the process is already gone
 
 
 class PtyProcess:

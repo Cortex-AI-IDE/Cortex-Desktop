@@ -139,7 +139,7 @@ def relative_label(path: Path, roots: list[Path]) -> str:
         try:
             return f"{resolved.name}/{path.relative_to(resolved)}"
         except ValueError:
-            continue
+            continue  # silent-ok: not under this ancestor; try the next one
     return str(path)
 
 
@@ -338,7 +338,7 @@ def git_history_matches(
                 input_bytes=reference_path.read_bytes(),
             ).decode("ascii").strip()
         except (OSError, subprocess.CalledProcessError):
-            continue
+            continue  # silent-ok: a path git cannot hash is left out of the history map
         paths = sorted(historical_paths.get(oid, set()))
         if paths:
             matches.append(

@@ -97,12 +97,12 @@ def parse_ports(spec: Any) -> List[int]:
             try:
                 ports.extend(range(int(lo), int(hi) + 1))
             except ValueError:
-                continue
+                continue  # silent-ok: a malformed range is skipped
         else:
             try:
                 ports.append(int(chunk))
             except ValueError:
-                continue
+                continue  # silent-ok: a malformed port token is skipped
     return sorted({p for p in ports if 1 <= p <= 65535})
 
 
@@ -305,7 +305,7 @@ def resolve_dns(host: str, project_root: Optional[str] = None) -> ScanReport:
         try:
             ip = ipaddress.ip_address(addr)
         except ValueError:
-            continue
+            continue  # silent-ok: not a literal address
         if ip.is_private and not ip.is_loopback:
             report.add(Finding(
                 title=f"{target} resolves to a private address ({addr})",
@@ -400,7 +400,7 @@ def inspect_tls(
                     remediation="Renew now; add automated renewal with alerting.",
                 ))
         except Exception:
-            pass
+            pass  # silent-ok: this certificate could not be parsed; the report carries on
     else:
         report.add(Finding(
             title="TLS certificate could not be validated",
@@ -633,7 +633,7 @@ def _http_get(url: str, timeout: float = 10.0) -> Tuple[Optional[int], Dict[str,
         try:
             body = exc.read(65536).decode("utf-8", errors="replace")
         except Exception:
-            pass
+            pass  # silent-ok: no error body; the status and headers still return
         return exc.code, dict(exc.headers or {}), body
     except Exception as exc:
         log.info(f"[RECON] GET {url} failed: {exc}")

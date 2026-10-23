@@ -939,7 +939,7 @@ def normalize_table_markdown(text: str, timeout: Optional[float] = 1.0) -> str:
         try:
             _result[0] = _run_table_pipeline(text)
         except Exception:
-            pass  # keep original text on failure
+            pass  # silent-ok: keeps the original text when the pipeline fails
         finally:
             _done.set()
 

@@ -408,7 +408,7 @@ class CrossProjectMemoryManager:
                     source_path = p
                     break
             except Exception:
-                continue
+                continue  # silent-ok: an unprobeable root is simply not the source
 
         if not source_path:
             log.error(f"[CrossProject] Project memory not found: {filename}")
@@ -455,7 +455,7 @@ class CrossProjectMemoryManager:
             try:
                 total_size += os.path.getsize(mem.file_path)
             except:
-                pass
+                pass  # silent-ok: a memory file that cannot be stat'd adds no bytes
         
         return {
             'total': len(memories),

@@ -324,7 +324,7 @@ def _notify_shell() -> None:
         # SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH
         ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x1000, None, None)
     except Exception:
-        pass
+        pass  # silent-ok: notifying the shell is cosmetic; the registry change already landed
 
 
 def _delete_tree(root, subkey: str) -> None:
@@ -339,7 +339,7 @@ def _delete_tree(root, subkey: str) -> None:
                 _delete_tree(root, subkey + "\\" + child)
         winreg.DeleteKey(root, subkey)
     except FileNotFoundError:
-        pass
+        pass  # silent-ok: the key is already gone
 
 
 def register_windows_user(exe: str, context_menu: bool = True) -> int:
@@ -377,7 +377,7 @@ def unregister_windows_user() -> int:
                     continue
                 removed += 1
             except OSError:
-                pass  # already gone, or not empty
+                pass  # silent-ok: already gone, or a directory that is not empty
     _notify_shell()
     return removed
 

@@ -274,7 +274,7 @@ class SymbolExtractor(ast.NodeVisitor):
                 lines = self.source_lines[node.lineno - 1:node.end_lineno]
                 return '\n'.join(lines)
         except Exception:
-            pass
+            pass  # silent-ok: no source text for this node; the caller treats None as absent
         return None
     
     def visit_ClassDef(self, node):

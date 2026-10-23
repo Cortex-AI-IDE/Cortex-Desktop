@@ -306,7 +306,7 @@ def _scratch_file_args(tool: str, args: Dict[str, Any],
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
         except OSError:
-            continue
+            continue  # silent-ok: the redirect cannot land here, so this arg keeps its value
         changed = dict(args) if changed is None else changed
         changed[key] = target
     return changed if changed is not None else args
@@ -346,11 +346,11 @@ def _npx_cache_dirs(package: Optional[str]) -> List[Path]:
             try:
                 deps = json.loads((d / "package.json").read_text(encoding="utf-8")).get("dependencies") or {}
             except Exception:
-                continue
+                continue  # silent-ok: no readable manifest, so not this package
             if package in deps:
                 out.append(d)
     except OSError:
-        pass
+        pass  # silent-ok: an unlistable node_modules yields nothing
     return out
 
 
@@ -361,7 +361,7 @@ def _dir_size(d: Path) -> int:
             try:
                 total += os.lstat(os.path.join(root, f)).st_size
             except OSError:
-                pass
+                pass  # silent-ok: a file that vanished adds no size
     return total
 
 
@@ -389,7 +389,7 @@ def _remove_keys(path: Path, keys: List[str]) -> None:
     try:
         shutil.copymode(path, tmp)
     except OSError:
-        pass
+        pass  # silent-ok: the mode copy is cosmetic; the replace below still lands
     os.replace(tmp, path)
 
 
@@ -987,7 +987,7 @@ class MCPManager:
                         await asyncio.wait_for(state.stop_event.wait(), delay)
                         return  # stop() was called while we were waiting to retry
                     except asyncio.TimeoutError:
-                        continue  # delay elapsed, try again
+                        continue  # silent-ok: the retry delay elapsed, so try again
                 else:
                     log.warning(f"[MCP] '{cfg.name}' failed permanently after "
                                 f"{attempt} attempts: {reason}")
@@ -1436,7 +1436,7 @@ class MCPManager:
                     continue
                 servers = (json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
             except Exception:
-                continue
+                continue  # silent-ok: an unreadable client config is not this file
             keys = [k for k in servers if _sanitize(k) == name]
             if keys:
                 hits.append((path, src, keys))

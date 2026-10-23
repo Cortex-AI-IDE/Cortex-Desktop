@@ -268,7 +268,7 @@ class ScopeGuard:
                 if ip in net:
                     return ScopeDecision(True, host, "loopback", "default-loopback")
         except ValueError:
-            pass  # a hostname, not a literal IP
+            pass  # silent-ok: a hostname, not a literal IP
 
         # 3. A declared target that has not expired. A match on the NAME is
         #    not the same as authorisation to reach the ADDRESS, so resolve
@@ -316,7 +316,7 @@ class ScopeGuard:
             try:
                 ip = ipaddress.ip_address(addr)
             except ValueError:
-                continue
+                continue  # silent-ok: not a literal address
             if _is_loopback(ip) or self._ip_declared(ip, policy):
                 continue
             # Private ranges are denied by default, and a name is not a
@@ -413,12 +413,12 @@ class ScopeGuard:
                         if ip in ipaddress.ip_network(raw, strict=False):
                             return True
                     except ValueError:
-                        continue
+                        continue  # silent-ok: not a network literal; try the address form below
             try:
                 if ip == ipaddress.ip_address(raw):
                     return True
             except ValueError:
-                continue  # a name, not an address
+                continue  # silent-ok: a name, not an address
         return False
 
     def _audit(self, host: str, allowed: bool, reason: str, purpose: str) -> None:
@@ -440,8 +440,8 @@ class ScopeGuard:
                 {"target": host, "reason": reason, "purpose": purpose},
             )
         except Exception:
-            # Auditing must never be the thing that raises instead of the
-            # refusal itself. The log line above is the fallback record.
+            # silent-ok: auditing must never be the thing that raises instead of
+            # the refusal itself. The log line above is the fallback record.
             pass
 
 

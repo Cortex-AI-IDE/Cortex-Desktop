@@ -201,7 +201,7 @@ def _iter_files(root: Path) -> Iterable[Path]:
                 if path.stat().st_size > MAX_FILE_BYTES:
                     continue
             except OSError:
-                continue
+                continue  # silent-ok: a file that cannot be stat'd is skipped
             seen += 1
             yield path
 
@@ -223,7 +223,7 @@ def scan_secrets(
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except (OSError, UnicodeDecodeError):
-            continue
+            continue  # silent-ok: an unreadable file is not scanned
         files_scanned += 1
         rel = _rel(path, base)
 
@@ -407,7 +407,7 @@ def check_hardening(root: str, max_findings: int = 200) -> ScanReport:
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except (OSError, UnicodeDecodeError):
-            continue
+            continue  # silent-ok: an unreadable file is not scanned
         files_scanned += 1
         rel = _rel(path, base)
         lines = text.splitlines()

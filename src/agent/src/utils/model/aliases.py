@@ -134,7 +134,7 @@ def resolveAlias(alias: str) -> Optional[str]:
         if remote:
             return remote
     except Exception:
-        pass  # remote layer unavailable (offline, import error): built-in wins
+        pass  # silent-ok: remote layer unavailable (offline, import error); built-in wins
     return ALIAS_MAP.get(alias)
 
 
@@ -167,7 +167,7 @@ def resolveOrPassthrough(modelInput: str) -> str:
         if remote:
             return remote
     except Exception:
-        pass  # never let the remote layer break alias resolution
+        pass  # silent-ok: never let the remote layer break alias resolution
     return ALIAS_MAP.get(modelInput, modelInput)
 
 

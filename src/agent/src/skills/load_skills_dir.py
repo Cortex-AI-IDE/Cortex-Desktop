@@ -929,7 +929,7 @@ async def discoverSkillDirsForPaths(
                         continue
                     new_dirs.append(skill_dir)
                 except Exception:
-                    # Directory doesn't exist, already recorded above, continue
+                    # silent-ok: the directory is already recorded as missing above
                     pass
 
             # Move to parent
@@ -1110,5 +1110,5 @@ try:
         'parseSkillFrontmatterFields': parseSkillFrontmatterFields,
     })
 except (ImportError, Exception):
-    # MCP skill builders not available or failed to register
+    # silent-ok: MCP skill builders are optional and may fail to register
     pass

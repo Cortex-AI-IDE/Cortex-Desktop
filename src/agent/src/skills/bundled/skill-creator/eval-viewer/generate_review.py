@@ -95,7 +95,7 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
                 prompt = metadata.get("prompt", "")
                 eval_id = metadata.get("eval_id")
             except (json.JSONDecodeError, OSError):
-                pass
+                pass  # silent-ok: this candidate has no metadata; the loop tries the next one
             if prompt:
                 break
 
@@ -109,7 +109,7 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
                     if match:
                         prompt = match.group(1).strip()
                 except OSError:
-                    pass
+                    pass  # silent-ok: an unreadable skill file leaves prompt empty; loop tries next
                 if prompt:
                     break
 
@@ -133,7 +133,7 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
             try:
                 grading = json.loads(candidate.read_text())
             except (json.JSONDecodeError, OSError):
-                pass
+                pass  # silent-ok: an unreadable grading file is skipped by the loop
             if grading:
                 break
 
@@ -229,7 +229,7 @@ def load_previous_iteration(workspace: Path) -> dict[str, dict]:
                 if r.get("feedback", "").strip()
             }
         except (json.JSONDecodeError, OSError, KeyError):
-            pass
+            pass  # silent-ok: unreadable previous reviews simply leave the set empty
 
     # Load runs (to get outputs)
     prev_runs = find_runs(workspace)
@@ -297,11 +297,11 @@ def _kill_port(port: int) -> None:
                 try:
                     os.kill(int(pid_str.strip()), signal.SIGTERM)
                 except (ProcessLookupError, ValueError):
-                    pass
+                    pass  # silent-ok: the process is already gone, or the pid did not parse
         if result.stdout.strip():
             time.sleep(0.5)
     except subprocess.TimeoutExpired:
-        pass
+        pass  # silent-ok: the port check is best effort; a hung lsof costs only that check
     except FileNotFoundError:
         print("Note: lsof not found, cannot check if port is in use", file=sys.stderr)
 
@@ -338,7 +338,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 try:
                     benchmark = json.loads(self.benchmark_path.read_text())
                 except (json.JSONDecodeError, OSError):
-                    pass
+                    pass  # silent-ok: a corrupt benchmark only drops the comparison panel
             html = generate_html(runs, self.skill_name, self.previous, benchmark)
             content = html.encode("utf-8")
             self.send_response(200)
@@ -426,7 +426,7 @@ def main() -> None:
         try:
             benchmark = json.loads(benchmark_path.read_text())
         except (json.JSONDecodeError, OSError):
-            pass
+            pass  # silent-ok: a corrupt benchmark only drops the comparison panel
 
     if args.static:
         html = generate_html(runs, skill_name, previous, benchmark)

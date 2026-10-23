@@ -123,7 +123,7 @@ async def aiter_offloaded(
                 if closer is not None:
                     closer()
             except Exception:
-                pass
+                pass  # silent-ok: closing an already-finished generator is harmless
             _put(("end", None))
 
     worker = threading.Thread(target=_pump, name=name, daemon=True)

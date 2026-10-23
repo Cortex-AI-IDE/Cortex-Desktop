@@ -255,7 +255,7 @@ class CortexAPIClient:
             if self._token_file.exists():
                 self._token_file.unlink()
         except Exception:
-            pass
+            pass  # silent-ok: a token file that cannot be removed is overwritten on the next sign-in
 
     # ── HTTP helpers ───────────────────────────────────────────────────
 
@@ -349,7 +349,7 @@ class CortexAPIClient:
             if detail:
                 return f"{detail} (HTTP {resp.status_code})"
         except Exception:
-            pass
+            pass  # silent-ok: falls back to the generic refusal message below
         return f"The server refused the sign-in (HTTP {resp.status_code})."
 
     def _try_refresh(self) -> bool:
@@ -397,7 +397,7 @@ class CortexAPIClient:
             if resp is not None:
                 return resp.status_code == 200
         except Exception:
-            pass
+            pass  # silent-ok: an unreachable check is treated as "not verified"
         return False
 
     def get_login_url(self, state: str = "", redirect_uri: str = "http://127.0.0.1:18923/callback") -> Optional[str]:
@@ -761,7 +761,7 @@ class CortexAPIClient:
                 try:
                     self._http_client.close()
                 except Exception:
-                    pass
+                    pass  # silent-ok: the client is dropped on the next line either way
                 self._http_client = None
 
     # ── Helpers ────────────────────────────────────────────────────────

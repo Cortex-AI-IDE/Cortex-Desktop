@@ -232,7 +232,7 @@ def getEffectiveContextWindowSize(model: str) -> int:
             if parsed > 0:
                 contextWindow = min(contextWindow, parsed)
         except ValueError:
-            pass
+            pass  # silent-ok: a non-numeric override keeps the default window
     
     return contextWindow - reservedTokensForSummary
 
@@ -256,7 +256,7 @@ def getAutoCompactThreshold(model: str) -> int:
                 percentageThreshold = int(effectiveContextWindow * (parsed / 100))
                 return min(percentageThreshold, autocompactThreshold)
         except ValueError:
-            pass
+            pass  # silent-ok: a non-numeric percentage keeps the default threshold
     
     return autocompactThreshold
 
@@ -420,7 +420,7 @@ async def shouldAutoCompact(
             if isContextCollapseEnabled and isContextCollapseEnabled():
                 return False
         except (ImportError, AttributeError):
-            pass
+            pass  # silent-ok: context-collapse support is optional; absent means not enabled
     
     tokenCount = tokenCountWithEstimation(messages) - snipTokensFreed
     threshold = getAutoCompactThreshold(model)

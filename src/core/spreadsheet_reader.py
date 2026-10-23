@@ -402,7 +402,7 @@ def _rgb_hex(color) -> str | None:
         if isinstance(rgb, str) and len(rgb) == 8 and rgb != "00000000":
             return "#" + rgb[2:]
     except Exception:
-        pass
+        pass  # silent-ok: no usable fill colour; the caller treats None as none
     return None
 
 
@@ -456,7 +456,7 @@ def _cell_style(cell) -> dict:
             if not st["al"]:
                 st.pop("al", None)
     except Exception:
-        pass
+        pass  # silent-ok: the style map keeps whatever it resolved
     return st
 
 
@@ -553,7 +553,7 @@ def _build_xlsx(filepath: str) -> dict:
                     "cs": min(mr.max_col - mr.min_col + 1, n_cols - c0),
                 })
         except Exception:
-            pass
+            pass  # silent-ok: a merged range that cannot be read is skipped
 
         sheets.append({
             "name": name, "rows": rows, "merges": merges,

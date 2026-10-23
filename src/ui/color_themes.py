@@ -708,7 +708,7 @@ def remove_listener(callback) -> None:
     try:
         _listeners.remove(callback)
     except ValueError:
-        pass
+        pass  # silent-ok: removing a listener that is not registered is harmless
 
 
 def notify_color_theme_changed() -> None:
@@ -736,4 +736,4 @@ def notify_color_theme_changed() -> None:
         from src.ui.editor_theme import notify_editor_theme_changed
         notify_editor_theme_changed()      # editor "auto" follows this theme
     except Exception:
-        pass
+        pass  # silent-ok: the editor notifier is optional; the theme change already applied

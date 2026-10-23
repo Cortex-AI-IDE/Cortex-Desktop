@@ -410,7 +410,7 @@ def register_file_read_listener(listener: FileReadListener) -> Callable[[], None
         try:
             _file_read_listeners.remove(listener)
         except ValueError:
-            pass
+            pass  # silent-ok: unsubscribing twice is harmless
     
     return unsubscribe
 
@@ -423,7 +423,7 @@ def _notify_file_read_listeners(file_path: str, content: str) -> None:
         try:
             listener(file_path, content)
         except Exception:
-            pass
+            pass  # silent-ok: one bad listener must not stop the others
 
 
 # ============================================================
@@ -931,7 +931,7 @@ async def suggest_path_under_cwd(file_path: str) -> Optional[str]:
                 if f.lower() == filename.lower():
                     return os.path.join(cwd, f)
         except OSError:
-            pass
+            pass  # silent-ok: an unlistable directory simply yields no match
     
     return None
 
@@ -972,7 +972,7 @@ def _get_default_chunk_line_limit() -> int:
             if parsed > 0:
                 return min(parsed, MAX_LINES_TO_READ)
         except (TypeError, ValueError):
-            pass
+            pass  # silent-ok: a non-numeric limit falls back to MAX_LINES_TO_READ
     return MAX_LINES_TO_READ
 
 
@@ -1534,7 +1534,7 @@ class FileReadTool:
                             )
                         }
                 except Exception:
-                    # stat failed, fall through to full read
+                    # silent-ok: stat failed, so fall through to the full read
                     pass
         
         # Discover skills from this file's path (fire-and-forget, non-blocking)
@@ -1553,7 +1553,7 @@ class FileReadTool:
                 # Activate conditional skills whose path patterns match this file
                 activate_conditional_skills_for_paths([full_file_path], cwd)
             except Exception:
-                pass
+                pass  # silent-ok: conditional-skill activation is fire-and-forget
         
         try:
             return await self._call_inner(
@@ -1604,7 +1604,7 @@ class FileReadTool:
                         message_id=None,
                     )
                 except FileNotFoundError:
-                    # Alt path also missing, fall through to friendly error
+                    # silent-ok: the alternative path is missing too; fall through to the friendly error
                     pass
 
             # Auto-resolve common shorthand for nested tool module files:
@@ -1628,7 +1628,7 @@ class FileReadTool:
                         message_id=None,
                     )
                 except FileNotFoundError:
-                    pass
+                    pass  # silent-ok: neither candidate path exists; the caller reports the miss
             
             similar_filename = find_similar_file(full_file_path)
             cwd_suggestion = await suggest_path_under_cwd(full_file_path)

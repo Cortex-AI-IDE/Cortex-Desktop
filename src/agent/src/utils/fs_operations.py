@@ -376,9 +376,8 @@ def resolveDeepestExistingAncestorSync(fs: FsOperations, absolutePath: str) -> O
             if resolved != dir_path:
                 return resolved if not segments else os.path.join(resolved, *segments)
         except Exception:
-            # realpath can still fail (e.g. EACCES in ancestors). Return
-            # None, we can't resolve, and the logical path is already
-            # in pathSet for the caller.
+            # silent-ok: realpath can fail (EACCES in ancestors). Return None;
+            # the logical path is already in pathSet for the caller.
             pass
         
         return None
@@ -459,7 +458,7 @@ def getPathsForPermissionCheck(inputPath: str) -> List[str]:
             pathSet.add(absoluteTarget)
             currentPath = absoluteTarget
     except Exception:
-        # If anything fails during chain traversal, continue with what we have
+        # silent-ok: keep whatever part of the chain was traversed
         pass
     
     # Also add the final resolved path using realpathSync for completeness

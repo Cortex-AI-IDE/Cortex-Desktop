@@ -140,7 +140,7 @@ class _BaseSpinner(QWidget):
         try:
             self.update()
         except RuntimeError:
-            pass
+            pass  # silent-ok: the widget was deleted before the repaint
 
     def start(self):
         if not self._alive:
@@ -1045,7 +1045,7 @@ class MermaidSpinner(QWidget):
         try:
             self.hide()
         except RuntimeError:
-            pass
+            pass  # silent-ok: the widget was deleted before it could hide
 
     def is_running(self) -> bool:
         if not self._alive:

@@ -297,7 +297,7 @@ def get_model_limits(model_id: str) -> ModelLimits:
                 max_output_tokens=int(remote["max_output_tokens"]),
             )
     except Exception:
-        pass  # never let the remote layer break limit resolution
+        pass  # silent-ok: never let the remote layer break limit resolution
 
     needle = model_id.lower()
     for pattern, ctx_window, max_out in _REGISTRY:

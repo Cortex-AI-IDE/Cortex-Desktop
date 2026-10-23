@@ -159,7 +159,7 @@ class LiveServer:
                     s.bind(("127.0.0.1", port))
                     return port
                 except OSError:
-                    continue
+                    continue  # silent-ok: the port is taken; try the next one
         return None
 
     def _refresh_watched_files(self):
@@ -200,7 +200,7 @@ class LiveServer:
             if os.path.isfile(abs_path):
                 return abs_path
         except Exception:
-            pass
+            pass  # silent-ok: this href does not resolve to a served file
         return None
 
     def _scan_mtime(self) -> float:
@@ -214,7 +214,7 @@ class LiveServer:
                 if t > latest:
                     latest = t
             except OSError:
-                pass
+                pass  # silent-ok: a file that vanished mid-scan does not change the timestamp
         return latest
 
     def _watch_loop(self):

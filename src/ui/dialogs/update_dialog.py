@@ -274,7 +274,7 @@ class UpdateDialog(QDialog):
                     try:
                         os.remove(tmp_path)
                     except OSError:
-                        pass
+                        pass  # silent-ok: the refused download is cleaned up by the OS if this fails
                     self._update_status(
                         "Update failed: the download did not match the "
                         "expected checksum and was discarded. Please download "
@@ -290,7 +290,7 @@ class UpdateDialog(QDialog):
                 try:
                     os.remove(tmp_path)
                 except OSError:
-                    pass
+                    pass  # silent-ok: the rejected download is cleaned up by the OS if this fails
                 self._update_status(
                     "Update failed: the release is missing a valid checksum "
                     "and was discarded. Please download from cortex-ide.app."
@@ -315,28 +315,28 @@ class UpdateDialog(QDialog):
         try:
             self.progress_changed.emit(int(pct))
         except Exception:
-            pass
+            pass  # silent-ok: the dialog may already be gone; the download carries on
 
     def _update_status(self, text: str):
         """Emit status text from any thread; the GUI slot applies it safely."""
         try:
             self.status_changed.emit(str(text))
         except Exception:
-            pass
+            pass  # silent-ok: the dialog may already be gone; the download carries on
 
     def _on_progress_changed(self, pct: int):
         """GUI-thread slot for progress updates."""
         try:
             self._progress.setValue(int(pct))
         except Exception:
-            pass
+            pass  # silent-ok: the widget may already be destroyed
 
     def _on_status_changed(self, text: str):
         """GUI-thread slot for status text updates."""
         try:
             self._status.setText(str(text))
         except Exception:
-            pass
+            pass  # silent-ok: the widget may already be destroyed
 
     @property
     def downloaded_path(self) -> Optional[str]:

@@ -91,7 +91,7 @@ def get_cwd() -> str:
         if root and 'Program Files' not in root:
             return root
     except (ImportError, AttributeError):
-        pass
+        pass  # silent-ok: the project-root helper is optional; the cwd guard below covers it
     raw_cwd = os.getcwd()
     if 'Program Files' in raw_cwd:
         return os.path.expanduser('~')
@@ -416,7 +416,7 @@ class SementicSearchTool:
                 )
                 return getattr(result, 'behavior', 'allow') != 'deny'
         except Exception:
-            pass
+            pass  # silent-ok: a failing permission hook falls back to allow on the next line
         
         return True  # Allow by default
     
@@ -472,7 +472,7 @@ class SementicSearchTool:
             try:
                 progress_callback("Initializing semantic search engine...")
             except Exception:
-                pass
+                pass  # silent-ok: a broken progress callback must not stop the search
         
         # ── Initialize searcher ──
         try:
@@ -492,7 +492,7 @@ class SementicSearchTool:
                     try:
                         progress_callback("Indexing project (this may take a moment on first run)...")
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken progress callback must not stop the indexing
                 
                 # Run indexing in a thread to avoid blocking
                 loop = asyncio.get_running_loop()
@@ -512,7 +512,7 @@ class SementicSearchTool:
             try:
                 progress_callback(f"Searching for: {query}")
             except Exception:
-                pass
+                pass  # silent-ok: a broken progress callback must not stop the search
         
         # ── Execute search ──
         try:

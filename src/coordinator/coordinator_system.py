@@ -91,7 +91,7 @@ class Scratchpad:
                 payload = json.loads(filepath.read_text(encoding='utf-8'))
                 results[payload.get("key", filepath.stem)] = payload.get("data")
             except Exception:
-                continue
+                continue  # silent-ok: an unreadable partial result is skipped
         return results
     
     def cleanup(self):
@@ -481,7 +481,7 @@ class CoordinationEngine:
                 if ctx:
                     parts.append(f"### Code Context:\n{ctx}\n")
             except Exception:
-                pass
+                pass  # silent-ok: code context is optional enrichment for the prompt
         
         # Extra contexts from parallel workers
         if extra_contexts:

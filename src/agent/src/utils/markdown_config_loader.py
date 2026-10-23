@@ -158,7 +158,7 @@ async def loadMarkdownFilesForSubdir(
                         source=source,
                     ))
         except (OSError, PermissionError):
-            # Skip directories we can't read
+            # silent-ok: skip directories we cannot read
             continue
     
     return files

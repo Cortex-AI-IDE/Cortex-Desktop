@@ -290,7 +290,7 @@ class MimoProvider(BaseProvider):
                     f"over an unverified connection."
                 )
             except requests.exceptions.RequestException:
-                pass
+                pass  # silent-ok: the probe failed; the format check below decides
             # 2) Fallback: trust format (tp-/sk- prefix + length)
             return len(self._api_key) >= 20
         except Exception as e:
@@ -543,7 +543,7 @@ class MimoProvider(BaseProvider):
                     try:
                         _resp_body = e.response.text[:500]
                     except Exception:
-                        pass
+                        pass  # silent-ok: the error body is only used for quota detection
 
                 # Detect daily quota exhaustion, non-retryable
                 _resp_lower = _resp_body.lower()
@@ -682,7 +682,7 @@ class MimoProvider(BaseProvider):
                     try:
                         retry_callback(attempt + 1, self._max_retries + 1, "error")
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken retry callback must not stop the retry
                 time.sleep(backoff)
 
             try:
@@ -758,7 +758,7 @@ class MimoProvider(BaseProvider):
                     try:
                         data = json.loads(data_str)
                     except json.JSONDecodeError:
-                        continue
+                        continue  # silent-ok: a non-JSON line is a keepalive, not an event
 
                     choices = data.get("choices", [])
                     if not choices:
@@ -841,7 +841,7 @@ class MimoProvider(BaseProvider):
                         _resp_body = e.response.text[:500]
                         _resp_headers = dict(e.response.headers)
                     except Exception:
-                        pass
+                        pass  # silent-ok: body and headers only feed the diagnostic message
                 
                 # Log detailed error info for debugging
                 log.error(f"[MiMo] HTTP {status} | URL: {url} | Server: {_resp_headers.get('server', 'unknown')} | Body: {_resp_body[:200]}")
@@ -905,7 +905,7 @@ class MimoProvider(BaseProvider):
                         try:
                             retry_callback(attempt + 1, self._max_retries + 1, str(status))
                         except Exception:
-                            pass
+                            pass  # silent-ok: a broken retry callback must not stop the retry
                     continue
 
                 # Auth failures (401, 403), likely wrong endpoint for this key type.
@@ -925,7 +925,7 @@ class MimoProvider(BaseProvider):
                         body_json = json.loads(_resp_body)
                         _friendly_msg = body_json.get("error", {}).get("message", "")
                     except Exception:
-                        pass
+                        pass  # silent-ok: a non-JSON error body leaves the raw text as the message
                 if _friendly_msg:
                     raise RuntimeError(f"MiMo API: {_friendly_msg} (HTTP {status})")
                 raise RuntimeError(f"MiMo HTTP {status}")

@@ -123,7 +123,7 @@ def run_single_query(
                     try:
                         event = json.loads(line)
                     except json.JSONDecodeError:
-                        continue
+                        continue  # silent-ok: a non-JSON line in the stream is not an event
 
                     # Early detection via stream events
                     if event.get("type") == "stream_event":

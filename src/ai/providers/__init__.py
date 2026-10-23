@@ -263,9 +263,9 @@ class BaseProvider(ABC):
             if os.path.isfile(ca_path):
                 os.environ['REQUESTS_CA_BUNDLE'] = ca_path
         except ImportError:
-            pass
+            pass  # silent-ok: certifi is optional; requests falls back to its own bundle
         except Exception:
-            pass
+            pass  # silent-ok: a missing CA bundle must not stop the provider import
 
     def _load_api_key(self):
         """Load API key with 3-tier fallback: env var → KeyManager → settings.json."""
@@ -663,7 +663,7 @@ class ProviderRegistry:
                             f"{_pt.value}")
                         return _cand
                 except Exception:
-                    continue
+                    continue  # silent-ok: this candidate failed to build; try the next one
             # Nothing usable. Returning the OCR service here would only turn a
             # clear failure into a confusing 401, so surface the real problem.
             log.error(

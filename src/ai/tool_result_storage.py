@@ -75,7 +75,7 @@ def _ensure_tool_results_dir() -> None:
     try:
         os.makedirs(_get_tool_results_dir(), exist_ok=True)
     except OSError:
-        pass
+        pass  # silent-ok: the writer recreates the directory on the next write
 
 
 def persist_tool_result(content: str, tool_use_id: str) -> Optional[Dict]:
@@ -320,9 +320,9 @@ def cleanup_old_results(max_age_hours: int = 24) -> int:
                     os.remove(fpath)
                     removed += 1
             except OSError:
-                pass
+                pass  # silent-ok: a file that cannot be removed waits for the next sweep
     except OSError:
-        pass
+        pass  # silent-ok: an unlistable directory yields nothing to clean
     
     if removed:
         log.info(f"[STORAGE] Cleaned up {removed} old tool result files")

@@ -247,7 +247,7 @@ class ProjectContextBuilder(QThread):
                         if fpath.suffix in SOURCE_EXTENSIONS:
                             source_count += 1
             except Exception:
-                continue
+                continue  # silent-ok: one unreadable file must not abort the count
         
         self._context.source_file_count = source_count
         self._context.total_file_count = total_count
@@ -410,7 +410,7 @@ class ProjectContextBuilder(QThread):
                     # Truncate config files to 300 chars (was 500)
                     self._context.config_files[fname] = content[:300]
                 except Exception:
-                    pass
+                    pass  # silent-ok: an unreadable config file is left out of the snapshot
         
         # README: only read first 800 chars (was 2000), AI can read more if needed
         for readme_name in ["README.md", "README.rst", "README.txt"]:
@@ -420,7 +420,7 @@ class ProjectContextBuilder(QThread):
                     content = readme_path.read_text(encoding='utf-8', errors='replace')
                     self._context.readme_content = content[:800]
                 except Exception:
-                    pass
+                    pass  # silent-ok: an unreadable README leaves the field empty
                 break
 
     def _build_file_tree(self):
@@ -496,7 +496,7 @@ class ProjectContextBuilder(QThread):
                             self._context.dependencies.append(pkg)
                 self._context.dependencies = self._context.dependencies[:30]
             except Exception:
-                pass
+                pass  # silent-ok: a missing or malformed manifest leaves dependencies empty
         
         # package.json
         pkg_path = root / "package.json"
@@ -506,7 +506,7 @@ class ProjectContextBuilder(QThread):
                 self._context.dependencies = list(pkg.get("dependencies", {}).keys())[:20]
                 self._context.dev_dependencies = list(pkg.get("devDependencies", {}).keys())[:10]
             except Exception:
-                pass
+                pass  # silent-ok: a malformed package.json leaves the lists as they were
 
     def _detect_venv(self):
         """Detect Python virtual environments."""

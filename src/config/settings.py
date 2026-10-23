@@ -524,7 +524,7 @@ class Settings:
             if os.path.exists(tmp):
                 os.unlink(tmp)
         except OSError:
-            pass
+            pass  # silent-ok: a leftover temp file is overwritten by the save below
         try:
             with open(self._config_file, "w", encoding="utf-8") as f:
                 f.write(payload)

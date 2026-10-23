@@ -178,7 +178,7 @@ def _saved_code_font(section: str) -> tuple:
             family = raw
         size = int(s.get(section, "font_size", default=default_size) or default_size)
     except Exception:
-        pass
+        pass  # silent-ok: keeps the caller's defaults when the setting cannot be read
     return family, max(8, min(40, size))
 
 
@@ -311,7 +311,7 @@ def _restyle_native(old: str, new: str) -> tuple:
             if isinstance(w, QTextEdit):
                 n_doc += _refont_document(w.document(), old_primary, new_fams)
         except RuntimeError:
-            continue   # widget deleted mid-walk
+            continue  # silent-ok: the widget was deleted mid-walk
     return n_sheet, n_doc, n_font
 
 
@@ -375,7 +375,7 @@ def remove_terminal_font_listener(callback) -> None:
     try:
         _terminal_font_listeners.remove(callback)
     except ValueError:
-        pass
+        pass  # silent-ok: removing a listener that is not registered is harmless
 
 
 def notify_terminal_font_changed() -> None:
@@ -447,7 +447,7 @@ def _own_page_prefixes() -> list:
             if str(r).strip():
                 out.append(r.resolve().as_uri().lower())
         except Exception:
-            continue
+            continue  # silent-ok: a path that cannot be resolved to a URI is skipped
     return out
 
 

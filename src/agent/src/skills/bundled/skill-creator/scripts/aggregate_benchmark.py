@@ -144,7 +144,7 @@ def load_run_results(benchmark_dir: Path) -> dict:
                         result["time_seconds"] = timing_data.get("total_duration_seconds", 0.0)
                         result["tokens"] = timing_data.get("total_tokens", 0)
                     except json.JSONDecodeError:
-                        pass
+                        pass  # silent-ok: a malformed timing file leaves the timing columns empty
 
                 # Extract metrics if available
                 metrics = grading.get("execution_metrics", {})

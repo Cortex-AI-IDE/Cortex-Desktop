@@ -329,7 +329,7 @@ class AlibabaProvider(BaseProvider):
                     try:
                         _resp_body = e.response.text[:500]
                     except Exception:
-                        pass
+                        pass  # silent-ok: the error body is only used for quota detection
 
                 _is_quota = any(kw in _resp_body.lower() for kw in (
                     'insufficient_quota', 'quota exceeded', 'billing', 'no credits',
@@ -465,7 +465,7 @@ class AlibabaProvider(BaseProvider):
                 "token-plan" if "token-plan" in (self._base_url or "") else "dashscope",
             )
         except Exception:
-            pass
+            pass  # silent-ok: request logging is diagnostics only
 
         last_error: Optional[Exception] = None
         _retry_count = 0
@@ -480,7 +480,7 @@ class AlibabaProvider(BaseProvider):
                     try:
                         retry_callback(attempt + 1, max_retries + 1, 'error')
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken retry callback must not stop the retry
                 log.warning(f"Alibaba stream retry {attempt}/{max_retries + 1} (waiting {backoff:.1f}s)")
                 time.sleep(backoff)
 
@@ -504,7 +504,7 @@ class AlibabaProvider(BaseProvider):
                         _saved_sock_timeout = _raw_sock.gettimeout()
                         _raw_sock.settimeout(self._chunk_timeout)
                 except Exception:
-                    pass
+                    pass  # silent-ok: the socket may already be closed; the read proceeds
 
                 try:
                     _last_chunk_ts = time.time()
@@ -525,7 +525,7 @@ class AlibabaProvider(BaseProvider):
                         try:
                             data = json.loads(data_str)
                         except json.JSONDecodeError:
-                            continue
+                            continue  # silent-ok: a non-JSON line is a keepalive, not an event
 
                         _events += 1
                         # An error can arrive INSIDE a 200 stream as its own
@@ -635,7 +635,7 @@ class AlibabaProvider(BaseProvider):
                             if _raw_sock is not None:
                                 _raw_sock.settimeout(_saved_sock_timeout)
                         except Exception:
-                            pass
+                            pass  # silent-ok: restoring the timeout on a closed socket is harmless
 
             except RuntimeError as _rt_err:
                 _rt_msg = str(_rt_err)
@@ -655,7 +655,7 @@ class AlibabaProvider(BaseProvider):
                     try:
                         _resp_body = e.response.text[:500]
                     except Exception:
-                        pass
+                        pass  # silent-ok: the streaming error body is only used for quota detection
 
                 _is_quota = any(kw in _resp_body.lower() for kw in (
                     'insufficient_quota', 'quota exceeded', 'billing', 'no credits',
