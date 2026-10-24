@@ -658,11 +658,19 @@ def build_markdown_css(t: dict | None = None) -> str:
   /* Emphasis, gold (#e5c07b) */
   em, i {{ color: {t['md_emph']} !important; font-style: italic; }}
 
-  /* Inline code, green (#7fd88f) with subtle bg */
+  /* Inline code: mono, one step smaller, NO filled box.
+     Qt paints an inline background over the whole text-height rectangle of
+     the line while the glyphs are much shorter, and it IGNORES padding,
+     border-radius and em font sizes on inline spans (measured 2026-10-24:
+     "padding:0 20px" changed nothing, "font-size:0.9em" rendered at the body
+     size, only px sizes took effect). So the old "2px 6px chip" drew a
+     hard-edged grey block that was too tall above and below the glyphs and
+     had zero breathing room beside them: it read as a wall of grey bars.
+     Emphasis comes from the mono face and the smaller size instead. */
   code {{
-    color: {t['md_code']} !important; background: {t['md_code_bg']};
-    font-family: {t['font_mono']}; font-size: 0.9em;
-    padding: 2px 6px; border-radius: 4px;
+    color: {t['md_code']} !important; background: transparent;
+    font-family: {t['font_mono']}; font-size: {t['font_size_xs']};
+    padding: 0; border-radius: 0;
   }}
 
   /* Code blocks, dark bg, subtle border */

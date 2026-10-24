@@ -855,7 +855,7 @@ def _fix_prose_code_blocks(html: str) -> str:
     font_mono = T['font_mono']
     font_xxs = T['font_size_xxs']
     md_code = T['md_code']
-    md_code_bg = T['md_code_bg']
+    font_xs = T['font_size_xs']
     text_color = T['text']
     line_h = T.get('line_height_code', '1.55')
 
@@ -875,12 +875,20 @@ def _fix_prose_code_blocks(html: str) -> str:
         # Insert style before the closing >
         return re.sub(r'>', f' {pre_style}>', tag, count=1)
 
-    # Style <code> NOT inside <pre> (inline code)
+    # Style <code> NOT inside <pre> (inline code).
+    # NOT a filled chip. Qt paints an inline background across the whole
+    # text-height rectangle of the line while the glyphs are far shorter, and
+    # it IGNORES padding, border-radius and em font sizes on inline spans
+    # (measured 2026-10-24: changing padding to "0 20px" moved nothing,
+    # "font-size:0.9em" rendered at the body size, only px sizes took effect).
+    # So the old "2px 6px, radius 4" chip drew a tall hard-edged grey bar with
+    # zero room beside the word, and an answer with a dozen inline code spans
+    # read as a wall of grey bars. Emphasis now comes from the mono face and
+    # the 12px size, which Qt does honour.
     def _style_inline_code(m):
         tag = m.group(0)
-        code_style = (f'style="color:{md_code};background:{md_code_bg};'
-                      f'padding:2px 6px;border-radius:4px;'
-                      f'font-family:{font_mono};font-size:0.9em;"')
+        code_style = (f'style="color:{md_code};background:transparent;'
+                      f'font-family:{font_mono};font-size:{font_xs};"')
         if 'style=' in tag:
             return re.sub(r'style="[^"]*"', code_style, tag)
         return re.sub(r'>', f' {code_style}>', tag, count=1)
