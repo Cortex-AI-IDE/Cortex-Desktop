@@ -139,6 +139,48 @@ DEFAULT_SETTINGS = {
         "only_when_unfocused": True,        # Only toast when IDE is not the active window
         "sound_alerts": False,              # Play a sound when tasks complete
     },
+    "telegram": {
+        # Outbound notifications only. The bot token is NOT here: settings.json
+        # is plaintext and _is_secret_field() would blank any *_token value on
+        # the way out. The token lives in KeyManager under the provider slug
+        # "telegram" (see src/services/telegram_config.py).
+        "enabled": False,
+        "chat_id": "",          # written by pairing, sent to Telegram as-is
+        # One flag per event the user chose. Off here and on in the UI means
+        # "the user turned it off", so defaults must match what ships on.
+        "events": {
+            "started": True,
+            "blocked": True,
+            "finished": True,
+            "failed": True,
+        },
+        # Local wall-clock window. Urgent events bypass it; see
+        # src/services/telegram_monitor.py.
+        "quiet_hours": {
+            "enabled": False,
+            "start": "22:00",
+            "end": "07:00",
+        },
+        # Pairing code policy. "expiry" is a preset key, not a number of
+        # seconds, so this file and the UI share one vocabulary. Known keys:
+        # 60m, 24h, 7d, 30d, 90d, unlimited (see telegram_config.py).
+        "pairing": {
+            "expiry": "60m",
+            # False: a code works once and is consumed. True: the same code
+            # keeps working until it expires, so a second device can pair
+            # later without generating a new one.
+            "reusable": False,
+        },
+        # Inbound prompts: a message typed in the paired chat becomes a user
+        # prompt in the chat panel. Off by default on purpose. Turning this on
+        # gives the phone a remote control for the agent, so an existing
+        # install must opt in rather than acquire that after an update.
+        # It cannot approve a permission card or answer a question: those
+        # still happen in Cortex, on the PC.
+        "inbound": {
+            "enabled": False,
+        },
+    },
     "thinking": {
         # Per-provider overrides (merged with thinking.py PROVIDER_THINKING_DEFAULTS)
         # Set to null to use defaults, or override specific fields
@@ -524,7 +566,7 @@ class Settings:
             if os.path.exists(tmp):
                 os.unlink(tmp)
         except OSError:
-            pass
+            pass  # silent-ok: a leftover temp file is overwritten by the save below
         try:
             with open(self._config_file, "w", encoding="utf-8") as f:
                 f.write(payload)

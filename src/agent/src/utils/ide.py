@@ -158,7 +158,7 @@ async def get_sorted_ide_lockfiles() -> List[str]:
                         'mtime': stat.st_mtime
                     })
             except (OSError, PermissionError):
-                continue
+                continue  # silent-ok: a lockfile that cannot be stat'd is skipped
         
         # Sort by modification time (newest first)
         lockfiles.sort(key=lambda x: x['mtime'], reverse=True)
@@ -249,7 +249,7 @@ async def detect_ide() -> Optional[DetectedIDEInfo]:
             try:
                 os.kill(info.pid, 0)  # Check if process exists
             except (OSError, ProcessLookupError):
-                continue
+                continue  # silent-ok: the process is gone, so this IDE is not running
         
         return DetectedIDEInfo(
             name=info.ide_name or 'unknown',

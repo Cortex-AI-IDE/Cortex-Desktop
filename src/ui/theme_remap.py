@@ -178,7 +178,7 @@ def remap_all(was_dark: bool, is_dark: bool, on_done=None) -> None:
             try:
                 ss = w.styleSheet()
             except RuntimeError:
-                continue  # deleted since the list was taken
+                continue  # silent-ok: the widget was deleted since the list was taken
             stats[1] += 1
             if not ss or not _COLOR.search(ss):
                 continue
@@ -249,7 +249,7 @@ class _NewWindowTheme(QObject):
                     obj.setProperty("cortexThemeGen", self.gen)
                     obj.setStyleSheet(_with_theme(obj.styleSheet(), self.qss))
             except RuntimeError:
-                pass
+                pass  # silent-ok: the widget was deleted mid-walk
         return False
 
 
@@ -280,7 +280,7 @@ def apply_theme_outside(heavy: QWidget, qss: str) -> int:
         try:
             r.setStyleSheet(_with_theme(r.styleSheet(), qss))
         except RuntimeError:
-            pass
+            pass  # silent-ok: the widget was deleted before the restyle
 
     app = QApplication.instance()
     if _window_filter is None:
@@ -359,7 +359,7 @@ class _TooltipTheme(QObject):
                         obj.setStyleSheet("/* cortex tooltip */")   # re-resolve rules
                         obj.adjustSize()
             except RuntimeError:
-                pass
+                pass  # silent-ok: the tooltip was deleted mid-walk
         return False
 
 

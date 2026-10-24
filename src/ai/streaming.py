@@ -60,7 +60,7 @@ class StreamingEventEmitter(QObject):
             from src.ai.agent_bridge import clean_citation_markers
             full_response = clean_citation_markers(full_response)
         except ImportError:
-            pass  # Preprocessing not available, emit raw
+            pass  # silent-ok: preprocessing unavailable, so emit the raw text
         self.llm_complete.emit(full_response)
     
     def emit_session_update(self, session_data: dict):

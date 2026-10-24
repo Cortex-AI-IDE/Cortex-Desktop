@@ -257,7 +257,7 @@ def pick_reviewer_model(actor_model: Optional[str] = None) -> Optional[Tuple[str
         try:
             ptype = ProviderType(provider_value)
         except ValueError:
-            continue
+            continue  # silent-ok: an unknown provider id in the priority list is skipped
         provider = registry.get_provider(ptype)
         if provider is None or not getattr(provider, "_api_key", None):
             continue

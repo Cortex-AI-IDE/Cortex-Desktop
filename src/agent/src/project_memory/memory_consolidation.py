@@ -449,7 +449,7 @@ class MemoryConsolidator:
                     try:
                         total_size += os.path.getsize(file_path)
                     except:
-                        pass
+                        pass  # silent-ok: an unreadable file contributes no size
         return total_size
     
     def _extract_metadata(self, file_path: str) -> Optional[Dict]:

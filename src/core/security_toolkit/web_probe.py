@@ -168,7 +168,7 @@ class Requester:
             try:
                 body = exc.read(200000).decode("utf-8", errors="replace")
             except Exception:
-                pass
+                pass  # silent-ok: no error body; the status and headers still return
             return exc.code, dict(exc.headers or {}), body
         except Exception as exc:
             log.debug(f"[PROBE] {method} {url} failed: {exc}")

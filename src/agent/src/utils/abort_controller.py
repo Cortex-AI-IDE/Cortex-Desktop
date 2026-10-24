@@ -52,7 +52,7 @@ class AbortSignal:
                 try:
                     listener()
                 except Exception:
-                    pass  # Ignore listener errors
+                    pass  # silent-ok: one bad listener must not stop the others
             self._listeners.clear()
 
 

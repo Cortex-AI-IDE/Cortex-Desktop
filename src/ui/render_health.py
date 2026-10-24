@@ -151,7 +151,7 @@ def should_offer_from_probes(min_failures: int = 2) -> bool:
         if gpu_compat.current_mode() == 'software':
             return False                 # already fixed, nothing to offer
     except Exception:
-        pass
+        pass  # silent-ok: without gpu_compat the failure count alone decides
     return len(probe_failures()) >= min_failures
 
 
@@ -210,7 +210,7 @@ def enable_software_rendering() -> bool:
         try:
             settings.set("ui", "rendering_mode", "software")
         except Exception:
-            pass   # legacy bool alone is enough for main.py
+            pass   # silent-ok: the legacy bool alone is enough for main.py
         log.info("[RenderHealth] software rendering enabled for next launch")
         return True
     except Exception as exc:
@@ -225,7 +225,7 @@ def _already_software() -> bool:
         if gpu_compat.current_mode() == 'software':
             return True
     except Exception:
-        pass
+        pass  # silent-ok: falls through to the setting check below
     try:
         from src.config.settings import get_settings
         if get_settings().get("ui", "software_rendering", default=False):
@@ -233,7 +233,7 @@ def _already_software() -> bool:
         if str(get_settings().get("ui", "rendering_mode", default="") or "").lower() == "software":
             return True
     except Exception:
-        pass
+        pass  # silent-ok: no settings read means software rendering is not configured
     return False
 
 

@@ -234,7 +234,7 @@ def check_test_integrity(
         try:
             removed = int(removed_s)
         except ValueError:
-            continue
+            continue  # silent-ok: a non-numeric diff count cannot be judged
         if removed > spec.max_test_lines_removed_per_iter:
             violations.append(IntegrityViolation(
                 "test-shrunk", path,

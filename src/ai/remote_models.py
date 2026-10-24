@@ -205,14 +205,14 @@ def _parse_payload(data: Any) -> Optional[Dict[str, Any]]:
                 if ctx > 0 and out > 0:
                     limits[mid] = {"context_window": ctx, "max_output_tokens": out}
             except (TypeError, ValueError):
-                pass
+                pass  # silent-ok: a non-numeric limit is left out of the map
             try:
                 p_in = float(raw.get("price_in") or 0)
                 p_out = float(raw.get("price_out") or 0)
                 if p_in > 0 or p_out > 0:
                     pricing[mid] = (p_in, p_out)
             except (TypeError, ValueError):
-                pass
+                pass  # silent-ok: a non-numeric price is left out of the map
 
         if not entries:
             continue
@@ -290,7 +290,7 @@ def _load_cache() -> Optional[Dict[str, Any]]:
         try:
             _CACHE_PATH.unlink()  # corrupt cache repairs itself on next fetch
         except OSError:
-            pass
+            pass  # silent-ok: the corrupt cache is replaced on the next fetch anyway
         return None
 
 

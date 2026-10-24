@@ -30,14 +30,14 @@ try:
     from src.core.embeddings import get_embedding_generator, EmbeddingsGenerator
     HAS_EMBEDDINGS = True
 except ImportError:
-    pass
+    pass  # silent-ok: optional backend; HAS_EMBEDDINGS stays False and is checked below
 
 if not HAS_EMBEDDINGS:
     try:
         from src.core.embedding_provider import get_embedding_generator, EmbeddingsGenerator
         HAS_EMBEDDINGS = True
     except ImportError:
-        pass
+        pass  # silent-ok: second optional backend; absence is handled below
 
 if not HAS_EMBEDDINGS:
     try:
@@ -315,7 +315,7 @@ class MemoryIndex:
                 try:
                     os.replace(self.index_path, self.index_path + ".corrupt")
                 except OSError:
-                    pass
+                    pass  # silent-ok: the rebuild below replaces the index either way
                 return False
             
             loaded_count = 0
@@ -344,7 +344,7 @@ class MemoryIndex:
                                 self._index[rel_path] = metadata
                                 continue
                     except Exception:
-                        pass
+                        pass  # silent-ok: entry is skipped on the next line; the rebuild continues
                     # If re-embedding failed, skip this entry
                     continue
                 

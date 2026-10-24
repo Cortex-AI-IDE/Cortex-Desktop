@@ -379,7 +379,7 @@ class AnthropicProvider(BaseProvider):
                     try:
                         retry_callback(attempt + 1, max_retries + 1, 'error')
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken retry callback must not stop the retry
                 time.sleep(backoff)
 
             try:
@@ -406,7 +406,7 @@ class AnthropicProvider(BaseProvider):
                             _saved_sock_timeout = _raw_sock.gettimeout()
                             _raw_sock.settimeout(self._chunk_timeout)
                     except Exception:
-                        pass  # Non-critical safety net
+                        pass  # silent-ok: non-critical safety net around the socket timeout
 
                     try:
                         _last_chunk_ts = time.time()
@@ -486,7 +486,7 @@ class AnthropicProvider(BaseProvider):
                                 if _raw_sock is not None:
                                     _raw_sock.settimeout(_saved_sock_timeout)
                             except Exception:
-                                pass
+                                pass  # silent-ok: restoring the timeout on a closed socket is harmless
 
                 else:
                     response = self._session.post(
@@ -533,7 +533,7 @@ class AnthropicProvider(BaseProvider):
                     try:
                         _resp_body = (e.response.text or "")[:1000]
                     except Exception:
-                        pass
+                        pass  # silent-ok: the error body is only used for billing detection
                 # Detect credit/billing exhaustion, NEVER retryable
                 _resp_lower = _resp_body.lower()
                 _is_quota_exhausted = (

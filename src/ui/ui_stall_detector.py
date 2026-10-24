@@ -98,7 +98,7 @@ class UiStallDetector:
                             "[UI-STALL] GUI thread frozen ~%.1fs, its stack "
                             "right now:\n%s", stale, stack)
                 except Exception:
-                    pass
+                    pass  # silent-ok: stall reporting must never throw
             elif stale < REPORT_THRESHOLD_S:
                 self._dumped_for_this_stall = False   # armed for the next one
 

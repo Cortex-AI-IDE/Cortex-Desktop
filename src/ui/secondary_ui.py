@@ -449,7 +449,7 @@ class TodoSection(QFrame):
             self._body_scroll.setMaximumHeight(max(1, min(need, cap)))
             self._body_scroll.setMinimumHeight(min(need, 140))
         except RuntimeError:
-            pass
+            pass  # silent-ok: the popover was deleted mid-resize
 
     def _toggle(self):
         self._collapsed = not self._collapsed

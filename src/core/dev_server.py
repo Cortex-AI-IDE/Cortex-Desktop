@@ -158,7 +158,7 @@ def list_listening_ports(pid: int) -> List[int]:
                 if conn.status == psutil.CONN_LISTEN and conn.laddr:
                     ports.add(int(conn.laddr.port))
         except Exception:
-            continue
+            continue  # silent-ok: one unreadable process is skipped
     return sorted(ports)
 
 

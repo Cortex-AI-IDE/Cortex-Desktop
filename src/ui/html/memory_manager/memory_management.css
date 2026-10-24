@@ -9,6 +9,10 @@
     --surface-3: #2a2a2a;
     --border: #3c3c3c;
     --border-strong: #4a4a4a;
+    /* Hairline between rows inside a card. A token rather than a hardcoded
+       rgba(255,255,255,.04), because white-on-white disappears entirely on
+       the light theme. */
+    --row-line: rgba(255, 255, 255, .06);
     --text: #cccccc;
     --muted: #969696;
     --accent: #0078d4;
@@ -35,6 +39,7 @@ html[data-theme="light"] {
     --surface-3: #e0e0e0;
     --border: #d0d0d0;
     --border-strong: #bdbdbd;
+    --row-line: rgba(0, 0, 0, .08);
     --text: #1a1a1a;
     --muted: #555555;
     --accent: #4CAF50;
@@ -350,7 +355,7 @@ body {
     align-items: center;
     gap: 24px;
     padding: 14px 0;
-    border-top: 1px solid rgba(255, 255, 255, .04)
+    border-top: 1px solid var(--row-line)
 }
 
 .setting-row:first-of-type {
@@ -486,14 +491,19 @@ body {
     border-color: var(--danger)
 }
 
-.primary-btn {
+/* Two class names for one idea: the markup was written as
+   `class="setting-btn primary"` in places, and `.primary` had no rule at all,
+   so those buttons silently rendered as plain ones. Both names now resolve. */
+.primary-btn,
+.setting-btn.primary {
     background: var(--accent);
     border: none;
     color: #fff;
     font-weight: 600
 }
 
-.primary-btn:hover {
+.primary-btn:hover,
+.setting-btn.primary:hover {
     box-shadow: 0 4px 16px rgba(10, 132, 255, .3);
     transform: translateY(-1px)
 }
@@ -677,7 +687,7 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 10px 0;
-    border-top: 1px solid rgba(255, 255, 255, .04)
+    border-top: 1px solid var(--row-line)
 }
 
 .shortcut-row:first-child {
@@ -709,7 +719,7 @@ kbd {
     align-items: center;
     gap: 16px;
     padding: 10px 0;
-    border-top: 1px solid rgba(255, 255, 255, .04)
+    border-top: 1px solid var(--row-line)
 }
 
 .provider-row:first-child {
@@ -830,10 +840,9 @@ kbd {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    background: var(--surface-2);
-    padding: 6px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
+    /* No box around it: a bordered box reads as a filled input, which is the
+       thing a masked value should never look like. */
+    padding: 6px 0
 }
 
 /* Action buttons - compact inline */
@@ -867,14 +876,6 @@ kbd {
 /* Key status indicators */
 .provider-row[data-has-key="true"] .key-input {
     border-color: rgba(76, 175, 80, 0.3);
-}
-
-.provider-row[data-has-key="true"] .remove-btn {
-    display: inline-flex !important;
-}
-
-.provider-row[data-has-key="false"] .remove-btn {
-    display: none !important;
 }
 
 /* Test button states */
@@ -3310,3 +3311,397 @@ html[data-theme="light"] .theme-notification-restart:hover {
     opacity: 0.85;
 }
 .get-key-link:hover { opacity: 1; text-decoration: underline; }
+
+/* ═══════════════════════════ Telegram ═══════════════════════════
+   The section used to be five identical cards, so the only place the
+   connection state appeared was one grey line under "Pairing code", two cards
+   away from the token it described. It now opens with one status card that
+   answers "where am I" and then lists the steps. Everything below uses the
+   existing tokens only: no new colour, no new font, one accent. */
+
+.tg-status .tg-status-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px
+}
+
+.tg-status .status-dot {
+    width: 9px;
+    height: 9px;
+    margin-top: 5px;
+    box-shadow: 0 0 0 5px rgba(81, 96, 125, .16)
+}
+
+/* The dot carries real state, so it is the one place colour is allowed to
+   change: grey means nothing is wired up, accent means the bot can reach you. */
+.tg-status.is-live .status-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 18%, transparent)
+}
+
+.tg-status-title {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.3
+}
+
+.tg-status-text {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 3px;
+    line-height: 1.45;
+    max-width: 62ch
+}
+
+/* A live card earns a border, not a glow: the dot already carries the state,
+   and a second loud signal would make the summary compete with the settings. */
+.tg-status.is-live {
+    border-color: color-mix(in oklab, var(--accent) 38%, var(--border))
+}
+
+/* Locked is a state, not an error: a dashed edge says "not available yet"
+   without the alarm a red border would add. Nothing else changes, so the card
+   still reads as the same object in a different mode. */
+.tg-status.is-locked {
+    border-style: dashed
+}
+
+/* Telegram is sold with a subscription, so a locked section disables its
+   controls. Native styling greys the text barely at all, which leaves a
+   disabled switch looking pressable; this matches the dependent rows, which
+   already dim when their parent switch is off. */
+.settings-section[data-section="telegram"] :disabled {
+    opacity: .45;
+    cursor: not-allowed
+}
+
+/* Five cards is more breathing room than sixteen settings rows need at the
+   shared 16px gap, which read as one continuous column. */
+.settings-section[data-section="telegram"] .settings-card {
+    margin-bottom: 20px
+}
+
+/* .setting-row is a flex pair. That right-aligned the control but let a
+   three-line helper paragraph run up against it, so the control read as
+   detached from the label it belonged to. A two-column grid gives the text a
+   hard stop and puts every control on one shared right edge. */
+.settings-section[data-section="telegram"] .setting-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 32px;
+    row-gap: 6px
+}
+
+.settings-section[data-section="telegram"] .setting-info p {
+    max-width: 58ch
+}
+
+.settings-section[data-section="telegram"] .setting-control {
+    justify-self: end
+}
+
+/* Below the point where a label and a 300px control cannot share a line, the
+   control drops under its label instead of squeezing the text into a column. */
+@media (max-width: 720px) {
+    .settings-section[data-section="telegram"] .setting-row {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 10px
+    }
+
+    .settings-section[data-section="telegram"] .setting-row > :last-child {
+        justify-self: start
+    }
+}
+
+/* A card that states its purpose in one line reads faster than a bare title
+   followed by seven unexplained switches. */
+.tg-card-desc {
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: -10px 0 4px
+}
+
+/* A saved token is a fact, not a field. It renders as a static mask: no caret,
+   no focus ring, nothing that can be typed into by accident. The input only
+   exists while a new token is being pasted, so the two states never overlap. */
+.tg-token-saved,
+.tg-token-edit {
+    display: flex;
+    align-items: center;
+    gap: 8px
+}
+
+.tg-token-saved[hidden],
+.tg-token-edit[hidden],
+.tg-token-saved [hidden] {
+    display: none
+}
+
+.tg-token-dots {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 2px;
+    user-select: none
+}
+
+.tg-text-btn {
+    background: none;
+    border-color: transparent;
+    color: var(--accent);
+    padding: 6px 10px
+}
+
+.tg-text-btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border)
+}
+
+/* A switch that only means anything while another switch is on. Indented and
+   quieter, and made inert by the script while the parent is off, so it cannot
+   be flipped into a state nothing reads. */
+.settings-section[data-section="telegram"] .tg-sub {
+    padding-left: 20px;
+    border-left: 1px solid var(--row-line)
+}
+
+.settings-section[data-section="telegram"] .tg-sub .setting-info label {
+    font-weight: 400;
+    color: color-mix(in oklab, var(--text) 80%, var(--muted))
+}
+
+.settings-section[data-section="telegram"] .setting-row.is-off {
+    opacity: .5
+}
+
+/* From and Until are one value, so they are one control. */
+.tg-time {
+    display: flex;
+    align-items: center;
+    gap: 8px
+}
+
+.tg-time .setting-input {
+    width: 122px;
+    min-width: 0;
+    color-scheme: dark
+}
+
+html[data-theme="light"] .tg-time .setting-input {
+    color-scheme: light
+}
+
+.tg-time-sep {
+    font-size: 12px;
+    color: var(--muted)
+}
+
+.tg-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    list-style: none;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--row-line)
+}
+
+.tg-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 11px 4px 5px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-2);
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    transition: border-color .15s, background .15s, color .15s
+}
+
+.tg-step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface-3);
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted)
+}
+
+.tg-step.is-done {
+    color: var(--text);
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border))
+}
+
+.tg-step.is-done .tg-step-num {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff
+}
+
+/* The single step that needs doing next. One at a time, so the strip reads as
+   a direction instead of three equal badges. */
+.tg-step.is-next {
+    color: var(--text);
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+    background: color-mix(in oklab, var(--accent) 10%, var(--surface-2))
+}
+
+.tg-step.is-next .tg-step-num {
+    color: var(--text);
+    border-color: color-mix(in oklab, var(--accent) 60%, var(--border))
+}
+
+/* Feedback sits under the control that produced it. Empty notes collapse, so a
+   message appearing does not shove the rest of the card down. */
+.tg-note {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+    margin-top: 8px;
+    padding-left: 10px;
+    border-left: 2px solid var(--border)
+}
+
+.tg-note:empty {
+    display: none
+}
+
+.tg-note.is-error {
+    color: var(--danger);
+    border-left-color: var(--danger)
+}
+
+.tg-note.is-ok {
+    color: var(--text);
+    border-left-color: var(--accent)
+}
+
+.tg-note code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 4px
+}
+
+/* A value, not a button. It used to be a <span class="setting-btn"> with
+   inline styles and cursor:default, which read as a permanently disabled
+   button. Dashed and muted means "nothing generated yet"; solid means a code. */
+.tg-code {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 172px;
+    padding: 9px 16px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-xs);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .18em;
+    font-variant-numeric: tabular-nums;
+    user-select: all;
+    transition: border-color .15s, background .15s, color .15s
+}
+
+.tg-code.is-set {
+    border-style: solid;
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+    background: color-mix(in oklab, var(--accent) 9%, var(--surface-2));
+    color: var(--text)
+}
+
+/* A token is a machine string: monospace and tight tracking, so a paste can be
+   checked by eye instead of guessed at. */
+#tgToken {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: .02em;
+    min-width: 280px
+}
+
+/* Destructive actions live in their own card: leaving them in the pairing list
+   put Remove bot one row below Test message, at the same visual weight. */
+.tg-danger {
+    border-color: color-mix(in oklab, var(--danger) 22%, var(--border))
+}
+
+.tg-danger:hover {
+    border-color: color-mix(in oklab, var(--danger) 34%, var(--border))
+}
+
+.danger-btn.is-heavy {
+    background: var(--danger-bg);
+    border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
+    font-weight: 600
+}
+
+.danger-btn.is-heavy:hover {
+    background: color-mix(in oklab, var(--danger) 20%, var(--surface-2));
+    border-color: var(--danger)
+}
+
+/* The switch hides its <input> for the slider, so keyboard focus was invisible
+   on every toggle in this panel. The ring matches .theme-option and
+   .confirm-btn. */
+.switch input:focus-visible+.switch-slider {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px
+}
+
+.setting-btn:focus-visible,
+.setting-input:focus-visible,
+.setting-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px
+}
+
+/* Physical push on press. :active wins over .primary-btn:hover because this
+   rule comes later at the same specificity. */
+.setting-btn:active {
+    transform: translateY(1px)
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .settings-section,
+    .tg-step,
+    .tg-code {
+        animation: none;
+        transition: none
+    }
+
+    .switch-slider,
+    .switch-slider::after,
+    .setting-btn {
+        transition: none
+    }
+
+    .setting-btn:active,
+    .primary-btn:hover,
+    .setting-btn.primary:hover {
+        transform: none
+    }
+}

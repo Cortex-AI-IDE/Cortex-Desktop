@@ -76,12 +76,12 @@ def _is_alive(view: Any) -> bool:
         if not isinstance(view, QObject):
             return True                        # plain double (tests)
     except Exception:
-        pass
+        pass  # silent-ok: falls through to the shiboken check below
     try:
         from shiboken6 import isValid          # ships with PyQt6
         return bool(isValid(view))
     except Exception:
-        pass
+        pass  # silent-ok: falls through to the objectName probe below
     try:
         view.objectName()                      # raises RuntimeError if deleted
         return True

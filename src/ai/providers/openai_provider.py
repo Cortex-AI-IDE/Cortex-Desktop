@@ -309,7 +309,7 @@ class OpenAIProvider(BaseProvider):
                     try:
                         retry_callback(attempt + 1, max_retries + 1, 'error')
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken retry callback must not stop the retry
                 log.warning(f"OpenAI stream retry {attempt}/{max_retries + 1} (waiting {backoff:.1f}s)")
                 time.sleep(backoff)
 

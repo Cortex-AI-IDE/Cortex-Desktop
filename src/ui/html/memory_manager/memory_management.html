@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cortex Settings</title>
-  <link rel="stylesheet" href="./memory_management.css?v=12">
+  <link rel="stylesheet" href="./memory_management.css?v=15">
 </head>
 
 <body>
@@ -53,6 +53,7 @@
         <div class="nav-group">
           <div class="nav-group-label">Advanced</div>
           <button class="nav-item" data-section="terminal"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span>Terminal</span></button>
+          <button class="nav-item" data-section="telegram"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>Telegram</span></button>
           <button class="nav-item" data-section="about"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span>About Cortex</span></button>
         </div>
       </div>
@@ -1051,6 +1052,181 @@
         </div>
       </section>
 
+      <!-- TELEGRAM -->
+      <section class="settings-section" data-section="telegram">
+        <div class="section-header">
+          <div>
+            <h1>Telegram</h1>
+            <p class="section-desc">A run reports to your phone, and prompts you send in the paired chat come back and run on this PC. Approvals and questions still need this screen.</p>
+          </div>
+        </div>
+
+        <div class="settings-card tg-status" id="tgStatus">
+          <div class="tg-status-head">
+            <span class="status-dot" id="tgStatusDot"></span>
+            <div>
+              <div class="tg-status-title" id="tgStatusTitle">Checking</div>
+              <p class="tg-status-text" id="tgStatusText">Reading the saved bot settings.</p>
+            </div>
+          </div>
+          <ol class="tg-steps">
+            <li class="tg-step" data-step="token"><span class="tg-step-num">1</span>Token</li>
+            <li class="tg-step" data-step="pair"><span class="tg-step-num">2</span>Pairing</li>
+            <li class="tg-step" data-step="prompts"><span class="tg-step-num">3</span>Prompts</li>
+          </ol>
+        </div>
+
+        <div class="settings-card">
+          <h3>Bot token</h3>
+          <p class="tg-card-desc">How Cortex reaches Telegram at all. Nothing is sent until this is saved.</p>
+          <div class="setting-row">
+            <div class="setting-info"><label for="tgToken">Token from BotFather</label>
+              <p>Kept in the encrypted vault and never sent back to this page, so a saved token reads as dots. Paste a new one to replace it.</p>
+            </div>
+            <div class="setting-control">
+              <div class="tg-token-saved" id="tgTokenSaved" hidden>
+                <span class="tg-token-dots" aria-label="A bot token is saved">••••••••••••</span>
+                <button type="button" class="setting-btn tg-text-btn" id="tgTokenChange">Change</button>
+              </div>
+              <div class="tg-token-edit" id="tgTokenEdit">
+                <input type="password" class="setting-input" id="tgToken" placeholder="8123456789:AAH..." autocomplete="off" spellcheck="false">
+                <button type="button" class="setting-btn primary" id="tgSaveToken">Save</button>
+                <button type="button" class="setting-btn" id="tgTokenCancel" hidden>Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="tg-note" id="tgTokenHint"></div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Pairing</h3>
+          <p class="tg-card-desc">A code links one chat to this PC. The code sits next to the button that makes it.</p>
+          <div class="setting-row">
+            <div class="setting-info"><label>Show a pairing code</label>
+              <p>Then send <code>/pair CODE</code> to your bot from the phone.</p>
+            </div>
+            <button class="setting-btn primary" id="tgPair">Show code</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Pairing code</label>
+              <p>Type this after <code>/pair</code>. It appears here and in the message you send, nowhere else.</p>
+            </div>
+            <span class="tg-code" id="tgPairCode">--------</span>
+          </div>
+          <div class="tg-note" id="tgPairHint"></div>
+          <div class="setting-row">
+            <div class="setting-info"><label for="tgPairExpiry">Code is valid for</label>
+              <p>After this the code stops being accepted. Pick a longer window if you will pair from another device later.</p>
+            </div>
+            <select class="setting-select" id="tgPairExpiry">
+              <option value="60m">1 hour</option>
+              <option value="24h">24 hours</option>
+              <option value="7d">7 days</option>
+              <option value="30d">30 days</option>
+              <option value="90d">90 days</option>
+              <option value="unlimited">No limit</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Reusable code</label>
+              <p>Off: the code is used up after one pairing. On: the same code keeps working until it expires, so you can pair a second device later. Anyone who has the code can pair, so keep the window short while this is on.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgPairReusable"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Prompts from Telegram</h3>
+          <p class="tg-card-desc">The other direction: messages you send from the phone.</p>
+          <div class="setting-row">
+            <div class="setting-info"><label for="tgInbound">Allow prompts</label>
+              <p>Plain text sent to the paired chat runs here, as if you had typed it. A picture works too when the selected model can see images. A prompt that arrives during a run waits in a queue of three. Approvals and questions still need this screen, so nothing is decided for you. Off by default.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgInbound"><span class="switch-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>What to send</h3>
+          <p class="tg-card-desc">One message per event. Quiet hours hold back everything except being blocked on you.</p>
+          <div class="setting-row">
+            <div class="setting-info"><label>Notifications on</label>
+              <p>Turn everything off without forgetting the pairing.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEnabled"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Run started</label>
+              <p>One message as a run begins.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvStarted"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Blocked on you</label>
+              <p>The run is waiting for an answer or an approval. Sent even in quiet hours.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvBlocked"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Run finished</label>
+              <p>Duration, file counts, final state of the live message.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvFinished"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row tg-sub" id="tgSummaryRow">
+            <div class="setting-info"><label>Include the answer</label>
+              <p>Append Cortex's final answer to the finished message. It is capped so one run stays one message; anything longer says so and the full answer stays in Cortex. The answer can contain file paths and code.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgSummary"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Run failed</label>
+              <p>The error message, short.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgEvFailed"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Quiet hours</label>
+              <p>Silence progress notifications between two local times. A window that crosses midnight works.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="tgQuietEnabled"><span class="switch-slider"></span></label>
+          </div>
+          <div class="setting-row tg-sub" id="tgQuietWindow">
+            <div class="setting-info"><label>Quiet window</label>
+              <p>Local time on this computer.</p>
+            </div>
+            <div class="tg-time">
+              <input type="time" class="setting-input" id="tgQuietStart" value="22:00" aria-label="Quiet hours start">
+              <span class="tg-time-sep">to</span>
+              <input type="time" class="setting-input" id="tgQuietEnd" value="07:00" aria-label="Quiet hours end">
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Test message</label>
+              <p>Sends one now, ignoring quiet hours and the event list.</p>
+            </div>
+            <button class="setting-btn" id="tgTest">Test message</button>
+          </div>
+        </div>
+
+        <div class="settings-card tg-danger">
+          <h3>Disconnect</h3>
+          <p class="tg-card-desc">Both act immediately. Unpair keeps the token, Remove bot deletes it.</p>
+          <div class="setting-row">
+            <div class="setting-info"><label>Unpair</label>
+              <p>Forgets this chat and cancels any open pairing code, immediately. The bot token is kept, so pairing again needs no pasting.</p>
+            </div>
+            <button class="setting-btn danger-btn" id="tgUnpair">Unpair</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><label>Remove bot</label>
+              <p>Unpairs and deletes the token from this computer. Nothing is left behind, and the BotFather token will be needed again.</p>
+            </div>
+            <button class="setting-btn danger-btn is-heavy" id="tgForget">Remove bot</button>
+          </div>
+        </div>
+      </section>
+
       <!-- ABOUT -->
       <section class="settings-section" data-section="about">
         <div class="section-header">
@@ -1104,7 +1280,7 @@
     window.onerror = function(msg, src, line) { window.__memMgrDebug.errors.push({msg,src,line}); return false; };
     window.receiveMemoryState = window.receiveMemoryState || function(s) { window.__memMgrDebug.fallbackState = s; };
   </script>
-  <script src="./memory_management.js?v=15"></script>
+  <script src="./memory_management.js?v=18"></script>
 </body>
 
 </html>

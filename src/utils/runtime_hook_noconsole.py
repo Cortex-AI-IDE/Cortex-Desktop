@@ -133,4 +133,4 @@ if sys.platform == 'win32':
         
     except Exception as e:
         # Silently fail - don't crash the app
-        pass
+        pass  # silent-ok: a missing console patch must never stop startup

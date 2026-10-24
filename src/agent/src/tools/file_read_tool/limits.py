@@ -25,7 +25,7 @@ def get_env_max_tokens() -> Optional[int]:
             if parsed > 0:
                 return parsed
         except ValueError:
-            pass
+            pass  # silent-ok: a non-numeric override means "no limit set"
     return None
 
 

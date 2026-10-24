@@ -66,7 +66,7 @@ def toggleable_providers() -> list:
             if slug and slug not in out:
                 out.append(slug)
     except Exception:
-        pass  # the optional app must never break the built-in toggles
+        pass  # silent-ok: the optional app must never break the built-in toggles
     return out
 
 
@@ -148,7 +148,7 @@ def get_enabled_providers() -> list:
         if saved is not None:
             return saved
     except Exception:
-        pass
+        pass  # silent-ok: nothing saved or unreadable; the server defaults apply
     # Nothing saved (or unreadable): the server defaults apply. Logged
     # because on screen it is indistinguishable from "your choice was
     # ignored" - which is exactly how a failed settings write presented
@@ -219,7 +219,7 @@ def get_model_groups() -> list:
         from src.ai.remote_models import get_remote_groups
         base = list(get_remote_groups() or [])
     except Exception:
-        pass  # a broken catalog module must not take the dropdown with it
+        pass  # silent-ok: a broken catalog module must not take the dropdown with it
     base = _auto_first(base)
     try:
         from src.ai.dynamic_providers import dropdown_groups
@@ -227,7 +227,7 @@ def get_model_groups() -> list:
         if extra:
             return base + list(extra)
     except Exception:
-        pass
+        pass  # silent-ok: the extras are optional; the base catalog stands
     return base
 
 

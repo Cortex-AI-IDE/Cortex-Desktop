@@ -100,7 +100,7 @@ class UpdateChecker:
                          "(Microsoft Store delivers updates)")
                 return False
         except Exception:
-            pass  # version module unavailable, behave like a normal build
+            pass  # silent-ok: the version module is absent, so behave like a normal build
 
         try:
             from src.config.settings import load_settings
@@ -136,12 +136,12 @@ class UpdateChecker:
                 from src.core.cortex_api import APP_PLATFORM
                 params["platform"] = APP_PLATFORM
             except Exception:
-                pass
+                pass  # silent-ok: no platform param; the update check still runs
             try:
                 from src.version import CHANNEL
                 params["channel"] = CHANNEL
             except Exception:
-                pass
+                pass  # silent-ok: no channel param; the update check still runs
             result = api._request("GET", "/api/v1/version/check/", params=params)
 
             if not result:

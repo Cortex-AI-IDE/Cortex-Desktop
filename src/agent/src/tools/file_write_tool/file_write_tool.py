@@ -194,7 +194,7 @@ def clear_delivered_diagnostics_for_file(uri: str) -> None:
         from services.lsp.lsPDiagnosticRegistry import clear_delivered_diagnostics_for_file
         clear_delivered_diagnostics_for_file(uri)
     except ImportError:
-        pass
+        pass  # silent-ok: the LSP bridge only exists inside the IDE host
 
 def notify_vscode_file_updated(path: str, old: Optional[str], new: str) -> None:
     """Notify the connected IDE about file update for diff view."""
@@ -202,7 +202,7 @@ def notify_vscode_file_updated(path: str, old: Optional[str], new: str) -> None:
         from services.mcp.vscode_sdk_mcp import notifyVscodeFileUpdated
         notifyVscodeFileUpdated(path, old, new)
     except ImportError:
-        pass
+        pass  # silent-ok: the VS Code MCP bridge only exists inside the IDE host
 
 def count_lines_changed(patch: List[Hunk], content: Optional[str] = None) -> None:
     """Count lines changed in patch for analytics."""
@@ -232,7 +232,7 @@ def fetch_single_file_git_diff(path: str) -> Optional[GitDiff]:
         if result.returncode == 0:
             return {'diff': result.stdout}
     except Exception:
-        pass
+        pass  # silent-ok: the caller treats None as "diff unavailable"
     return None
 
 # Secret detection patterns for team memory protection
@@ -367,7 +367,7 @@ def write_text_content(path: str, content: str, encoding: str, line_endings: str
                 # Content identical - skip write to avoid unnecessary file modification
                 return
         except Exception:
-            pass  # Can't read existing file, proceed with write
+            pass  # silent-ok: cannot read the existing file, so proceed with the write
     
     # Step 4: Write with newline="" to prevent Python from adding more conversions
     with open(path, "w", encoding=encoding, newline="") as f:
@@ -605,7 +605,7 @@ class FileWriteTool:
             activate_conditional_skills_for_paths([full_file_path], cwd)
             
         except ImportError:
-            # Skills system not available - skip
+            # silent-ok: the skills system is not available in this context
             pass
         
         # --------------------------------------------------------------
@@ -630,7 +630,7 @@ class FileWriteTool:
                     getattr(assistant_message, "uuid", None) if assistant_message else None,
                 )
             except AttributeError:
-                pass
+                pass  # silent-ok: no uuid on the message, so the association is skipped
         
         # --------------------------------------------------------------
         # Read current file state (atomic read)

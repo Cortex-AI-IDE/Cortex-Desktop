@@ -936,7 +936,7 @@ class ProjectHealthScanner:
                     try:
                         rel = path.relative_to(self.project_root).as_posix()
                     except ValueError:
-                        continue
+                        continue  # silent-ok: a path outside the project root is not part of it
                     out.append((path, rel))
                     if len(out) >= _MAX_FILES:
                         log.warning(f"[ProjectHealth] file cap {_MAX_FILES} reached; truncating")
@@ -1675,7 +1675,7 @@ class ProjectHealthScanner:
                     try:
                         rel = path.relative_to(self.project_root).as_posix()
                     except ValueError:
-                        continue
+                        continue  # silent-ok: a path outside the project root is not part of it
                     census.append((path, rel))
                     extra += 1
                     if extra >= _MAX_CENSUS_EXTRA_FILES:
@@ -1683,14 +1683,14 @@ class ProjectHealthScanner:
                 if extra >= _MAX_CENSUS_EXTRA_FILES:
                     break
         except Exception:
-            pass
+            pass  # silent-ok: the census keeps whatever it collected before the error
 
         build_refs: Set[str] = set()
         for path, rel in census:
             try:
                 src = read_source_bom_safe(path)
             except Exception:
-                continue
+                continue  # silent-ok: an unreadable file cannot be judged for a __main__ guard
             if rel in py_rels and "__main__" in src:
                 has_main_guard.add(rel)
             if rel.endswith(".spec"):

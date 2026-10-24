@@ -207,7 +207,7 @@ class BackgroundWorker:
                 payload={"reason": "controller_shutdown"},
             ))
         except Exception:
-            pass
+            pass  # silent-ok: the controller may already be gone; shutdown proceeds
 
         self._keep_reading.clear()
         self._safe_terminate(timeout)
@@ -382,7 +382,7 @@ class BackgroundWorker:
                             source_component=f"background_worker/{self.worker_id}",
                         ))
                 except Exception:
-                    pass
+                    pass  # silent-ok: the event bus is optional telemetry
 
                 # Queue for collection
                 with self._message_lock:
@@ -397,7 +397,7 @@ class BackgroundWorker:
                     self._on_error(error)
 
             except json.JSONDecodeError:
-                continue
+                continue  # silent-ok: a non-JSON line is not a worker message
             except Exception as exc:
                 log.debug(f"[WORKER-{self.worker_id}] Read loop error: {exc}")
                 break
@@ -442,7 +442,7 @@ class BackgroundWorker:
                 self._process.kill()
                 self._process.wait(timeout=5.0)
             except Exception:
-                pass
+                pass  # silent-ok: the process is already gone or unkillable; shutdown continues
 
     def _find_entry_point(self) -> str:
         """Find the worker entry point script."""
@@ -508,7 +508,7 @@ class WorkerAgent:
                     self._send_heartbeat()
 
             except json.JSONDecodeError:
-                continue
+                continue  # silent-ok: a non-JSON line is not a worker message
             except Exception as exc:
                 self._send_error(str(exc))
 

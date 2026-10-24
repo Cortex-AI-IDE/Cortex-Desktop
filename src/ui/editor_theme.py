@@ -52,7 +52,7 @@ def effective_editor_theme() -> str:
         if app_theme in dict(EDITOR_THEMES):
             return app_theme
     except Exception:
-        pass
+        pass  # silent-ok: falls back to DEFAULT_EDITOR_THEME below
     return DEFAULT_EDITOR_THEME
 
 

@@ -447,7 +447,7 @@ class AgentSafetyGuard:
                     f"overwriting changes made by other tool calls."
                 )
         except Exception:
-            pass
+            pass  # silent-ok: the guard could not run; the caller proceeds without a finding
         return None
 
     # ── P8: Error recovery budget ──────────────────────────────

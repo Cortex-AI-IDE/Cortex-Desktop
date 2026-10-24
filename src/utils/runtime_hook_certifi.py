@@ -28,9 +28,9 @@ def _configure_certifi():
             os.environ['REQUESTS_CA_BUNDLE'] = ca_path
             return
     except ImportError:
-        pass
+        pass  # silent-ok: certifi is not bundled; the fallback search below runs
     except Exception:
-        pass
+        pass  # silent-ok: certifi is bundled but unusable; the fallback search below runs
 
     # Fallback: search for cacert.pem in known locations
     search_paths = []
@@ -83,7 +83,7 @@ def _configure_certifi():
                     ):
                         pem_parts.append(ssl.DER_cert_to_PEM_cert(cert_bytes))
             except Exception:
-                continue
+                continue  # silent-ok: an unparsable certificate in the bundle is skipped
 
         if pem_parts:
             fd, pem_path = tempfile.mkstemp(prefix="cortex_ca_", suffix=".pem")
@@ -94,7 +94,7 @@ def _configure_certifi():
     except Exception:
         # Nothing else to try. Leave the environment alone so the failure is
         # the library's own clear TLS error rather than a half-set variable.
-        pass
+        pass  # silent-ok: leaving the environment untouched is the intended outcome
 
 
 _configure_certifi()

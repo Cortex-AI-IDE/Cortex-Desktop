@@ -88,7 +88,7 @@ def tinted_pixmap(name: str, color: str, size: int = 16) -> QPixmap:
             p.end()
             return pm
         except Exception:
-            pass
+            pass  # silent-ok: falls back to the Unicode glyph below
 
     # Unicode fallback, render symbol onto pixmap
     pm = QPixmap(size, size)

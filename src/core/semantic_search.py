@@ -123,8 +123,8 @@ class SemanticSearch:
                 self._cloud_check_time = now
                 return True
         except Exception:
-            pass
-        
+            pass  # silent-ok: no cloud access, and the flag below records that
+
         self._has_cloud_access = False
         self._cloud_check_time = now
         return False
@@ -258,7 +258,7 @@ class SemanticSearch:
                     ut = get_usage_tracker()
                     ut.record_embedding_tokens(result.tokens_used)
                 except Exception:
-                    pass
+                    pass  # silent-ok: usage accounting is optional and must not fail an embed
 
             # Store in cache (packed float32, see _pack_embedding)
             self.embeddings_cache[file_path] = _pack_embedding(result.embedding)
@@ -353,21 +353,38 @@ class SemanticSearch:
         return sum(1 for p in list(self.embeddings_cache)
                    if not self._same_space(self._entry_model(p), current))
 
-    def index_project(self, force: bool = False) -> Dict[str, int]:
+    def index_project(self, force: bool = False,
+                      max_files: Optional[int] = None,
+                      max_seconds: Optional[float] = None) -> Dict[str, int]:
         """
         Index entire project.
-        
+
         Incremental by default, only re-embeds files that are new or changed
         (mtime differs from stored value). Use force=True for full rebuild.
-        
+
         PERFORMANCE: Adds rate limiting between API calls to prevent flooding
         the Django dev server (single-threaded). Saves index periodically.
-        
+
         Args:
             force: Force re-index all files
-        
+            max_files: Stop after embedding this many files (None = no limit).
+                Counts files actually embedded, not files visited, so skipped
+                and unchanged files stay free. Used to bound a foreground heal
+                of entries that came from another embedding model: on a large
+                project that heal took one tool call 19 minutes, which looks
+                like a hang and blocks whatever called it.
+            max_seconds: Stop once this much wall-clock time has been spent in
+                the embedding loop (None = no limit). A file costs one network
+                round-trip (~3.3s through the subscription proxy on this
+                machine), so a count cap alone still scales with how slow the
+                network is that day. Both caps are checked; whichever hits
+                first wins. ``max_files`` alone turned "bounded" into
+                "bounded at 82s" on a bad connection.
+
         Returns:
-            Statistics dict
+            Statistics dict. ``capped`` is True when either cap stopped it,
+            ``stop_reason`` names which one, and ``total_candidates`` is how
+            many files the walk found, so a caller can report what is pending.
         """
         import time as _time
         log.info(f"Starting project indexing{'(force)' if force else ''}...")
@@ -377,6 +394,14 @@ class SemanticSearch:
             'skipped': 0,
             'errors': 0,
             'total_tokens': 0,
+            # How many files the walk saw. Without it a capped run can only
+            # report what it did, never how much is left, which is the number
+            # that tells a caller whether the answer it is about to return
+            # covers 5% of the project or 95%.
+            'total_candidates': 0,
+            # Always present so callers can read the shape without getattr.
+            'capped': False,
+            'stop_reason': None,
             # Rows that belonged to another project and were removed. Reported
             # rather than silently dropped: "my index shrank" needs a reason
             # in the log, and this is the only place it can appear.
@@ -438,7 +463,7 @@ class SemanticSearch:
                     if os.path.getsize(full) == 0:
                         continue
                 except OSError:
-                    continue
+                    continue  # silent-ok: a file that cannot be stat'd is not indexed
                 files_to_index.append(full)
 
         # Rate limit: small delay between API calls to avoid flooding
@@ -475,6 +500,10 @@ class SemanticSearch:
         # another model than the one in use now (see _entry_model).
         _current_model = self.current_model()
         stats['converted'] = 0
+        stats['total_candidates'] = len(files_to_index)
+        # Measured from here, not from entry: the tree walk and the prune are
+        # local work that should not eat the caller's network budget.
+        _loop_start = _time.monotonic()
 
         for i, file_path in enumerate(files_to_index):
             file_str = str(file_path)
@@ -499,7 +528,28 @@ class SemanticSearch:
                 stats['total_tokens'] += meta.get('tokens_used', 0)
             else:
                 stats['errors'] += 1
-            
+
+            # Bounded run: stop once the file cap OR the time cap is reached.
+            # The caller re-enters on the next call and continues from the
+            # saved index, so a long convert spreads out instead of freezing
+            # one call. Skipped files cost nothing, so both caps budget real
+            # work. The time cap exists because one file is one network
+            # round-trip: a count cap alone still means "N x however slow the
+            # proxy is today".
+            if max_files is not None and stats['indexed'] >= max_files:
+                stats['capped'] = True
+                stats['stop_reason'] = 'max_files'
+                log.info(f"[SemanticSearch] Stopped at max_files={max_files}; "
+                         f"run index again to continue")
+                break
+
+            if max_seconds is not None and _time.monotonic() - _loop_start >= max_seconds:
+                stats['capped'] = True
+                stats['stop_reason'] = 'max_seconds'
+                log.info(f"[SemanticSearch] Stopped at max_seconds={max_seconds}; "
+                         f"run index again to continue")
+                break
+
             # Rate limit: small delay between API calls to prevent flooding
             # Only applies when cloud embeddings are actually used (not hash fallback)
             if stats['indexed'] > 0 and self._check_embeddings_access():
@@ -938,7 +988,7 @@ class SemanticSearch:
                 self.index_path.unlink()
                 log.info(f"Replaced the JSON index with the binary one in {self.index_dir}")
             except OSError:
-                pass
+                pass  # silent-ok: the old JSON index is already gone
 
         log.info(f"Saved index with {len(keys)} embeddings to {npy_path}")
 
@@ -962,7 +1012,7 @@ class SemanticSearch:
             try:
                 p.unlink()
             except OSError:
-                pass
+                pass  # silent-ok: the stale binary shard is already gone
 
         log.info(f"Saved index with {len(self.embeddings_cache)} embeddings to {self.index_path}")
 
@@ -990,7 +1040,7 @@ class SemanticSearch:
                     try:
                         os.replace(p, str(p) + ".corrupt")
                     except OSError:
-                        pass
+                        pass  # silent-ok: the rebuild below replaces the index either way
                 self.embeddings_cache = {}
                 self.file_metadata = {}
                 if not self.index_path.exists():
@@ -1020,7 +1070,7 @@ class SemanticSearch:
             try:
                 os.replace(self.index_path, str(self.index_path) + ".corrupt")
             except OSError:
-                pass
+                pass  # silent-ok: the rebuild below replaces the index either way
             self.embeddings_cache.clear()
         except Exception as e:
             log.error(f"Failed to load index: {e}")

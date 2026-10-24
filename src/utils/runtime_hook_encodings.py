@@ -42,4 +42,4 @@ except (ImportError, ModuleNotFoundError):
     # Python 3.14+ / PyInstaller frozen: codecs is bundled as a flat module,
     # not a package, so submodule imports fail. MBCS is auto-registered by
     # the codecs registry on Windows anyway, so this is safe to skip.
-    pass
+    pass  # silent-ok: MBCS registers itself through the codecs registry on Windows

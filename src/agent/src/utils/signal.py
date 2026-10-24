@@ -52,7 +52,7 @@ class Signal:
             try:
                 listener(*args)
             except Exception:
-                # Silently ignore listener errors to prevent breaking other listeners
+                # silent-ok: one bad listener must not stop the others
                 pass
     
     def clear(self) -> None:

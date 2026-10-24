@@ -72,7 +72,7 @@ def apply_menu_theme(widget) -> None:
         head = existing.split(_MARKER)[0].rstrip()
         widget.setStyleSheet((head + "\n" + build_menu_qss()).strip())
     except RuntimeError:
-        pass  # C++ side already deleted
+        pass  # silent-ok: the C++ side was already deleted
 
 
 class _MenuWatcher(QObject):
@@ -99,7 +99,7 @@ class _MenuWatcher(QObject):
                 try:
                     child.setStyleSheet(build_menu_qss())
                 except RuntimeError:
-                    pass
+                    pass  # silent-ok: the menu was deleted mid-polish
             elif kind == QEvent.Type.ChildAdded and isinstance(child, QWidget):
                 child.installEventFilter(self)   # follow the tree down
         return False   # never consume, this only observes
@@ -121,7 +121,7 @@ def install_menu_watcher(view) -> None:
             child.installEventFilter(watcher)
         view._cortex_menu_watcher = watcher
     except RuntimeError:
-        pass
+        pass  # silent-ok: the view was deleted before the watcher was attached
 
 
 def theme_native_menus(view) -> None:
@@ -152,7 +152,7 @@ class _GlobalMenuThemer(QObject):
                 if not a0.styleSheet():
                     a0.setStyleSheet(build_menu_qss())
             except RuntimeError:
-                pass
+                pass  # silent-ok: the menu was deleted mid-event
         return False   # never consume
 
 

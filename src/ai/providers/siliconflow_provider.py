@@ -195,7 +195,7 @@ class SiliconFlowProvider(BaseProvider):
                     try:
                         retry_callback(attempt + 1, self._max_retries + 1, 'error')
                     except Exception:
-                        pass
+                        pass  # silent-ok: a broken retry callback must not stop the retry
                 time.sleep(backoff)
 
             try:
@@ -217,7 +217,7 @@ class SiliconFlowProvider(BaseProvider):
                                     if content:
                                         yield content
                             except json.JSONDecodeError:
-                                continue
+                                continue  # silent-ok: a non-JSON line is a keepalive, not an event
                 return  # Successfully streamed
 
             except requests.exceptions.Timeout:
@@ -232,7 +232,7 @@ class SiliconFlowProvider(BaseProvider):
                         try:
                             retry_callback(attempt + 1, self._max_retries + 1, str(status))
                         except Exception:
-                            pass
+                            pass  # silent-ok: a broken retry callback must not stop the retry
                     time.sleep(self._retry_delay * (2 ** attempt))
                     continue
                 # Handle HTML error pages gracefully (openresty, nginx, etc.)
@@ -241,7 +241,7 @@ class SiliconFlowProvider(BaseProvider):
                     try:
                         _resp_body = (e.response.text or "")[:500]
                     except Exception:
-                        pass
+                        pass  # silent-ok: the body is only used to detect an HTML error page
                 _is_html = "<html" in _resp_body.lower() or "<center>" in _resp_body.lower()
                 if _is_html and status == 400:
                     log.error(f"SiliconFlow HTTP 400 (HTML error page, likely upstream issue): {_resp_body[:200]}")

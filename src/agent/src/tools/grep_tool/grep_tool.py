@@ -59,7 +59,7 @@ def get_cwd() -> str:
         if root and 'Program Files' not in root:
             return root
     except (ImportError, AttributeError):
-        pass
+        pass  # silent-ok: the project-root helper is optional; the cwd guard below covers it
     raw_cwd = os.getcwd()
     # Last-resort guard: refuse Program Files
     if 'Program Files' in raw_cwd:
@@ -442,7 +442,7 @@ def _python_grep_fallback_sync(args: List[str], cwd: str) -> List[str]:
                 all_lines = text.splitlines(keepends=True)
                 break
             except (UnicodeDecodeError, ValueError):
-                continue
+                continue  # silent-ok: this encoding did not decode; try the next one
         else:
             # Should never reach here (latin-1 never fails), but safety net
             return hits
@@ -574,7 +574,7 @@ def _find_npm_ripgrep() -> Optional[str]:
             if node_exe:
                 break
         except Exception:
-            continue
+            continue  # silent-ok: this candidate is not on the machine; try the next one
     
     if node_exe:
         try:
@@ -592,7 +592,7 @@ def _find_npm_ripgrep() -> Optional[str]:
             if npm_rg and os.path.isfile(npm_rg):
                 return npm_rg
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
+            pass  # silent-ok: npm is absent or slow; the next lookup method runs
     
     # -- Method 2: Scan common npm global install locations (faster, no subprocess) --
     npm_global_roots = []
@@ -636,7 +636,7 @@ def _find_npm_ripgrep() -> Optional[str]:
                 break
             search_dir = parent
     except Exception:
-        pass
+        pass  # silent-ok: no enclosing project root; the caller treats None as "not found"
     
     return None
 
@@ -702,7 +702,7 @@ def _find_ripgrep() -> Optional[str]:
                     if stable_hash == bundled_hash:
                         return stable_rg
                 except (IOError, OSError):
-                    pass
+                    pass  # silent-ok: an unreadable stable copy is refreshed on the next line
             
             # Copy to stable location (or refresh if outdated)
             try:
@@ -758,7 +758,7 @@ def prewarm_ripgrep():
                 **kwargs,
             )
         except Exception:
-            pass
+            pass  # silent-ok: warming ripgrep in the background is best effort
     threading.Thread(target=_warm, daemon=True).start()
 
 
@@ -1237,7 +1237,7 @@ class GrepTool:
                         total_matches += count
                         file_count += 1
                     except ValueError:
-                        pass
+                        pass  # silent-ok: a non-numeric count line is ignored
             
             output = {
                 "mode": "count",

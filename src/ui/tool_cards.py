@@ -333,7 +333,7 @@ class ToolCardBase(QFrame):
                 self._chev.setStyleSheet(f"color:{T['mono_muted']};font-size:11px;")
             self._style_labels()
         except RuntimeError:
-            pass  # C++ object deleted
+            pass  # silent-ok: the C++ object was already deleted
 
 
 # ============================================================
@@ -1048,7 +1048,7 @@ class TodoCard(ToolCardBase):
         try:
             self._style_rows()
         except RuntimeError:
-            pass  # C++ object deleted
+            pass  # silent-ok: the C++ object was already deleted
 
 
 class GenericCard(ToolCardBase):

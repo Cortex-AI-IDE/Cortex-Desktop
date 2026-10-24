@@ -104,7 +104,7 @@ def _find_importers(project_root: str, edited_path: str,
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except OSError:
-            continue
+            continue  # silent-ok: an unreadable file is left out of the impact map
 
         rel = os.path.relpath(path, project_root)
         for sym, (imp_re, attr_re) in pats.items():

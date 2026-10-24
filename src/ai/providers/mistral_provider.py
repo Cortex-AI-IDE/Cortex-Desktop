@@ -370,7 +370,7 @@ class MistralProvider(BaseProvider):
                         parsed = json.loads(json_str)
                         return True, parsed
                     except (IndexError, json.JSONDecodeError):
-                        pass
+                        pass  # silent-ok: no fenced JSON block; the brace scan below runs
 
                 # Try to find JSON between curly braces
                 try:
@@ -381,7 +381,7 @@ class MistralProvider(BaseProvider):
                         parsed = json.loads(json_str)
                         return True, parsed
                 except json.JSONDecodeError:
-                    pass
+                    pass  # silent-ok: not JSON in this shape; the next extraction runs
 
                 return False, None
         except Exception as e:
@@ -497,7 +497,7 @@ class MistralProvider(BaseProvider):
                             try:
                                 retry_callback(attempt + 2, max_retries, 'rate_limit')
                             except Exception:
-                                pass
+                                pass  # silent-ok: a broken retry callback must not stop the retry
                         time.sleep(backoff_seconds)
                         continue
                     else:
@@ -522,7 +522,7 @@ class MistralProvider(BaseProvider):
                             try:
                                 retry_callback(attempt + 2, max_retries, 'error')
                             except Exception:
-                                pass
+                                pass  # silent-ok: a broken retry callback must not stop the retry
                         time.sleep(backoff_seconds)
                         continue
 
@@ -533,7 +533,7 @@ class MistralProvider(BaseProvider):
                         try:
                             retry_callback(attempt + 2, max_retries, error_type)
                         except Exception:
-                            pass
+                            pass  # silent-ok: a broken retry callback must not stop the retry
                     time.sleep(self._retry_delay * (attempt + 1))
                 else:
                     raise last_error
@@ -755,7 +755,7 @@ class MistralProvider(BaseProvider):
                 try:
                     _body = _resp.text or ""
                 except Exception:
-                    pass
+                    pass  # silent-ok: no body available; the model check runs on the status alone
                 _unknown = unknown_model_message(self, model, _resp.status_code, _body)
                 if _unknown:
                     raise Exception(_unknown)

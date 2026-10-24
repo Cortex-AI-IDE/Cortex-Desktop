@@ -155,6 +155,10 @@
     // at startup) keeps the list current, since skills can be added or
     // edited on disk while this window is sitting there.
     if (id === 'skills' && bridge) loadSkills();
+    // Telegram state lives in settings + KeyManager, so read it on open
+    // rather than at startup: the pairing state can change while this
+    // window is open (the code expires, or /pair arrives).
+    if (id === 'telegram' && bridge) loadTelegram();
     // Fetch version when About section is shown
     if (id === 'about' && bridge) {
       callBridge(["getVersion"], []).then(v => {
@@ -652,6 +656,274 @@
       });
   };
 
+  /* ═══════════ Telegram ═══════════
+     These controls deliberately stay out of SETTINGS_MAP. Python's
+     setSetting() splits a dotted key on the FIRST dot only, so a nested path
+     such as telegram.quiet_hours.start would be stored under a key literally
+     named "quiet_hours.start". The token is different again: it goes to
+     KeyManager, never to settings.json. So this section sends one JSON
+     payload and lets telegram_config decide where each part belongs. */
+
+  const TG_EVENT_IDS = {
+    started: "tgEvStarted",
+    blocked: "tgEvBlocked",
+    finished: "tgEvFinished",
+    failed: "tgEvFailed",
+  };
+
+  /* Reads after "Valid ...". The keys mirror PAIR_EXPIRY_OPTIONS in
+     src/services/telegram_config.py; an unknown key falls back to "for 1 hour". */
+  const TG_EXPIRY_PHRASE = {
+    "60m": "for 1 hour",
+    "24h": "for 24 hours",
+    "7d": "for 7 days",
+    "30d": "for 30 days",
+    "90d": "for 90 days",
+    unlimited: "until you cancel it",
+  };
+
+  /* The token itself never reaches the page. A saved one is displayed as a
+     static mask rather than in a filled field, so there is no caret, no focus
+     ring, and no secret sitting in the DOM waiting to be read back. */
+
+  /* True once the page has actually read the saved value. A switch that was
+     never populated must not be written back: an unrelated toggle on a page
+     whose load failed would otherwise report "off" for a setting the user has
+     on, and turn it off silently. */
+  let tgInboundKnown = false;
+  let tgSummaryKnown = false;
+  /* Mirrors getTelegramSettings().hasToken, so Save can tell "nothing typed"
+     apart from "user wants the token gone". */
+  let tgHasToken = false;
+  /* Mirrors getTelegramSettings().paired so the status card can be redrawn when
+     a toggle changes without re-reading the bridge. */
+  let tgPaired = false;
+  /* Telegram ships with the subscription, exactly like OCR and web search, so
+     this mirrors the one check the app makes (has_subscription()) and nothing
+     else. Defaults to allowed so a bridge that predates the field can never
+     lock a subscriber out of their own settings. */
+  let tgSubscribed = true;
+
+  /* Everything that would reach a bridge method the monitor refuses anyway.
+     Unpair and Remove bot are deliberately absent: cleaning up an account is
+     never something to block. */
+  const TG_LOCKED_IDS = [
+    "tgEnabled", "tgEvStarted", "tgEvBlocked", "tgEvFinished",
+    "tgQuietEnabled", "tgQuietStart", "tgQuietEnd",
+    "tgPairExpiry", "tgPairReusable", "tgInbound", "tgSummary",
+    "tgToken", "tgTokenChange", "tgSaveToken", "tgTokenCancel",
+    "tgPair", "tgTest",
+  ];
+
+  /* Inline feedback belongs next to the control that produced it. Every
+     message used to be written into the pairing hint, so a failed token save
+     showed up two cards below the Save button and read as a pairing problem. */
+  function setNote(id, text, kind) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.remove("is-error", "is-ok");
+    if (kind === "error") el.classList.add("is-error");
+    else if (kind === "ok") el.classList.add("is-ok");
+  }
+
+  function tgHint(text, isError) {
+    setNote("tgPairHint", text, isError ? "error" : "");
+  }
+
+  function tgTokenHint(text, isError) {
+    setNote("tgTokenHint", text, isError ? "error" : "");
+  }
+
+  /* One step carries "next" at a time, so the strip reads as a direction
+     instead of three equal badges. */
+  function tgSetStep(name, state) {
+    const el = document.querySelector('.tg-step[data-step="' + name + '"]');
+    if (!el) return;
+    el.classList.remove("is-done", "is-next");
+    if (state) el.classList.add(state);
+  }
+
+  function setPairCode(value) {
+    const el = $("tgPairCode");
+    if (!el) return;
+    el.textContent = value || "--------";
+    el.classList.toggle("is-set", !!value);
+  }
+
+  /* The status card is the only place that answers "where am I", so it is
+     written from the three real states rather than inferred per card. */
+  function renderTelegramStatus(hasToken, paired, inbound) {
+    const card = $("tgStatus");
+    if (card) card.classList.toggle("is-live", !!tgSubscribed && !!(hasToken && paired));
+    if (card) card.classList.toggle("is-locked", !tgSubscribed);
+
+    let heading = "Not connected";
+    let detail = "Paste a token from BotFather below. Nothing is sent until you do.";
+    if (!tgSubscribed) {
+      /* The plan wins over every other state: a locked account has nothing to
+         do here until the subscription is back, whether or not a token or chat
+         exists. One sentence, because there is one reason. */
+      heading = "Needs a subscription";
+      detail = "Telegram is included with Cortex Pro. Upgrade from Help -> Upgrade to Pro, then reopen this page.";
+    } else if (hasToken && !paired) {
+      heading = "Token saved, no chat paired";
+      detail = "Show a code, then send /pair CODE to your bot from the phone.";
+    } else if (hasToken && paired) {
+      heading = "Connected";
+      detail = inbound
+        ? "Reports arrive on your phone, and prompts you send there run on this PC."
+        : "Reports arrive on your phone. Prompts are off, so messages you send are ignored.";
+    }
+
+    const title = $("tgStatusTitle");
+    if (title) title.textContent = heading;
+    const text = $("tgStatusText");
+    if (text) text.textContent = detail;
+
+    /* A locked section has no next step, so the strip goes quiet instead of
+       pointing at a control that cannot be pressed. */
+    tgSetStep("token", !tgSubscribed ? "" : hasToken ? "is-done" : "is-next");
+    tgSetStep("pair", !tgSubscribed ? "" : paired ? "is-done" : hasToken ? "is-next" : "");
+    tgSetStep("prompts", !tgSubscribed ? "" : !paired ? "" : inbound ? "is-done" : "is-next");
+  }
+
+  /* Two rows only mean something while the switch above them is on: the answer
+     is appended to a finished message, and a quiet window needs quiet hours.
+     They are disabled rather than merely dimmed, so a keyboard user cannot
+     change a value that nothing reads. */
+  function refreshTelegramDependents() {
+    const pairs = [
+      ["tgEvFinished", "tgSummaryRow", ["tgSummary"]],
+      ["tgQuietEnabled", "tgQuietWindow", ["tgQuietStart", "tgQuietEnd"]],
+    ];
+    pairs.forEach(([parentId, rowId, controlIds]) => {
+      const parent = $(parentId);
+      const row = $(rowId);
+      if (!parent || !row) return;
+      const off = !parent.checked || !tgSubscribed;
+      row.classList.toggle("is-off", off);
+      controlIds.forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = off;
+      });
+    });
+  }
+
+  /* A locked section is inert, not merely dimmed: the controls are disabled so
+     a click cannot reach a bridge method that would refuse it anyway. Cleanup
+     (Unpair, Remove bot) stays live, because taking access away is always safe. */
+  function applyTelegramLock() {
+    TG_LOCKED_IDS.forEach((id) => {
+      const el = $(id);
+      if (el) el.disabled = !tgSubscribed;
+    });
+    refreshTelegramDependents();
+  }
+
+  /* A saved token is shown, not edited. Rendering it as a static mask means the
+     field only exists while a new token is being pasted, so a stored one can
+     never be clicked into and no caret or focus ring appears over a value the
+     user is not changing. */
+  function applyTokenMode(hasToken, editing) {
+    const saved = $("tgTokenSaved");
+    const edit = $("tgTokenEdit");
+    const cancel = $("tgTokenCancel");
+    const field = $("tgToken");
+    const showSaved = !!hasToken && !editing;
+    if (saved) saved.hidden = !showSaved;
+    if (edit) edit.hidden = showSaved;
+    /* Cancel only makes sense while a token is still stored: with nothing to go
+       back to it would just be a second, quieter Save. */
+    if (cancel) cancel.hidden = !hasToken;
+    if (field) field.value = "";
+  }
+
+  function applyTelegramSettings(data) {
+    if (!data || typeof data !== "object") return;
+    const enabled = $("tgEnabled");
+    if (enabled) enabled.checked = !!data.enabled;
+    const events = data.events || [];
+    for (const [name, id] of Object.entries(TG_EVENT_IDS)) {
+      const el = $(id);
+      if (el) el.checked = events.includes(name);
+    }
+    const quiet = $("tgQuietEnabled");
+    if (quiet) quiet.checked = !!data.quietEnabled;
+    if (data.quietStart && $("tgQuietStart")) $("tgQuietStart").value = data.quietStart;
+    if (data.quietEnd && $("tgQuietEnd")) $("tgQuietEnd").value = data.quietEnd;
+
+    /* Only trust a value the <select> actually offers, or the browser blanks
+       the control and the user sees an empty dropdown. */
+    const expiry = $("tgPairExpiry");
+    if (expiry) {
+      const wanted = String(data.pairExpiry || "60m");
+      const offered = Array.from(expiry.options).map((option) => option.value);
+      expiry.value = offered.includes(wanted) ? wanted : "60m";
+    }
+    const reusable = $("tgPairReusable");
+    if (reusable) reusable.checked = !!data.pairReusable;
+    const inbound = $("tgInbound");
+    if (inbound) inbound.checked = !!data.inbound;
+    /* Defaults to on, which is what the server does for a missing key. */
+    const summary = $("tgSummary");
+    if (summary) summary.checked = data.summaryEnabled !== false;
+
+    /* The token itself is never sent back to the page. A saved one renders as a
+       static mask, so the page never holds the secret and there is nothing to
+       type into until Change is pressed. */
+    tgHasToken = !!data.hasToken;
+    tgPaired = !!data.paired;
+    /* Absent means a bridge that predates the field: allow, so a subscriber is
+       never locked out by a page that simply does not know about plans. */
+    tgSubscribed = data.subscribed !== false;
+    applyTokenMode(tgHasToken, false);
+    /* The saved state lives in the status card now, so a reload must not leave
+       a stale error from an earlier attempt sitting under the pairing row. */
+    tgHint("", false);
+    tgTokenHint("", false);
+    renderTelegramStatus(tgHasToken, !!data.paired, !!data.inbound);
+    applyTelegramLock();
+    tgInboundKnown = true;
+    tgSummaryKnown = true;
+  }
+
+  function loadTelegram() {
+    callBridge(["getTelegramSettings"], [])
+      .then((raw) => applyTelegramSettings(typeof raw === "string" ? JSON.parse(raw) : raw))
+      .catch(() => {
+        const title = $("tgStatusTitle");
+        if (title) title.textContent = "Status unavailable";
+        const text = $("tgStatusText");
+        if (text) text.textContent = "The saved bot settings could not be read. Reopen this page to try again.";
+      });
+  }
+
+  function saveTelegramSettings() {
+    const events = Object.entries(TG_EVENT_IDS)
+      .filter(([, id]) => $(id) && $(id).checked)
+      .map(([name]) => name);
+    const payload = {
+      enabled: !!($("tgEnabled") && $("tgEnabled").checked),
+      events: events,
+      quietEnabled: !!($("tgQuietEnabled") && $("tgQuietEnabled").checked),
+      quietStart: $("tgQuietStart") ? $("tgQuietStart").value : "22:00",
+      quietEnd: $("tgQuietEnd") ? $("tgQuietEnd").value : "07:00",
+      pairExpiry: $("tgPairExpiry") ? $("tgPairExpiry").value : "60m",
+      pairReusable: !!($("tgPairReusable") && $("tgPairReusable").checked),
+    };
+    if (tgInboundKnown) {
+      payload.inbound = !!($("tgInbound") && $("tgInbound").checked);
+    }
+    /* Same guard, same reason: never write a switch this page never read. */
+    if (tgSummaryKnown) {
+      payload.summaryEnabled = !!($("tgSummary") && $("tgSummary").checked);
+    }
+    callBridge(["saveTelegramSettings"], [JSON.stringify(payload)])
+      .then((result) => showToast(result === "ok" ? "Telegram settings saved" : "Could not save Telegram settings"))
+      .catch(() => showToast("Could not save Telegram settings"));
+  }
+
   /* ═══════════ DOM READY ═══════════ */
   document.addEventListener("DOMContentLoaded", () => {
 
@@ -668,6 +940,141 @@
     $("skillsSearch")?.addEventListener("input", (e) => onSkillSearchInput(e.target.value));
     $("skillsSearch")?.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { e.target.value = ""; onSkillSearchInput(""); }
+    });
+
+    /* ── Telegram ── */
+    ["tgEnabled", "tgEvStarted", "tgEvBlocked", "tgEvFinished", "tgEvFailed",
+     "tgQuietEnabled", "tgQuietStart", "tgQuietEnd",
+     "tgPairExpiry", "tgPairReusable", "tgInbound", "tgSummary"].forEach((id) => {
+      $(id)?.addEventListener("change", () => saveTelegramSettings());
+    });
+
+    /* Turning prompts on is step 3, so the strip has to follow the switch
+       without waiting for a reload. Nothing is redrawn before pairing, because
+       step 3 does not apply yet. */
+    $("tgInbound")?.addEventListener("change", (event) => {
+      if (!tgPaired) return;
+      renderTelegramStatus(tgHasToken, tgPaired, !!event.target.checked);
+    });
+
+    /* The dependent row has to follow its parent switch immediately; waiting
+       for a reload would leave it dim and dead for a beat after the click. */
+    ["tgEvFinished", "tgQuietEnabled"].forEach((id) => {
+      $(id)?.addEventListener("change", refreshTelegramDependents);
+    });
+
+    /* Change is the only way to reach the field once a token exists, so the
+       saved state cannot be typed into by accident. Cancel puts the mask back
+       without touching what is stored. */
+    $("tgTokenChange")?.addEventListener("click", () => {
+      applyTokenMode(tgHasToken, true);
+      $("tgToken")?.focus();
+    });
+
+    $("tgTokenCancel")?.addEventListener("click", () => {
+      applyTokenMode(tgHasToken, false);
+      tgTokenHint("", false);
+    });
+
+    $("tgSaveToken")?.addEventListener("click", () => {
+      const field = $("tgToken");
+      const typed = field ? field.value.trim() : "";
+      /* An empty field never reaches the bridge. saveTelegramToken("")
+         clears the vault, so a stray click on Save would delete a stored
+         token with no warning. Removal has its own button, Remove bot,
+         which says so before it does anything. */
+      if (!typed) {
+        if (tgHasToken) {
+          tgTokenHint("A token is already saved. Paste a new one to replace it, or use Remove bot to delete it.", false);
+        } else {
+          tgTokenHint("Paste a token from BotFather first.", true);
+        }
+        return;
+      }
+      callBridge(["saveTelegramToken"], [typed]).then((result) => {
+        if (result === "ok") {
+          tgHasToken = true;
+          applyTokenMode(true, false);
+          tgTokenHint("", false);
+          showToast("Token saved");
+          loadTelegram();
+        } else if (result === "invalid") {
+          tgTokenHint("That does not look like a BotFather token.", true);
+        } else {
+          tgTokenHint("Could not save the token.", true);
+        }
+      }).catch(() => tgTokenHint("Could not save the token.", true));
+    });
+
+    $("tgPair")?.addEventListener("click", () => {
+      callBridge(["startTelegramPairing"], [], 20000).then((result) => {
+        /* A refusal arrives as a marker, so it can name the real reason. An
+           empty answer would make every case look like a missing token. */
+        if (result === "!already-paired") {
+          tgHint(
+            "A chat is already paired. Unpair it first if you want to move Cortex to another chat.",
+            true
+          );
+          return;
+        }
+        if (result === "!no-token") {
+          tgHint("Add a bot token first.", true);
+          return;
+        }
+        if (result === "!no-subscription") {
+          tgHint("Telegram needs a Cortex subscription. Upgrade from Help -> Upgrade to Pro.", true);
+          return;
+        }
+        if (!result) {
+          tgHint("Could not start pairing.", true);
+          return;
+        }
+        const code = result;
+        setPairCode(code);
+        /* Describe what the Python side was actually told to do. The policy
+           controls are saved the moment they change, so reading them here is
+           accurate rather than optimistic. */
+        const expiry = $("tgPairExpiry") ? $("tgPairExpiry").value : "60m";
+        const phrase = TG_EXPIRY_PHRASE[expiry] || TG_EXPIRY_PHRASE["60m"];
+        const reusable = !!($("tgPairReusable") && $("tgPairReusable").checked);
+        const tail = reusable
+          ? " It keeps working until then, so another device can pair later."
+          : " It works once.";
+        tgHint("Send /pair " + code + " to your bot. Valid " + phrase + "." + tail, false);
+      }).catch(() => tgHint("Could not start pairing.", true));
+    });
+
+    $("tgTest")?.addEventListener("click", () => {
+      callBridge(["testTelegramMessage"], []).then((result) => {
+        if (result === "queued") showToast("Test message queued");
+        else if (result === "unpaired") showToast("Pair a chat first.");
+        else if (result === "!no-subscription") showToast("Telegram needs a Cortex subscription.");
+        else showToast("Could not send the test message.");
+      }).catch(() => showToast("Could not send the test message."));
+    });
+
+    $("tgUnpair")?.addEventListener("click", () => {
+      callBridge(["unpairTelegram"], []).then((result) => {
+        if (result !== "ok") { showToast("Could not unpair."); return; }
+        setPairCode("");
+        showToast("Unpaired");
+        /* The reload re-reads the saved state, so the hint it sets is the
+           truth rather than an optimistic guess made here. */
+        loadTelegram();
+      }).catch(() => tgHint("Could not unpair.", true));
+    });
+
+    $("tgForget")?.addEventListener("click", () => {
+      callBridge(["forgetTelegramBot"], []).then((result) => {
+        if (result !== "ok") { showToast("Could not remove the bot."); return; }
+        setPairCode("");
+        /* Forget bot is now the only way the token leaves the vault, so clear
+           the flag here too; loadTelegram() confirms it either way. */
+        tgHasToken = false;
+        applyTokenMode(false, false);
+        showToast("Bot removed");
+        loadTelegram();
+      }).catch(() => tgHint("Could not remove the bot.", true));
     });
 
     /* ── Nav search ── */
@@ -1637,10 +2044,10 @@ Use f-strings instead of .format().</code></pre>
 
     /* Track which providers have keys stored */
     const _providerHasKey = {};
-    /* Track which providers were explicitly removed (don't reload from .env) */
-    const _providerRemoved = {};
 
-    /* Mask API key for display: show first 6 + last 4 chars, asterisks in between */
+    /* The one mask used wherever a stored key is displayed. Called with no
+       argument, so a real key never passes through it and no character of one
+       can reach the page. */
     function _maskApiKey(key) {
       if (!key || typeof key !== 'string') return '••••••••••••••••';
       if (key.length <= 12) return key.charAt(0) + '•'.repeat(key.length - 2) + key.charAt(key.length - 1);
@@ -1648,7 +2055,7 @@ Use f-strings instead of .format().</code></pre>
     }
 
     /* Show masked key when a key is stored */
-    function _showMaskedState(provider, fullKey) {
+    function _showMaskedState(provider) {
       const cfg = PROVIDER_CONFIG[provider];
       if (!cfg) return;
       const input = $(cfg.input);
@@ -1657,8 +2064,10 @@ Use f-strings instead of .format().</code></pre>
       if (input && mask) {
         input.style.display = 'none';
         mask.style.display = 'inline-block';
-        /* If fullKey provided, show partial mask; otherwise generic dots */
-        mask.textContent = fullKey ? _maskApiKey(fullKey) : '••••••••••••••••••••••••••••';
+        /* Never the key itself: the page does not need it back, and a
+           first-6/last-4 hint identifies it to anyone else looking at the
+           screen. */
+        mask.textContent = _maskApiKey() || '••••••••••••••••••••••••••••';
         if (row) row.setAttribute('data-has-key', 'true');
         _providerHasKey[provider] = true;
       }
@@ -1768,35 +2177,9 @@ Use f-strings instead of .format().</code></pre>
       }
     }
 
-    /* Remove key */
-    async function _removeKey(provider) {
-      const cfg = PROVIDER_CONFIG[provider];
-      if (!cfg) return;
-
-      const ok = await askConfirm(
-        `You'll need to re-enter it to use this provider.`,
-        { title: `Remove ${provider} API key?`, okLabel: "Remove", danger: true }
-      );
-      if (!ok) return;
-
-      /* Mark as removed FIRST (prevents re-appearance from .env on page reload) */
-      _providerRemoved[provider] = true;
-      _providerHasKey[provider] = false;
-      
-      /* Always update UI immediately */
-      _showEditState(provider);
-      const input = $(cfg.input);
-      if (input) input.value = '';
-      persistSetting(cfg.settingsKey, '');
-      showToast(`${provider} key removed`);
-      
-      /* Try to delete from backend (non-blocking) */
-      if (bridge && typeof bridge.removeApiKey === 'function') {
-        bridge.removeApiKey(cfg.kmName, (ok) => {
-          console.log(`[KEY] removeApiKey(${provider}) backend result:`, ok);
-        });
-      }
-    }
+    /* There is no "forget this key" control: the row is a single field, so
+       pasting a new key is how a key is changed, and a saved key stays masked
+       until the user asks for the field back. */
 
     /* Save key on blur */
     function _saveKey(provider) {
@@ -1809,14 +2192,11 @@ Use f-strings instead of .format().</code></pre>
       /* Don't save empty or placeholder values */
       if (!value || value === '***' || value === '••••••••••••••••') return;
 
-      /* Clear removed flag when saving a new key */
-      _providerRemoved[provider] = false;
-
       /* Save via bridge */
       if (bridge && typeof bridge.setApiKey === 'function') {
         bridge.setApiKey(cfg.kmName, value, (ok) => {
           if (ok) {
-            _showMaskedState(provider, value);
+            _showMaskedState(provider);
             showToast(`${provider} key saved`);
           } else {
             showToast(`Failed to save ${provider} key`);
@@ -1825,7 +2205,7 @@ Use f-strings instead of .format().</code></pre>
       } else {
         /* Fallback: save via setSetting */
         persistSetting(cfg.settingsKey, value);
-        _showMaskedState(provider, value);
+        _showMaskedState(provider);
         showToast(`${provider} key saved`);
       }
     }
@@ -1841,7 +2221,6 @@ Use f-strings instead of .format().</code></pre>
       const input = $(cfg.input);
       const eyeBtn = $(cfg.eye);
       const testBtn = $(cfg.test);
-      const removeBtn = $(cfg.remove);
 
       /* Eye toggle */
       if (eyeBtn) {
@@ -1851,11 +2230,6 @@ Use f-strings instead of .format().</code></pre>
       /* Test connection */
       if (testBtn) {
         testBtn.addEventListener('click', () => _testConnection(key));
-      }
-
-      /* Remove key */
-      if (removeBtn) {
-        removeBtn.addEventListener('click', () => _removeKey(key));
       }
 
       /* Save on blur */
@@ -1879,7 +2253,7 @@ Use f-strings instead of .format().</code></pre>
     function _applyKeyStatus(provider, cfg, key) {
       /* Only show masked state if key is valid (not empty, not placeholder) */
       if (key && key.length > 8 && key !== '***') {
-        _showMaskedState(provider, key);
+        _showMaskedState(provider);
       } else {
         /* No valid key, show empty input */
         _showEditState(provider);
@@ -1969,9 +2343,6 @@ Use f-strings instead of .format().</code></pre>
           '<div class="key-actions">' +
             '<button class="setting-btn icon-btn test-btn" id="' + k + 'Test" title="Test">' +
               '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' +
-            '</button>' +
-            '<button class="setting-btn icon-btn remove-btn" id="' + k + 'Remove" title="Remove" style="display:none">' +
-              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
             '</button>' +
           '</div>' +
         '</div>' +
@@ -2066,7 +2437,6 @@ Use f-strings instead of .format().</code></pre>
           mask:   key + 'KeyMask',
           eye:    key + 'Eye',
           test:   key + 'Test',
-          remove: key + 'Remove',
           settingsKey: p.settingsKey || ('ai.' + key + '_key'),
           kmName: p.keyName || key,
         };

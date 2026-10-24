@@ -176,7 +176,7 @@ def find_bundled_dir() -> Optional[str]:
                 if os.path.isfile(os.path.join(path, name, 'SKILL.md')):
                     return path
         except OSError:
-            continue
+            continue  # silent-ok: a directory that cannot be listed holds no skill
     return None
 
 
@@ -302,7 +302,7 @@ def _extract_frontmatter(content: str) -> Optional[Dict[str, Any]]:
         if isinstance(data, dict) and data:
             return {str(k): v for k, v in data.items()}
     except Exception:
-        pass
+        pass  # silent-ok: falls through to the lenient parser on the next line
     return _extract_frontmatter_lenient(raw)
 
 
@@ -439,7 +439,7 @@ class SkillsManager:
                             + (f", {len(self._active_skills) - len(loaded)} more "
                                f"not installed here" if len(loaded) < len(self._active_skills) else ""))
         except FileNotFoundError:
-            pass
+            pass  # silent-ok: no saved skill state means nothing to restore
         except Exception as e:
             logger.debug(f"Skill state restore skipped: {e}")
 
@@ -740,7 +740,7 @@ class SkillsManager:
                 try:
                     st = os.stat(f_path)
                 except OSError:
-                    continue
+                    continue  # silent-ok: a file that vanished mid-walk is left out of the fingerprint
                 entries.append((f_path, st.st_mtime_ns, st.st_size))
         return tuple(sorted(entries, key=lambda e: e[0]))
 

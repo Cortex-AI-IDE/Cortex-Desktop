@@ -532,7 +532,7 @@ class DiffInIDEService:
             from ..services.analytics import log_event
             log_event(event_name, data)
         except ImportError:
-            # Analytics not available in all contexts
+            # silent-ok: analytics is optional and absent in some contexts
             pass
 
 

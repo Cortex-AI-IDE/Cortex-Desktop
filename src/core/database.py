@@ -306,13 +306,13 @@ class CortexDatabase:
             try:
                 cursor.execute("ALTER TABLE chat_messages ADD COLUMN metadata TEXT")
             except Exception:
-                pass  # column already exists
+                pass  # silent-ok: the column already exists on an upgraded database
 
             # Migration: add timeline_json column for dynamic timeline architecture
             try:
                 cursor.execute("ALTER TABLE conversations ADD COLUMN timeline_json TEXT")
             except Exception:
-                pass  # column already exists
+                pass  # silent-ok: the column already exists on an upgraded database
 
             # ★ MIGRATION: Backfill NULL updated_at values.
             # Older schema versions created conversations without setting updated_at.
@@ -634,7 +634,7 @@ class CortexDatabase:
             try:
                 dependencies = json.loads(row['dependencies'])
             except:
-                pass
+                pass  # silent-ok: malformed dependencies JSON reads as an empty list
         
         return CodeChunk(
             id=row['id'],
@@ -936,7 +936,7 @@ class CortexDatabase:
                     if _metadata_raw:
                         _metadata = json.loads(_metadata_raw)
                 except (json.JSONDecodeError, KeyError):
-                    pass
+                    pass  # silent-ok: malformed metadata is read as absent
                 messages.append(ChatMessage(
                     id=row['id'],
                     conversation_id=row['conversation_id'],
@@ -1248,7 +1248,7 @@ class CortexDatabase:
                     try:
                         existing = json.loads(row['data'])
                     except json.JSONDecodeError:
-                        pass
+                        pass  # silent-ok: unreadable row data is replaced by the new output below
                 existing.update(output_data)
                 data_json = json.dumps(existing, ensure_ascii=False)
                 cursor.execute(
@@ -1441,17 +1441,17 @@ class CortexDatabase:
         try:
             self._writer_thread.join(timeout=5)
         except Exception:
-            pass
+            pass  # silent-ok: shutdown must not fail because a thread did not join
         try:
             self.flush_write_queue(force=True)
         except Exception:
-            pass
+            pass  # silent-ok: shutdown must not fail on a final flush error
         conn = getattr(self._conn_local, 'conn', None)
         if conn:
             try:
                 conn.close()
             except Exception:
-                pass
+                pass  # silent-ok: the connection reference is cleared on the next line either way
             self._conn_local.conn = None
 
     def _writer_loop(self):

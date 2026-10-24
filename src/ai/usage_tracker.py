@@ -34,7 +34,7 @@ class UsageTracker:
         try:
             self.cleanup_invalid_models()
         except Exception:
-            pass
+            pass  # silent-ok: cleaning stale rows at startup is best effort
 
     # ── JSON Helpers ──────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ class UsageTracker:
                 daemon=True,
             ).start()
         except Exception:
-            pass  # Offline or not configured
+            pass  # silent-ok: offline or not configured, so no sync is attempted
 
     def _do_sync(self, api):
         """Sync subscription service usage to server (runs in background thread).

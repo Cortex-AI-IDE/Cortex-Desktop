@@ -215,7 +215,7 @@ class SpinnerOverlay(QFrame):
                 f"background: transparent; border: none; }}"
             )
         except RuntimeError:
-            pass  # widgets torn down mid-switch
+            pass  # silent-ok: widgets were torn down mid-switch
 
     def _sync_geometry(self):
         """Update overlay geometry to fill parent viewport."""
@@ -245,7 +245,7 @@ class SpinnerOverlay(QFrame):
             if h > 0:
                 self._card.setMinimumHeight(h)
         except RuntimeError:
-            pass
+            pass  # silent-ok: the card was deleted mid-measure
 
     def show_overlay(self, message: str, spinner_key: str = "thought",
                      detail: str = "", title: str = "",
@@ -315,7 +315,7 @@ class SpinnerOverlay(QFrame):
             try:
                 self._spinner.stop()
             except RuntimeError:
-                pass
+                pass  # silent-ok: the spinner was already destroyed
         super().closeEvent(event)
 
     def force_hide(self):
@@ -331,7 +331,7 @@ class SpinnerOverlay(QFrame):
             try:
                 self._spinner.stop()
             except RuntimeError:
-                pass
+                pass  # silent-ok: the spinner was already destroyed
 
     def _on_fade_out_finished(self):
         """Clean up after fade-out completes."""

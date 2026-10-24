@@ -181,7 +181,7 @@ class NativeChatBridge(QObject):
                     e, traceback.format_exc()
                 )
             except Exception:
-                pass
+                pass  # silent-ok: a failure while logging the crash must not raise again
 
     def _handle_response_chunk(self, chunk: str):
         import logging
@@ -589,7 +589,7 @@ class NativeChatBridge(QObject):
                         return v
                 return ""
             except (json.JSONDecodeError, ValueError):
-                pass
+                pass  # silent-ok: not a dict payload; the raw info is returned below
         return info
 
     def _parse_tool_data(self, info: str) -> dict:
@@ -603,7 +603,7 @@ class NativeChatBridge(QObject):
                 data = json.loads(info)
                 return data
             except (json.JSONDecodeError, ValueError):
-                pass
+                pass  # silent-ok: not JSON; the raw info is wrapped below
         return {"info": info}
 
     def _compute_hunk_lines(self, original: str, new: str) -> list:
@@ -682,4 +682,4 @@ class NativeChatBridge(QObject):
             self._bridge.file_operation_completed.disconnect(self._on_file_done)
             self._bridge.request_error.disconnect(self._on_error)
         except Exception:
-            pass
+            pass  # silent-ok: disconnecting signals that were never connected is harmless

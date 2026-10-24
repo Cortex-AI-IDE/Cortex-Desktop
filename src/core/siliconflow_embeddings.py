@@ -445,7 +445,7 @@ class SiliconFlowEmbeddings:
             api = get_api_client()
             has_subscription = api.has_subscription()
         except Exception:
-            pass
+            pass  # silent-ok: no API client means no subscription, which the dict below records
 
         return {
             'model_name': self.model_name,

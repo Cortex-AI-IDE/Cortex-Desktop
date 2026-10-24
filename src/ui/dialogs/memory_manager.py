@@ -15,7 +15,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 from PyQt6.QtCore import QObject, QUrl, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QDesktopServices
@@ -1930,6 +1930,190 @@ scope: project
             return json.dumps(installed_code_fonts())
         except Exception:
             return "[]"
+
+    # ── Telegram run notifications ──────────────────────────────────────────
+    # These cannot ride the generic SETTINGS_MAP path: setSetting splits a
+    # dotted key on the FIRST dot only, so "telegram.quiet_hours.start" would
+    # be stored under a key literally named "quiet_hours.start". The token
+    # also has to go through telegram_config, which puts it in KeyManager
+    # instead of settings.json.
+
+    @pyqtSlot(result=str)
+    def getTelegramSettings(self) -> str:
+        """Everything the Telegram section needs, except the token itself."""
+        try:
+            from src.services import telegram_config as tg
+            cfg = tg.load()
+            return json.dumps({
+                "enabled": cfg.enabled,
+                "paired": bool(cfg.chat_id),
+                "hasToken": tg.has_token(),
+                # Telegram ships with the subscription, so `subscribed` is the
+                # app's single entitlement check (has_subscription()), the same
+                # one OCR, embeddings and web search read. There is no
+                # Telegram-only rule and no second state to report: the card
+                # locks when the plan lapses and unlocks when it renews. Read
+                # from the saved account copy, so this never blocks the GUI
+                # thread. Absent field (older page) is treated as allowed.
+                "subscribed": self._telegram_subscribed(),
+                "events": sorted(cfg.events),
+                "quietEnabled": cfg.quiet_enabled,
+                "quietStart": cfg.quiet_start,
+                "quietEnd": cfg.quiet_end,
+                "pairExpiry": cfg.pair_expiry,
+                "pairReusable": cfg.pair_reusable,
+                "pairExpiryOptions": list(tg.PAIR_EXPIRY_OPTIONS),
+                "inbound": cfg.inbound_enabled,
+                "summaryEnabled": cfg.summary_enabled,
+                "summaryMaxChars": cfg.summary_max_chars,
+            })
+        except Exception as exc:
+            log.warning(f"[MemoryManager] getTelegramSettings failed: {exc}")
+            return "{}"
+
+    def _telegram_subscribed(self) -> bool:
+        """Whether this account may use Telegram at all, for the settings page.
+
+        The same call every other gated feature makes: has_subscription(). It
+        answers from the saved account copy, so this never blocks the GUI thread
+        and still works offline. Fail closed, the same direction the monitor's
+        own gate takes.
+        """
+        try:
+            from src.core.cortex_api import get_api_client
+            return bool(get_api_client().has_subscription())
+        except Exception as exc:
+            log.debug(f"[MemoryManager] Telegram subscription verdict unavailable: {exc}")
+            return False
+
+    @pyqtSlot(str, result=str)
+    def saveTelegramToken(self, token: str) -> str:
+        """Store the bot token in KeyManager. Returns ok / invalid / error.
+
+        The cached transport is dropped either way. It holds the token it was
+        built from, so without this a token replaced in place (Remove bot, paste
+        a new one, no unpair) kept talking to the old bot until a restart, which
+        looks like a bot that ignores messages.
+        """
+        try:
+            from src.services import telegram_config as tg
+            from src.services.telegram_monitor import get_monitor
+            if not (token or "").strip():
+                tg.clear_token()
+                self._drop_cached_transport(get_monitor)
+                return "ok"
+            saved = tg.set_token(token)
+            self._drop_cached_transport(get_monitor)
+            return "ok" if saved else "invalid"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] saveTelegramToken failed: {exc}")
+            return "error"
+
+    @staticmethod
+    def _drop_cached_transport(get_monitor: Callable) -> None:
+        """Forget the built client. Never lets a cleanup failure undo a save."""
+        try:
+            get_monitor().invalidate_client()
+        except Exception as exc:
+            log.warning(f"[MemoryManager] invalidate_client failed: {exc}")
+
+    @pyqtSlot(str, result=str)
+    def saveTelegramSettings(self, payload: str) -> str:
+        """Persist enabled / events / quiet hours. Returns ok or an error."""
+        try:
+            from src.services import telegram_config as tg
+            data = json.loads(payload or "{}")
+            tg.set_enabled(bool(data.get("enabled")))
+            tg.set_events(data.get("events") or [])
+            tg.set_quiet_hours(
+                bool(data.get("quietEnabled")),
+                str(data.get("quietStart") or ""),
+                str(data.get("quietEnd") or ""),
+            )
+            # Only when the page actually sent it: an older page must not
+            # silently reset a policy the user set from a newer one.
+            if "pairExpiry" in data or "pairReusable" in data:
+                tg.set_pairing(
+                    str(data.get("pairExpiry") or ""),
+                    bool(data.get("pairReusable")),
+                )
+            # Inbound is its own key for the same reason: a page that does not
+            # mention it must not switch it off (or on) behind the user.
+            if "inbound" in data:
+                enabled = bool(data.get("inbound"))
+                tg.set_inbound(enabled)
+                if enabled:
+                    # Take effect now instead of at the next restart. Starting
+                    # the poller is local: it never makes a network call here.
+                    try:
+                        from src.services.telegram_monitor import get_monitor
+                        get_monitor().ensure_inbound()
+                    except Exception as exc:
+                        log.debug(f"[MemoryManager] inbound poller not started: {exc}")
+            # Summary rides along with "finished". Same rule once more: a page
+            # that predates the switch never sends the key, so it cannot turn
+            # the answer off behind the user's back.
+            if "summaryEnabled" in data:
+                tg.set_summary(bool(data.get("summaryEnabled")))
+            return "ok"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] saveTelegramSettings failed: {exc}")
+            return "error"
+
+    @pyqtSlot(result=str)
+    def startTelegramPairing(self) -> str:
+        """Issue a pairing code and start watching for /pair.
+
+        Returns the code, or a ``!`` marker when pairing was refused (no token,
+        a chat already paired, or no active subscription), so the panel can say
+        which it was instead of reporting every refusal as a missing token.
+        Empty only on an exception.
+        """
+        try:
+            from src.services.telegram_monitor import get_monitor
+            code = get_monitor().begin_pairing()
+            return code or ""
+        except Exception as exc:
+            log.warning(f"[MemoryManager] startTelegramPairing failed: {exc}")
+            return ""
+
+    @pyqtSlot(result=str)
+    def testTelegramMessage(self) -> str:
+        """Queue a test message. Never blocks this (GUI) thread."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            monitor = get_monitor()
+            if not monitor.has_chat():
+                return "unpaired"
+            # The monitor would drop the message anyway, so say why here rather
+            # than report "queued" for something that can never arrive.
+            if not self._telegram_subscribed():
+                return "!no-subscription"
+            monitor.send_test()
+            return "queued"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] testTelegramMessage failed: {exc}")
+            return "error"
+
+    @pyqtSlot(result=str)
+    def unpairTelegram(self) -> str:
+        """Revoke the pairing. The token stays, so re-pairing is one click."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            return "ok" if get_monitor().revoke_pairing() else "error"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] unpairTelegram failed: {exc}")
+            return "error"
+
+    @pyqtSlot(result=str)
+    def forgetTelegramBot(self) -> str:
+        """Revoke the pairing and delete the token: nothing is left behind."""
+        try:
+            from src.services.telegram_monitor import get_monitor
+            return "ok" if get_monitor().revoke_pairing(forget_token=True) else "error"
+        except Exception as exc:
+            log.warning(f"[MemoryManager] forgetTelegramBot failed: {exc}")
+            return "error"
 
     @pyqtSlot(result=str)
     def getSettings(self) -> str:
