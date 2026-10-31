@@ -1,0 +1,15 @@
+# ---------------------------------------------------------------------------
+# Port packs carry DELIBERATE CRLF bytes. Do not let Git normalise them away.
+#
+# Windows `main` stores src/main_window.py, src/ui/components/sidebar.py and
+# src/ui/html/sidebar.html with CRLF endings, so the hunks that touch those
+# files are generated with CR bytes on every context and +/- line. `git apply`
+# matches context byte-exactly, so if Git strips the CRs on commit
+# (core.autocrlf=input does exactly that) the pack still applies on Linux but
+# FAILS on Windows with "patch does not apply" - and the corruption is
+# invisible, because the diff renders identically either way.
+#
+# `-text` marks these as binary: no conversion on commit or on checkout.
+# ---------------------------------------------------------------------------
+*.diff  -text
+*.patch -text

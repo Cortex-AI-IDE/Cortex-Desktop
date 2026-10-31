@@ -1,0 +1,976 @@
+"""
+tokens.py, Cortex IDE Design Tokens
+=====================================
+
+Single source of truth for all chat UI theming.
+
+Every color in the UI flows from here. No hardcoded hex values outside this file.
+"""
+
+# ── Dark theme tokens (default), OC-2 exact ──
+DARK = {
+    # Backgrounds, matched to editor.html color scheme
+    "bg":                "#1e1e1e",     # editor #app background
+    "bg_card":           "#252526",     # editor tab-bar / elevated panel bg
+    "bg_secondary":      "#2d2d2d",     # editor inactive tab bg
+    "bg_tertiary":       "#18181c",     # editor file-path-bar bg
+    "bg_hover":          "#2a2a2a",     # editor tab hover
+    "bg_input":          "#161616",     # chat input, UNCHANGED
+    "bg_elevated":       "#252526",     # elevated panels
+    "bg_raised":         "#252526",     # raised panels
+
+    # Borders, matched to editor.html
+    "border":            "#3c3c3c",     # editor tab-bar border-bottom
+    "border_dim":        "#2a2a2e",     # editor file-path-bar border-bottom
+    "border_color":      "#3c3c3c",     # consistent with editor borders
+    "border_active":     "#3b82f6",
+
+    # Text, demo: text .85, text_secondary .55, text_tertiary .35
+    "text":              "rgba(255,255,255,0.85)",
+    "text_dim":          "rgba(255,255,255,0.55)",
+    "text_secondary":    "rgba(255,255,255,0.55)",
+    "text_primary":      "rgba(255,255,255,0.85)",
+    "muted":             "rgba(255,255,255,0.35)",
+    "mono_muted":        "#8b949e",
+    "mono_bright":       "#e6edf3",
+
+    # Accent
+    "accent":            "#06b6d4",
+    "accent_primary":    "#7c3aed",
+    "accent_secondary":  "#6c5ce7",
+
+    # Semantic
+    "think":             "#7c6ce7",
+    "think_label":       "#a89df0",
+    "user_bubble":       "#212529",
+    "green":             "#3fb950",
+    "red":               "#f85149",
+    # Error card surface + the text that sits ON it. These travel together on
+    # purpose: the card background was hardcoded dark in BOTH themes while its
+    # label used text_secondary, which is dark in light mode, so light-mode
+    # users got dark text on a dark red card (unreadable). Any pairing like
+    # this must define the on-surface text with the surface.
+    "bg_error":          "#3b1010",
+    "error_border":      "#e74c3c",
+    "error":             "#e74c3c",
+    "text_on_error":     "rgba(255,255,255,0.88)",
+    "orange":            "#ff8c00",
+    "warning":           "#e5c07b",
+    "blue":              "#06b6d4",
+    "info":              "#9d7cd8",
+    "streaming_cursor":  "#06b6d4",
+
+    # Tool card specific
+    "tool_header_bg":    "rgba(255,255,255,0.03)",
+    "tool_body_bg":      "rgba(255,255,255,0.01)",
+    "diff_add_bg":       "rgba(63,185,80,0.12)",
+    "diff_del_bg":       "rgba(248,81,73,0.12)",
+    "diff_hunk_bg":      "rgba(110,118,129,0.06)",
+    "diff_add_line":     "rgba(63,185,80,0.22)",
+    "diff_del_line":     "rgba(248,81,73,0.22)",
+
+    # Syntax, OC-2 exact values from TUI_DISPLAY_DESIGN.md
+    "syntax_string":     "#00ceb9",    # teal, strings
+    "syntax_property":   "#ff9ae2",    # pink, properties
+    "syntax_keyword":    "#c678dd",    # purple, keywords (was muted, now proper purple)
+    "syntax_variable":   "rgba(255,255,255,0.936)",  # strong, variables
+    "syntax_function":   "#61afef",    # blue, functions/methods
+    "syntax_number":     "#ffba92",    # peach, numbers/booleans
+    "syntax_type":       "#ecf58c",    # yellow-green, types/classes
+    "syntax_builtin":    "#f85149",    # RED, builtins
+    "syntax_comment":    "rgba(255,255,255,0.422)",  # muted italic, comments
+    "syntax_operator":   "#abb2bf",    # light-gray, operators/punctuation
+    "syntax_constant":   "#d19a66",    # orange, constants
+    "syntax_decorator":  "#ecf58c",    # yellow-green, decorators
+    "syntax_tag":        "#e06c75",    # coral, HTML tags
+    "syntax_attribute":  "#d19a66",    # orange, HTML attributes
+    "syntax_namespace":  "#ecf58c",    # yellow-green, namespaces
+
+    # Markdown colors, matches chat_panel_design_demo.html
+    "md_heading":        "#f0f6fc",    # white, all heading levels (demo)
+    "md_text":           "rgba(255,255,255,0.85)",  # white, body text (demo)
+    "md_link":           "#58a6ff",    # blue, link URLs (demo)
+    "md_link_text":      "#58a6ff",    # blue, link label text
+    "md_code":           "#7fd88f",    # green, inline code (demo)
+    "md_code_bg":        "rgba(110,118,129,0.15)",  # inline code background (demo)
+    "md_blockquote":     "rgba(255,255,255,0.55)",  # secondary, blockquote text (demo)
+    "md_blockquote_border": "#3b82f6", # blue, blockquote border (demo)
+    "md_strong":         "#f5a742",    # orange, bold/strong (demo)
+    "md_emph":           "#e5c07b",    # gold, italic/emphasis (OC-2 exact)
+    "md_hr":             "#282828",    # subtle, horizontal rule
+    "md_list_marker":    "#61afef",    # blue, bullet/numbers
+    "md_table_header_bg": "rgba(255,255,255,0.04)",  # th background
+    "md_table_border":   "#282828",    # subtle, table borders
+    "md_strikethrough":  "rgba(255,255,255,0.4)",    # strikethrough
+    "md_mark_bg":        "rgba(229,192,123,0.25)",   # mark highlight bg
+    "md_filename":       "#3fb950",    # green, file names/paths
+
+    # Syntax highlight palette (used by tool_cards.py)
+    "tool_read":      "#58a6ff",   # blue  , reading / inspecting
+    "tool_edit":      "#3fb950",   # green , mutating files
+    "tool_write":     "#3fb950",   # green , creating files
+    "tool_search":    "#bc8cff",   # purple, grep / glob / semantic search
+    "tool_terminal":  "#f0883e",   # orange, shell / bash / powershell
+    "tool_web":       "#56d4dd",   # cyan  , web_search / web_fetch
+    "tool_task":      "#d2a8ff",   # lilac , task / planning
+    "tool_team":      "#ff7b72",   # coral , multi-agent / delegation
+    "tool_thought":   "#7c6ce7",   # violet, thinking
+    "tool_generic":   "#8b949e",   # gray  , fallback
+
+    # Status colors
+    "status_running": "#56d4dd",   # spinner default tint
+    "status_ok":      "#3fb950",
+    "status_error":   "#f85149",
+
+    # Fonts
+    # Bundled with Cortex (src/assets/fonts, see src/ui/fonts.py): Inter for
+    # the interface, JetBrains Mono for code. Qt registers the Inter file as
+    # "Inter Variable"; web pages name it "Inter" through @font-face - the
+    # list carries both so each side finds its own name first. Geist was
+    # named here before but never shipped, so it always fell back.
+    "font_ui":           "'Inter', 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif",
+    "font_mono":         "'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace",
+    "font_size":         "14px",
+    "font_size_sm":      "13px",
+    "font_size_xs":      "12px",
+    "font_size_xxs":     "11px",
+
+    # Line heights
+    "line_height":       "1.45",
+    "line_height_code":  "1.4",
+
+    # Spacing & Radius
+    "radius_xs":         "4px",
+    "radius_sm":         "6px",
+    "radius_md":         "8px",
+    "radius_lg":         "10px",
+    "radius_xl":         "14px",
+
+    # Input / Menu / Button tokens (used by InputArea, context menus, etc.)
+    "input_border":      "#262626",
+    "input_hover":       "#2A2A2A",
+    "separator":         "#3c3c3c",     # match editor borders
+    "btn_bg":            "#242424",
+    "btn_hover":         "#2D2D2D",
+    "btn_text":          "#aaaaaa",
+    "btn_text_hover":    "#ffffff",
+    "menu_bg":           "#1F1F1F",
+    "menu_text":         "#cccccc",
+    "menu_selected":     "#2A2A2A",
+    "divider":           "#3c3c3c",     # match editor borders
+    "white":             "#ffffff",
+    "card_border_subtle": "rgba(255,255,255,0.08)",
+    "card_bg_subtle":    "rgba(255,255,255,0.015)",
+    "stop_btn":          "#f85149",
+    "stop_btn_hover_bg": "rgba(248,81,73,0.15)",
+    "spell_error":       "#ff4040",
+    "spell_input_bg":    "#1a1a1a",
+    "context_menu_bg":   "#252526",
+    "context_menu_border": "#3c3c3c",
+    "context_menu_sel":  "#094771",
+    "ring_purple":       "#7c3aed",
+    "ring_purple_light": "#8b5cf6",
+    "ring_cyan":         "#06b6d4",
+    "ring_cyan_light":   "#22d3ee",
+    "edited_row_bg":     "#18181c",     # match bg_tertiary
+    "edited_row_hover":  "#2a2a2a",     # match bg_hover
+    "edited_row_text":   "#e3e4e6",
+    "edited_row_badge":  "#ffb300",
+
+    # Code block decoration
+    "code_header_bg":    "#2d2d2d",     # match bg_secondary (editor inactive tab)
+    "code_header_border": "#3c3c3c",    # match editor borders
+    "code_copy_color":   "#8b949e",
+    "code_copy_hover":   "#f0f6fc",
+    "code_copy_bg":      "transparent",
+    "code_copy_bg_hover": "#30363d",
+    "code_lang_color":   "#8b949e",
+    "code_line_number":  "rgba(255,255,255,0.35)",
+    "code_scrollbar":    "rgba(255,255,255,0.10)",
+}
+
+# ── Light theme tokens ──
+# Built as DARK-merge so key parity is guaranteed: any token not overridden
+# here inherits the dark value (correct for fonts/radii/line-heights, and a
+# safe fallback for any future key someone adds to DARK only).
+# Palette: warm Anthropic/Claude scheme, MATCHES editor.html, sidebar.html,
+# the status bar, and memory_management.css [data-theme="light"] exactly
+# (bg #ECE9E0, surfaces #E4E1D8/#DDDAD0, text #1A1814, muted #6B6860,
+# terracotta accent #C96A3E). Every "black-based" rgba tint below uses the
+# warm text RGB (26,24,20) instead of pure black so translucent overlays
+# read as warm, not cool-gray. THE RULE: light backgrounds get DARK text,
+# never light-hash grays. Syntax-highlighting hues (keyword/string/etc.)
+# are intentionally NOT warmed, those follow language-convention colors
+# for code readability, independent of chrome theming.
+LIGHT = {
+    **DARK,
+
+    # Backgrounds
+    "bg":                "#ECE9E0",
+    "bg_card":           "#EDEAE1",
+    "bg_secondary":      "#E4E1D8",
+    "bg_tertiary":       "#DDDAD0",
+    "bg_hover":          "#DDDAD0",
+    "bg_input":          "#F4F1EA",
+    "bg_elevated":       "#F4F1EA",
+    "bg_raised":         "#F4F1EA",
+
+    # Borders
+    "border":            "#CCC9C0",
+    "border_dim":        "#DDDAD0",
+    "border_color":      "#CCC9C0",
+    "border_active":     "#C96A3E",
+
+    # Text, warm near-black on warm surfaces (user requirement: NO light-hash fonts in light mode)
+    "text":              "rgba(26,24,20,0.92)",
+    "text_dim":          "rgba(26,24,20,0.62)",
+    "text_secondary":    "rgba(26,24,20,0.62)",
+    "text_primary":      "rgba(26,24,20,0.92)",
+    "muted":             "rgba(26,24,20,0.45)",
+    "mono_muted":        "#6B6860",
+    "mono_bright":       "#1F1E1B",
+
+    # Accent, terracotta, matches editor.html active-tab accent
+    "accent":            "#C96A3E",
+    "accent_primary":    "#C96A3E",
+    "accent_secondary":  "#B85A32",
+
+    # Semantic
+    "think":             "#A85D3A",
+    "think_label":       "#8B4A2C",
+    "user_bubble":       "#DDDAD0",
+    "green":             "#3B7A4A",
+    "red":               "#B83232",
+    # Light theme keeps light mode LIGHT: a pale red wash with dark text,
+    # rather than a dark card dropped into a light UI.
+    "bg_error":          "#FDECEA",
+    "error_border":      "#D9534F",
+    "error":             "#B83232",
+    "text_on_error":     "rgba(26,24,20,0.90)",
+    "orange":            "#C96A3E",
+    "warning":           "#8A5C00",
+    "blue":              "#5B7A96",
+    "info":              "#6B5B8C",
+    "streaming_cursor":  "#C96A3E",
+
+    # Tool card specific
+    "tool_header_bg":    "rgba(26,24,20,0.05)",
+    "tool_body_bg":      "rgba(26,24,20,0.025)",
+    "diff_add_bg":       "rgba(59,122,74,0.12)",
+    "diff_del_bg":       "rgba(184,50,50,0.10)",
+    "diff_hunk_bg":      "rgba(107,104,96,0.10)",
+    "diff_add_line":     "rgba(59,122,74,0.22)",
+    "diff_del_line":     "rgba(184,50,50,0.22)",
+
+    # Syntax, light-theme values (language-convention colors, not chrome, left as-is)
+    "syntax_string":     "#0e7569",
+    "syntax_property":   "#bf3989",
+    "syntax_keyword":    "#8250df",
+    "syntax_variable":   "rgba(26,24,20,0.92)",
+    "syntax_function":   "#0550ae",
+    "syntax_number":     "#b35900",
+    "syntax_type":       "#66700d",
+    "syntax_builtin":    "#cf222e",
+    "syntax_comment":    "rgba(26,24,20,0.48)",
+    "syntax_operator":   "#6B6860",
+    "syntax_constant":   "#953800",
+    "syntax_decorator":  "#66700d",
+    "syntax_tag":        "#cf222e",
+    "syntax_attribute":  "#953800",
+    "syntax_namespace":  "#66700d",
+
+    # Markdown
+    "md_heading":        "#1A1814",
+    "md_text":           "rgba(26,24,20,0.92)",
+    "md_link":           "#C96A3E",
+    "md_link_text":      "#C96A3E",
+    "md_code":           "#3B7A4A",
+    "md_code_bg":        "rgba(107,104,96,0.12)",
+    "md_blockquote":     "rgba(26,24,20,0.62)",
+    "md_blockquote_border": "#C96A3E",
+    "md_strong":         "#A8542E",
+    "md_emph":           "#8A5C00",
+    "md_hr":             "#DDDAD0",
+    "md_list_marker":    "#C96A3E",
+    "md_table_header_bg": "rgba(26,24,20,0.05)",
+    "md_table_border":   "#DDDAD0",
+    "md_strikethrough":  "rgba(26,24,20,0.40)",
+    "md_mark_bg":        "rgba(138,92,0,0.20)",
+    "md_filename":       "#3B7A4A",
+
+    # Tool colors
+    "tool_read":      "#5B7A96",
+    "tool_edit":      "#3B7A4A",
+    "tool_write":     "#3B7A4A",
+    "tool_search":    "#8B5A8C",
+    "tool_terminal":  "#C96A3E",
+    "tool_web":       "#5B8C8C",
+    "tool_task":      "#8B5A8C",
+    "tool_team":      "#B83232",
+    "tool_thought":   "#A85D3A",
+    "tool_generic":   "#6B6860",
+
+    # Status colors
+    "status_running": "#5B8C8C",
+    "status_ok":      "#3B7A4A",
+    "status_error":   "#B83232",
+
+    # Input / Menu / Button tokens
+    "input_border":      "#CCC9C0",
+    "input_hover":       "#DDDAD0",
+    "separator":         "#CCC9C0",
+    "btn_bg":            "#DDDAD0",
+    "btn_hover":         "#D6D3CA",
+    "btn_text":          "#6B6860",
+    "btn_text_hover":    "#1A1814",
+    "menu_bg":           "#F4F1EA",
+    "menu_text":         "#1A1814",
+    "menu_selected":     "#DDDAD0",
+    "divider":           "#CCC9C0",
+    "card_border_subtle": "rgba(26,24,20,0.10)",
+    "card_bg_subtle":    "rgba(26,24,20,0.025)",
+    "stop_btn":          "#B83232",
+    "stop_btn_hover_bg": "rgba(184,50,50,0.12)",
+    "spell_error":       "#B83232",
+    "spell_input_bg":    "#F4F1EA",
+    "context_menu_bg":   "#F4F1EA",
+    "context_menu_border": "#CCC9C0",
+    "context_menu_sel":  "rgba(201,106,62,0.18)",
+    "ring_cyan":         "#5B8C8C",
+    "ring_cyan_light":   "#6FA0A0",
+    "edited_row_bg":     "#E4E1D8",
+    "edited_row_hover":  "#DDDAD0",
+    "edited_row_text":   "#1A1814",
+    "edited_row_badge":  "#8A5C00",
+
+    # Code block decoration
+    "code_header_bg":    "#E4E1D8",
+    "code_header_border": "#CCC9C0",
+    "code_copy_color":   "#6B6860",
+    "code_copy_hover":   "#1A1814",
+    "code_copy_bg_hover": "#DDDAD0",
+    "code_lang_color":   "#6B6860",
+    "code_line_number":  "rgba(26,24,20,0.35)",
+    "code_scrollbar":    "rgba(26,24,20,0.15)",
+}
+
+# ── Theme state ──
+_current_theme = DARK
+
+
+class _TokenProxy:
+    """Dict-like live view of the ACTIVE theme.
+
+    Bug history: seven UI modules did `from tokens import DARK as T`,
+    binding their T name to the DARK dict object at import time, so
+    set_theme('light') switched _current_theme but every T['key'] in those
+    modules still read dark values forever (chat panel, tool cards,
+    spinners, icons all stayed dark in light mode). Importing TOKENS
+    instead routes every lookup through _current_theme at call time.
+    """
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        # A missing token must NEVER crash a widget. Bug history: the update
+        # dialog referenced 'mono_bright' which no palette defined, the
+        # KeyError killed the dialog before it showed, so FORCE updates
+        # silently never appeared (9 crashes in one log, three releases).
+        # Log loudly, fall back to the theme's text color.
+        try:
+            return _current_theme[key]
+        except KeyError:
+            import logging
+            logging.getLogger("tokens").error(
+                "[TOKENS] Unknown token %r, add it to BOTH palettes in tokens.py", key)
+            return _current_theme.get("text", "#e6edf3")
+    def get(self, key, default=None): return _current_theme.get(key, default)
+    def __contains__(self, key): return key in _current_theme
+    def keys(self): return _current_theme.keys()
+    def values(self): return _current_theme.values()
+    def items(self): return _current_theme.items()
+    def copy(self): return dict(_current_theme)
+    def __iter__(self): return iter(_current_theme)
+    def __len__(self): return len(_current_theme)
+
+
+TOKENS = _TokenProxy()
+
+
+# ── Chat panel palette ────────────────────────────────────────────────────
+# The chat panel's own look, layered over the active theme. Only
+# src/ui/chat_panel.py reads it (through CHAT_TOKENS / chat_theme()), so the
+# sidebar, settings, menus and tool cards keep their colours: ~30 of the
+# tokens the chat uses (accent, bg, border, green, orange, ...) are shared
+# with those modules, and changing the shared values would restyle the whole
+# app.
+#
+# One accent - the Cortex brand lime from cortex-ide.app - marks what is live
+# (spinners, running, streaming cursor, links, focus). Everything else is
+# neutral; emphasis comes from weight, not colour: bold, italic, inline code,
+# headings and table headers use the text colour (they were orange, gold,
+# green, white and purple). Tool rows are neutral: the icon says the kind,
+# the state says what is happening. Diff and syntax colours are unchanged -
+# they carry meaning.
+#
+# Dark keeps the editor's own background so the chat sits flush with the
+# code. Light is white with cool greys; the cream + terracotta it replaces
+# measured 3.1:1 (accent) and 3.0:1 (muted) on its own background, under the
+# 4.5:1 WCAG AA minimum. Every text colour below is >= 4.5:1 on its surface.
+CHAT_DARK = {
+    "text": "#e6e8eb", "text_primary": "#e6e8eb",                  # 13.6:1
+    "text_dim": "#a9afb8", "text_secondary": "#a9afb8",             # 7.6:1
+    "muted": "#7f8792", "mono_muted": "#7f8792",                    # 4.6:1
+    "mono_bright": "#e6e8eb",
+    "accent": "#c2f25c", "accent_primary": "#c2f25c",               # 12.8:1
+    "accent_secondary": "#c2f25c", "border_active": "#c2f25c",
+    "accent_fill": "#b7ef38", "accent_ink": "#151c2b", "accent_fill_hover": "#d2fb72",
+    "think": "#7f8792", "think_label": "#7f8792",
+    "user_bubble": "#2a2d33",
+    "red": "#ff7a6e", "error": "#ff7a6e", "error_border": "#ff7a6e",  # 6.6:1
+    "status_error": "#ff7a6e", "stop_btn": "#ff7a6e", "spell_error": "#ff7a6e",
+    "orange": "#f2c14e", "warning": "#f2c14e",                      # 9.9:1
+    "blue": "#c2f25c", "info": "#a9afb8",
+    "streaming_cursor": "#c2f25c",
+    "md_heading": "#e6e8eb", "md_text": "#e6e8eb",
+    "md_link": "#c2f25c", "md_link_text": "#c2f25c",
+    "md_code": "#e6e8eb", "md_code_bg": "#2c2f35",                  # 10.9:1
+    "md_blockquote": "#a9afb8", "md_blockquote_border": "#3a3f47",
+    "md_strong": "#e6e8eb", "md_emph": "#e6e8eb",
+    "md_hr": "#2c3036", "md_list_marker": "#7f8792",
+    "md_table_header_bg": "rgba(255,255,255,0.04)", "md_table_border": "#2c3036",
+    "md_mark_bg": "rgba(194,242,92,0.18)", "md_filename": "#e6e8eb",
+    "tool_read": "#7f8792", "tool_edit": "#7f8792", "tool_write": "#7f8792",
+    "tool_search": "#7f8792", "tool_terminal": "#7f8792", "tool_web": "#7f8792",
+    "tool_task": "#7f8792", "tool_team": "#7f8792", "tool_generic": "#7f8792",
+    "tool_thought": "#c2f25c",
+    "status_running": "#c2f25c", "status_ok": "#7f8792",
+    "ring_cyan": "#c2f25c", "ring_cyan_light": "#d4f78a",
+    "ring_purple": "#c2f25c", "ring_purple_light": "#d4f78a",
+    "context_menu_sel": "#2c3036",
+}
+
+CHAT_LIGHT = {
+    # Surfaces, borders, bubble, menus and buttons are NOT overridden: the
+    # light chat keeps the app's warm paper (#ECE9E0 page, #DDDAD0 bubble).
+    # Only ink and accents change. Contrast is measured on the darkest warm
+    # surface text sits on (#DDDAD0).
+    "text": "#1A1814", "text_primary": "#1A1814",                  # 12.7:1
+    "text_dim": "#4A463E", "text_secondary": "#4A463E",             # 6.7:1
+    "muted": "#5E5A52", "mono_muted": "#5E5A52",                    # 4.9:1
+    "mono_bright": "#1A1814",
+    "border_active": "#3f6a12",
+    "accent": "#3f6a12", "accent_primary": "#3f6a12",               # 4.6:1
+    "accent_secondary": "#3f6a12",
+    "accent_fill": "#b7ef38", "accent_ink": "#151c2b",              # 12.5:1
+    "accent_fill_hover": "#c6f45e",
+    "think": "#5E5A52", "think_label": "#5E5A52",
+    "red": "#a8281a", "error": "#a8281a",                           # 5.0:1
+    "status_error": "#a8281a", "stop_btn": "#a8281a", "spell_error": "#a8281a",
+    "orange": "#7a4f00", "warning": "#7a4f00",                      # 5.1:1
+    "blue": "#3f6a12", "info": "#4A463E",
+    "streaming_cursor": "#3f6a12",
+    "md_heading": "#1A1814", "md_text": "#1A1814",
+    "md_link": "#3f6a12", "md_link_text": "#3f6a12",
+    "md_code": "#1A1814",
+    "md_blockquote": "#4A463E", "md_blockquote_border": "#CCC9C0",
+    "md_strong": "#1A1814", "md_emph": "#1A1814",
+    "md_list_marker": "#5E5A52",
+    "md_strikethrough": "rgba(26,24,20,0.45)", "md_mark_bg": "rgba(183,239,56,0.40)",
+    "md_filename": "#1A1814",
+    "tool_read": "#5E5A52", "tool_edit": "#5E5A52", "tool_write": "#5E5A52",
+    "tool_search": "#5E5A52", "tool_terminal": "#5E5A52", "tool_web": "#5E5A52",
+    "tool_task": "#5E5A52", "tool_team": "#5E5A52", "tool_generic": "#5E5A52",
+    "tool_thought": "#3f6a12",
+    "status_running": "#3f6a12", "status_ok": "#5E5A52",
+    "btn_text": "#4A463E", "btn_text_hover": "#1A1814",
+    "menu_text": "#1A1814",
+    "context_menu_sel": "#DDDAD0",
+    "ring_cyan": "#3f6a12", "ring_cyan_light": "#5c8f22",
+    "ring_purple": "#3f6a12", "ring_purple_light": "#5c8f22",
+    "edited_row_text": "#1A1814",
+    "code_copy_color": "#5E5A52", "code_copy_hover": "#1A1814", "code_lang_color": "#5E5A52",
+}
+
+_chat_cache: dict = {}
+
+# Cortex's own palettes as shipped; a colour theme is applied on top of these
+# (apply_named_palette) and removed by restoring them.
+_PRISTINE = {"dark": (dict(DARK), dict(CHAT_DARK)), "light": (dict(LIGHT), dict(CHAT_LIGHT))}
+
+
+def chat_theme(mode: str | None = None) -> dict:
+    """The chat panel's full palette for `mode` (default: the active theme):
+    the theme's tokens with the chat overrides on top. Cached per theme."""
+    base = LIGHT if (mode == "light" or (mode is None and _current_theme is LIGHT)) else DARK
+    key = id(base)
+    hit = _chat_cache.get(key)
+    if hit is None:
+        hit = _chat_cache[key] = {**base, **(CHAT_LIGHT if base is LIGHT else CHAT_DARK)}
+    return hit
+
+
+class _ChatTokenProxy(_TokenProxy):
+    """TOKENS for the chat panel: same live switching, chat palette on top."""
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        t = chat_theme()
+        try:
+            return t[key]
+        except KeyError:
+            import logging
+            logging.getLogger("tokens").error(
+                "[TOKENS] Unknown chat token %r, add it to BOTH palettes in tokens.py", key)
+            return t.get("text", "#e6edf3")
+    def get(self, key, default=None): return chat_theme().get(key, default)
+    def __contains__(self, key): return key in chat_theme()
+    def keys(self): return chat_theme().keys()
+    def values(self): return chat_theme().values()
+    def items(self): return chat_theme().items()
+    def copy(self): return dict(chat_theme())
+    def __iter__(self): return iter(chat_theme())
+    def __len__(self): return len(chat_theme())
+
+
+CHAT_TOKENS = _ChatTokenProxy()
+
+
+def get_theme(mode: str = "dark") -> dict:
+    """Return the token dict for the given theme mode.
+
+    Bug history: this always returned DARK ("only dark is supported"), so
+    the entire chat panel silently could not render light mode, every
+    other layer switched but chat kept dark tokens (light-hash text on
+    light backgrounds elsewhere, dark chat here)."""
+    return LIGHT if mode == "light" else DARK
+
+
+def set_theme(mode: str = "dark"):
+    """Switch the active theme tokens ('dark' or 'light')."""
+    global _current_theme
+    _current_theme = LIGHT if mode == "light" else DARK
+
+
+def set_code_font(stack: str) -> None:
+    """Point the font_mono token (both palettes) at the user's code font.
+
+    Settings -> Editor -> Font family. Widgets built after this read the new
+    stack; src/ui/fonts.py restyles the ones already on screen.
+    """
+    if not stack:
+        return
+    for pal in (DARK, LIGHT):
+        pal["font_mono"] = stack
+    _chat_cache.clear()
+
+
+def apply_named_palette(mode, base: dict, chat: dict) -> None:
+    """Recolour the palettes for a named colour theme (Settings -> Appearance
+    -> Color theme, see src/ui/color_themes.py).
+
+    Both palettes go back to Cortex's own first, so switching from one named
+    theme to another never leaves the previous one's colours behind; then the
+    `mode` palette takes the theme. mode=None restores Cortex's own theme.
+    The code font (set_code_font) is kept.
+    """
+    for pal, chat_pal, (orig, orig_chat) in ((DARK, CHAT_DARK, _PRISTINE["dark"]),
+                                             (LIGHT, CHAT_LIGHT, _PRISTINE["light"])):
+        mono = pal.get("font_mono")
+        pal.clear(); pal.update(orig)
+        chat_pal.clear(); chat_pal.update(orig_chat)
+        if mono:
+            pal["font_mono"] = mono
+    if mode in ("dark", "light"):
+        pal, chat_pal = (LIGHT, CHAT_LIGHT) if mode == "light" else (DARK, CHAT_DARK)
+        pal.update(base)
+        chat_pal.update(chat)
+    _chat_cache.clear()
+
+
+def T() -> dict:
+    """Get current theme tokens. Usage: T()['key'], allows runtime switching."""
+    return _current_theme
+
+
+def is_dark() -> bool:
+    """True while the dark theme is active (follows a live switch)."""
+    return _current_theme is DARK
+
+
+def family_list(value: str) -> list[str]:
+    """Unwrap a CSS font-family list into individual family names.
+
+    The font_ui / font_mono tokens carry CSS lists, which is what a
+    stylesheet wants. Code that hands Qt a font OBJECT needs real family
+    names: QFont.setFamilies() takes the list and keeps the first family
+    that is installed, so one token works on every platform. Qt-free, so
+    it is safe at module import time.
+    """
+    return [p.strip().strip("'\"") for p in value.split(",") if p.strip()]
+
+
+def build_markdown_css(t: dict | None = None) -> str:
+    """Generate unified markdown CSS from design tokens. Single source of truth.
+
+    OC-2 styling:
+    - Headings: purple, bold
+    - Strong/bold: orange
+    - Emphasis/italic: gold
+    - Inline code: green with subtle bg
+    - Code blocks: dark bg, subtle border, no padding (handled by wrapper)
+    - Blockquotes: gold, italic, left border
+    - Links: peach underline
+    - Lists: blue markers
+    - Tables: subtle borders, header bg
+    """
+    if t is None:
+        t = _current_theme
+    return f"""<style>
+  body {{
+    color: {t['md_text']} !important; font-size: {t['font_size']};
+    line-height: {t['line_height']}; font-family: {t['font_ui']};
+    overflow-wrap: break-word; word-break: break-word;
+    max-width: 100%; box-sizing: border-box;
+  }}
+
+  /* Universal overflow prevention, NO element can cause horizontal scroll */
+  * {{ overflow-wrap: break-word; word-wrap: break-word; box-sizing: border-box; }}
+
+  /* Headings, purple (#9d7cd8), bold */
+  h1, h2, h3, h4, h5, h6 {{
+    color: {t['md_heading']} !important; font-weight: 600; margin: 8px 0 4px 0;
+    overflow-wrap: break-word; word-wrap: break-word; max-width: 100%;
+  }}
+  h1 {{ font-size: 1.5em; border-bottom: 1px solid {t['border_dim']}; padding-bottom: 4px; margin-top: 12px; }}
+  h2 {{ font-size: 1.35em; margin-top: 10px; }}
+  h3 {{ font-size: 1.2em; margin-top: 8px; }}
+  h4 {{ font-size: 1.05em; }}
+  h5, h6 {{ font-size: 1em; color: {t['text_dim']} !important; }}
+
+  /* Paragraphs */
+  p {{ color: {t['md_text']} !important; margin: 3px 0; line-height: {t['line_height']};
+      overflow-wrap: break-word; word-wrap: break-word; word-break: break-word;
+      max-width: 100%; box-sizing: border-box; }}
+
+  /* Strong, orange (#f5a742) */
+  strong, b {{ color: {t['md_strong']} !important; font-weight: 600; }}
+
+  /* Emphasis, gold (#e5c07b) */
+  em, i {{ color: {t['md_emph']} !important; font-style: italic; }}
+
+  /* Inline code: mono, one step smaller, NO filled box.
+     Qt paints an inline background over the whole text-height rectangle of
+     the line while the glyphs are much shorter, and it IGNORES padding,
+     border-radius and em font sizes on inline spans (measured 2026-10-24:
+     "padding:0 20px" changed nothing, "font-size:0.9em" rendered at the body
+     size, only px sizes took effect). So the old "2px 6px chip" drew a
+     hard-edged grey block that was too tall above and below the glyphs and
+     had zero breathing room beside them: it read as a wall of grey bars.
+     Emphasis comes from the mono face and the smaller size instead. */
+  code {{
+    color: {t['md_code']} !important; background: transparent;
+    font-family: {t['font_mono']}; font-size: {t['font_size_xs']};
+    padding: 0; border-radius: 0;
+  }}
+
+  /* Code blocks, dark bg, subtle border */
+  pre {{
+    max-width: 100%; overflow-x: auto; box-sizing: border-box;
+    background: {t['bg']}; border: 1px solid {t['border_dim']};
+    border-radius: {t['radius_md']}; padding: 10px 14px; margin: 8px 0;
+  }}
+  pre code {{
+    color: {t['text']} !important; background: transparent;
+    padding: 0; border-radius: 0;
+    font-size: 0.88em; line-height: {t['line_height_code']};
+    white-space: pre-wrap;
+  }}
+
+  /* Links, peach (#fab283) */
+  a {{ color: {t['md_link']} !important; text-decoration: underline; }}
+  a:visited {{ color: {t['md_link']} !important; }}
+
+  /* Blockquotes, demo: blue left border, normal text */
+  blockquote {{
+    border-left: 3px solid {t['md_blockquote_border']};
+    color: {t['md_blockquote']} !important;
+    padding: 4px 0 4px 12px; margin: 8px 0;
+    background: transparent;
+    border-radius: 0;
+    overflow-wrap: break-word; word-wrap: break-word; word-break: break-word;
+  }}
+
+  /* Horizontal rules, subtle */
+  hr {{ border: none; border-top: 1px solid {t['md_hr']}; margin: 10px 0; }}
+
+  /* Lists, pure white text, NOT purple */
+  ul, ol {{ padding-left: 20px; margin: 4px 0; overflow-wrap: break-word; word-wrap: break-word; }}
+  li {{ margin: 2px 0; color: {t['md_text']} !important; line-height: {t['line_height']};
+       overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }}
+  li > ul, li > ol {{ margin: 2px 0 2px 0; }}
+
+  /* Tables, purple header, white body, file names green */
+  table {{ border-collapse: collapse; margin: 6px 0; width: 100%; font-size: 13px;
+           table-layout: fixed; max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; }}
+  th, td {{
+    border-bottom: 1px solid {t['md_table_border']};
+    padding: 8px 12px; text-align: left; vertical-align: top;
+    overflow-wrap: break-word; word-wrap: break-word; word-break: break-word;
+  }}
+  th {{
+    color: {t['md_heading']} !important; font-weight: 600;
+    border-bottom: 1px solid {t['border']};
+    background: {t['md_table_header_bg']};
+  }}
+  /* No "tr:first-child td" header rule: Qt's rich-text CSS drops the
+     pseudo-class and applied it to EVERY cell, so whole tables rendered
+     bold on the header band. Headers are real <th> cells (see
+     _fix_prose_tables in chat_panel.py). */
+  td {{ color: {t['md_text']} !important; }}
+  /* Remove outer borders */
+  table tr:first-child th, table tr:first-child td {{ border-top: none; }}
+  table tr:last-child td {{ border-bottom: none; }}
+  table th:first-child, table td:first-child {{ border-left: none; }}
+  table th:last-child, table td:last-child {{ border-right: none; }}
+
+  /* Strikethrough */
+  del, s {{ color: {t['md_strikethrough']} !important; text-decoration: line-through; }}
+
+  /* Mark highlighting */
+  mark {{ background: {t['md_mark_bg']}; color: {t['text']} !important; border-radius: 2px; padding: 0 3px; }}
+
+  /* Images */
+  img {{ max-width: 100%; border-radius: {t['radius_sm']}; margin: 8px 0; }}
+
+  /* Definition lists */
+  dt {{ font-weight: 600; color: {t['md_heading']} !important; margin-top: 12px; }}
+  dd {{ margin-left: 20px; color: {t['text_dim']} !important; }}
+
+  /* Task lists (checkboxes) */
+  input[type="checkbox"] {{
+    margin-right: 6px;
+  }}
+
+  /* Keyboard shortcuts */
+  kbd {{
+    background: {t['bg_secondary']}; border: 1px solid {t['border_dim']};
+    border-radius: 3px; padding: 1px 5px;
+    font-family: {t['font_mono']}; font-size: 0.88em;
+    color: {t['text_dim']} !important;
+  }}
+
+  /* File names/paths, GREEN highlight */
+  code.filename, code.filepath, span.filename {{
+    color: {t['md_filename']} !important;
+    background: rgba(63,185,80,0.08) !important;
+    padding: 1px 4px !important;
+    font-weight: 500;
+    font-family: {t['font_mono']};
+  }}
+  /* Any code element that looks like a path (contains / or \\), green */
+  code[class*=\"path\"], code[class*=\"file\"] {{
+    color: {t['md_filename']} !important;
+    background: rgba(63,185,80,0.08) !important;
+    padding: 1px 4px !important;
+  }}
+</style>"""
+
+
+def build_code_block_css(t: dict | None = None) -> str:
+    """CSS for code block decorations (header bar, copy button, language label)."""
+    if t is None:
+        t = _current_theme
+    return f"""<style>
+    /* Code block wrapper */
+    .cb-wrapper {{
+      margin: 12px 0; border-radius: {t['radius_md']};
+      border: 1px solid {t['code_header_border']};
+    }}
+    /* Code block header bar */
+    .cb-header {{
+      background: {t['code_header_bg']};
+      border-bottom: 1px solid {t['code_header_border']};
+      padding: 6px 14px; min-height: 32px;
+    }}
+    /* Language label */
+    .cb-lang {{
+      color: {t['code_lang_color']}; font-family: {t['font_mono']};
+      font-size: 11px; text-transform: uppercase;
+      font-weight: 500;
+    }}
+    /* Copy button */
+    .cb-copy {{
+      color: {t['code_copy_color']}; font-size: 11px;
+      padding: 3px 10px; border-radius: {t['radius_xs']};
+      border: 1px solid {t['border_dim']}; background: {t['code_copy_bg']};
+      font-family: {t['font_ui']};
+    }}
+    /* Code body */
+    .cb-body {{
+      background: {t['bg']};
+      border-top: none;
+    }}
+    .cb-body pre {{
+      margin: 0; border: none; border-radius: 0;
+    }}
+    </style>"""
+
+
+def build_qss(t: dict | None = None, mode: str | None = None) -> str:
+    """Build the full QSS stylesheet from tokens.
+
+    Defaults to the ACTIVE theme, a hardcoded mode="dark" default here
+    would hand dark styles to light-mode callers."""
+    if t is None:
+        t = get_theme(mode) if mode else _current_theme
+    return f"""
+    QWidget {{
+        background: {t['bg']};
+        color: {t['text']};
+        font-family: {t['font_ui']};
+        font-size: {t['font_size']};
+    }}
+    QScrollArea {{ border: none; }}
+    QScrollBar:vertical {{
+        background: transparent; width: 8px; margin: 0;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {t['border']}; border-radius: 4px; min-height: 30px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: {t['border_active']};
+    }}
+    QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+
+    #userBubble {{
+        background: {t['bg_card']};
+        border: none;
+        border-right: 3px solid #ff8c00;
+        border-radius: 0px;
+        padding: 12px 18px;
+        font-size: 14px;
+        line-height: 1.65;
+        color: rgba(255,255,255,0.92);
+        font-family: {t['font_mono']};
+    }}
+
+    #aiCard {{
+        background: transparent;
+        border: none;
+    }}
+
+    QTextBrowser {{
+        background: transparent;
+        border: none;
+        font-size: {t['font_size']};
+    }}
+
+    #cardFrame {{
+        border: 1px solid {t['border']};
+        border-radius: 0px;
+    }}
+    #cardHeader {{ background: transparent; }}
+    #thoughtHeader {{
+        background: rgba(124,108,231,0.06);
+        border-radius: {t['radius_md']};
+    }}
+    #cardHeaderLabel {{
+        color: {t['text_secondary']};
+        font-size: {t['font_size_xs']};
+        font-weight: 400;
+    }}
+    #thoughtLabel {{
+        color: {t['think_label']};
+        font-size: {t['font_size_sm']};
+        font-weight: 500;
+    }}
+    #thoughtBody {{
+        color: {t['text_secondary']};
+        font-size: {t['font_size_sm']};
+        font-style: italic;
+    }}
+
+    #toolName {{
+        color: {t['text_secondary']};
+        font-size: {t['font_size_xs']};
+    }}
+    #toolArg {{
+        color: {t['muted']};
+        font-family: {t['font_mono']};
+        font-size: {t['font_size_xxs']};
+    }}
+
+    #chatInput {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: {t['radius_lg']};
+        padding: 10px 12px;
+        font-size: {t['font_size']};
+    }}
+    #chatInput:focus {{
+        border-color: {t['border_active']};
+    }}
+    #sendBtn {{
+        background: {t['accent']};
+        border: none;
+        border-radius: {t['radius_md']};
+        padding: 8px 14px;
+        color: #04222a;
+        font-weight: 600;
+    }}
+    #sendBtn:hover {{
+        background: {t['accent']};
+        opacity: 0.9;
+    }}
+    #stopBtn {{
+        background: transparent;
+        border: 1px solid {t['red']};
+        border-radius: {t['radius_md']};
+        padding: 8px 14px;
+        color: {t['red']};
+        font-weight: 600;
+    }}
+    #stopBtn:hover {{
+        background: rgba(248,81,73,0.10);
+    }}
+    #toolbarBtn {{
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: {t['radius_sm']};
+        padding: 4px 10px;
+        color: {t['text_dim']};
+        font-size: {t['font_size_xs']};
+    }}
+    #toolbarBtn:hover {{ background: rgba(255,255,255,0.08); }}
+    #toolbarBtn::menu-indicator {{ image: none; width: 0; }}
+    QMenu {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: {t['radius_md']};
+        padding: 6px;
+        color: {t['text']};
+    }}
+    QMenu::item {{
+        padding: 6px 12px;
+        border-radius: {t['radius_sm']};
+        font-size: {t['font_size_xs']};
+    }}
+    QMenu::item:selected {{ background: {t['menu_selected']}; color: {t['text']}; }}
+    QMenu::item:disabled {{ color: {t['muted']}; font-size: 10px; }}
+    QMenu::separator {{
+        height: 1px;
+        background: {t['border']};
+        margin: 6px 4px;
+    }}
+    #chev {{
+        color: {t['muted']};
+        border: none;
+        background: transparent;
+        font-size: 14px;
+        width: 20px;
+    }}
+    """
+
+
+
+

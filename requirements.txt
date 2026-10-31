@@ -1,0 +1,90 @@
+# ---------------------------------------------------------------------------
+# Cortex AI IDE - runtime dependencies
+#
+# Install with:
+#     python -m pip install -r requirements.txt
+#
+# For development (adds pytest, black, PyInstaller and type stubs):
+#     python -m pip install -r requirements-dev.txt
+#
+# The versions below are the minimums this release was built and tested
+# against.  Requirements are grouped by what they power so you can see at a
+# glance why a package is here.  Everything in this file is a direct import
+# found in src/; transitive dependencies are left to pip to resolve.
+#
+# For a byte-exact reproduction of the maintainer's build environment use
+# requirements-lock.txt instead (a full `pip freeze`).
+# ---------------------------------------------------------------------------
+
+# --- GUI -------------------------------------------------------------------
+# The whole desktop shell.  PyQt6-WebEngine supplies the four embedded
+# Chromium panels: file explorer, editor/chat, terminal and live preview.
+PyQt6>=6.6
+PyQt6-WebEngine>=6.6
+
+# --- HTTP and LLM providers ------------------------------------------------
+# requests/urllib3 drive the provider REST calls, aiohttp and httpx handle
+# streaming responses, anthropic and openai are the two native SDKs.
+# mcp is the Model Context Protocol client that loads external tool servers.
+requests>=2.31
+urllib3>=2.2
+certifi>=2024.2.2
+httpx>=0.27
+aiohttp>=3.9
+anthropic>=0.34
+openai>=1.40
+mcp>=1.0
+
+# --- Terminal --------------------------------------------------------------
+# ConPTY process hosting for the integrated terminal ("Cortex AI" tab).
+pywinpty>=2.0; sys_platform == "win32"
+
+# --- Configuration and serialization --------------------------------------
+python-dotenv>=1.0
+PyYAML>=6.0
+orjson>=3.9
+typing_extensions>=4.9
+
+# --- Cryptography ----------------------------------------------------------
+# Encrypts API keys at rest and signs secure transmissions.
+cryptography>=42.0
+
+# --- Code intelligence and search -----------------------------------------
+# numpy backs the vector math in semantic search and the code chunker.
+numpy>=1.26
+
+# --- Chat rendering --------------------------------------------------------
+# mistune parses Markdown into the chat transcript, Pygments tokenizes code
+# blocks, Pillow decodes pasted and generated images, flatlatex renders the
+# LaTeX inside math blocks.
+mistune>=3.0
+Pygments>=2.17
+Pillow>=10.3
+flatlatex>=0.15
+# Red squiggles in the chat input (chat_panel imports SpellChecker). It was
+# imported by the code and protected in cortex.spec with its dictionary data,
+# but never listed here, so a fresh clone silently lost spellcheck and the
+# spec's collect_data_files('spellchecker') copied nothing.
+pyspellchecker>=0.8
+
+# --- System and process ---------------------------------------------------
+psutil>=5.9
+send2trash>=1.8.2
+
+# --- Agent tools and skills ------------------------------------------------
+# These back the document and web tools the agent uses (PDF and Office
+# reading, HTML scraping for WebFetch, spreadsheet imports).  The app degrades
+# gracefully if one is missing: the matching tool reports that it is
+# unavailable instead of crashing.
+beautifulsoup4>=4.12
+lxml>=5.2
+defusedxml>=0.7.1
+pypdf>=4.2
+pypdfium2>=4.30
+openpyxl>=3.1
+python-docx>=1.1
+xlrd>=2.0
+
+# --- Python 3.13 and newer -------------------------------------------------
+# The stdlib audioop module was removed in Python 3.13.  Voice input uses it.
+audioop-lts>=0.2.2; python_version >= "3.13"

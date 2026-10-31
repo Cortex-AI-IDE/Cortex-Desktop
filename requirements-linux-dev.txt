@@ -1,0 +1,21 @@
+# Everything needed to build and develop the Linux build of Cortex: the
+# runtime packages plus PyInstaller, formatters, type stubs and tests.
+# build/linux/build.sh (see Docs/LINUX-PACKAGING.md) installs this file.
+-r requirements-linux.txt
+altgraph==0.17.5
+autopep8==2.3.2
+black==26.5.1
+mypy_extensions==1.1.0
+packaging==26.2
+pathspec==1.1.1
+platformdirs==4.10.0
+pycodestyle==2.14.0
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.5
+pytest-qt==4.5.0
+pytokens==0.4.1
+setuptools==82.0.1
+types-PyYAML==6.0.12.20260518
+types-requests==2.33.0.20260518
+types-tabulate==0.10.0.20260508
+types-tqdm==4.67.3.20260518

@@ -1,0 +1,1398 @@
+<div align="center">
+
+# Cortex AI IDE on macOS
+
+### The official port roadmap
+
+**Cortex 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Maintainer-authorized porting guide
+
+**Windowsh 10/11 and Linux ship today.** This is the step-by-step roadmap for
+building the macOS version, published with the maintainer's permission.
+
+**Verified against the 3.0.63 source tree.** Each file, line number and platform
+check below was re-read in the released 3.0.63 code (`src/version.py:21`), not
+carried forward from an earlier revision.
+
+</div>
+
+---
+
+## Dear Mac user
+
+You are holding the roadmap to a **maintainer-authorized macOS port**. Cortex
+ships a Windows build (including the Microsoft Store) and Linux packages
+(`.deb` and `.rpm`, from [cortex-ide.app/download](https://cortex-ide.app/download/)),
+and the macOS build is not published yet. Rather than leave you waiting, the
+maintainer grants you permission to build it, and this document is the official
+step-by-step guide for doing that.
+
+**Permission is granted.** You can port Cortex to macOS, run it, change it, add
+your own features, and share your build. This is an approved port, not a
+tolerated workaround.
+
+Here is the full picture:
+
+- **Windows and Linux are the released builds.** Windows covers Windows 10/11
+  and the Microsoft Store; Linux users get `.deb` and `.rpm` packages. Those are
+  tested, signed and updated automatically.
+- **The private build pipeline stays private.** The repository you are reading
+  is the application source. The PyInstaller spec, the Windows installer script,
+  the MSIX manifest and the code-signing configuration for the released builds
+  live in a separate folder and are not part of this repository.
+- **That does not block you, and it is not meant to.** This guide replaces that
+  pipeline for the macOS case. It hands you a complete macOS PyInstaller spec,
+  the terminal and shell changes, and the `.dmg` recipe. Nothing in it depends on
+  anything that is not published, and nothing you need is hidden.
+- **The port is done in the source tree.** This is not a rewrite, and it is no
+  longer something you have to write: the POSIX terminal backend, the zsh and
+  bash integration, the shell names, a macOS spec and a CI build are all
+  committed. What remains is building it and, if you want a clean double-click
+  for other people, signing it. Budget **30 to 45 minutes** for a working
+  development build, and plan a second session for a signed `.dmg`.
+
+Use whatever agent you already work with (Cursor, Claude Code, Codex, Cortex
+itself on a Windows or Linux machine pointed at this folder). This document is
+written so an agent can execute it directly: every claim names a file, a line
+and the exact change.
+
+**The target:** `python src/main.py` opens a working Cortex window on your Mac,
+with the agent, the editor, chat, the explorer and a terminal. Then, if you want
+it, a double-clickable `.app` inside a `.dmg`.
+
+---
+
+## Contents
+
+- [What 3.0.61 and 3.0.63 changed for macOS](#what-3061-and-3063-changed-for-macos)
+- [What already works on macOS](#what-already-works-on-macos)
+- [What needs changing](#what-needs-changing)
+- [The port is in the source tree](#the-port-is-in-the-source-tree)
+- [The 30 to 45 minute build](#the-30-to-45-minute-build)
+- [Terminal: replacing PowerShell with zsh or bash](#terminal-replacing-powershell-with-zsh-or-bash)
+- [Monaco editor and Node.js](#monaco-editor-and-nodejs)
+- [Grep and ripgrep](#grep-and-ripgrep)
+- [API keys and the macOS Keychain](#api-keys-and-the-macos-keychain)
+- [The agent's shell tools on macOS](#the-agents-shell-tools-on-macos)
+- [Building without a Mac](#building-without-a-mac)
+- [Packaging a .dmg](#packaging-a-dmg)
+- [Verification checklist](#verification-checklist)
+- [Troubleshooting](#troubleshooting)
+- [What to do with your build](#what-to-do-with-your-build)
+
+---
+
+## What 3.0.61 and 3.0.63 changed for macOS
+
+Two releases landed after this guide was first written, and both touch things a
+port cares about: fonts, theming and process cleanup. The short answer is that
+**neither release adds a Windows dependency.** Every module introduced by them
+was searched for `win32`, `winpty`, `powershell`, `sys.platform`, `os.name`,
+`LOCALAPPDATA` and `APPDATA`. None contains a platform branch. The only hit is a
+comment in `src/ai/mcp_context.py` that mentions PowerShell in passing, while
+explaining why browser actions count as progress.
+
+| Release | Change | New or changed files | Effect on macOS |
+|---|---|---|---|
+| 3.0.61 | Bundled fonts | `src/ui/fonts.py`, `src/assets/fonts/` | New behaviour, and the one item that adds a build check. See [Bundled fonts](#bundled-fonts-3061-and-your-build) |
+| 3.0.61 | Whole-app colour themes | `src/ui/color_themes.py`, `src/ui/editor_theme.py` | Works. A theme reaches Monaco, xterm.js, the Qt token palettes and a style element on the shared WebEngine profile, none of which is platform-specific |
+| 3.0.61 | Stream stall timer switched to `time.monotonic()` | `src/ai/providers/deepseek_provider.py` | Removes a macOS hazard too. A laptop that sleeps mid-answer shifts the wall clock, and the old `time.time()` delta read that as hours of silence and aborted a healthy request |
+| 3.0.61 | Verbosity and code-style rules moved to the end of the system prompt | `src/ai/agent_bridge.py` | Prompt order only |
+| 3.0.63 | Accessibility themes, High Contrast and Distinct Colors | `src/ui/color_themes.py`, `src/ui/editor_theme.py` | Works. Editor themes go from 13 to 17, mapped onto Monaco's `hc-black` and `hc-light` bases, so focus and selection get real outlines |
+| 3.0.63 | Compact chat activity | `src/ui/chat_panel.py`, `src/config/settings.py` | Works, and matters more on a laptop screen than on a desktop monitor |
+| 3.0.63 | Remembered project access | `src/core/project_permissions.py` | Works. Decisions live in `~/.cortex/always_allow.json`, which already sits outside the project, so nothing about the path changes on macOS |
+| 3.0.63 | MCP roots, guidance, stale snapshot pruning | `src/ai/mcp_context.py`, `src/ai/mcp_guidance.py`, `src/services/mcp_manager.py` | Works. Trimming 187K-character page snapshots helps most on an 8 GB machine |
+| 3.0.63 | Sign-in window no longer blocks the GUI thread | `src/core/auth_manager.py` | `webbrowser.open` now runs on a daemon thread, which is the correct shape on macOS as well |
+| 3.0.63 | Editor tab size, word wrap and minimap actually applied | `src/ui/editor_prefs.py`, `src/ui/components/webview_panel.py`, `src/assets/editor.html` | Works. They reach Monaco through `editor.html`, a plain web asset |
+| 3.0.63 | Exit cleanup before `os._exit` | `src/utils/exit_hooks.py` | Works. Temp-file and clean-shutdown marker cleanup run identically on macOS |
+| 3.0.63 | Update check sends `platform` | `src/services/update_checker.py` | Fixes a build being offered an installer for another platform |
+| 3.0.63 | Sign-in window and sidebar follow the theme | `src/ui/dialogs/login_dialog.py`, `src/ui/components/sidebar.py`, `src/ui/html/sidebar.html` | Works. The sidebar can also sit on the right, which some macOS users prefer |
+| 3.0.63 | Semantic memory LRU cache and time budget | `src/core/semantic_memory.py` | Works. Keeps a slow search from holding up a turn |
+
+Nothing above changes the port plan. The terminal work in
+[What needs changing](#what-needs-changing) is unchanged and still the real job.
+
+### Bundled fonts (3.0.61) and your build
+
+Cortex used to name Geist and JetBrains Mono in its design tokens while shipping
+neither file, so every platform silently fell back to the system font. Since
+3.0.61 five files ship in `src/assets/fonts/`:
+
+| File | Size | Purpose |
+|---|---|---|
+| `InterVariable.ttf` | 859 KB | Interface font |
+| `JetBrainsMono-Regular.ttf` | 267 KB | Code and terminal |
+| `JetBrainsMono-Bold.ttf` | 271 KB | Code and terminal, bold |
+| `Inter-LICENSE.txt`, `JetBrainsMono-OFL.txt` | 4 KB each | SIL OFL 1.1 requires the notices to travel with the font |
+
+Two mechanisms load them, and both are cross-platform:
+
+- **Native Qt** through `QFontDatabase.addApplicationFont` at
+  `src/ui/fonts.py:82`. Qt names the face from the file, so the variable Inter
+  file registers as **"Inter Variable"**. That is why the font stacks list both
+  names.
+- **Every WebEngine page** through `@font-face` rules plus the `--font-ui` and
+  `--font-mono` variables, built by `font_face_css()` at `src/ui/fonts.py:427`
+  and installed on the shared profile by `install_web_fonts()`. Chromium cannot
+  see fonts registered with Qt, so the web half needs its own copy.
+
+From a source checkout there is nothing to do. In a frozen build the files must
+be inside the bundle, because `fonts_dir()` at `src/ui/fonts.py:57` resolves to
+`sys._MEIPASS/src/assets/fonts` when frozen. The macOS spec below copies
+`src/assets` wholesale, so it already covers this, but confirm that
+`src/assets/fonts/InterVariable.ttf` exists inside the finished `Cortex.app`
+before you ship. If it is missing the app still runs; it simply falls back to
+the system font and logs one `[Fonts]` line.
+
+### Themes (3.0.61 and 3.0.63) and what they touch
+
+The theme work replaced the old "apply one global stylesheet" model, which is
+the same code path that used to freeze a large chat for several seconds. On
+macOS there is nothing to port, but two things are worth knowing while you test:
+
+- A theme is four surfaces, so a broken theme on macOS means one surface did not
+  receive it: the WebEngine style element for web pages, xterm's 16-colour
+  palette, the Qt token palettes, and Monaco. If only the editor stays dark,
+  that is the Monaco mapping, not the theme system.
+- Choosing a theme also sets dark or light, so widgets the theme does not cover
+  still follow it. If something looks half-themed on your Mac, report the
+  widget, not the palette.
+
+---
+
+## What already works on macOS
+
+Before anything is changed, a surprising amount is already portable. Each row
+below was read directly in the 3.0.63 source tree. This is the good news, and it
+is why the job is short.
+
+| Area | Evidence | Status |
+|------|----------|--------|
+| **Master encryption secret** | `src/core/key_manager.py:231` branches to `_macos_keychain_secret()` (line 234), which uses the macOS `security` CLI to read and create a Keychain item | Works |
+| **Linux secret store** | `src/core/key_manager.py:267` uses `secret-tool` | Works |
+| **Server platform reporting** | `src/core/cortex_api.py:41` maps `darwin` to `macos` | Works |
+| **MCP server resolving** | `src/services/mcp_manager.py:115` has an explicit `darwin` branch (the `npx.cmd` shim problem is Windows-only) | Works |
+| **Recycle Bin / Trash** | `src/utils/safe_delete.py:132` tries `send2trash` first, which is cross-platform. The Windows-only `SHFileOperationW` path is guarded at line 69 by `sys.platform != "win32"` and returns unavailable | Works |
+| **Single instance guard** | `src/core/instance_ipc.py:41` selects `AF_UNIX` on non-Windows and puts the socket in `$XDG_RUNTIME_DIR` or `~/.cortex` | Works |
+| **GPU compatibility probe** | `src/core/gpu_compat.py:106` returns early on non-Windows | Works |
+| **Process spawning** | `src/ui/components/sidebar_bridge.py:1346` already branches to the macOS and Linux fire-and-forget path, and the five `CREATE_NO_WINDOW` call sites are all written as `... if sys.platform == "win32" else 0` | Works |
+| **Process killing** | `src/utils/proc_kill.py` gives the Bash tool a real POSIX process-group kill, used from `BashTool.py:187`. Windows uses `taskkill /T` instead | Works |
+| **Startup sequence** | Every `sys.platform == 'win32'` block in `src/main.py` (lines 76, 94, 107, 298, 340, 351, 385, 512, 899) is an `if`, not an assumption. They no-op on macOS | Works |
+| **Bash tool backend** | `src/agent/src/tools/BashTool/BashTool.py:139` resolves the shell with `shutil.which("bash")`, which finds `/bin/bash` on macOS. Line 160 sets `CREATE_NO_WINDOW` to `0` off Windows, and the `taskkill` block at 171 is Windows-gated | Works |
+| **Grep fallback chain** | `src/agent/src/tools/GrepTool/GrepTool.py:639` tries the npm ripgrep package first, then ends at line 720 with `return shutil.which('rg')` | Works once `rg` is installed |
+| **Bundled fonts** (3.0.61) | `src/ui/fonts.py:64` registers the shipped `.ttf` files with Qt and line 454 installs `@font-face` rules on the shared WebEngine profile. Both are platform-neutral | Works, see the build note above |
+| **Colour themes** (3.0.61, 3.0.63) | `src/ui/color_themes.py` and `src/ui/editor_theme.py` contain no `sys.platform` check at all | Works |
+| **Terminal UI** | `src/ui/components/xterm_terminal.py:1061` falls back to a `QProcess` shell when pywinpty is absent | Partial, see below |
+| **The four Chromium panels** | Monaco, xterm.js, Mermaid and the HTML panels are all vendored web assets. Qt WebEngine is identical on macOS | Works |
+
+---
+
+## What needs changing
+
+> **Status: done in this source tree.** The blockers below were the work, and
+> that work is now committed, so a macOS build needs no hand-editing. This table
+> stays because it is the map of what the port touches: if a line number shifts
+> or a regression appears, this is where to look. The original analysis is kept
+> unchanged underneath it, and [The port is in the source tree](#the-port-is-in-the-source-tree)
+> says exactly where each item now lives.
+
+Ranked by how much it hurts. Rows 1 to 3 are the real work. Rows 4 and below
+are correctness and polish.
+
+| # | Priority | File | Problem on macOS | What to do |
+|---|----------|------|------------------|------------|
+| 1 | **Blocker** | `src/core/terminal_session.py:390` | `if sys.platform != "win32" or not _WINPTY: return False` (the same guard is repeated at line 984). The shared AI shell session can **never start** on macOS. This is what the agent's persistent shell is built on | Add a POSIX PTY backend |
+| 2 | **Blocker** | `src/core/terminal_session.py:67` | `_INTEGRATION_PS1` is a PowerShell integration script. The command start/end/cwd markers the AI relies on are written by a PowerShell prompt | Write the zsh/bash equivalent |
+| 3 | **High** | `src/ui/components/xterm_terminal.py:877` | `_SHELL_EXE` and `_SHELL_ARGS` only contain `powershell.exe`, `cmd.exe`, `bash.exe`, `wsl.exe`. Line 892 defaults to `"powershell"`, line 907 hardcodes `powershell.exe` | Map the names to `/bin/zsh` and `/bin/bash`, default to `zsh` |
+| 4 | **High** | `src/core/key_manager.py:489` | `if os.name != 'nt': return None` at line 493. The **master secret** has a Keychain path, but per-provider **API keys** do not. Same shape in `store_key` (line 404) and `delete_key` (line 614) | Add a Keychain branch, or accept the fallback |
+| 5 | **Medium** | `src/ui/components/xterm_terminal.py:25` | `import winpty` fails, so `WINPTY_AVAILABLE` is `False` (line 28) and the terminal drops to the `QProcess` fallback (line 1061). The source comment at line 23 says it plainly: this "doesn't support interactive terminal apps like vim or python repl well" | Point it at a POSIX PTY |
+| 6 | **Medium** | `src/ai/agent_bridge.py:1344` | `_build_recycle_bin_command` builds a **PowerShell** command to move files to the Recycle Bin | Use `send2trash` or `osascript` |
+| 7 | **Medium** | `src/ai/agent_bridge.py:1411`, `2025` | The `PowerShell` tool description and the `_TERMINAL_GUIDANCE` preamble tell the model it is on Windows | Gate the tool off on macOS, prefer `Bash` |
+| 8 | **Medium** | `src/ai/agent_bridge.py:2594` | `PowerShell` sits in the always-exposed tool list | Hide it when `sys.platform != "win32"` |
+| 9 | **Build** | `bin/rg.exe` | A 5.2 MB **Windows** binary cannot run on macOS | Do not ship it. Use `brew install ripgrep` or the npm package |
+| 10 | **Build** | `src/utils/pyinstaller_hooks/hook-winpty.py` | Bundles `conpty.dll`, `winpty.dll`, `winpty-agent.exe`, `OpenConsole.exe` | Mac spec must not reference it |
+| 11 | **Build** | `src/utils/runtime_hook_noconsole.py` | Hides the Windows console window via the Win32 API | Skip it in the mac spec |
+| 12 | **Build** | `requirements-dev.txt` | `pywin32-ctypes==0.2.3` and `pefile==2024.8.26` are Windows-only. They install but do nothing | Leave them or strip them |
+| 13 | **Packaging** | `src/assets/logo/logo.ico` | macOS wants `.icns` | Convert `app.png` with `iconutil` |
+| 14 | **Nice to have** | `src/agent/src/utils/powershell/` and `src/agent/src/tools/PowerShellTool/` | Entire PowerShell tool subtree, Windows by design | Leave in place, gate at runtime |
+
+Note on `requirements.txt`: `pywinpty>=2.0` is already correctly marked
+`; sys_platform == "win32"`, so it will not install on your Mac. That is
+deliberate and correct. It is also exactly why row 1 exists: the terminal
+session code was written against pywinpty and has no POSIX twin.
+
+---
+
+## The port is in the source tree
+
+These are the files the port added or changed. Read them before changing
+anything else, because the reasoning is in the comments.
+
+| What | Where | Why it is shaped that way |
+|------|-------|---------------------------|
+| One PTY interface for every platform | `src/core/pty_backend.py` (new) | Exports `PTY_AVAILABLE` and `PtyProcess.spawn(...)`. On Windows it delegates to pywinpty; everywhere else it uses `pty.fork()`, which does the three things a controlling terminal needs (fork, `setsid`, open the slave as stdin/stdout/stderr) so Ctrl+C raises a real SIGINT instead of being four echoed bytes. `PosixPty` copies pywinpty's method names on purpose (`read`, `write`, `isalive`, `pid`, `setwinsize`, `terminate`), so neither panel needed a second code path. |
+| The AI's shared session | `src/core/terminal_session.py` | `start()` now calls `_launch_command()`, which returns the Windows PowerShell line unchanged or a POSIX one. Both `sys.platform != "win32"` guards are gone; the gate is `PTY_AVAILABLE`. |
+| zsh and bash integration | `_INTEGRATION_ZSH`, `_INTEGRATION_BASH`, `_INTEGRATION_ZSHENV` in the same file | The same three OSC 633 markers the PowerShell prompt writes, produced by shell hooks instead: zsh `preexec`/`precmd`, bash `DEBUG` trap plus `PROMPT_COMMAND`. The user's own rc file is sourced first and the hooks are added after it, so their prompt and theme survive and the markers sit beside the prompt that is really drawn. zsh has no `--rcfile`, so `ZDOTDIR` points at a generated folder. |
+| Shell names | `XTermWidget._get_posix_shell_command` in `src/ui/components/xterm_terminal.py` | `zsh` then `bash`, resolved with `shutil.which`. A synced setting of `powershell` falls back to zsh rather than launching nothing. |
+| The agent's own instructions | `_BASH_TOOL_DESC_POSIX` and `_TERMINAL_GUIDANCE_POSIX` in `src/ai/agent_bridge.py` | On Windows the model is told "this runs PowerShell, NOT bash". On macOS that sentence has to invert, or it spends turns writing `;` and `2>$null` into a shell that rejects them. |
+| The macOS build | `cortex-macos.spec` (new, project root) | Same structure as the Windows spec, with the Windows-only binaries excluded, `upx=False` because UPX breaks signing, and the version read from `src/version.py` rather than typed in. |
+| The CI build | `.github/workflows/macos-build.yml` (new) | Two jobs: a dependency-free terminal test on every pull request, and the full `.app` plus `.dmg` on a tag or on demand. Standard runners are free for public repositories, which is why no Mac is required. |
+
+### What is still Windows-shaped, and why it is fine
+
+| Item | Effect on macOS | Where |
+|------|-----------------|-------|
+| Per-provider API keys | They work, but are kept in the encrypted key file rather than the macOS Keychain. The master secret that encrypts that file does come from the Keychain, so the file is not readable without it | `src/core/key_manager.py:425` |
+| The `PowerShell` tool | Stays in the tool list and errors if the model calls it. The `Bash` tool description now steers the model away | `src/ai/agent_bridge.py` |
+| `windows_terminal.py` | A legacy panel the main window does not use | `src/ui/components/windows_terminal.py` |
+
+None of these stops the app from running, and none is on the path of a normal
+session.
+
+---
+
+## The 30 to 45 minute build
+
+Everything here is a development build. It gets you a real, running Cortex.
+Packaging comes later.
+
+### Step 1: Install the toolchain (about 10 minutes)
+
+You need Homebrew, Python 3.11 or newer, Node.js 18 or newer, and ripgrep.
+
+```bash
+# Homebrew, if you do not already have it
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# The rest
+brew install python@3.12 node ripgrep git
+```
+
+Verify all four:
+
+```bash
+python3 --version    # expect 3.11 or newer
+node --version       # expect v18 or newer
+rg --version         # expect ripgrep 14.x
+git --version
+```
+
+Two notes on Python. Cortex was built and tested on 3.14 on Windows, and 3.11
+through 3.14 are all intended to work. If `python3.12` fails to build a
+dependency later, `brew install python@3.13` is a good fallback. Also, on macOS
+always call `python3`, never a bare `python`, unless you have made an alias.
+
+### Step 2: Clone and install the JavaScript dependency (about 5 minutes)
+
+```bash
+git clone https://github.com/Cortex-AI-IDE/Cortex-Desktop.git
+cd Cortex-Desktop
+npm install
+```
+
+`npm install` pulls in exactly one package: `monaco-editor@0.52.2`. It is
+mandatory. Skip it and the editor pane shows `Monaco loader.js missing`
+instead of your code, because the app reads
+`node_modules/monaco-editor/min/vs/loader.js` at startup.
+
+### Step 3: Create the virtual environment (about 3 minutes)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+```
+
+Your prompt should now begin with `(.venv)`. Every command from here assumes it
+is still active. If you open a new terminal tab, run
+`source .venv/bin/activate` again.
+
+Qt and PyQt6-WebEngine are the large downloads. This step is the slowest part
+of the whole process.
+
+If you would rather not install the development tooling, `requirements.txt`
+alone is enough to run the app. Use `requirements-dev.txt` if you intend to
+build a `.dmg` later, since PyInstaller is in it.
+
+### Step 4: First run (about 2 minutes)
+
+```bash
+python src/main.py
+```
+
+Expect this to open a window. The first launch is slow, because Qt WebEngine
+unpacks and warms its profile. Give it fifteen or twenty seconds.
+
+What to check on that first launch:
+
+| Panel | Expected | Note |
+|-------|----------|------|
+| Window and splitters | Opens | Native PyQt6, fully portable |
+| Chat transcript | Renders | HTML in Qt WebEngine |
+| Model provider | Configure it in Settings with your own API key | See the Keychain section |
+| File explorer | Works | HTML panel |
+| Editor | Works if you ran `npm install` | Monaco |
+| Terminal | Works, with a real PTY | zsh, through `src/core/pty_backend.py` |
+| Agent shell commands | Work, and remember the directory | The shared session starts; that was blocker 1 |
+
+If the window opens and the editor shows code, you have a working Cortex.
+
+### Step 5: Check the terminal
+
+Run these in the terminal panel. Each one exercises something the old QProcess
+fallback could not do:
+
+| Command | What it proves |
+|---------|----------------|
+| `ls -la` | A real PTY: colour, a prompt, cursor control |
+| `vim`, then `:q` | Full-screen apps work, so the alternate screen and cursor addressing are real |
+| `python3 -c "print(1)"` | Interactive programs run, with no QProcess warning at the top of the tab |
+| `git status` inside a repo | The shell inherited your PATH and git config |
+
+Then ask the agent to run `pwd`, then `cd /tmp`, then `pwd` again. The second
+answer must be `/tmp`. That is the shared session carrying state between tool
+calls, which used to be impossible on macOS.
+
+Finally, `~/.cortex/logs/cortex.log` should contain
+`[AI-TERM] session 1 started, pid=..., shell=/bin/zsh` and no mention of winpty
+or PowerShell.
+
+With the port already in the source tree, steps 1 to 5 are the whole job.
+
+---
+
+## Terminal: replacing PowerShell with zsh or bash
+
+This was the heart of the port. There are two separate terminal systems, and
+both were Windows-shaped:
+
+1. **`src/ui/components/xterm_terminal.py`** is the visible terminal panel the
+   user sees and types into.
+2. **`src/core/terminal_session.py`** is the shared "Cortex AI" session that the
+   agent's shell commands run inside, so that `cd`, variables, an activated
+   virtualenv and `$env:` changes survive between tool calls.
+
+Both now go through `src/core/pty_backend.py`. What follows records the four
+problems the port had to solve and how each one was solved, in the order they
+bite. Read it if you are changing the terminal; skip to
+[Packaging a .dmg](#packaging-a-dmg) if you only want a build. The line numbers
+refer to 3.0.63 as published, before the port.
+
+### Problem A: the shell names are hardcoded Windows executables
+
+At `src/ui/components/xterm_terminal.py:877`:
+
+```python
+_SHELL_EXE = {
+    "powershell": "powershell.exe",
+    "cmd": "cmd.exe",
+    "bash": "bash.exe",
+    "wsl": "wsl.exe",
+}
+```
+
+And at line 892 the default is `"powershell"`, with line 907 falling back to
+`powershell.exe -NoLogo <ctrl-c fix>`.
+
+**Change it to select by platform.** The smallest correct version:
+
+```python
+import sys
+
+_IS_MAC = sys.platform == "darwin"
+
+if _IS_MAC:
+    _SHELL_EXE = {
+        "zsh": "/bin/zsh",
+        "bash": "/bin/bash",
+        "sh": "/bin/sh",
+    }
+    _SHELL_ARGS = {
+        "zsh": "-l",       # login shell, so ~/.zprofile and PATH load
+        "bash": "--login",
+        "sh": "",
+    }
+    _DEFAULT_SHELL = "zsh"
+else:
+    _SHELL_EXE = {
+        "powershell": "powershell.exe",
+        "cmd": "cmd.exe",
+        "bash": "bash.exe",
+        "wsl": "wsl.exe",
+    }
+    _SHELL_ARGS = {
+        "powershell": "-NoLogo",
+        "cmd": "",
+        "bash": "--login -i",
+        "wsl": "",
+    }
+    _DEFAULT_SHELL = "powershell"
+```
+
+Then, in the same method, change the two defaults (`line 892`) from
+`default="powershell"` to `default=_DEFAULT_SHELL`, and change the hardcoded
+return on line 907 so the PowerShell Ctrl+C fix is applied **only** on Windows.
+The `_PS_ENABLE_CTRL_C` blob is a C# `kernel32.dll` `P/Invoke`; it is meaningless
+on macOS and passing it to `/bin/zsh` would be treated as a filename.
+
+**Do not try to shortcut this by editing `~/.cortex/settings.json`.** It looks
+tempting: set `terminal.default_shell` to `"zsh"` and skip the code. It will not
+work. The read is `settings.get("terminal", "default_shell", default="powershell")`
+at line 892, but line 893 resolves it through the dictionary:
+
+```python
+cmd = _SHELL_EXE.get(shell, "powershell.exe")
+```
+
+`_SHELL_EXE` has no `"zsh"` key, so `.get` returns its fallback and you launch
+`powershell.exe` anyway, with no error to explain it. Either add the key to the
+dictionary or the setting is inert. This is the single most likely way to lose
+twenty minutes on the port.
+
+Also fix the fallback at line 1093:
+
+```python
+shell = parts[0] if parts else "powershell.exe"
+```
+
+That must become platform-aware too, or an empty shell string still yields
+`powershell.exe` on your Mac.
+
+There is a second default to catch. `src/ui/components/xterm_terminal.py:251`
+reads the setting the same way:
+
+```python
+_shell_name = _s.get("terminal", "default_shell", default="powershell")
+```
+
+That one only labels the terminal tab, but it should agree with the others.
+Better still, make the default live in one place, and have both call sites read
+it.
+
+### Problem B: the agent's shared session never starts
+
+At `src/core/terminal_session.py:389`:
+
+```python
+def start(self) -> bool:
+    if sys.platform != "win32" or not _WINPTY:
+        return False
+```
+
+Windows gets pywinpty, which is a real ConPTY. macOS has no pywinpty, so the
+method returns `False` immediately and the agent falls back to one-shot
+subprocess calls. Concretely, the agent loses all state between commands: a `cd`
+does not persist, an activated virtualenv does not persist, and an exported
+environment variable disappears. Commands still run, so this is not a crash. It
+is a correctness gap, and it is the single most valuable thing to fix.
+
+**Two ways to fix it.** Pick one.
+
+**Option 1, recommended: add `ptyprocess`.** It is a small, pure-Python, well
+maintained library that gives you a real PTY on macOS, and its API is close
+enough to pywinpty's that the rest of the file barely changes.
+
+```bash
+python -m pip install ptyprocess
+```
+
+Then install it conditionally in `requirements.txt` and add a backend selection:
+
+```python
+try:
+    import winpty
+    _PTY_BACKEND = "winpty"
+except ImportError:
+    _PTY_BACKEND = None
+
+if sys.platform != "win32":
+    try:
+        from ptyprocess import PtyProcessUnicode
+        _PTY_BACKEND = "ptyprocess"
+    except ImportError:
+        _PTY_BACKEND = None
+```
+
+Then replace the Windows-only guard at line 390 with a backend check, and give
+the spawn at line 411 a POSIX twin. There is a **second copy of the same guard
+at line 984**, which gates writing to the session; grep the file for
+`sys.platform != "win32"` and fix both, or the session will start and then
+refuse to accept input. The Windows call is:
+
+```python
+self.pty = winpty.PtyProcess.spawn(cmd, cwd=self.cwd, env=env, dimensions=(rows, cols))
+```
+
+The `ptyprocess` equivalent is:
+
+```python
+self.pty = PtyProcessUnicode.spawn(
+    [shell, "-l"], cwd=self.cwd, env=env, dimensions=(rows, cols)
+)
+```
+
+**Option 2, no new dependency: use the standard library.** The `pty`, `termios`,
+`fcntl`, `struct` and `os` modules ship with Python and can give you a working
+PTY on macOS with `pty.fork()` or `os.openpty()`. It is more code than option 1
+and you own the termios plumbing, but it keeps the dependency list exactly as
+it is today. Choose this if you want a zero-dependency port.
+
+Note that `ptyprocess` is not currently in `requirements.txt`, so option 1 adds
+one conditional line. That is a reasonable trade.
+
+### Problem C: the shell integration script is PowerShell
+
+At `src/core/terminal_session.py:67`, `_INTEGRATION_PS1` is a PowerShell script
+that Cortex writes to `~/.cortex/shell/cortex_integration.ps1` and sources at
+startup. It is how the AI knows a command finished and what its exit code was,
+using OSC 633 escape sequences that xterm.js ignores:
+
+```
+ESC ] 633 ; C BEL             command accepted, output starts
+ESC ] 633 ; D ; <code> BEL    command finished
+ESC ] 633 ; P ; Cwd=<dir> BEL current directory
+```
+
+**Write the zsh and bash equivalent.** In zsh the standard hook pair is
+`preexec` and `precmd`; in bash it is `PROMPT_COMMAND` plus a `DEBUG` trap or
+`PS0`. A minimal zsh version looks like this:
+
+```zsh
+# ~/.cortex/shell/cortex_integration.zsh
+_cortex_preexec() {
+  printf '\033]633;C\007'
+}
+
+_cortex_precmd() {
+  local _code=$?
+  printf '\033]633;D;%d\007' "$_code"
+  printf '\033]633;P;Cwd=%s\007' "$PWD"
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec _cortex_preexec
+add-zsh-hook precmd _cortex_precmd
+```
+
+Load it the way the Windows path does, with a flag that keeps the shell alive:
+
+```bash
+/bin/zsh -l -c "source ~/.cortex/shell/cortex_integration.zsh; exec /bin/zsh -l"
+```
+
+The parser on the Python side already understands these sequences, because it
+parses the byte stream rather than PowerShell's output. Check
+`_SHELL_PROMPT_RE` at `src/core/terminal_session.py:121` while you are here: it
+matches `[$#%>]\s*$`, and that pattern works for a `%` or `#` zsh prompt as well
+as a `$` bash one, so it likely needs no change.
+
+### Problem D: the visible terminal uses the QProcess fallback
+
+`src/ui/components/xterm_terminal.py:919` branches on `WINPTY_AVAILABLE`. On
+macOS that is `False` (line 28), so control goes to the `QProcess` path at
+line 1061. A
+`QProcess` is not a PTY. The source comment at line 23 is candid about the
+consequence: it "doesn't support interactive terminal apps like vim or python
+repl well". Simple commands work, full-screen programs do not.
+
+Once you have a working PTY backend from Problem B, route the visible terminal
+through it too, for the same reason and the same payoff. This is a good second
+session task, not part of the 45 minutes.
+
+---
+
+## Monaco editor and Node.js
+
+This part needs no porting. It is worth documenting because it is the first
+thing that looks broken if you skip a step.
+
+**Monaco is pure web content.** It is a JavaScript editor running inside Qt
+WebEngine, so `darwin` versus `win32` is irrelevant to it. What matters is that
+the files exist on disk.
+
+Cortex injects Monaco's AMD loader into `src/assets/editor.html` at startup,
+reading it from:
+
+```
+node_modules/monaco-editor/min/vs/loader.js
+```
+
+So the requirement is simply that you ran `npm install` in the directory that
+contains `package.json`. On macOS that is `npm install` exactly as written.
+There is no `.cmd` shim problem for this path; that problem is specific to
+resolving `npx` for MCP servers, and `src/services/mcp_manager.py:123` already
+handles the `darwin` case.
+
+**The version is pinned on purpose.** `package.json` holds
+`monaco-editor: "0.52.2"`. Cortex needs the **AMD** build under `min/vs`.
+Newer major lines are expected to drop it, so keep 0.52 until the editor is
+migrated to the ESM bundle. If you upgrade Monaco and the editor goes blank,
+that is why.
+
+**Node itself** is needed for three separate things:
+
+1. Providing the Monaco files above.
+2. Starting MCP servers, since almost every Model Context Protocol server is
+   published to npm and launched with `npx`.
+3. Running your own project's tooling (`npm test`, `npx tsc`, `npm run build`)
+   in the integrated terminal, which is your project's business, not Cortex's.
+
+Node does **not** build the app's own UI. xterm.js and Mermaid are vendored in
+the repository, and the explorer, chat and memory manager are plain HTML, CSS
+and JavaScript. Nothing bundles at startup.
+
+If you see `Monaco loader.js missing`, you ran `npm install` in the wrong
+directory or skipped it. It is the most common false alarm on a fresh Mac.
+
+---
+
+## Grep and ripgrep
+
+`bin/rg.exe` is a Windows binary and will not run on macOS. Do not add it to
+your mac build. The good news is that the search tool already has a correct
+non-Windows path.
+
+Look at `src/agent/src/tools/GrepTool/GrepTool.py:639`, the `_find_ripgrep()`
+function. It tries, in order:
+
+1. The npm `ripgrep` package, queried with
+   `node -e "console.log(require('ripgrep').rgPath)"`. This returns the
+   **platform-correct** binary, so on macOS it resolves a macOS `rg`. This is
+   the preferred path and it already works.
+2. The bundled binary in `bin/`, cached to `%LOCALAPPDATA%\Cortex\bin`. This is
+   Windows-specific and will simply not find anything on your Mac.
+3. `return shutil.which('rg')` at line 720. This is your path, once you have run
+   `brew install ripgrep`.
+
+So installing ripgrep is the whole fix:
+
+```bash
+brew install ripgrep
+rg --version
+```
+
+Because you did that in step 1, `shutil.which('rg')` resolves it and Grep runs at
+full speed. You do not need to touch `bin/rg.exe`, and you should not copy it
+into a mac build.
+
+If ripgrep is ever missing, the tool does not fail. It falls back to a pure
+Python search and prefixes the result with a note saying so, which you can see
+in the source at line 300. Slower, still correct. That is your safety net.
+
+One macOS-specific gotcha worth knowing: by default `rg` and the Grep tool both
+respect `.gitignore`. If you are searching a folder that is not a git repository
+and getting nothing, that is usually why.
+
+---
+
+## API keys and the macOS Keychain
+
+Cortex stores secrets in two tiers, and on macOS only the first tier is
+currently ported. Understand this before you are surprised by it.
+
+### Tier 1: the master secret. Already works.
+
+`src/core/key_manager.py:228` sends macOS straight to
+`_macos_keychain_secret()` at line 232, which shells out to the `security`
+command:
+
+```bash
+security find-generic-password -s <target> -a cortex -w     # read
+security add-generic-password -U -s <target> -a cortex -w <secret>   # create
+```
+
+That is the correct macOS mechanism and it requires no extra Python package,
+because it uses `subprocess` and the system `security` binary. Nothing to do
+here.
+
+The same file gives Linux `secret-tool` at line 262. Windows uses the
+Credential Manager through raw `ctypes` in `src/core/win_cred.py`.
+
+### Tier 2: per-provider API keys. Windows-only today.
+
+`src/core/key_manager.py:491`:
+
+```python
+def _get_os_keyring_key(self, provider: str) -> Optional[str]:
+    if os.name != 'nt':
+        return None
+```
+
+The same Windows-only shape appears in `store_key` (definition at line 402, the
+Windows write at line 424) and in both delete paths. So on macOS:
+
+- Your **API keys are still safe and still work.** They are written to the
+  encrypted backup file, `keys.enc`, encrypted with AES-GCM under the master
+  secret that *is* in your Keychain.
+- What you lose is the **primary** store. The Keychain will not hold your
+  provider keys, only the master secret that protects them.
+
+**This is a real but modest gap. The app functions.** Your keys persist, they
+are encrypted at rest, and the master secret protecting them lives in the
+Keychain. If you want key parity with Windows, add a darwin branch that writes
+each provider key with `security add-generic-password`, mirroring
+`_macos_keychain_secret`. It is a small, self-contained change and a good
+follow-up once the terminal works.
+
+### Where things live
+
+| Path | Contents |
+|------|----------|
+| `~/.cortex/` | Settings, memories, rules, logs, semantic index |
+| `~/.cortex/memory/` | Project and user memories, as Markdown |
+| `~/.cortex/logs/cortex.log` | The main diagnostic log. **Start here when something breaks** |
+| macOS Keychain | The master encryption secret |
+
+`~/.cortex/logs/cortex.log` is the first place to look for any problem. Cortex
+also writes stall reports there: if the window freezes, the log records how long
+it was frozen and the Python stack that was blocking, which usually names the
+exact function. On macOS those live in your home directory rather than under
+`%LOCALAPPDATA%`.
+
+---
+
+## The agent's shell tools on macOS
+
+Cortex exposes two shell tools to the model. On macOS you want one of them.
+
+| Tool | macOS verdict |
+|------|---------------|
+| `Bash` | **Correct choice.** `src/agent/src/tools/BashTool/BashTool.py:139` resolves `/bin/bash` with `shutil.which("bash")`, and line 160 already zeroes the Windows-only `CREATE_NO_WINDOW` flag elsewhere. It runs `bash -c`, which is right |
+| `PowerShell` | **Should be off.** It runs Windows PowerShell. Keep it available only when `sys.platform == "win32"` |
+
+Three specific places carry Windows assumptions into the agent:
+
+**The tool list.** `src/ai/agent_bridge.py:2594` includes `'PowerShell'` among the
+always-exposed tools. Gate that entry on `sys.platform == "win32"` so a macOS
+model is not offered a shell it cannot use.
+
+**The tool description.** `src/ai/agent_bridge.py:1411` describes the tool as
+"Run a command in Windows PowerShell". That text is a prompt. It teaches the
+model Windows habits. Either hide the tool or rewrite the description.
+
+**The Recycle Bin rewrite.** `src/ai/agent_bridge.py:1344` builds a PowerShell
+command to send files to the Recycle Bin instead of deleting them permanently.
+Note the helper is `_build_recycle_bin_command`, and its caller is around
+line 1609, so a platform branch belongs at the top of the helper rather than at
+the call site.
+On macOS, replace that with `send2trash`, which is already a dependency and
+already used by `src/utils/safe_delete.py:117`, or with `osascript` to move the
+item to Trash:
+
+```bash
+osascript -e 'tell application "Finder" to delete POSIX file "/path/to/file"'
+```
+
+Do not simply delete the rewrite. It exists to make destructive commands
+recoverable, and that guarantee should hold on macOS too.
+
+**The shell preamble.** `src/ai/agent_bridge.py:2025` tells the model
+"On this PC your Bash commands run hidden, in a one-off PowerShell". That is a
+Windows statement injected into the system prompt from the `_TERMINAL_GUIDANCE`
+constant declared at line 2023. It needs a macOS variant describing zsh.
+
+None of this stops the app from running, which is why it sits below the terminal
+work in priority. But a model told it is on Windows will write PowerShell, so
+fixing it materially improves agent behavior on your Mac.
+
+---
+
+## Building without a Mac
+
+You do not need Apple hardware. `.github/workflows/macos-build.yml` builds the
+`.app` and the `.dmg` on a GitHub-hosted macOS runner, and standard runners are
+free for public repositories.
+
+How to get a build:
+
+1. Push this repository to GitHub, or use an existing fork.
+2. Open **Actions**, choose **macOS build** in the left column, then **Run
+   workflow**.
+3. Wait about twenty minutes. The run uploads an artifact named
+   `cortex-macos-<version>-arm64` containing the `.dmg` and its SHA-256.
+4. Download it from the run summary, then
+   `open Cortex-<version>-macos-arm64.dmg` and drag the app to Applications.
+
+The workflow also runs on a tag, so `git tag v3.0.63 && git push origin v3.0.63`
+produces a build with no clicking.
+
+It has two jobs for a reason:
+
+| Job | When | What it proves | Time |
+|-----|------|----------------|------|
+| `POSIX terminal` | Every pull request that touches `src/` | Spawns a PTY, writes a command into it and reads the answer back, then starts the shared session and checks that `cd` and an exported variable survive between two calls. It installs nothing, so it is fast | about 1 minute |
+| `Cortex.app and .dmg` | A tag, or manually | Installs Qt, builds Monaco, runs PyInstaller, checks the bundle for `cacert.pem`, the bundled fonts and Monaco, checks that no `winpty` file leaked in, ad-hoc signs it, and makes the `.dmg` | about 20 minutes |
+
+The first job is the one that matters over time: it fails if the POSIX terminal
+regresses, which is the only part of this port that can break quietly.
+
+Two limits, stated plainly:
+
+- The runner is Apple Silicon, so the artifact is an `arm64` build. For Intel,
+  change `runs-on` to `macos-13` and install an x86_64 virtualenv; PyInstaller
+  cannot cross-compile the PyQt6 native libraries.
+- The build is ad-hoc signed, not notarised. The first user on another Mac has to
+  right-click and choose **Open**. See [About Gatekeeper](#about-gatekeeper).
+
+---
+
+## Packaging a .dmg
+
+Do this only after `python src/main.py` is working. A build freezes whatever
+bugs you have.
+
+**The spec is in the repository now:** `cortex-macos.spec` in the project root.
+The Windows `cortex.spec` lives in the private release pipeline and is not
+published, which is why a macOS one had to be written from scratch. The copy
+below is that file, with the reasoning attached to each part.
+
+### What differs from the Windows spec
+
+| Concern | Windows | macOS |
+|---------|---------|-------|
+| Bundle layout | `EXE` plus `COLLECT` into a folder | `BUNDLE` into a `.app` |
+| Icon | `logo.ico` | `AppIcon.icns` |
+| Console | `console=False` hides a Win32 window | Not applicable, skip the noconsole hook |
+| Terminal binaries | pywinpty `.dll`/`.pyd`/`.exe` collected | None, use the POSIX PTY |
+| Grep binary | `bin/rg.exe` | Nothing, rely on `shutil.which('rg')` |
+| Runtime hooks | Includes `runtime_hook_noconsole.py` | Omit it |
+| Signing | Code signing certificate | `codesign` and `notarytool`, or unsigned |
+
+### The .app bundle
+
+Build the icon first. macOS wants `.icns`, and `src/assets/logo/app.png` is
+already in the tree:
+
+```bash
+mkdir -p icon.iconset
+sips -z 16 16     src/assets/logo/app.png --out icon.iconset/icon_16x16.png
+sips -z 32 32     src/assets/logo/app.png --out icon.iconset/icon_16x16@2x.png
+sips -z 32 32     src/assets/logo/app.png --out icon.iconset/icon_32x32.png
+sips -z 64 64     src/assets/logo/app.png --out icon.iconset/icon_32x32@2x.png
+sips -z 128 128   src/assets/logo/app.png --out icon.iconset/icon_128x128.png
+sips -z 256 256   src/assets/logo/app.png --out icon.iconset/icon_128x128@2x.png
+sips -z 256 256   src/assets/logo/app.png --out icon.iconset/icon_256x256.png
+sips -z 512 512   src/assets/logo/app.png --out icon.iconset/icon_256x256@2x.png
+sips -z 512 512   src/assets/logo/app.png --out icon.iconset/icon_512x512.png
+sips -z 1024 1024 src/assets/logo/app.png --out icon.iconset/icon_512x512@2x.png
+iconutil -c icns icon.iconset
+```
+
+That produces `icon.icns`.
+
+### A working macOS spec
+
+This mirrors the Windows spec's structure and its important lessons: the
+`collect_data_files` calls for certifi and spellchecker exist because without
+them HTTPS requests and the spellchecker silently died in the frozen build, and
+the `hiddenimports` list covers modules PyInstaller cannot see through lazy
+`importlib` calls. Keep all of that.
+
+```python
+# -*- mode: python ; coding: utf-8 -*-
+import os
+import sys
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+block_cipher = None
+ROOT = os.path.abspath('.')
+
+datas = [
+    (os.path.join(ROOT, 'src', 'ui', 'html'), os.path.join('src', 'ui', 'html')),
+    (os.path.join(ROOT, 'src', 'ui', 'components'), os.path.join('src', 'ui', 'components')),
+    (os.path.join(ROOT, 'src', 'ui', 'themes'), os.path.join('src', 'ui', 'themes')),
+    (os.path.join(ROOT, 'src', 'assets'), os.path.join('src', 'assets')),
+]
+
+# plugins/ is not in this repository: the Windows build copies it from the
+# private build folder. Guard the entry rather than listing it unconditionally,
+# because PyInstaller stops with "Unable to find" on a missing datas source and
+# you would be debugging a folder that was never supposed to be here.
+if os.path.isdir(os.path.join(ROOT, 'plugins')):
+    datas.append((os.path.join(ROOT, 'plugins'), 'plugins'))
+
+# The fonts added in 3.0.61 live in src/assets/fonts and are already covered by
+# the src/assets entry above. They matter: src/ui/fonts.py:57 resolves them from
+# sys._MEIPASS/src/assets/fonts when frozen, and without them the app silently
+# falls back to the system font. Check the finished bundle for
+# src/assets/fonts/InterVariable.ttf before shipping.
+
+# Neither of these is optional. Without certifi's cacert.pem every HTTPS
+# request dies before it leaves the machine, and without the spellchecker
+# dictionary data the chat spellcheck turns itself off. Both worked in dev
+# and broke only in the frozen build.
+datas += collect_data_files('spellchecker')
+datas += collect_data_files('certifi')
+
+# The bundled agent skills are data files. collect_submodules only walks
+# .py files, so without this the frozen app ships zero builtin skills.
+datas += [('src/agent/src/skills/bundled', 'src/agent/src/skills/bundled')]
+
+# Monaco, read at runtime from node_modules. Run `npm install` first.
+for nm_sub in ('monaco-editor',):
+    nm_path = os.path.join(ROOT, 'node_modules', nm_sub)
+    if os.path.isdir(nm_path):
+        datas.append((nm_path, os.path.join('node_modules', nm_sub)))
+
+hiddenimports = [
+    'src.version',
+    'src._build_info',
+    'src.commands',
+    'PyQt6',
+    'PyQt6.QtWidgets',
+    'PyQt6.QtCore',
+    'PyQt6.QtGui',
+    'PyQt6.QtWebEngineWidgets',
+    'PyQt6.QtWebEngineCore',
+    'PyQt6.QtWebChannel',
+    'PyQt6.QtNetwork',
+    'PyQt6.sip',
+    'PyQt6.QtSvg',
+    'PyQt6.QtMultimedia',
+    # stdlib
+    'asyncio',
+    'multiprocessing',
+    'sqlite3',
+    'json',
+    'logging',
+    'ctypes',
+    'xml',
+    'xml.etree',
+    'xml.etree.ElementTree',
+    'html.parser',
+    'http.server',
+    'socketserver',
+    'ssl',
+    'pty',            # macOS PTY backend
+    'termios',
+    'fcntl',
+    # crypto and TLS
+    'certifi',
+    'cryptography',
+    'cffi',
+    '_cffi_backend',
+    'pycparser',
+    # http
+    'dotenv',
+    'requests',
+    'httpx',
+    'aiohttp',
+    'urllib3',
+    # providers
+    'openai',
+    'anthropic',
+    'src',
+    'src.ai',
+    'src.ai.providers',
+    # agent runtime
+    'src.agent',
+    'src.agent.src',
+    'src.core',
+    'src.services.update_checker',
+    'src.ui.dialogs',
+    'src.ui.dialogs.update_dialog',
+    'src.ui.dialogs.memory_manager',
+    'src.ui.dialogs.health_map',
+    'src.ui.dialogs.diff_viewer',
+    'src.ui.render_health',
+    'src.ui.native_menu',
+    'src.core.voice_input',
+    'src.core.voice_stream',
+    # Modules added in 3.0.61 and 3.0.63. collect_submodules('src.*') below
+    # already reaches these, but naming them keeps the dependency visible and
+    # survives a future change to the collect_submodules list.
+    'src.ui.fonts',
+    'src.ui.color_themes',
+    'src.ui.editor_theme',
+    'src.ui.editor_prefs',
+    'src.core.project_permissions',
+    'src.core.semantic_memory',
+    'src.ai.mcp_context',
+    'src.ai.mcp_guidance',
+    'src.utils.exit_hooks',
+    'src.utils.proc_kill',
+    'websocket',
+    # data and config
+    'yaml',
+    'pydantic',
+    'numpy',
+    'PIL',
+    'typing_extensions',
+    'psutil',
+    'pygments',
+    'mistune',
+    'bs4',
+    'lxml',
+    'orjson',
+    'mcp',
+    # file formats
+    'PyPDF2',
+    'docx',
+    'openpyxl',
+    'xlrd',
+    'pymupdf',
+    'fitz',
+    'spellchecker',
+    'flatlatex',
+    'send2trash',
+]
+
+hiddenimports += collect_submodules('asyncio')
+hiddenimports += collect_submodules('multiprocessing')
+hiddenimports += collect_submodules('pydantic')
+hiddenimports += collect_submodules('cryptography')
+hiddenimports += collect_submodules('openai')
+hiddenimports += collect_submodules('mcp')
+hiddenimports += collect_submodules('anyio')
+hiddenimports += ['pydantic_settings', 'httpx_sse', 'jsonschema']
+
+# Every Cortex src.* submodule, so every lazy importlib.import_module call
+# resolves in the frozen app exactly as it does in development.
+hiddenimports += collect_submodules('src.ai')
+hiddenimports += collect_submodules('src.core')
+hiddenimports += collect_submodules('src.ui')
+hiddenimports += collect_submodules('src.utils')
+hiddenimports += collect_submodules('src.config')
+hiddenimports += collect_submodules('src.coordinator')
+hiddenimports += collect_submodules('src.plugin')
+hiddenimports += collect_submodules('src.services')
+hiddenimports += collect_submodules('src.agent')
+
+a = Analysis(
+    [os.path.join(ROOT, 'src', 'main.py')],
+    pathex=[ROOT],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[os.path.join(ROOT, 'src', 'utils', 'pyinstaller_hooks')],
+    hooksconfig={},
+    runtime_hooks=[
+        # NOTE: runtime_hook_noconsole.py is deliberately absent. It hides a
+        # Windows console via the Win32 API and is meaningless on macOS.
+        os.path.join(ROOT, 'src', 'utils', 'runtime_hook_encodings.py'),
+        os.path.join(ROOT, 'src', 'utils', 'runtime_hook_certifi.py'),
+        os.path.join(ROOT, 'src', 'utils', 'runtime_hook_asyncio.py'),
+        os.path.join(ROOT, 'src', 'utils', 'runtime_hook_agent_path.py'),
+    ],
+    excludes=[
+        'tkinter', 'matplotlib', 'scipy', 'test', 'tests', 'unittest',
+        'xmlrpc', 'pydoc', 'doctest',
+        'pandas', 'litellm', 'tokenizers', 'speech_recognition',
+        'sqlalchemy', 'boto3', 'botocore', 'grpc', 'mem0',
+        'qdrant_client', 'redis', 'mistralai', 'git', 'tiktoken',
+        # Windows-only, must not be pulled in transitively on macOS
+        'winpty', 'pywinpty', 'win32ctypes', 'pefile',
+    ],
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+# Qt WebEngine ships a debug twin of every resource pack, about 81 MB.
+a.datas = [d for d in a.datas if '.debug.' not in os.path.basename(d[0])]
+a.binaries = [b for b in a.binaries if '.debug.' not in os.path.basename(b[0])]
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='Cortex',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,            # UPX breaks macOS signing
+    console=False,
+    argv_emulation=False,
+    target_arch=None,     # set to 'arm64' or 'x86_64' to force one
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    name='Cortex',
+)
+
+app = BUNDLE(
+    coll,
+    name='Cortex.app',
+    icon=os.path.join(ROOT, 'icon.icns'),
+    bundle_identifier='app.cortex.ide.macos',
+    info_plist={
+        'CFBundleName': 'Cortex',
+        'CFBundleDisplayName': 'Cortex AI IDE',
+        'CFBundleShortVersionString': '3.0.63',
+        'NSHighResolutionCapable': True,
+        # Qt WebEngine needs this on macOS. Without it the app may be
+        # killed for using an unsigned executable memory region.
+        'NSRequiresAquaSystemAppearance': False,
+    },
+)
+```
+
+Two things to notice. The `excludes` list now blocks Windows-only packages so a
+transitive import cannot drag them into your mac bundle. And `upx=False` is not
+optional: UPX compression breaks code signing, and macOS refuses to launch a
+binary whose signature does not match.
+
+One difference from the copy above: the shipped `cortex-macos.spec` reads
+`CFBundleShortVersionString` out of `src/version.py` with a regex, so it can
+never drift from the app's own version. The literal `'3.0.63'` you see here is
+only what that regex returns today.
+
+### Build it
+
+```bash
+source .venv/bin/activate
+python -m pip install pyinstaller
+
+# The build script normally generates this. Make it yourself, or the app
+# reports channel "dev". For a personal build, "dev" is fine, so this is
+# optional.
+cat > src/_build_info.py <<'EOF'
+CHANNEL = "dev"
+EOF
+
+python -m PyInstaller cortex-macos.spec --noconfirm
+```
+
+You get `dist/Cortex.app`. Test it before packaging:
+
+```bash
+open dist/Cortex.app
+```
+
+**Watch for the classic frozen-build failure.** If the app launches but chat
+errors on every provider, that is almost always a missing or misplaced
+`cacert.pem`, which is exactly why the spec calls
+`collect_data_files('certifi')`. If the editor pane says
+`Monaco loader.js missing`, the Monaco data files did not make it into the
+bundle. Both are build-configuration problems, not code problems.
+
+### Make the .dmg
+
+```bash
+mkdir -p dmg-staging
+cp -R dist/Cortex.app dmg-staging/
+ln -s /Applications dmg-staging/Applications
+
+hdiutil create -volname "Cortex" \
+  -srcfolder dmg-staging \
+  -ov -format UDZO \
+  Cortex-3.0.63-macos.dmg
+```
+
+### About Gatekeeper
+
+An unsigned `.dmg` will be blocked by Gatekeeper on other people's Macs, and
+often on yours. You have three options:
+
+1. **Ad-hoc sign it**, enough for local use:
+   `codesign --deep --force --sign - dist/Cortex.app`
+2. **Tell the user to right-click and choose Open**, which bypasses the block
+   once per app.
+3. **Sign and notarize properly.** This needs a paid Apple Developer account,
+   `codesign` with a Developer ID certificate, and `xcrun notarytool submit`
+   plus `xcrun stapler staple`. This is the only option that gives a clean
+   double-click for everyone, and it is the reason official builds take longer.
+
+Also note: if you build on an Apple Silicon Mac you get an `arm64` binary. If
+you need one build that runs on both Intel and Apple Silicon, build twice and
+combine them with `lipo`, or set `target_arch` and build two separate `.dmg`
+files. Building for the other architecture from scratch is simpler and more
+reliable.
+
+---
+
+## Verification checklist
+
+Work down this list. Each item is observable, and each one maps to a claim
+earlier in this document.
+
+| # | Check | Expected |
+|---|-------|----------|
+| 1 | `python3 --version` | 3.11 or newer |
+| 2 | `node --version` | v18 or newer |
+| 3 | `rg --version` | ripgrep 14.x or newer |
+| 4 | `npm install` completed | `node_modules/monaco-editor/` exists |
+| 5 | `python src/main.py` | Window opens within about 20 seconds |
+| 6 | Editor pane | Shows your code, not `Monaco loader.js missing` |
+| 7 | Settings, add an API key | Saves without error |
+| 8 | Restart, send a chat message | The model replies |
+| 9 | File explorer | Opens a project folder, lists files |
+| 10 | Terminal, `ls -la` | Real output, real prompt |
+| 11 | Terminal, `git status` | Works inside a repo |
+| 12 | Terminal, `python3 -c "print(1)"` | Prints `1` |
+| 13 | Terminal, `vim` then `:q` | Full-screen apps work, which proves a real PTY |
+| 14 | Ask the agent to run `pwd` twice, with a `cd` between | The second call remembers the new directory, which proves the shared session |
+| 15 | Ask the agent to search for a string | Grep results, no "ripgrep was unavailable" note |
+| 16 | `~/.cortex/logs/cortex.log` | No repeated errors, in particular nothing about winpty or PowerShell |
+| 17 | Frozen build: `open dist/Cortex.app` | Same behavior as item 5 onwards |
+| 18 | Frozen build: chat works | Proves `certifi` data files are bundled |
+| 19 | Interface and chat font | Rendered in Inter, not the macOS system font. `~/.cortex/logs/cortex.log` shows a `[Fonts]` line from `register_qt_fonts` |
+| 20 | Settings, Appearance, colour theme | Changing it recolours the sidebar, the chat and the editor together. Editor themes now number 17 in 3.0.63 |
+| 21 | Settings, Editor, tab size, word wrap, minimap | Each one changes Monaco immediately. These were inert before 3.0.63 |
+| 22 | Quit, then read the log | No exit-hook traceback. Cleanup added in 3.0.63 runs before `os._exit` |
+| 23 | Frozen build: fonts | `src/assets/fonts/InterVariable.ttf` exists inside `Cortex.app` |
+
+Items 13 and 14 are the two that distinguish a ported terminal from a working
+but degraded one. Items 19 to 23 are the 3.0.61 and 3.0.63 additions, and all
+five should pass without any porting work: if one fails, the cause is the build
+or the theme, not the platform. Everything else should pass before you touch a
+line of code.
+
+---
+
+## Troubleshooting
+
+**`python` is not found, only `python3`.**
+Normal on macOS. Use `python3` everywhere, or add an alias. Inside an activated
+virtual environment `python` also works, because the venv provides it.
+
+**`xcrun: error: invalid active developer path` when running git.**
+You need the Xcode command line tools: `xcode-select --install`.
+
+**The editor pane says `Monaco loader.js missing`.**
+You skipped `npm install` or ran it in the wrong directory. Run it where
+`package.json` lives, then restart Cortex.
+
+**The terminal opens but `vim` or a Python REPL renders garbage.**
+Expected before the PTY fix. The visible terminal is on the `QProcess` fallback,
+which is not a real PTY. See
+[Terminal: replacing PowerShell](#terminal-replacing-powershell-with-zsh-or-bash).
+
+**The agent forgets a `cd` or an activated virtualenv between commands.**
+Expected before the session fix. `src/core/terminal_session.py:390` returns
+`False` on macOS, so commands run one-shot with no shared state. This is the
+most valuable single fix in the port.
+
+**The app is killed on launch, or Gatekeeper says it is damaged.**
+Signing. Try `codesign --deep --force --sign - dist/Cortex.app`, or right-click
+the app and choose Open. For a distributable build you need a Developer ID and
+notarization.
+
+**Chat errors on every provider in the frozen build, but works from source.**
+Almost always the missing TLS bundle. Confirm the spec calls
+`collect_data_files('certifi')` and that the resulting bundle contains
+`certifi/cacert.pem`.
+
+**The window opens blank or shows grey boxes.**
+Qt WebEngine failed to start its render process, usually after an unclean exit.
+Close Cortex fully, delete the Qt WebEngine profile under your home directory,
+and relaunch. On macOS the profile is not under `%LOCALAPPDATA%`, which is a
+Windows-only path.
+
+**The interface or the chat uses the system font instead of Inter.**
+The bundled fonts did not load. From source, check that `src/assets/fonts/`
+contains `InterVariable.ttf` and both `JetBrainsMono` files. In a frozen build,
+check they exist inside `Cortex.app`. `~/.cortex/logs/cortex.log` has a `[Fonts]`
+line either way. This is not fatal: `register_qt_fonts()` returns an empty list
+and the app deliberately keeps its fallback font.
+
+**Only half the app changes when I switch theme.**
+A theme covers four separate surfaces: web pages through a style element on the
+shared WebEngine profile, the terminal through xterm's 16-colour palette, native
+widgets through the token palettes, and the editor through Monaco. If only the
+editor stays dark, the Monaco mapping did not apply. If only the chat stays
+dark, the WebEngine style element did not reach that page. Neither is
+macOS-specific, and both are fixed in the theme layer rather than the port.
+
+**A provider returns 401.**
+Check the key and the endpoint. The Alibaba Token Plan is the usual trap:
+`sk-sp-` keys are a separate billing channel needing the Token Plan endpoint,
+and the standard endpoint rejects them. This is not macOS-specific, but it is
+the most common "it is broken" report, so it belongs here.
+
+**The window stops responding during a long agent run.**
+`~/.cortex/logs/cortex.log` will contain a `UI-STALL` entry naming the blocking
+Python function. Attach it to an issue, or fix it in your fork.
+
+**Grep is slow.**
+`rg` is not on your `PATH`. Run `brew install ripgrep`. Without it Cortex falls
+back to a pure-Python search and says so in the result.
+
+---
+
+## What to do with your build
+
+You have a working Cortex on macOS. Here is what that is, and what you are
+permitted to do with it.
+
+### What you have
+
+A fully functional ported IDE. The agent loop, the model providers, the editor,
+chat, project memory, skills, MCP servers, the file explorer and the terminal
+all work. The code is the same code that runs on Windows, with a POSIX terminal
+backend and shell names where yours needed them.
+
+### Known remaining gaps, stated plainly
+
+| Gap | Impact | Effort to close |
+|-----|--------|-----------------|
+| Per-provider API keys are not in the Keychain, only the encrypted file | None for security, in that both are encrypted under a Keychain-held master secret. Only the storage location differs | Small |
+| The visible terminal uses `QProcess` if you only fixed the AI session | Full-screen terminal apps misbehave | Medium |
+| No signed or notarized build | Gatekeeper warns on other people's Macs | Needs a paid Apple Developer account |
+| The PowerShell tool stays in the tool list unless you gate it | The model may offer PowerShell on macOS | Small |
+| The maintainer does not publish a macOS `.dmg` yet | You are the one filling that gap, with permission | This document |
+
+### Licence, naming and permission
+
+Cortex is **Apache-2.0**. You may use, modify, redistribute and sell software
+built on this code, including commercially, provided you keep the licence and
+copyright notices and state what you changed. There is an explicit patent grant.
+
+On top of that licence, the maintainer **grants explicit permission for this
+macOS port**. You may build it, keep it private, share it with your team, or
+distribute it. Keep the licence and copyright notices, keep the Cortex name and
+logo attribution, and identify the build as the macOS port of Cortex, for
+example "Cortex for macOS, built from the official source". Say what you
+changed. That is all that is asked of you.
+
+One distinction to keep clear, for your users rather than for legal reasons:
+identify your build as the macOS port, not as the maintainer's signed Windows
+and Linux release. Yours is not Apple-notarized and does not use the
+maintainer's automatic update channel, so say both of those in your release
+notes and nobody will expect the same update experience.
+
+The general trademark position in [README.md](README.md) is unchanged by this
+document. The permission above covers this port; the usual rule still applies to
+modified builds you create for anything else.
+
+### Contributing back
+
+If you fix the POSIX PTY backend or the shell integration script properly,
+upstreaming it would be genuinely useful, because both are cleanly separable
+improvements that do not alter Windows behavior. Open a pull request at
+[Cortex-AI-IDE/Cortex-Desktop](https://github.com/Cortex-AI-IDE/Cortex-Desktop).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
+
+### The released builds
+
+If you also use Windows or Linux, the maintainer's signed and supported builds
+are:
+
+- **Windows**, including the Microsoft Store build: [cortex-ide.app](https://cortex-ide.app/)
+- **Linux**, `.deb` and `.rpm`: [cortex-ide.app/download](https://cortex-ide.app/download/)
+
+Your macOS build runs the same source and the same feature set. The practical
+differences are that it is not Apple-notarized and it does not use the
+maintainer's update channel, so note both of those in your release notes.
+
+---
+
+<div align="center">
+
+**Cortex AI IDE** &nbsp;·&nbsp; Think Limitless. Build Beyond.
+
+*The official macOS port roadmap. Authorized by the maintainer, published for you to build.*
+
+*Reviewed line by line against Cortex 3.0.63.*
+
+</div>

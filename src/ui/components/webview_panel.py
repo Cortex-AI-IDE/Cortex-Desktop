@@ -1,0 +1,1619 @@
+"""
+WebviewPanel, Monaco Editor webview panel for Cortex IDE.
+Replaces the PyQt6 QPlainTextEdit-based CodeEditor with a Monaco-backed editor.
+"""
+import json
+import logging
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent, pyqtSignal, pyqtSlot, QObject
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QApplication, QLabel
+from PyQt6.QtWebChannel import QWebChannel
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+# Cortex's logger, not logging.getLogger: a plain module logger never reaches
+# cortex.log, so neither this panel's lines nor the editor's JS errors
+# ([JS-ERROR], forwarded below) left any trace when a tab went missing.
+from src.utils.logger import get_logger
+log = get_logger("webview_panel")
+
+# Live design tokens (the placeholder, view and loading overlay read the
+# active theme's background). tokens.py imports nothing, so this is cycle-free.
+from src.ui.tokens import TOKENS as T
+
+# Above this many characters a file is handed to the webview as a file:// URI
+# instead of being embedded in a runJavaScript string. Qt's IPC channel and
+# V8's main thread both stall on multi-megabyte inline payloads.
+#
+# Module level because two code paths need it and only one used to have it:
+# it lived inside _open_file_js, so _flush_pending_switch had no guard and
+# re-shipped the whole file on every switch back to that tab.
+_LARGE_CHAR_THRESHOLD = 200_000
+
+# Hard ceiling for anything handed to the Monaco renderer. A ~40 MB JSON file
+# (geo/ne_10m_admin_1_states_provinces.json, 39,959,249 chars) was serialized
+# with json.dumps() and pushed through runJavaScript() as one string literal.
+# V8 could not allocate it -> SIGTRAP (exit 133) -> the shared Chromium render
+# process died, taking editor + sidebar + terminal with it.
+#
+# The old 200 KB guard only ran on the BACKGROUND branch of _run_open_now; a
+# user click took the activate=True branch that returned before the guard, so
+# nothing capped the click path. Every path now routes through
+# _deliver_to_editor(), which enforces this ceiling, so no caller can bypass it
+# by choosing a different code path.
+_MAX_EDITOR_CHARS = 20_000_000  # 20 MB of text: refuse to open above this
+
+# Large-file XHR must hit a same-origin temp path under %TEMP%/cortex_webview.
+# editor.html itself is loaded from that folder. XHR to the real project path
+# (especially OneDrive Desktop) often hangs forever in QWebEngine, leaving the
+# tab stuck on "// Loading...".
+_LARGE_CACHE_DIR = Path(__import__("tempfile").gettempdir()) / "cortex_webview" / "large_cache"
+
+
+def _cache_large_file_uri(file_path: str, content: str) -> str:
+    """Write large-file bytes next to editor_resolved.html and return a file:// URI.
+
+    Same-origin with the editor page so XMLHttpRequest can complete. Always
+    rewrites so deferred/AI content matches what Python already read.
+    """
+    import hashlib
+
+    _LARGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1(
+        file_path.encode("utf-8", errors="replace")
+    ).hexdigest()[:20]
+    out = _LARGE_CACHE_DIR / f"{key}.txt"
+    data = content.encode("utf-8")
+    # Avoid pointless rewrite when identical (fast path for tab re-switch).
+    try:
+        if out.exists() and out.stat().st_size == len(data):
+            existing = out.read_bytes()
+            if existing == data:
+                return out.as_uri()
+    except Exception:
+        # silent-ok: the dedupe read is an optimisation only; falling through
+        # to the write below is the correct behaviour when it cannot tell.
+        pass
+    out.write_bytes(data)
+    return out.as_uri()
+
+
+class _LoggingWebEnginePage(QWebEnginePage):
+    """Capture JS console output in Python logs for crash/debug visibility."""
+
+    def javaScriptConsoleMessage(self, level, message, line_number, source_id):
+        try:
+            lvl = int(level)
+        except Exception:
+            lvl = 0
+        # Route JS console messages to appropriate Python log levels:
+        # INFO (0) → debug (noisy, routine editor operations)
+        # WARN (1) → warning (worth noting but not critical)
+        # ERROR (2) → error (real problems that need attention)
+        if lvl == 0:
+            log.debug(f"[JS] {message}")
+        elif lvl == 1:
+            log.warning(f"[JS-WARN] {message}")
+        elif lvl == 2:
+            log.error(f"[JS-ERROR] {message}")
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        """Intercept navigation requests. If the URL is an external http(s)
+        link (not a local file:// or about:blank), open it in the system
+        browser instead of loading inside the editor webview."""
+        if nav_type == QWebEnginePage.NavigationType.NavigationTypeLinkClicked:
+            scheme = url.scheme()
+            if scheme in ('http', 'https'):
+                import webbrowser
+                webbrowser.open(url.toString())
+                log.info(f"[WebviewPanel] External link opened in browser: {url.toString()}")
+                return False  # Block navigation in webview
+        return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+    def createWindow(self, window_type):
+        """Prevent WebEngine from spawning native top-level windows.
+        Return self to handle in-page (links intercepted by acceptNavigationRequest)."""
+        return self
+
+
+class _EditorBridge(QObject):
+    """QWebChannel bridge, JS calls slots on this object."""
+
+    content_changed = pyqtSignal(str, str)       # file_path, content
+    file_save_requested = pyqtSignal(str, str)   # file_path, content (Ctrl+S from Monaco)
+    file_closed = pyqtSignal(str)                 # file_path
+    cursor_changed = pyqtSignal(str, int, int)    # file_path, line, column
+    editor_ready = pyqtSignal()
+
+
+    def __init__(self, webview_panel: 'WebviewPanel' = None):
+        super().__init__()
+        self._panel = webview_panel
+
+    @pyqtSlot(str, str)
+    def onContentChanged(self, file_path: str, content: str):
+        # Update Python-side content cache so get_content() always returns
+        # the LATEST Monaco model content (not the stale original from open_file).
+        # This is critical for _save_current() which uses get_content() as fallback.
+        if self._panel and file_path in self._panel._open_files:
+            self._panel._open_files[file_path]["content"] = content
+        self.content_changed.emit(file_path, content)
+
+    @pyqtSlot(str, str)
+    def saveFile(self, file_path: str, content: str):
+        """Ctrl+S from Monaco, pushes fresh content synchronously.
+        
+        Unlike the old get_current_content + async callback pattern,
+        this receives the exact Monaco model content directly, avoiding
+        silent save failures from dropped runJavaScript callbacks.
+        """
+        self.file_save_requested.emit(file_path, content)
+
+    @pyqtSlot(str)
+    def onFileClosed(self, file_path: str):
+        self.file_closed.emit(file_path)
+
+    @pyqtSlot(str, int, int)
+    def onCursorChanged(self, file_path: str, line: int, column: int):
+        self.cursor_changed.emit(file_path, line, column)
+
+    @pyqtSlot()
+    def onEditorReady(self):
+        self.editor_ready.emit()
+
+    @pyqtSlot(str)
+    def openExternalUrl(self, url: str):
+        """Open URL in external system browser (called from JS window.open override)."""
+        import webbrowser
+        webbrowser.open(url)
+        log.info(f"[WebviewPanel] External link opened in browser: {url}")
+
+    # ---- LSP Bridge Slots (called from JS) ----
+
+    @pyqtSlot(str, int)
+    def onContentDelivered(self, file_path: str, content_length: int):
+        """ACK from JS: file content was successfully received and stored in openFiles.
+        
+        Populated from the send side (Python guesses), but JS confirms receipt.
+        This fixes Race Condition #1 where Python assumed delivery but JS never got it
+        (page crash, warmup, QWebChannel dead, switch_to_file called pre-delivery).
+        """
+        try:
+            if self._panel:
+                self._panel._files_delivered_to_js.add(file_path)
+                log.info(f"[WebviewPanel] JS confirmed content delivery: {file_path} ({content_length} chars)")
+        except Exception as e:
+            log.warning(f"[WebviewPanel] onContentDelivered error (non-fatal): {e}")
+
+    @pyqtSlot(str, result=bool)
+    def copyToClipboard(self, text: str) -> bool:
+        """Copy text to the system clipboard. Called from JS editor.html."""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            return True
+        except Exception as e:
+            log.error(f"[WebviewPanel] copyToClipboard error: {e}")
+            return False
+
+    @pyqtSlot(str, str)
+    def requestLargeFileContent(self, file_path: str, language: str = ""):
+        """JS fallback when openFileFromUri XHR fails/times out.
+
+        Python already holds the content in _open_files. Re-cache under the
+        same-origin temp dir and re-issue openFileFromUri, or fall back to
+        inline openFile if caching fails.
+        """
+        try:
+            if self._panel:
+                self._panel._deliver_large_file_fallback(file_path, language or "")
+        except Exception as e:
+            log.error(f"[WebviewPanel] requestLargeFileContent error: {e}")
+
+
+class WebviewPanel(QWidget):
+    """
+    Monaco Editor webview panel with tab management.
+
+    Usage:
+        panel = WebviewPanel()
+        panel.open_file("/path/to/file.py", "print('hello')", "python")
+        panel.set_theme(is_dark=True)
+    """
+
+    # Signals, mirror CodeEditor API where possible
+    file_opened = pyqtSignal(str)                   # file_path
+    file_content_changed = pyqtSignal(str, str)     # file_path, new_content
+    file_save_requested = pyqtSignal(str, str)       # file_path, content (Ctrl+S from Monaco)
+    file_closed = pyqtSignal(str)                    # file_path
+    cursor_position_changed = pyqtSignal(int, int)   # line, column
+    active_file_changed = pyqtSignal(str)            # file_path (or empty)
+    editor_ready = pyqtSignal()
+
+    def __init__(self, parent: QWidget = None):
+        super().__init__(parent)
+        self._init_time = time.time()  # track startup for warmup delay
+        self._open_files: dict[str, dict] = {}      # path → {path, language, content}
+        self._active_file_path: str = ""
+        self._page_loaded = False
+        self._pending_opens: list[tuple] = []        # queued until page loads
+        self._pending_theme: Optional[bool] = None
+        self._files_delivered_to_js: set = set()     # files whose content reached JS (via openFile or force_reload)
+        self._webview_initialized = False
+        
+        self._build_placeholder()
+
+    def _build_placeholder(self):
+        """Lightweight placeholder, Chromium loads on first show."""
+        from PyQt6.QtWidgets import QLabel
+        existing_layout = self.layout()
+        if existing_layout is not None:
+            # Reuse existing layout, deleteLater() is async and may not
+            # have completed. Creating a new layout causes:
+            # "QLayout: Attempting to add QLayout which already has a layout"
+            layout = existing_layout
+            # Clear existing children
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+        else:
+            layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._placeholder = QLabel("Editor loading...")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet(f"background: {T['bg']}; color: {T['muted']}; font-size: 13px;")
+        layout.addWidget(self._placeholder)
+
+    def showEvent(self, event):
+        """Lazy-load Chromium Monaco editor on first show."""
+        super().showEvent(event)
+        if not self._webview_initialized:
+            self._webview_initialized = True
+            QTimer.singleShot(200, self._init_webview)
+
+    def _init_webview(self):
+        """Create and load the Monaco editor webview (called once, on first show)."""
+        # _build_ui() now handles layout reuse + placeholder cleanup internally.
+        self._build_ui()
+        
+    def _build_ui(self):
+        # REUSE existing layout if present (prevents QLayout duplicate warning).
+        # _init_webview clears old children but Qt keeps the layout attached.
+        layout = self.layout()
+        if layout is None:
+            layout = QVBoxLayout(self)
+        # Clear any leftover widgets from placeholder
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.hide()
+                w.deleteLater()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Persistent storage profile for Monaco settings
+        profile = QWebEngineProfile.defaultProfile()
+        try:
+            storage_path = str(Path.home() / ".cortex" / "webengine_storage")
+            profile.setPersistentStoragePath(storage_path)
+        except Exception as e:
+            # Without this the profile stays on its default path, so Monaco
+            # settings and everything else that should survive a restart are
+            # silently per-session.
+            log.warning(
+                "[WebviewPanel] persistent storage path not set (%s); "
+                "editor state will not survive a restart", e,
+            )
+
+        self._view = QWebEngineView()
+        self._page = _LoggingWebEnginePage(self._view)
+        self._view.setPage(self._page)
+        # KILL WHITE FLASH: TRANSPARENT page background, not dark. A dark
+        # color only fixes the RENDERER's background; Chromium's native
+        # surface still shows its gray placeholder quad and a white first
+        # composite BEFORE the renderer starts (video-captured at boot:
+        # gray at t+4.10s, white at t+4.33s). Native child windows also
+        # z-order ABOVE the Qt startup overlay, so the overlay can't hide
+        # it. Transparent makes the uninitialized surface composite as
+        # nothing, the dark Qt window shows through until the HTML (which
+        # paints its own background) renders.
+        from PyQt6.QtGui import QColor
+        from PyQt6.QtCore import Qt as _Qt
+        self._page.setBackgroundColor(QColor(_Qt.GlobalColor.transparent))
+        # Theme surface, not a fixed #1e1e1e: the page is transparent, so this
+        # is what shows while it loads or resizes (a dark flash in light mode).
+        self._view.setStyleSheet(f"background: {T['bg']}; border: none;")
+
+        # Chromium's own menu (Back, Forward, Reload, Save page, Save image,
+        # Copy image address) was reachable by right-clicking the welcome
+        # screen. Those entries belong to a browser, not to an editor pane:
+        # "Back" and "Reload" can navigate the pane away from editor.html,
+        # and "Save page" offers to write the IDE's own markup to disk. The
+        # terminal already suppresses it the same way, see xterm_terminal.py.
+        self._view.setContextMenuPolicy(_Qt.ContextMenuPolicy.NoContextMenu)
+
+        # Enable localStorage + cross-directory file access
+        # NOTE: JavascriptCanAccessClipboard intentionally DISABLED -
+        # Monaco editor uses the Python bridge (copyToClipboard slot) for clipboard.
+        # Enabling it causes Qt/Chromium to spam "qt.qpa.mime: Retrying to obtain clipboard"
+        # when the OS clipboard is locked or unavailable (especially under memory pressure).
+        self._view.settings().setAttribute(
+            self._view.settings().WebAttribute.LocalStorageEnabled, True
+        )
+        self._view.settings().setAttribute(
+            self._view.settings().WebAttribute.LocalContentCanAccessFileUrls, True
+        )
+
+        # QWebChannel bridge
+        self._channel = QWebChannel()
+        self._bridge = _EditorBridge(webview_panel=self)
+        self._bridge.content_changed.connect(self._on_js_content_changed)
+        self._bridge.file_save_requested.connect(self._on_js_save_requested)
+        self._bridge.file_closed.connect(self._on_js_file_closed)
+        self._bridge.cursor_changed.connect(self._on_js_cursor_changed)
+        self._bridge.editor_ready.connect(self._on_editor_ready)
+        self._channel.registerObject("bridge", self._bridge)
+        self._page.setWebChannel(self._channel)
+
+        # Inline Monaco loader.js + inject file:/// vs/ path → write temp file → load.
+        # Inlining loader.js avoids <script src="file:///..."> cross-directory loading
+        # issues in QWebEngineView. Dynamic script/XHR fetches from file:/// URIs
+        # work correctly with LocalContentCanAccessFileUrls enabled.
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            _bundle_root = Path(sys._MEIPASS)
+        else:
+            _bundle_root = Path(__file__).parent.parent.parent.parent
+        editor_html = _bundle_root / "src" / "assets" / "editor.html"
+        _monaco_loader = _bundle_root / "node_modules" / "monaco-editor" / "min" / "vs" / "loader.js"
+        _monaco_vs_dir = _bundle_root / "node_modules" / "monaco-editor" / "min" / "vs"
+
+        if not editor_html.exists():
+            log.error(f"[WebviewPanel] editor.html not found at: {editor_html}")
+            self._view.setHtml("<h3>editor.html not found</h3>")
+        elif not _monaco_loader.exists():
+            log.error("[WebviewPanel] Monaco loader not found - run: npm install monaco-editor")
+            self._view.setHtml("<h3>Monaco loader.js missing. Run: npm install monaco-editor</h3>")
+        else:
+            import tempfile, atexit
+            html_content = editor_html.read_text(encoding="utf-8")
+            loader_js = _monaco_loader.read_text(encoding="utf-8")
+            html_content = html_content.replace("__MONACO_LOADER_INLINE__", loader_js)
+            html_content = html_content.replace("__MONACO_VS_PATH__", _monaco_vs_dir.as_uri())
+
+            _tmp_dir = Path(tempfile.gettempdir()) / "cortex_webview"
+            _tmp_dir.mkdir(parents=True, exist_ok=True)
+            self._tmp_html = _tmp_dir / "editor_resolved.html"
+            self._tmp_html.write_text(html_content, encoding="utf-8")
+            log.info(f"[WebviewPanel] Monaco loader inlined -> {self._tmp_html} ({len(html_content)} chars)")
+
+            def _cleanup_tmp():
+                try:
+                    if self._tmp_html.exists():
+                        self._tmp_html.unlink()
+                except Exception:
+                    # silent-ok: an exit hook; leaving one temp file behind
+                    # costs nothing and there is no user left to tell.
+                    pass
+            from src.utils.exit_hooks import register as _register_exit_hook
+            _register_exit_hook(_cleanup_tmp)
+
+            # Cache-busting: append timestamp to force fresh page load every restart.
+            # boot=1 tells editor.html to stay boot-hidden (flat dark, content
+            # invisible) until the startup overlay is dismissed - the page's
+            # native surface z-orders above the Qt overlay and would otherwise
+            # paint its own splash/welcome next to the main loading screen.
+            from src.core import boot_state
+            _boot_q = "&boot=1" if boot_state.is_booting() else ""
+            url = QUrl.fromLocalFile(str(self._tmp_html.resolve()))
+            url.setQuery(f"v={int(time.time())}{_boot_q}")
+            self._view.load(url)
+            log.info(f"[WebviewPanel] Loading with cache-bust: {url.toString()}")
+
+        self._view.loadFinished.connect(self._on_page_loaded)
+        
+        # Catch Chromium render process crashes
+        self._view.page().renderProcessTerminated.connect(self._on_render_crash)
+        
+        # Install event filter on the webview to intercept Ctrl+S ShortcutOverride.
+        # QWebEngineView accepts ShortcutOverride by default, which prevents Qt's
+        # menu shortcut (Ctrl+S → _save_current) from ever firing. By rejecting
+        # ShortcutOverride for Ctrl+S, we let Qt's shortcut system handle it.
+        self._view.installEventFilter(self)
+        
+        layout.addWidget(self._view)
+
+        # Loading overlay to prevent white flash while editor.html loads
+        self._loading_overlay = QWidget(self)
+        self._loading_overlay.setStyleSheet(f"background: {T['bg']};")
+        ov_layout = QVBoxLayout(self._loading_overlay)
+        ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ov_layout.setSpacing(24)
+
+        # Brand wordmark
+        brand = QLabel("C O R T E X")
+        brand.setStyleSheet(
+            "color: #5B8CFF; font-size: 18px; font-weight: 700;"
+            "font-family: 'Segoe UI', sans-serif; letter-spacing: 6px;"
+            "background: transparent;"
+        )
+        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ov_layout.addWidget(brand)
+
+        # Status label with animated dots (zero CPU, text-only animation)
+        ov_label = QLabel("Loading Editor")
+        ov_label.setStyleSheet(
+            "color: #666; font-size: 14px; font-family: 'Segoe UI', sans-serif;"
+            "background: transparent;"
+        )
+        ov_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ov_layout.addWidget(ov_label)
+
+        # Animate dots on the label
+        self._load_dot_timer = QTimer(self)
+        self._load_dot_count = 0
+        def _animate_dots():
+            self._load_dot_count = (self._load_dot_count + 1) % 4
+            dots = "." * self._load_dot_count
+            ov_label.setText(f"Loading Editor{dots}")
+        self._load_dot_timer.timeout.connect(_animate_dots)
+        self._load_dot_timer.start(500)
+
+        self._loading_overlay.raise_()
+        self._loading_overlay.show()
+
+        # SAFETY TIMEOUT: If loadFinished never fires (Chromium crash/slow start),
+        # force-hide the overlay after 15 seconds so the UI isn't permanently stuck.
+        # Increased from 8s, Chromium on cold start + session restore can take 10-12s.
+        self._load_safety_timer = QTimer(self)
+        self._load_safety_timer.setSingleShot(True)
+        self._load_safety_timer.timeout.connect(self._force_hide_loading_overlay)
+        self._load_safety_timer.start(60000)  # 60s, Chromium cold start under RAM pressure
+
+    # ---- Page lifecycle ---------------------------------------------------
+
+    # ---- Event filter for Ctrl+S shortcut --------------------------------
+
+    def eventFilter(self, obj, event):
+        """Intercept events on the QWebEngineView.
+
+        Ctrl+S: Do NOT consume ShortcutOverride, accepting it lets the key
+        event reach Chromium/Monaco where editor.html's addCommand handler
+        calls bridge.saveFile(). Consuming ShortcutOverride with return True
+        blocked the key event from reaching both Qt AND Monaco, causing saves
+        to silently fail when the file was clean (no dirty indicator).
+        """
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_loading_overlay') and self._loading_overlay:
+            self._loading_overlay.setGeometry(self.rect())
+
+    def _retry_load(self):
+        """Retry loading editor.html after a failed load."""
+        log.info(f"[WebviewPanel] Retrying editor.html load (attempt {getattr(self, '_load_retry_count', '?')}/3)")
+        if hasattr(self, '_loading_overlay') and self._loading_overlay:
+            self._loading_overlay.show()
+        if hasattr(self, '_tmp_html') and self._tmp_html and self._tmp_html.exists():
+            url = QUrl.fromLocalFile(str(self._tmp_html.resolve()))
+            url.setQuery(f"v={int(time.time())}&retry={getattr(self, '_load_retry_count', 1)}")
+            self._view.load(url)
+            if hasattr(self, '_load_safety_timer'):
+                self._load_safety_timer.start(60000)
+
+    def _force_hide_loading_overlay(self):
+        """Safety fallback: force-hide loading overlay if loadFinished never fires."""
+        log.warning("[WebviewPanel] Loading overlay safety timeout, force-hiding overlay")
+        if hasattr(self, '_loading_overlay') and self._loading_overlay:
+            self._loading_overlay.hide()
+        if hasattr(self, '_load_dot_timer'):
+            self._load_dot_timer.stop()
+
+    def _on_page_loaded(self, ok: bool):
+        # ALWAYS hide the overlay, even on failure, the UI must not stay stuck.
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.hide()
+        if hasattr(self, '_load_dot_timer'):
+            self._load_dot_timer.stop()
+        if hasattr(self, '_load_safety_timer'):
+            self._load_safety_timer.stop()
+        if not ok:
+            log.error("[WebviewPanel] Page failed to load, auto-retrying in 3s")
+            # Retry up to 3 times under memory pressure
+            if not hasattr(self, '_load_retry_count'):
+                self._load_retry_count = 0
+            if self._load_retry_count < 3:
+                self._load_retry_count += 1
+                QTimer.singleShot(3000, self._retry_load)
+            else:
+                log.error("[WebviewPanel] Load failed after 3 retries, giving up")
+            return
+        self._page_loaded = True
+        log.info(f"[WebviewPanel] editor.html loaded, pending opens: {len(self._pending_opens)}")
+
+        # A load that finished AFTER boot (user reload, retry) must never stay
+        # boot-hidden: reveal immediately. During boot the startup overlay's
+        # dismissal owns the reveal.
+        try:
+            from src.core import boot_state
+            if not boot_state.is_booting():
+                self.reveal_boot_hidden()
+        except Exception as e:
+            # This is the only path that reveals a page loaded after boot, so
+            # a failure here is a panel that stays flat dark with content
+            # painted into it, i.e. the blank-editor symptom.
+            log.warning(
+                "[WebviewPanel] post-boot reveal failed (%s); the editor may "
+                "stay boot-hidden", e,
+            )
+
+        # Silent-blank detection: ask the page whether Chromium obtained a
+        # GPU context. No-op when software rendering is already active.
+        try:
+            from src.ui.render_health import probe_page
+            probe_page(self._view.page(), "editor")
+        except Exception as e:
+            # Lose the GPU-context evidence for this load, which is what the
+            # compatibility-mode diagnosis reads.
+            log.debug("[WebviewPanel] render probe skipped: %s", e)
+
+        # The editor came back. Reset its crash budget, which used to be
+        # permanent: three crashes anywhere in a session and the editor never
+        # auto-recovered again after a fourth.
+        self._crash_reload_count = 0
+        try:
+            from src.ui.webengine_recovery import note_page_loaded
+            note_page_loaded("editor", self._view)
+        except Exception as e:
+            # The recovery budget then never resets, so the third crash in a
+            # session silently stops auto-recovery for good.
+            log.debug("[WebviewPanel] recovery budget not reset: %s", e)
+
+        # Replay JS issued before the page existed (see _safe_run_js).
+        _queued = getattr(self, '_pending_js_calls', None)
+        if _queued:
+            self._pending_js_calls = []
+            log.info(f"[WebviewPanel] Replaying {len(_queued)} queued JS call(s)")
+            for _js in _queued:
+                self._safe_run_js(_js)
+
+        # Apply pending theme
+        if self._pending_theme is not None:
+            self._set_theme_js(self._pending_theme)
+            self._pending_theme = None
+
+        # Small delay to ensure QWebChannel transport is ready
+
+        def _process_pending():
+            pending = list(self._pending_opens)
+            self._pending_opens.clear()
+            active = self._active_file_path
+            # Open the active file first with priority=True so it renders immediately
+            for args in pending:
+                fp = args[0]
+                is_active = (fp == active)
+                log.info(f"[WebviewPanel] Processing pending open: {fp} (active={is_active})")
+                self._open_file_js(*args, priority=is_active)
+                # NOTE: Do NOT add to _files_delivered_to_js here.
+                # The JS ACK (bridge.onContentDelivered) is the reliable signal.
+                # Premature marking caused "empty editor" bugs during warmup.
+
+        QTimer.singleShot(200, _process_pending)
+
+    def reveal_boot_hidden(self):
+        """Tell the page to leave boot-hidden mode and show its content.
+
+        Called by main_window the moment the startup overlay is dismissed.
+        Safe to call any time (no-op if the page never entered boot-hidden).
+        """
+        try:
+            if getattr(self, '_view', None):
+                self._view.page().runJavaScript(
+                    "if(window.__cortexReveal)window.__cortexReveal();")
+        except Exception as exc:
+            log.debug(f"[WebviewPanel] reveal boot-hidden skipped: {exc}")
+
+    def _on_editor_ready(self):
+        """Monaco Editor fully initialized in JS."""
+        log.info("[WebviewPanel] Monaco Editor ready")
+        self.editor_ready.emit()
+
+        # The font chosen in Settings -> Editor (src/ui/fonts.py). Applied now
+        # and again whenever it changes, so Settings drives Monaco live.
+        try:
+            from src.ui.fonts import editor_font_js, on_editor_font_changed
+            self._safe_run_js(editor_font_js())
+            on_editor_font_changed(lambda: self._safe_run_js(editor_font_js()))
+        except Exception as e:
+            log.debug(f"[WebviewPanel] editor font not applied: {e}")
+
+        # Settings -> Editor -> Tab size / Word wrap / Minimap, same pattern.
+        try:
+            from src.ui.editor_prefs import editor_prefs_js, on_editor_prefs_changed
+            self._safe_run_js(editor_prefs_js())
+            on_editor_prefs_changed(lambda: self._safe_run_js(editor_prefs_js()))
+        except Exception as e:
+            log.debug(f"[WebviewPanel] editor preferences not applied: {e}")
+
+        # Settings -> Editor -> Theme (src/ui/editor_theme.py), same pattern.
+        try:
+            from src.ui.editor_theme import editor_theme_js, on_editor_theme_changed
+            self._safe_run_js(editor_theme_js())
+            if not getattr(self, "_theme_listener", None):
+                self._theme_listener = lambda: self._safe_run_js(editor_theme_js())
+                on_editor_theme_changed(self._theme_listener)
+        except Exception as e:
+            log.debug(f"[WebviewPanel] editor theme not applied: {e}")
+
+        # ── Session restore: ensure Monaco has the file content ──
+        if self._active_file_path:
+            f = self._open_files.get(self._active_file_path)
+            if f:
+                log.info(f"[WebviewPanel] Restored file content for: {self._active_file_path}")
+
+    def _on_render_crash(self, termination_status, exit_code):
+        """Chromium render process crashed, log and auto-recover."""
+        # termination_status: QWebEnginePage.RenderProcessTerminationStatus enum
+        #   NormalTerminationStatus=0, AbnormalTerminationStatus=1, CrashedTerminationStatus=2,
+        #   KilledTerminationStatus=3
+        status_names = {0: "Normal", 1: "Abnormal", 2: "Crashed", 3: "Killed"}
+        # PyQt6 passes the enum itself (not an int); int(enum) raises TypeError.
+        # Use .value when present, else coerce defensively.
+        try:
+            _status_int = termination_status.value
+        except AttributeError:
+            try:
+                _status_int = int(termination_status)
+            except (TypeError, ValueError):
+                _status_int = -1
+        status_name = status_names.get(_status_int, f"Unknown({termination_status})")
+        log.critical(f"[WebviewPanel] RENDER PROCESS CRASHED: status={status_name}, exit_code={exit_code}")
+        # Real evidence for render_health. A GPU/driver incompatibility kills
+        # the render process, which is what leaves the panel empty on the
+        # machines compatibility mode exists for.
+        try:
+            from src.ui.render_health import record_render_failure
+            record_render_failure("editor.html", f"render process {status_name} (exit {exit_code})")
+        except Exception:
+            # silent-ok: the crash itself is already logged at CRITICAL on the
+            # line above; only the render_health row is lost.
+            pass
+        # Mark page dead so we stop sending JS. Future opens will queue until reload.
+        self._page_loaded = False
+
+        # Auto-recover: reload the Monaco editor page after a short delay.
+        # Without this, the editor is permanently dead and the user must restart.
+        _current_file = getattr(self, '_current_file', None)
+        if not hasattr(self, '_crash_reload_count'):
+            self._crash_reload_count = 0
+        self._crash_reload_count += 1
+        if self._crash_reload_count <= 3:
+            log.info(f"[WebviewPanel] Auto-recovering from crash ({self._crash_reload_count}/3)...")
+            QTimer.singleShot(2000, self._reload_after_crash)
+        else:
+            log.error("[WebviewPanel] Too many crashes, NOT auto-reloading. Restart IDE to recover.")
+
+    def _reload_after_crash(self):
+        """Reload the Monaco editor page after a render process crash."""
+        try:
+            if hasattr(self, '_view') and self._view:
+                # Re-queue all open files so _on_page_loaded re-delivers them to JS.
+                # The crash destroyed all JS state (openFiles, editor, etc.) so
+                # every file must be re-sent via openFile().
+                self._files_delivered_to_js.clear()
+                self._pending_opens.clear()
+                active = self._active_file_path
+                for fp, fdata in self._open_files.items():
+                    self._pending_opens.append((
+                        fp,
+                        fdata.get("content", ""),
+                        fdata.get("language", "plaintext"),
+                    ))
+                log.info(f"[WebviewPanel] Re-queued {len(self._pending_opens)} files for crash recovery (active={active})")
+                self._view.reload()
+                # Restart safety timer for the reload attempt
+                if hasattr(self, '_load_safety_timer'):
+                    self._load_safety_timer.start(60000)
+                log.info("[WebviewPanel] Page reload triggered after crash")
+        except Exception as e:
+            log.warning(f"[WebviewPanel] Crash recovery reload failed: {e}")
+
+    # ---- Public API -------------------------------------------------------
+
+    def _deliver_large_file_fallback(self, file_path: str, language: str = ""):
+        """Re-deliver a large file after JS XHR timeout/failure.
+
+        Always uses inline openFile (not openFileFromUri) so a broken XHR
+        path cannot loop forever. Python already holds the content.
+        """
+        try:
+            fp = os.path.normpath(file_path or "")
+            if not fp:
+                return
+            # Guard against repeated JS fallback spam for the same file.
+            if not hasattr(self, "_large_fallback_done"):
+                self._large_fallback_done: set[str] = set()
+            if fp in self._large_fallback_done:
+                log.debug(f"[WebviewPanel] large-file fallback already done: {fp}")
+                return
+            self._large_fallback_done.add(fp)
+
+            fdata = self._open_files.get(fp) or self._open_files.get(file_path) or {}
+            content = fdata.get("content") or ""
+            lang = language or fdata.get("language") or "plaintext"
+            if not content:
+                try:
+                    content = Path(fp).read_text(encoding="utf-8", errors="replace")
+                except Exception as e:
+                    log.error(
+                        f"[WebviewPanel] large-file fallback has no content for "
+                        f"{fp}: {e}"
+                    )
+                    safe_path = json.dumps(fp)
+                    self._safe_run_js(
+                        f"if (openFiles[{safe_path}]) {{"
+                        f" openFiles[{safe_path}].content = '// Failed to load file: no content';"
+                        f" if (activeFilePath === {safe_path} && editor) setEditorContent({safe_path});"
+                        f"}}"
+                    )
+                    return
+
+            safe_path = json.dumps(fp)
+            safe_lang = json.dumps(lang)
+            # Route through the choke point: re-inlining a multi-MB string here
+            # was the crash-recovery loop (XHR fails -> inline 40MB -> SIGTRAP
+            # -> reload -> re-queue -> inline again). The choke point refuses
+            # oversized content and uses XHR for large-but-editable files.
+            self._deliver_to_editor(fp, content, lang, activate=True)
+            log.info(
+                f"[WebviewPanel] large-file fallback via _deliver_to_editor: "
+                f"{fp} ({len(content)} chars)"
+            )
+        except Exception as e:
+            log.error(f"[WebviewPanel] _deliver_large_file_fallback error: {e}")
+
+    def _safe_run_js(self, js: str, callback=None):
+        """Run JavaScript safely, catches crashes from dead/destroyed webview.
+
+        Calls issued BEFORE loadFinished are queued and replayed once the page
+        is ready. Previously they were dispatched into a page whose scripts did
+        not exist yet: runJavaScript() succeeded, the function was undefined,
+        and the update vanished with no error anywhere, one of the "weak
+        signal" failures where the UI silently misses an update.
+        """
+        try:
+            if not getattr(self, '_page_loaded', False) and callback is None:
+                self._pending_js_calls = getattr(self, '_pending_js_calls', [])
+                # Bound the queue: a page that never loads must not grow it
+                # without limit.
+                if len(self._pending_js_calls) < 200:
+                    self._pending_js_calls.append(js)
+                return
+
+            def _invoke():
+                try:
+                    page = self._view.page() if self._view else None
+                    if not page:
+                        return
+                    if callback:
+                        page.runJavaScript(js, callback)
+                    else:
+                        page.runJavaScript(js)
+                except Exception as e:
+                    log.debug(f"[WebviewPanel] runJavaScript failed (webview may be dead): {e}")
+
+            # Always schedule onto the Qt GUI thread (safe even if already on it).
+            QTimer.singleShot(0, _invoke)
+        except Exception as e:
+            log.debug(f"[WebviewPanel] runJavaScript scheduling failed: {e}")
+
+    # ---- Public API -------------------------------------------------------
+
+    def open_file(self, file_path: str, content: str, language: str = "plaintext", *, priority: bool = True):
+        """Open a file in the editor (creates/switches to tab).
+
+        priority=True is meant for user-initiated clicks (show the file now).
+        priority=False is meant for bulk/session restore (throttle during startup).
+        """
+        log.info(f"[WebviewPanel] open_file: {file_path} (lang={language}, len={len(content)}, page_loaded={self._page_loaded})")
+
+        # ── Oversized-file gate ──────────────────────────────────────────
+        # Anything above the ceiling is refused before it can reach the
+        # renderer. We keep only the size (not the buffer) so a 20MB+ string is
+        # never retained in Python nor shipped over IPC. The editor shows a
+        # read-only notice tab instead. See _MAX_EDITOR_CHARS.
+        _too_large = bool(content) and len(content) > _MAX_EDITOR_CHARS
+        if _too_large:
+            log.warning(
+                f"[WebviewPanel] open_file refusing oversized file "
+                f"({len(content)} chars > {_MAX_EDITOR_CHARS}): {file_path}"
+            )
+            self._open_files[file_path] = {
+                "path": file_path,
+                "language": language,
+                "content": "",
+                "disk_baseline": None,
+                "too_large": True,
+                "size": len(content),
+            }
+            self._active_file_path = file_path
+            self.file_opened.emit(file_path)
+            if self._page_loaded:
+                self._deliver_to_editor(file_path, "", language, activate=True)
+            else:
+                self._pending_opens.append((file_path, "", language))
+            return
+
+        self._open_files[file_path] = {
+            "path": file_path,
+            "language": language,
+            "content": content,
+            # What was on disk when this buffer was loaded. Ctrl+S compares
+            # against it so a save cannot silently overwrite changes the AI
+            # (or any other process) made to the file in the meantime.
+            "disk_baseline": content,
+        }
+        self._active_file_path = file_path
+        self.file_opened.emit(file_path)
+
+        if self._page_loaded:
+            self._open_file_js(file_path, content, language, priority=priority)
+        else:
+            self._pending_opens.append((file_path, content, language))
+            log.debug(f"[WebviewPanel] Queued open for: {file_path}")
+
+    def open_too_large(self, file_path: str, size: int,
+                       language: str = "plaintext", *, priority: bool = True):
+        """Show the read-only "file too large" notice tab for an oversized file.
+
+        Called from main_window when a file's on-disk size is over the editor
+        ceiling. The file's bytes are NEVER read or passed here - only its path
+        and byte size - so no multi-MB buffer is ever loaded into Python or
+        shipped over IPC (the 40MB inline string literal that crashed the shared
+        Chromium renderer, SIGTRAP/133). Registers a contentless `too_large`
+        entry and delivers openTooLarge() to JS.
+        """
+        log.warning(
+            f"[WebviewPanel] open_too_large: {file_path} "
+            f"({size} bytes, refusing to load)"
+        )
+        self._open_files[file_path] = {
+            "path": file_path,
+            "language": language,
+            "content": "",
+            "disk_baseline": None,
+            "too_large": True,
+            "size": int(size or 0),
+        }
+        self._active_file_path = file_path
+        self.file_opened.emit(file_path)
+        if self._page_loaded:
+            self._deliver_to_editor(file_path, "", language, activate=True)
+        else:
+            self._pending_opens.append((file_path, "", language))
+
+    def show_diff(self, file_path: str, language: str = "plaintext",
+                  additions: int = 0, deletions: int = 0, hunks=None):
+        """Open a read-only inline unified diff in the editor for an AI-edited file.
+
+        Called from main_window when the user clicks a change row in the sidebar's
+        CHANGES panel. Ships a **hunk-only** row list (not the full file) to
+        editor.html's showDiff(). Each row is one source line (ctx/del/add) or a
+        collapsible skip. Kept OUT of the tab system so it never destabilizes
+        session-restore/tab state. Queues until the page is loaded via _safe_run_js.
+        """
+        log.info(
+            f"[WebviewPanel] show_diff: {file_path} "
+            f"(lang={language}, +{additions}/-{deletions}, "
+            f"rows={len(hunks or [])}, page_loaded={self._page_loaded})"
+        )
+        safe_path = json.dumps(file_path)
+        safe_lang = json.dumps(language or "plaintext")
+        safe_add = int(additions or 0)
+        safe_del = int(deletions or 0)
+        safe_hunks = json.dumps(hunks or [])
+        js = (
+            f"showDiff({safe_path}, {safe_lang}, "
+            f"{safe_add}, {safe_del}, {safe_hunks});"
+        )
+        self._safe_run_js(js)
+
+    def switch_to_file(self, file_path: str):
+        """Switch the editor tab to an already-open file WITHOUT re-sending content.
+        
+        This avoids a model.setValue() call through QWebChannel, which is the
+        primary crash trigger during Chromium's startup warmup phase.
+        
+        If the file is still in the open queue (pending JS delivery), the content
+        is flushed IMMEDIATELY so the JS side has it before switchToFile runs.
+        Without this, switchToFile silently fails (openFiles[path] is undefined)
+        and the editor keeps showing the previous file's content.
+        
+        GUARD: If the file was tracked in _open_files but NEVER delivered to JS
+        (e.g. session restore warmup, page crash recovery), fall back to a full
+        open_file() call that sends content.  Without this, switchToFile() on the
+        JS side sees openFiles[path] === undefined and returns silently, the
+        editor stays on the previous file's content (Race Condition #1).
+        """
+        if file_path not in self._open_files:
+            log.warning(f"[WebviewPanel] switch_to_file: {file_path} not in _open_files")
+            return
+        self._active_file_path = file_path
+        self.file_opened.emit(file_path)
+
+        # GUARD: If JS never received this file, fall back to full open_file.
+        # This fixes the silent-failure case where switchToFile finds nothing.
+        if file_path not in self._files_delivered_to_js:
+            fdata = self._open_files[file_path]
+            content = fdata.get("content", "")
+            language = fdata.get("language", "plaintext")
+            log.info(f"[WebviewPanel] switch_to_file: {file_path} never delivered to JS, forcing open_file")
+            self.open_file(file_path, content, language, priority=True)
+            return
+
+        # If file content is still pending in the open queue, flush it NOW.
+        # Bumping alone doesn't help, JS switchToFile needs openFiles[path]
+        # to exist, which only happens after openFile() delivers the content.
+        if hasattr(self, '_open_queue') and file_path in self._open_queue:
+            args = self._open_queue.pop(file_path)
+            fp, content, language = args
+            # Route through the choke point so the size ceiling applies here
+            # too (this path used to inline unconditionally).
+            self._deliver_to_editor(fp, content, language, activate=True)
+            # NOTE: Do NOT add to _files_delivered_to_js here.
+            # The JS ACK (bridge.onContentDelivered) is the reliable signal.
+            log.info(f"[WebviewPanel] switch_to_file: flushed pending content for {file_path}")
+
+        if self._page_loaded:
+            # Debounce rapid consecutive switch_to_file calls, rapid sidebar clicks
+            # flood the JS queue with many switchToFile(path) calls; only the last one
+            # (after 60ms of inactivity) is actually sent to JS.
+            if hasattr(self, '_switch_timer') and self._switch_timer is not None:
+                self._switch_timer.stop()
+                self._switch_timer = None
+            self._pending_switch_path = file_path
+            self._switch_timer = QTimer(self)
+            self._switch_timer.setSingleShot(True)
+            self._switch_timer.timeout.connect(self._flush_pending_switch)
+            self._switch_timer.start(0)  # Instant tab switching, no delay
+
+    def _flush_pending_switch(self):
+        """Fire the debounced switchToFile JS call for the most-recent switch_to_file target.
+        
+        Also cancels any pending throttled openFile calls so stale queued opens
+        don't override the user's explicit tab switch (Fix 2, Race Condition #2).
+        """
+        self._switch_timer = None
+        path = getattr(self, '_pending_switch_path', None)
+        if path and self._page_loaded:
+            # Cancel any pending throttled openFile calls, a user-initiated
+            # switch_to_file means the user explicitly chose a tab, and queued
+            # background opens with stale activate=true must not override it.
+            if hasattr(self, '_open_timer') and self._open_timer is not None:
+                try:
+                    self._open_timer.stop()
+                except Exception:
+                    # silent-ok: QtTimer.stop only fails on a deleted C++
+                    # object, and the reference is dropped on the next line.
+                    pass
+                self._open_timer = None
+            if hasattr(self, '_open_queue'):
+                self._open_queue.clear()
+            safe_path = json.dumps(path)
+            # Push fresh content from Python cache to JS before switching,
+            # so the JS openFiles{path}.content is always up-to-date.
+            # Without this, stale JS cache causes file to show old content
+            # until IDE restart (caching bug reported: files only update on restart).
+            fdata = self._open_files.get(path, {})
+            py_content = fdata.get("content", "")
+            py_lang = fdata.get("language", "plaintext")
+
+            # Oversized files have no buffer and must show the refusal notice,
+            # never a giant inline string. _deliver_to_editor handles the switch
+            # (setIntendedActive) for the refused case from the activate flag.
+            if fdata.get("too_large"):
+                self._deliver_to_editor(path, "", py_lang, activate=True)
+                self._pending_switch_path = None
+                return
+
+            safe_lang = json.dumps(py_lang)
+
+            # Large-but-editable files: route through the choke point, which
+            # re-caches and uses openFileFromUri (JS switches instantly when it
+            # already holds real content, and XHRs only if it doesn't). Never
+            # inline >200KB here.
+            if path and len(py_content) > _LARGE_CHAR_THRESHOLD:
+                self._deliver_to_editor(path, py_content, py_lang, activate=True)
+                self._pending_switch_path = None
+                return
+
+            # Always push content inline on tab switch (small files). Python
+            # already holds py_content — ship it directly.
+            safe_content = json.dumps(py_content)
+            # openFile(path, content, lang, false) updates JS cache without switching,
+            # then switchToFile(path) shows the file with the fresh cache.
+            self._safe_run_js(
+                f"setIntendedActive({safe_path}); openFile({safe_path}, {safe_content}, {safe_lang}, false); switchToFile({safe_path});"
+            )
+        self._pending_switch_path = None
+
+    def _deliver_to_editor(self, file_path: str, content: str, language: str,
+                           activate: bool) -> bool:
+        """The single choke point for handing file text to the Monaco renderer.
+
+        Every delivery path (user click, tab switch, crash recovery, XHR
+        fallback) routes through here so the size ceiling cannot be bypassed by
+        choosing a different path. Returns True if delivered, False if the file
+        was refused as too large.
+
+        Three tiers:
+          <= _LARGE_CHAR_THRESHOLD  -> inline openFile (fastest, safest)
+          <= _MAX_EDITOR_CHARS      -> same-origin XHR openFileFromUri: stays
+                                       editable, but the text never becomes one
+                                       multi-MB JS string literal (the exact V8
+                                       allocation that crashed the renderer)
+          >  _MAX_EDITOR_CHARS      -> refuse with a read-only notice tab
+        """
+        fp = file_path or ""
+        fdata = self._open_files.get(fp) or {}
+        safe_path = json.dumps(fp)
+        safe_lang = json.dumps(language or "plaintext")
+        act = "true" if activate else "false"
+        prefix = f"setIntendedActive({safe_path}); " if activate else ""
+
+        # Tier 3: refused. fdata carries the true size (content was cleared in
+        # open_file so a 20MB+ buffer is never retained or shipped).
+        if fdata.get("too_large"):
+            n = int(fdata.get("size") or 0)
+            safe_name = json.dumps(os.path.basename(fp) or fp)
+            self._safe_run_js(
+                f"openTooLarge({safe_path}, {n}, {safe_lang}, {act}, {safe_name});"
+            )
+            log.warning(
+                f"[WebviewPanel] REFUSED oversized file ({n} chars > "
+                f"{_MAX_EDITOR_CHARS}): {fp}"
+            )
+            return False
+
+        n = len(content or "")
+
+        # Tier 2: large but under the ceiling -> same-origin XHR.
+        if fp and n > _LARGE_CHAR_THRESHOLD:
+            try:
+                file_uri = _cache_large_file_uri(fp, content)
+                safe_uri = json.dumps(file_uri)
+                self._safe_run_js(
+                    f"{prefix}openFileFromUri({safe_path}, {safe_lang}, "
+                    f"{safe_uri}, {act});"
+                )
+                log.info(
+                    f"[WebviewPanel] large file via same-origin cache: "
+                    f"{fp} ({n} chars)"
+                )
+                return True
+            except Exception as e:
+                log.warning(
+                    f"[WebviewPanel] large-file cache failed ({e}); "
+                    f"falling back to inline openFile for {fp}"
+                )
+
+        # Tier 1: small file -> inline openFile.
+        safe_content = json.dumps(content or "")
+        self._safe_run_js(
+            f"{prefix}openFile({safe_path}, {safe_content}, {safe_lang}, {act});"
+        )
+        return True
+
+    def _open_file_js(self, file_path: str, content: str, language: str, *, priority: bool = True):
+        """Send openFile() to JS, heavily throttled during first 60s warmup.
+        
+        QWebChannel IPC + Monaco model.setValue() crashes Chromium's render
+        process on Windows 25H2 when too many files are opened rapidly during
+        the first ~40-60s of startup. Testing proved that 3s spacing still
+        crashes after ~12 files accumulate. With 10s spacing, only ~6 files
+        load in 60s, safely under the crash threshold while keeping the IDE
+        usable (first file opens immediately so the user sees content).
+        """
+        _WARMUP_SECS = 15
+        _elapsed = time.time() - self._init_time
+        # 2s spacing during warmup, 1s after
+        _delay_ms = 2000 if _elapsed < _WARMUP_SECS else 1000
+
+        if not hasattr(self, '_open_queue'):
+            self._open_queue: dict[str, tuple] = {}
+        if not hasattr(self, '_open_timer'):
+            self._open_timer: Optional[QTimer] = None
+
+        def _run_open_now(fp: str, c: str, lang: str, activate: bool):
+            # NOTE: Do NOT mark as delivered before the JS call succeeds.
+            # The JS ACK (bridge.onContentDelivered) is the reliable signal.
+            # Premature marking caused "empty editor" bugs when the JS call
+            # was throttled or the page hadn't loaded yet.
+            #
+            # ALL paths (user click, background restore) now go through
+            # _deliver_to_editor, the single choke point that enforces the size
+            # ceiling. Previously this function had its own inline logic and a
+            # user click (activate=True) RETURNED before the 200 KB guard, so a
+            # 40 MB file was json.dumps()'d into one JS string literal and
+            # crashed the renderer (SIGTRAP/133). Do not reintroduce a direct
+            # openFile() here.
+            if fp and hasattr(self, "_large_fallback_done"):
+                # Allow the XHR fallback to be re-attempted for a fresh open.
+                self._large_fallback_done.discard(fp)
+            self._deliver_to_editor(fp, c, lang, activate)
+            if activate:
+                log.info(
+                    f"[WebviewPanel] priority open via _deliver_to_editor: "
+                    f"{fp} ({len(c)} chars)"
+                )
+
+        # Dedupe: keep only the latest call per file
+        if file_path:
+            self._open_queue[file_path] = (file_path, content, language)
+
+        # User-initiated opens must show immediately. Warmup throttling is only
+        # for restore/bulk opens; delaying the clicked file causes "wrong file"
+        # content (previous tab stays visible) and feels laggy.
+        if priority and file_path:
+            try:
+                # Stop any running pump so we can front-run the clicked file.
+                if self._open_timer is not None:
+                    try:
+                        self._open_timer.stop()
+                    except Exception as e:
+                        # A pump that is still armed will fire against a queue
+                        # this branch is about to mutate, so it can open a file
+                        # twice or race the click it was meant to front-run.
+                        log.debug(
+                            "[WebviewPanel] could not stop the open pump "
+                            "before a priority open: %s", e,
+                        )
+                    self._open_timer = None
+
+                args = self._open_queue.pop(file_path, None)
+                if args:
+                    _run_open_now(args[0], args[1], args[2], True)
+            except Exception as e:
+                log.error(f"[WebviewPanel] Priority openFile failed for {file_path}: {e}")
+
+            # Restart a throttled pump for any remaining queued files.
+            if self._open_queue and self._open_timer is None:
+                def _flush_one_priority_tail():
+                    if not self._open_queue:
+                        self._open_timer = None
+                        return
+                    fp, args2 = next(iter(self._open_queue.items()))
+                    del self._open_queue[fp]
+                    try:
+                        _run_open_now(fp, args2[1], args2[2], False)
+                    except Exception as e:
+                        log.error(f"[WebviewPanel] JS openFile failed for {fp}: {e}")
+                    if self._open_queue:
+                        self._open_timer = QTimer(self)
+                        self._open_timer.setSingleShot(True)
+                        self._open_timer.timeout.connect(_flush_one_priority_tail)
+                        _elapsed2 = time.time() - self._init_time
+                        _d2 = 2000 if _elapsed2 < _WARMUP_SECS else 1000
+                        self._open_timer.start(_d2)
+                    else:
+                        self._open_timer = None
+
+                self._open_timer = QTimer(self)
+                self._open_timer.setSingleShot(True)
+                self._open_timer.timeout.connect(_flush_one_priority_tail)
+                self._open_timer.start(_delay_ms)
+            return
+
+        if self._open_timer is None:
+            # Use a QTimer for ALL files, including the first.
+            # The first file fires at 0ms (next event-loop iteration),
+            # subsequent files are spaced by _delay_ms (10s warmup / 1.5s normal).
+            #
+            # CRITICAL: Using a timer (even 0ms) instead of calling _flush_one()
+            # synchronously ensures _open_timer remains set during batch opens
+            # (e.g. _process_pending loop). Without this, each _open_file_js()
+            # resets _open_timer=None after flushing, so the next call creates
+            # another immediate flush, completely bypassing the warmup delay.
+            def _flush_one():
+                if not self._open_queue:
+                    self._open_timer = None
+                    return
+                fp, args = next(iter(self._open_queue.items()))
+                del self._open_queue[fp]
+                try:
+                    c, lang = args[1], args[2]
+                    _run_open_now(fp, c, lang, False)
+                except Exception as e:
+                    log.error(f"[WebviewPanel] JS openFile failed for {fp}: {e}")
+                if self._open_queue:
+                    self._open_timer = QTimer(self)
+                    self._open_timer.setSingleShot(True)
+                    self._open_timer.timeout.connect(_flush_one)
+                    _elapsed2 = time.time() - self._init_time
+                    _d2 = 2000 if _elapsed2 < 15 else 1000
+                    self._open_timer.start(_d2)
+                else:
+                    self._open_timer = None
+
+            self._open_timer = QTimer(self)
+            self._open_timer.setSingleShot(True)
+            self._open_timer.timeout.connect(_flush_one)
+            self._open_timer.start(0)  # fire on next event-loop iteration
+
+    def _find_file_key(self, file_path: str) -> str:
+        """Find the actual key in _open_files matching file_path.
+
+        Uses os.path.normcase(os.path.normpath()) for robust matching
+        across path separator differences (forward/backslash), trailing
+        separators, and case differences on Windows.
+        Returns the actual key if found, else the original file_path.
+        """
+        # Fast path: exact match
+        if file_path in self._open_files:
+            return file_path
+        # Normalized match
+        norm = os.path.normcase(os.path.normpath(file_path))
+        for key in self._open_files:
+            if os.path.normcase(os.path.normpath(key)) == norm:
+                return key
+        return file_path
+
+    def close_file(self, file_path: str):
+        """Close a file tab."""
+        norm_path = os.path.normpath(file_path)
+        actual_key = self._find_file_key(norm_path)
+        log.info(f"[WebviewPanel] close_file: {file_path} (actual_key={actual_key!r}, was in _open_files: {actual_key in self._open_files})")
+        self._open_files.pop(actual_key, None)
+        if self._active_file_path == actual_key:
+            self._active_file_path = ""
+        if self._page_loaded:
+            safe = json.dumps(actual_key)
+            self._safe_run_js(f"closeFile({safe});")
+
+    def close_all_files(self):
+        """Close all file tabs in one shot, avoids per-file runJavaScript flood."""
+        count = len(self._open_files)
+        log.info(f"[WebviewPanel] close_all_files: clearing {count} files")
+        self._open_files.clear()
+        self._active_file_path = ""
+        if self._page_loaded:
+            self._safe_run_js("closeAllFiles();")
+
+    def rename_file(self, old_path: str, new_path: str):
+        """Rename a file tab from old_path to new_path."""
+        # Normalize both paths for consistent matching on Windows
+        old_norm = os.path.normpath(old_path)
+        new_norm = os.path.normpath(new_path)
+        actual_key = self._find_file_key(old_norm)
+        if actual_key not in self._open_files:
+            log.info(f"[WebviewPanel] rename_file: {old_path} not in _open_files "
+                     f"(looked up as {actual_key!r}, keys={list(self._open_files.keys())[:5]})")
+            return
+        # Update internal tracking, use new_norm for consistent key format
+        entry = self._open_files.pop(actual_key)
+        entry["path"] = new_norm
+        self._open_files[new_norm] = entry
+        if self._active_file_path == actual_key:
+            self._active_file_path = new_norm
+        # Update Monaco model URI via JS renameFileTab (editor.html)
+        if self._page_loaded:
+            safe_old = json.dumps(actual_key)
+            safe_new = json.dumps(new_norm)
+            safe_name = json.dumps(Path(new_norm).name)
+            self._safe_run_js(
+                f"if(typeof renameFileTab==='function')renameFileTab({safe_old},{safe_new},{safe_name});"
+                f"else if(typeof closeFile==='function'){{closeFile({safe_old});}}"
+            )
+        log.info(f"[WebviewPanel] rename_file: {actual_key} -> {new_norm}")
+
+    def next_tab(self):
+        """Switch to the next open tab (Ctrl+Tab)."""
+        if self._page_loaded:
+            self._safe_run_js("nextTab();")
+
+    def prev_tab(self):
+        """Switch to the previous open tab (Ctrl+Shift+Tab)."""
+        if self._page_loaded:
+            self._safe_run_js("prevTab();")
+
+    def get_content(self, file_path: str) -> str:
+        """Get current editor content for a file (async, returns cached content)."""
+        return self._open_files.get(file_path, {}).get("content", "")
+
+    def get_current_content(self, file_path: str, callback):
+        """Get FRESH content directly from Monaco editor (bypasses Python cache).
+
+        Use this instead of get_content() when the user explicitly saves, it reads
+        the Monaco model's current value, avoiding stale-cache saves when Ctrl+S
+        is pressed before the 500ms debounce fires.
+
+        Args:
+            file_path: Absolute path to the file.
+            callback: callable(content_str), called with the fresh content.
+        """
+        if not self._page_loaded:
+            if callback:
+                callback(self._open_files.get(file_path, {}).get("content", ""))
+            return
+
+        def _safe_callback(content: str):
+            # ── EMPTY CONTENT FALLBACK ──────────────────────────────────
+            # If Monaco returns empty/None, fall back to Python cache or
+            # disk content to prevent accidental file wiping.
+            # FIX: Only fall back to disk when content is None (JS bridge
+            # broken). Empty string "" means user intentionally cleared the
+            # file, trust Monaco and save the empty content.
+            if content is None:
+                try:
+                    from pathlib import Path
+                    disk_content = Path(file_path).read_text(encoding="utf-8")
+                    if disk_content:
+                        log.warning(f"[WebviewPanel] Monaco never responded for {file_path}, using disk content ({len(disk_content)} chars)")
+                        content = disk_content
+                    else:
+                        content = ""
+                except Exception:
+                    content = ""
+            if callback:
+                callback(content)
+
+        safe = json.dumps(file_path)
+        js = f"getEditorContent({safe});"
+        self._safe_run_js(js, _safe_callback)
+
+    def get_active_file(self) -> str:
+        """Get the currently active file path."""
+        return self._active_file_path
+
+    def get_active_file_async(self, callback):
+        """Ask the JS editor which tab is REALLY active and call back with it.
+
+        The Python-side mirror (_active_file_path) is set optimistically at
+        open/switch request time and can go stale when JS declines or races an
+        activation (e.g. background reloads while the agent streams, or the
+        image-preview branch).  For actions where running the WRONG file is
+        user-visible (Run File), query the JS truth instead of the mirror.
+        Falls back to the mirror if the webview is unavailable.
+        """
+        fallback = self._active_file_path
+
+        def _done(result):
+            fp = result if isinstance(result, str) and result else fallback
+            try:
+                callback(fp)
+            except Exception as e:
+                log.warning(f"[WebviewPanel] get_active_file_async callback failed: {e}")
+
+        if not self._page_loaded:
+            _done(None)
+            return
+        self._safe_run_js("window.activeFilePath || ''", _done)
+
+    def get_active_file_and_content_async(self, callback, timeout_ms: int = 700):
+        """callback(path, content) for the tab the editor REALLY shows.
+
+        Both come from ONE call into the editor, so the content always
+        belongs to the path. Save used the Python mirror for the path: the
+        mirror is set when Python asks for a file to be shown, and the editor
+        may decline (it keeps the tab the user is working in when a file is
+        opened in the background). On 2026-10-01 that sent four Ctrl+S
+        presses in a row to .env.example while the user was editing .env.
+
+        `content` is None when the editor could not supply it; the caller
+        then fetches it its own way. If the editor does not answer within
+        `timeout_ms` (dropped runJavaScript callbacks are a known QWebEngine
+        failure), the mirror is used, so Save never silently does nothing.
+        """
+        state = {"done": False}
+
+        def _finish(path, content):
+            if state["done"]:
+                return
+            state["done"] = True
+            try:
+                callback(path, content)
+            except Exception as e:
+                log.warning(f"[WebviewPanel] active file+content callback failed: {e}")
+
+        def _from_js(result):
+            path, content = "", None
+            try:
+                data = json.loads(result) if isinstance(result, str) and result else {}
+                path = data.get("path") or ""
+                content = data.get("content")
+            except Exception as e:
+                # The callback then reports "no content" for the file, which
+                # reads as an empty document rather than a broken reply.
+                log.debug(
+                    "[WebviewPanel] active-file mirror reply unparseable: %s", e,
+                )
+            if not path:
+                _finish(self._active_file_path, None)
+                return
+            if path != self._active_file_path:
+                log.warning(f"[WebviewPanel] active-file mirror was stale: "
+                            f"{self._active_file_path!r}, editor shows {path!r}")
+                self._active_file_path = path
+                self.active_file_changed.emit(path)
+            _finish(path, content)
+
+        if not self._page_loaded:
+            _finish(self._active_file_path, None)
+            return
+        QTimer.singleShot(timeout_ms, lambda: _finish(self._active_file_path, None))
+        self._safe_run_js(
+            "(function(){var p=activeFilePath||'';var c=null;"
+            "try{if(p){c=getEditorContent(p);}}catch(e){}"
+            "if(c===undefined)c=null;"
+            "return JSON.stringify({path:p,content:c});})()",
+            _from_js)
+
+    def set_theme(self, is_dark: bool):
+        """Apply dark or light theme to the editor.
+
+        ── AUDIT LOGGING ──
+        Logs page_loaded state, JS execution time, and RAM.
+        Tag: [THEME-AUDIT]
+        """
+        import time as _time
+        t0 = _time.perf_counter()
+
+        try:
+            import psutil as _psutil
+            def _ram() -> float: return _psutil.virtual_memory().percent
+        except ImportError:
+            def _ram() -> float: return -1.0
+
+        log.info(
+            f"[THEME-AUDIT] webview_panel.set_theme  START  "
+            f"is_dark={is_dark}  page_loaded={self._page_loaded}  "
+            f"RAM={_ram():.1f}%"
+        )
+
+        if self._page_loaded:
+            t_js = _time.perf_counter()
+            self._set_theme_js(is_dark)
+            dt_js = (_time.perf_counter() - t_js) * 1000
+            dt_total = (_time.perf_counter() - t0) * 1000
+            log.info(
+                f"[THEME-AUDIT] webview_panel.set_theme  DONE  "
+                f"runJS={dt_js:.1f}ms  total={dt_total:.1f}ms  "
+                f"RAM={_ram():.1f}%"
+            )
+        else:
+            self._pending_theme = is_dark
+            dt_total = (_time.perf_counter() - t0) * 1000
+            log.info(
+                f"[THEME-AUDIT] webview_panel.set_theme  DEFERRED (page not loaded)  "
+                f"total={dt_total:.1f}ms  RAM={_ram():.1f}%"
+            )
+
+    def _set_theme_js(self, is_dark: bool):
+        js = "setTheme(true);" if is_dark else "setTheme(false);"
+        self._safe_run_js(js)
+
+    def mark_modified(self, file_path: str, modified: bool = True):
+        """Show/hide the modified indicator dot on a tab."""
+        if self._page_loaded:
+            safe = json.dumps(file_path)
+            js = f"markModified({safe}, {'true' if modified else 'false'});"
+            self._safe_run_js(js)
+
+    def flash_editor(self):
+        """Briefly highlight the editor to draw attention after accept."""
+        if self._page_loaded:
+            js = """
+            try {
+                var editor = window._monacoEditor;
+                if (editor) {
+                    editor.revealLine(1);
+                    var decorations = editor.deltaDecorations([], [{
+                        range: new monaco.Range(1, 1, Math.min(10, editor.getModel().getLineCount()), 1),
+                        options: { className: 'flash-highlight', isWholeLine: true }
+                    }]);
+                    setTimeout(function() { editor.deltaDecorations(decorations, []); }, 1500);
+                }
+            } catch(e) {}
+            """
+            self._safe_run_js(js)
+
+    def force_reload_file(self, file_path: str, content: str, language: str = "plaintext"):
+        """Force-reload a file into the editor, bypasses throttle and warmup.
+        Used after Accept to guarantee the editor shows fresh content.
+        
+        Does NOT activate the tab if the user is viewing a different file -
+        refreshes content silently in the background instead.
+        """
+        # Remove old entry so JS openFile treats this as a new file
+        self._open_files.pop(file_path, None)
+        self._open_files[file_path] = {
+            "path": file_path,
+            "language": language,
+            "content": content,
+            # What was on disk when this buffer was loaded. Ctrl+S compares
+            # against it so a save cannot silently overwrite changes the AI
+            # (or any other process) made to the file in the meantime.
+            "disk_baseline": content,
+        }
+        if self._page_loaded:
+            safe_path = json.dumps(file_path)
+            safe_content = json.dumps(content)
+            safe_lang = json.dumps(language)
+            # Only activate tab if user is already viewing this file.
+            # Otherwise, refresh content silently without jumping.
+            is_active = (file_path == self._active_file_path)
+            activate = "true" if is_active else "false"
+            # setIntendedActive only for real activations, a background reload
+            # must not overwrite the user's actual selection in JS's
+            # _intendedActiveFile, or later activate calls misfire.
+            prefix = f"setIntendedActive({safe_path}); " if is_active else ""
+            js_open = f"{prefix}openFile({safe_path}, {safe_content}, {safe_lang}, {activate});"
+            if is_active:
+                js_open += f" switchToFile({safe_path});"
+            self._safe_run_js(js_open)
+            log.info(f"[WebviewPanel] force_reload_file: {file_path} ({len(content)} chars, activate={is_active})")
+
+    def get_cursor_position(self, callback=None):
+        """Get the cursor position (line, column) asynchronously via callback."""
+        if not self._page_loaded:
+            if callback:
+                callback(1, 1)
+            return
+        def _handle_result(result):
+            if callback and result:
+                callback(result.get("line", 1), result.get("column", 1))
+        self._safe_run_js("getCursorPosition();", _handle_result)
+
+    # ---- JS → Python signal handlers --------------------------------------
+
+    def _on_js_content_changed(self, file_path: str, content: str):
+        """JS notified us that file content changed (debounced)."""
+        if file_path in self._open_files:
+            self._open_files[file_path]["content"] = content
+        self.file_content_changed.emit(file_path, content)
+
+    def _on_js_save_requested(self, file_path: str, content: str):
+        """JS Ctrl+S, push save with fresh Monaco content."""
+        # Update Python cache immediately (already done in JS too)
+        if file_path in self._open_files:
+            self._open_files[file_path]["content"] = content
+        self.file_save_requested.emit(file_path, content)
+
+    def _on_js_file_closed(self, file_path: str):
+        """JS notified us that a file tab was closed."""
+        if file_path == '__ALL__':
+            # Bulk close, clear all tracked files
+            count = len(self._open_files)
+            self._open_files.clear()
+            self._files_delivered_to_js.clear()
+            self._active_file_path = ''
+            log.info(f"[WebviewPanel] _on_js_file_closed: __ALL__ (cleared {count} files)")
+            self.file_closed.emit('__ALL__')
+            return
+        was_present = file_path in self._open_files
+        self._open_files.pop(file_path, None)
+        self._files_delivered_to_js.discard(file_path)
+        log.info(f"[WebviewPanel] _on_js_file_closed: {file_path} (was_present={was_present}, remaining={len(self._open_files)})")
+        self.file_closed.emit(file_path)
+
+    def _on_js_cursor_changed(self, file_path: str, line: int, column: int):
+        """JS notified us of cursor position change."""
+        self._active_file_path = file_path
+        self.active_file_changed.emit(file_path)
+        self.cursor_position_changed.emit(line, column)
+
+    # ---- LSP Integration --------------------------------------------------
+
+    
+
+
+

@@ -1,0 +1,2918 @@
+﻿/* CORTEX SETTINGS, JS: Navigation, Modals, Memory Bridge, Live Settings Hydration */
+(function () {
+  "use strict";
+
+  let bridge = null, bridgeInitAttempts = 0, bridgeInitScheduled = false;
+  let state = { enabled: true, activeScope: "project", scopes: { project: { name: "Current Project", projectRoot: "", memoryDir: "", memories: [] }, global: { name: "Global", memoryDir: "", memories: [] } } };
+  let uiState = { query: "", type: "all", isSearchMode: false, searchQuery: "" };
+  const $ = (id) => document.getElementById(id);
+
+  /* ═══════ Simple Markdown Renderer ═══════ */
+  function renderMarkdown(text) {
+    if (!text) return '';
+    var html = text;
+    // Escape HTML first
+    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Code blocks (```)
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="md-code-block"><code>$2</code></pre>');
+    // Inline code (`)
+    html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+    // Headers
+    html = html.replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>');
+    html = html.replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
+    // Bold
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Italic
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // Unordered lists
+    html = html.replace(/^- (.+)$/gm, '<li class="md-li">$1</li>');
+    // Wrap consecutive li elements in ul
+    html = html.replace(/((?:<li class="md-li">.*<\/li>\s*)+)/g, '<ul class="md-ul">$1</ul>');
+    // Ordered lists
+    html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-li">$1</li>');
+    // Links
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link">$1</a>');
+    // Horizontal rules
+    html = html.replace(/^---$/gm, '<hr class="md-hr">');
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     SETTINGS MAP, HTML control ID → Python settings dotted path
+     Maps every <input/select/textarea/toggle> ID in the HTML to
+     the corresponding key in ~/.cortex/settings.json.
+     ═══════════════════════════════════════════════════════════════ */
+  const SETTINGS_MAP = {
+    /* General */
+    restoreSession: "memory.restore_session",
+    checkUpdates: "ui.check_updates",
+    notifications: "notifications.task_complete_enabled",
+    soundAlerts: "notifications.sound_alerts",
+    telemetry: "ui.telemetry",
+
+    /* Appearance, Editor */
+    theme: "theme",
+    editorFontSize: "editor.font_size",
+    editorFont: "editor.font_family",
+    colorTheme: "ui.color_theme",
+    tabSize: "editor.tab_size",
+    wordWrap: "editor.word_wrap",
+    minimap: "editor.minimap",
+
+    /* Appearance, Interface */
+    sidebarPosition: "layout.sidebar_position",
+    chatPosition: "layout.chat_position",
+    chatActivity: "ui.chat_activity",
+
+    /* Models & Providers */
+    defaultModel: "ai.model",
+    openaiKey: "ai.openai_key",
+    deepseekKey: "ai.deepseek_key",
+    mimoKey: "ai.mimo_key",
+    openrouterKey: "ai.openrouter_key",
+    alibabaKey: "ai.alibaba_key",
+    googleKey: "ai.google_key",
+    kimiKey: "ai.kimi_key",
+    siliconflowKey: "ai.siliconflow_key",
+    /* Personalization */
+    systemInstructions: "ai.system_instructions",
+    verbosity: "ai.verbosity",
+    codeStyle: "ai.code_style",
+    rememberConvos: "memory.remember_conversations",
+    contextWindow: "ai.context_window",
+
+    /* Safety & Permissions */
+    allowFileCreate: "safety.allow_file_create",
+    allowFileDelete: "safety.allow_file_delete",
+    allowTerminal: "safety.allow_terminal",
+    requireApproval: "safety.require_approval",
+    privacyMode: "safety.privacy_mode",
+    localOnly: "safety.local_only",
+    agenticLoopMode: "ai.agentic_loop_mode",
+
+    /* Git */
+    autoCommit: "git.auto_commit",
+    commitPrefix: "git.commit_prefix",
+    defaultBranch: "git.default_branch",
+
+    /* Terminal */
+    defaultShell: "terminal.default_shell",
+    shellArgs: "terminal.shell_args",
+    termFont: "terminal.font_family",
+    termFontSize: "terminal.font_size",
+    scrollback: "terminal.scrollback",
+    cursorStyle: "terminal.cursor_style",
+    copyOnSelect: "terminal.copy_on_select",
+
+    /* Network */
+    requestTimeout: "ai.request_timeout",
+    proxy: "network.proxy",
+  };
+
+  /* Reverse map: dotted path → control ID (for quick lookup) */
+  const _pathToId = {};
+  for (const [id, path] of Object.entries(SETTINGS_MAP)) _pathToId[path] = id;
+
+  /* ═══════ Bridge helpers ═══════ */
+  function resolveBridgeMethod(obj, names) { for (const n of names) { if (obj && typeof obj[n] === "function") return obj[n].bind(obj); } return null; }
+  function callBridge(methodNames, args = [], timeoutMs = 6000) {
+    const names = Array.isArray(methodNames) ? methodNames : [methodNames];
+    return new Promise((resolve, reject) => {
+      const fn = resolveBridgeMethod(bridge, names);
+      if (!fn) return reject(new Error("Bridge unavailable: " + names.join(", ")));
+      let settled = false;
+      const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error("Timeout: " + names[0])); } }, timeoutMs);
+      try { fn(...args, (r) => { if (!settled) { settled = true; clearTimeout(timer); resolve(r); } }); } catch (e) { if (!settled) { settled = true; clearTimeout(timer); reject(e); } }
+    });
+  }
+
+  /* Run fn once the QWebChannel bridge is connected. `bridge` is assigned
+     asynchronously by the QWebChannel callback, and in compiled builds
+     QtWebEngine can take longer than any fixed delay to connect, a missed
+     one-shot retry left saved API keys looking empty ("Paste key...") and
+     provider toggles at defaults even though Credential Manager had the
+     keys. Poll 200ms up to 20s, then run fn anyway so the no-bridge
+     fallbacks (standalone/demo mode) still apply. */
+  function whenBridgeReady(fn, attempt = 0) {
+    if (bridge || attempt >= 100) { fn(); return; }
+    setTimeout(() => whenBridgeReady(fn, attempt + 1), 200);
+  }
+
+  /* ═══════ Section Nav ═══════ */
+  function switchSection(id) {
+    document.querySelectorAll(".settings-section").forEach(s => s.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+    const sec = document.querySelector('.settings-section[data-section="' + id + '"]');
+    const nav = document.querySelector('.nav-item[data-section="' + id + '"]');
+    if (sec) sec.classList.add("active");
+    if (nav) nav.classList.add("active");
+    // Load skills when the Skills section is shown. Loading on open (not
+    // at startup) keeps the list current, since skills can be added or
+    // edited on disk while this window is sitting there.
+    if (id === 'skills' && bridge) loadSkills();
+    // Telegram state lives in settings + KeyManager, so read it on open
+    // rather than at startup: the pairing state can change while this
+    // window is open (the code expires, or /pair arrives).
+    if (id === 'telegram' && bridge) loadTelegram();
+    // Fetch version when About section is shown
+    if (id === 'about' && bridge) {
+      callBridge(["getVersion"], []).then(v => {
+        const el = $("appVersion");
+        if (el && v) el.textContent = "Version " + v;
+      }).catch(() => {});
+    }
+  }
+
+  /* ═══════ Upgrade Modal ═══════ */
+  function showUpgradeModal() { $("upgradeModal").classList.remove("hidden"); }
+  function hideUpgradeModal() { $("upgradeModal").classList.add("hidden"); }
+
+  /* ═══════ Toast ═══════ */
+  function showToast(msg, ms = 2500) {
+    const host = $("toastHost"), t = document.createElement("div");
+    t.textContent = msg;
+    Object.assign(t.style, { background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "10px 18px", color: "var(--text)", fontSize: "13px", marginTop: "8px", boxShadow: "0 8px 24px rgba(0,0,0,.3)", animation: "fadeInSection .2s ease", fontFamily: "var(--font-ui)" });
+    host.appendChild(t);
+    setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .3s"; setTimeout(() => t.remove(), 300); }, ms);
+  }
+
+  /* In-page replacement for the native confirm().
+     QtWebEngine renders window.confirm as an OS dialog: full app width,
+     the raw file:///C:/Program Files/WindowsApps/... path in its title
+     bar, and no styling hook, so light mode showed dark text on a dark
+     card. Returns a Promise<boolean>, so callers must await it.
+     Enter confirms, Escape and a click on the backdrop cancel. */
+  function askConfirm(message, { title = "Are you sure?", okLabel = "Confirm", danger = false } = {}) {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal-overlay";
+      overlay.innerHTML =
+        `<div class="confirm-card" role="alertdialog" aria-modal="true">` +
+        `<h3>${esc(title)}</h3><p>${esc(message)}</p>` +
+        `<div class="confirm-actions">` +
+        `<button class="confirm-btn" data-act="cancel">Cancel</button>` +
+        `<button class="confirm-btn${danger ? " danger" : ""}" data-act="ok">${esc(okLabel)}</button>` +
+        `</div></div>`;
+
+      let done = false;
+      const close = (result) => {
+        if (done) return;           // Enter plus a click must not resolve twice
+        done = true;
+        document.removeEventListener("keydown", onKey, true);
+        overlay.remove();
+        resolve(result);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); close(false); }
+        else if (e.key === "Enter") { e.preventDefault(); close(true); }
+      };
+
+      overlay.addEventListener("click", (e) => {
+        const act = e.target.closest("[data-act]");
+        if (act) close(act.dataset.act === "ok");
+        else if (e.target === overlay) close(false);   // backdrop click cancels
+      });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(overlay);
+      overlay.querySelector('[data-act="ok"]').focus();
+    });
+  }
+
+  /* ═══════ Skills ═══════
+     Same list AI > Browse Skills shows, from the same list_skills() in
+     agent_bridge, so the two can never disagree about what exists or
+     what is on. */
+  let _skills = [];
+  let _skillOrder = null;   // ranked names while searching, null = show all
+  let _skillQuery = "";
+  let _skillSeq = 0;        // guards against an older search landing last
+  let _skillTimer = null;
+
+  function renderSkills() {
+    const host = $("skillsList");
+    if (!host) return;
+    if (!_skills.length) {
+      host.innerHTML = '<p class="skills-empty">No skills found.</p>';
+      return;
+    }
+    // While searching, show the ranked subset. Names come back best-first
+    // and are mapped onto the objects already held here, so the toggle
+    // states stay exactly as known.
+    const byName = new Map(_skills.map(s => [s.name, s]));
+    const visible = _skillOrder
+      ? _skillOrder.map(n => byName.get(n)).filter(Boolean)
+      : _skills;
+    // Cost counts every enabled skill, not just the visible ones: a
+    // filtered-out skill is still sent with each request.
+    const on = _skills.filter(s => s.active);
+    const cost = $("skillsCost");
+    if (cost) {
+      // An enabled skill is pasted into every request, so show what the
+      // current selection actually costs rather than a generic warning.
+      const chars = on.reduce((n, s) => n + (s.chars || 0), 0);
+      cost.textContent = on.length
+        ? `${on.length} skill${on.length > 1 ? "s" : ""} enabled, about ${Math.round(chars / 4).toLocaleString()} tokens added to every request.`
+        : "No skills enabled. An enabled skill is added to every request.";
+    }
+    if (!visible.length) {
+      host.innerHTML = `<p class="skills-empty">No skills match &ldquo;${esc(_skillQuery)}&rdquo;.</p>`;
+      return;
+    }
+    host.innerHTML = visible.map(s => {
+      const tags = (s.tags || []).slice(0, 3).map(t => `<span class="skill-tag">${esc(t)}</span>`).join("");
+      return `<div class="skill-row">
+        <div class="skill-info">
+          <div class="skill-name">${esc(s.name)}${s.source === "bundled" ? '<span class="skill-src">bundled</span>' : ""}</div>
+          <div class="skill-desc">${esc(s.description || "")}</div>
+          <div class="skill-meta">${tags}</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" data-skill="${esc(s.name)}"${s.active ? " checked" : ""}>
+          <span class="switch-slider"></span>
+        </label>
+      </div>`;
+    }).join("");
+
+    host.querySelectorAll("input[data-skill]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const name = cb.dataset.skill;
+        cb.disabled = true;
+        callBridge(["toggleSkill"], [name]).then(raw => {
+          const r = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
+          cb.disabled = false;
+          if (!r.ok) {
+            // Snap back to the real state instead of leaving the switch
+            // showing something the agent will not actually do.
+            cb.checked = !cb.checked;
+            showToast("Could not change " + name);
+            return;
+          }
+          cb.checked = !!r.active;
+          const hit = _skills.find(s => s.name === name);
+          if (hit) hit.active = !!r.active;
+          renderSkills();
+          showToast(`${name} ${r.active ? "enabled" : "disabled"}`);
+        }).catch(() => {
+          cb.disabled = false;
+          cb.checked = !cb.checked;
+          showToast("Could not change " + name);
+        });
+      });
+    });
+  }
+
+  /* Ranking is done by src/ui/skill_search.py, the same one the rest of
+     the app uses, so results here match what a skill search gives
+     anywhere else. Only the ranked names come back; the objects are
+     already here. */
+  function runSkillSearch() {
+    const q = _skillQuery.trim();
+    if (!q) { _skillOrder = null; renderSkills(); return; }
+    const seq = ++_skillSeq;
+    callBridge(["searchSkills"], [q]).then(raw => {
+      // A slower earlier keystroke must not overwrite a newer result.
+      if (seq !== _skillSeq) return;
+      _skillOrder = typeof raw === "string" ? JSON.parse(raw || "[]") : (raw || []);
+      renderSkills();
+    }).catch(() => { if (seq === _skillSeq) { _skillOrder = []; renderSkills(); } });
+  }
+
+  function onSkillSearchInput(value) {
+    _skillQuery = value || "";
+    // Coalesce keystrokes: one ranking per pause, not one per character.
+    if (_skillTimer) clearTimeout(_skillTimer);
+    _skillTimer = setTimeout(runSkillSearch, 120);
+  }
+
+  function loadSkills() {
+    callBridge(["listSkills"], []).then(raw => {
+      _skills = typeof raw === "string" ? JSON.parse(raw || "[]") : (raw || []);
+      // Re-apply an active query so a Refresh does not silently drop it.
+      if (_skillQuery.trim()) runSkillSearch(); else renderSkills();
+    }).catch(() => {
+      const host = $("skillsList");
+      if (host) host.innerHTML = '<p class="skills-empty">Could not load skills.</p>';
+    });
+  }
+
+  /* ═══════ Helpers ═══════ */
+  function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+  function timeAgo(ts) { const d = Date.now() - new Date(ts).getTime(); if (d < 60000) return "just now"; if (d < 3600000) return Math.floor(d / 60000) + "m ago"; if (d < 86400000) return Math.floor(d / 3600000) + "h ago"; return Math.floor(d / 86400000) + "d ago"; }
+
+  /* Flatten a nested dict into dotted-path keys: {a:{b:1}} → {"a.b":1} */
+  function flattenObj(obj, prefix) {
+    prefix = prefix || "";
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      const path = prefix ? prefix + "." + k : k;
+      if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+        Object.assign(out, flattenObj(v, path));
+      } else {
+        out[path] = v;
+      }
+    }
+    return out;
+  }
+
+  /* "Restart to apply to the chat panel" - shown while the native UI still
+     has the colour theme Cortex started with. */
+  function refreshColorThemeNote() {
+    const note = $("colorThemeRestart");
+    if (!note || !bridge || typeof bridge.colorThemeNeedsRestart !== "function") return;
+    bridge.colorThemeNeedsRestart((r) => { note.style.display = r ? "block" : "none"; });
+  }
+
+  /* Editor / Terminal font family: only fonts installed on this computer
+     (Python's installed_code_fonts, JetBrains Mono first). */
+  function fillCodeFontSelects(families) {
+    if (!Array.isArray(families) || !families.length) return;
+    ["editorFont", "termFont"].forEach((id) => {
+      const sel = $(id);
+      if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = "";
+      families.forEach((fam, i) => {
+        const o = document.createElement("option");
+        o.value = fam;
+        o.textContent = fam;
+        if (i === 0) o.selected = true;
+        sel.appendChild(o);
+      });
+      if (families.includes(keep)) sel.value = keep;
+    });
+  }
+
+  /* ═══════ LIVE SETTINGS HYDRATION ═══════
+     Called once on bridge connect with the full nested settings dict
+     from Python's getSettings(). Iterates SETTINGS_MAP and sets every
+     matching HTML control to its saved value. */
+  function applySettingsFromBridge(data) {
+    if (!data || typeof data !== "object") return;
+    const flat = flattenObj(data);          // e.g. {"editor.font_size": 14, "ai.model": "gpt-4o", ...}
+
+    /* Walk every mapped control */
+    for (const [ctrlId, settingsPath] of Object.entries(SETTINGS_MAP)) {
+      const el = $(ctrlId);
+      if (!el) continue;
+      const val = flat[settingsPath];
+      if (val === undefined || val === null) continue;
+
+      if (el.type === "checkbox") {
+        el.checked = !!val;
+      } else if (el.type === "range") {
+        el.value = val;
+        /* Update the sibling <span class="range-value"> */
+        const valEl = $(ctrlId + "Val");
+        if (valEl) {
+          const unit = valEl.textContent.replace(/[\d.]+/, "");
+          valEl.textContent = val + unit;
+        }
+      } else if (el.tagName === "TEXTAREA") {
+        el.value = val;
+      } else if (el.tagName === "SELECT") {
+        /* A saved value that matches no option made the box render EMPTY
+           (seen on Editor -> Font family: the options were slugs like
+           "jetbrains" while settings held "JetBrains Mono"). Older builds
+           saved those slugs, so map them; otherwise keep the default. */
+        const legacy = { jetbrains: "JetBrains Mono", cascadia: "Cascadia Code",
+                         fira: "Fira Code", consolas: "Consolas" };
+        const want = String(val);
+        const opts = Array.from(el.options).map((o) => o.value);
+        if (opts.includes(want)) el.value = want;
+        else if (legacy[want.toLowerCase()] && opts.includes(legacy[want.toLowerCase()])) el.value = legacy[want.toLowerCase()];
+        /* else: leave the option marked `selected` in the HTML */
+      } else {
+        el.value = val;
+      }
+    }
+
+    /* Theme picker, special case (button group, not a single control).
+       Buttons use data-theme-choice (dataset.themeChoice), NOT data-theme,
+       so light-mode CSS variable selectors never match the button itself. */
+    const theme = flat["theme"];
+    if (theme) {
+      document.querySelectorAll(".theme-option").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.themeChoice === theme);
+      });
+    }
+
+    /* AI model, highlight the matching option if it exists */
+    const model = flat["ai.model"];
+    if (model) {
+      const sel = $("defaultModel");
+      if (sel) {
+        const match = Array.from(sel.options).find(o => o.value === model);
+        if (match) sel.value = model;
+      }
+    }
+
+    console.info("[SETTINGS] Hydrated", Object.keys(SETTINGS_MAP).length, "controls from bridge");
+  }
+
+  /* ═══════ Memory List ═══════ */
+  function renderMemoryList() {
+    const scope = state.scopes[state.activeScope]; if (!scope) return;
+    const list = $("listView"), empty = $("emptyState"), memories = scope.memories || [];
+    console.log('[Memory] renderMemoryList: scope=' + state.activeScope + ', count=' + memories.length);
+    if (memories.length > 0) {
+      console.log('[Memory] First memory:', JSON.stringify(memories[0]).substring(0, 200));
+    }
+    let filtered = memories;
+    if (uiState.query) { const q = uiState.query.toLowerCase(); filtered = filtered.filter(m => (m.title || m.name || "").toLowerCase().includes(q) || (m.content || m.body || "").toLowerCase().includes(q) || (m.source_file || m.filename || "").toLowerCase().includes(q)); }
+    $("countLabel").textContent = filtered.length + " memor" + (filtered.length === 1 ? "y" : "ies");
+    if (filtered.length === 0) { list.innerHTML = ""; if (empty) empty.classList.remove("hidden"); return; }
+    if (empty) empty.classList.add("hidden");
+    list.innerHTML = filtered.map((m, i) => {
+      const title = m.title || m.name || "Untitled";
+      const content = m.content || m.body || "";
+      const type = m.type || "general";
+      const sourceFile = m.source_file || m.filename || "";
+      const age = m.created_at ? timeAgo(m.created_at) : (m.age || "");
+      const sim = m._similarity != null ? '<span style="display:inline-block;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#0e1116;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;margin-right:6px;">' + Math.round(m._similarity * 100) + '%</span>' : "";
+      const keywords = (m.keywords || []).slice(0, 3).map(k => '<span class="memory-keyword">' + esc(k) + '</span>').join("");
+      // Render markdown content as HTML instead of raw text
+      const renderedContent = renderMarkdown(content.slice(0, 2000));
+      const hasMore = content.length > 2000;
+      return `<div class="memory-card">
+        <div class="memory-header">
+          <div class="memory-info">
+            <div class="memory-title">${sim}${esc(title)}</div>
+            <div class="memory-meta">
+              <span class="memory-type">${esc(type)}</span>
+              ${sourceFile ? '<span class="memory-file">' + esc(sourceFile.split(/[\\\/]/).pop()) + '</span>' : ''}
+              ${age ? '<span class="memory-age">' + esc(age) + '</span>' : ''}
+            </div>
+            ${keywords ? '<div class="memory-keywords">' + keywords + '</div>' : ''}
+          </div>
+          <button class="setting-btn danger-btn memory-delete-btn" onclick="window._deleteMemory(${i})">Delete</button>
+        </div>
+        <div class="memory-content">${renderedContent}${hasMore ? '<div class="memory-show-more" onclick="this.previousElementSibling.style.maxHeight=\'none\';this.remove();">Show more...</div>' : ''}</div>
+      </div>`;
+    }).join("");
+  }
+
+  /* ═══════ State Apply (Memory) ═══════ */
+  function applyState(data) {
+    if (!data) return;
+    state.enabled = data.enabled !== false;
+    if (data.scopes) { for (const k of Object.keys(data.scopes)) { if (!state.scopes[k]) state.scopes[k] = { name: k, projectRoot: "", memoryDir: "", memories: [] }; Object.assign(state.scopes[k], data.scopes[k]); } }
+    const toggle = $("enabledToggle"); if (toggle) toggle.checked = state.enabled;
+    const dot = $("statusDot"); if (dot) dot.classList.toggle("enabled", state.enabled);
+    if (data.activeScope) state.activeScope = data.activeScope;
+    document.querySelectorAll(".scope-tab").forEach(t => t.classList.toggle("active", t.dataset.scope === state.activeScope));
+    renderMemoryList();
+  }
+
+  window.receiveMemoryState = function (data) { try { applyState(typeof data === "string" ? JSON.parse(data) : data); window.__memMgrDebug.loaded = true; } catch (e) { console.error("[SETTINGS] parse error:", e); } };
+
+  /* ═══════ Bridge Init ═══════ */
+  function scheduleBridgeInitRetry() { if (bridge || bridgeInitScheduled) return; bridgeInitScheduled = true; setTimeout(() => { bridgeInitScheduled = false; initBridge(); }, 200); }
+  function initBridge() {
+    const transport = (typeof qt !== "undefined" && qt.webChannelTransport) || (typeof window !== "undefined" && window.qt && window.qt.webChannelTransport) || null;
+    if (!transport) { if (++bridgeInitAttempts < 40) scheduleBridgeInitRetry(); return; }
+    try {
+      new QWebChannel(transport, (ch) => {
+        bridge = ch.objects.bridge || ch.objects.cortex_bridge || null;
+        if (!bridge) { const keys = Object.keys(ch.objects || {}); if (keys.length) bridge = ch.objects[keys[0]]; }
+        if (bridge) {
+          console.info("[SETTINGS] Bridge connected");
+          /* Fresh server data (fetched off the GUI thread by Python's
+             refreshServerData), re-run the loaders, which now read the
+             updated cache instantly. refresh=false prevents a loop. */
+          if (bridge.server_data_ready && bridge.server_data_ready.connect) {
+            bridge.server_data_ready.connect(function (kind) {
+              try {
+                if (kind === 'usage') loadUsageStats(false);
+                else loadProfile(false);
+              } catch (e) { console.warn('[SETTINGS] server_data_ready handler:', e); }
+            });
+          }
+          /* Load memory state */
+          const loadFn = bridge.loadInitialData || bridge.getState || bridge.refresh;
+          if (typeof loadFn === "function") loadFn.call(bridge, (s) => window.receiveMemoryState(s));
+          /* Load ALL settings and hydrate every control. The font
+             dropdowns are filled first, from the fonts installed on this
+             computer, so the saved font has an option to select. */
+          const hydrateSettings = () => {
+            if (typeof bridge.getSettings !== "function") return;
+            bridge.getSettings((raw) => {
+              if (!raw) return;
+              try {
+                const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+                applySettingsFromBridge(data);
+                refreshColorThemeNote();
+              } catch (e) { console.error("[SETTINGS] getSettings parse error:", e); }
+            });
+          };
+          if (typeof bridge.listCodeFonts === "function") {
+            bridge.listCodeFonts((raw) => {
+              try { fillCodeFontSelects(JSON.parse(raw || "[]")); }
+              catch (e) { console.warn("[SETTINGS] listCodeFonts:", e); }
+              hydrateSettings();
+            });
+          } else {
+            hydrateSettings();
+          }
+          /* Apply current theme from Python.
+             getTheme() returns the RAW setting (dark/light/system), used
+             only to highlight which button is active. "system" is not a
+             CSS state and must never be written to data-theme directly: it
+             matches no CSS rule, so the page silently fell back to
+             whatever the default look was regardless of actual OS
+             preference (the "System picks dark even in light mode" bug).
+             getResolvedTheme() always returns the real dark/light
+             appearance to draw, resolving "system" via the OS preference
+             the same way every other panel does. */
+          if (typeof bridge.getTheme === "function") {
+            bridge.getTheme((theme) => {
+              if (theme) {
+                document.querySelectorAll(".theme-option").forEach(b => {
+                  b.classList.toggle("active", b.dataset.themeChoice === theme);
+                });
+                console.info("[SETTINGS] Theme setting:", theme);
+              }
+            });
+          }
+          if (typeof bridge.getResolvedTheme === "function") {
+            bridge.getResolvedTheme((resolved) => {
+              if (resolved === "dark" || resolved === "light") {
+                document.documentElement.setAttribute("data-theme", resolved);
+                console.info("[SETTINGS] Theme appearance:", resolved);
+              }
+            });
+          } else if (typeof bridge.getTheme === "function") {
+            /* Fallback for older bridges without getResolvedTheme */
+            bridge.getTheme((theme) => {
+              if (theme === "dark" || theme === "light") {
+                document.documentElement.setAttribute("data-theme", theme);
+              }
+            });
+          }
+          /* Load profile and usage data after bridge connects */
+          loadProfile();
+          loadUsageStats();
+        }
+      });
+    } catch (e) { if (++bridgeInitAttempts < 20) scheduleBridgeInitRetry(); }
+  }
+
+  /* A plan name outlives the billing period, so "plan is pro" does not mean
+     "entitled". Usage & Billing already checked sub.expired; the Profile
+     header did not, which is how one expired account showed "Pro" on one
+     screen and "Free" on the other. Both Profile paths use this now. */
+  function planLabel(src) {
+    if (!src) return 'Free';
+    const names = { 'pro': 'Pro', 'pro_yearly': 'Pro (Yearly)', 'starter': 'Starter', 'free': 'Free' };
+    const status = String(src.subscription_status || '').toLowerCase();
+    const endMs = src.subscription_period_end ? Date.parse(src.subscription_period_end) : NaN;
+    const expired = !!src.subscription_expired
+      || (status && !['active', 'trialing'].includes(status))
+      || (!isNaN(endMs) && endMs < Date.now());
+    const plan = String(src.plan || '').toLowerCase();
+    if (expired || !plan || plan === 'none' || plan === 'free') return 'Free';
+    return src.plan_display || names[plan] || src.plan;
+  }
+
+  /* ═══════ Persist a setting via bridge ═══════
+     Sends the dotted path (e.g. "editor.font_size") to Python's setSetting(). */
+  function persistSetting(ctrlId, value) {
+    const settingsPath = SETTINGS_MAP[ctrlId];
+    if (!settingsPath) return; // unmapped control, skip
+    if (bridge && typeof bridge.setSetting === "function") {
+      bridge.setSetting(settingsPath, String(value));
+    }
+  }
+
+  window._deleteMemory = function (idx) {
+    const scope = state.scopes[state.activeScope]; if (!scope || !scope.memories[idx]) return;
+    const mem = scope.memories[idx];
+    // Prefer full absolute path (mem.path) over relative filename
+    const deletePath = mem.path || mem.filename || mem.source_file || mem.id || idx;
+    console.log('[Memory] _deleteMemory: idx=' + idx + ', deletePath=' + deletePath);
+    callBridge(["deleteMemory", "delete_memory"], [state.activeScope, deletePath])
+      .then((newState) => {
+        // Use the state returned by the bridge (re-reads from disk)
+        if (newState) {
+          try {
+            window.receiveMemoryState(typeof newState === "string" ? JSON.parse(newState) : newState);
+          } catch (e) { console.error('[Memory] delete refresh parse error:', e); }
+        }
+        showToast("Memory deleted");
+      })
+      .catch((err) => {
+        console.error('[Memory] _deleteMemory bridge error:', err);
+        showToast("Delete failed");
+        // Refresh from bridge to sync state
+        if (bridge) {
+          callBridge(["refresh", "refreshMemories", "loadInitialData"], [])
+            .then((s) => { if (s) window.receiveMemoryState(typeof s === "string" ? JSON.parse(s) : s); })
+            .catch(() => {});
+        }
+      });
+  };
+
+  /* ═══════════ Telegram ═══════════
+     These controls deliberately stay out of SETTINGS_MAP. Python's
+     setSetting() splits a dotted key on the FIRST dot only, so a nested path
+     such as telegram.quiet_hours.start would be stored under a key literally
+     named "quiet_hours.start". The token is different again: it goes to
+     KeyManager, never to settings.json. So this section sends one JSON
+     payload and lets telegram_config decide where each part belongs. */
+
+  const TG_EVENT_IDS = {
+    started: "tgEvStarted",
+    blocked: "tgEvBlocked",
+    finished: "tgEvFinished",
+    failed: "tgEvFailed",
+  };
+
+  /* Reads after "Valid ...". The keys mirror PAIR_EXPIRY_OPTIONS in
+     src/services/telegram_config.py; an unknown key falls back to "for 1 hour". */
+  const TG_EXPIRY_PHRASE = {
+    "60m": "for 1 hour",
+    "24h": "for 24 hours",
+    "7d": "for 7 days",
+    "30d": "for 30 days",
+    "90d": "for 90 days",
+    unlimited: "until you cancel it",
+  };
+
+  /* The token itself never reaches the page. A saved one is displayed as a
+     static mask rather than in a filled field, so there is no caret, no focus
+     ring, and no secret sitting in the DOM waiting to be read back. */
+
+  /* True once the page has actually read the saved value. A switch that was
+     never populated must not be written back: an unrelated toggle on a page
+     whose load failed would otherwise report "off" for a setting the user has
+     on, and turn it off silently. */
+  let tgInboundKnown = false;
+  let tgSummaryKnown = false;
+  /* Mirrors getTelegramSettings().hasToken, so Save can tell "nothing typed"
+     apart from "user wants the token gone". */
+  let tgHasToken = false;
+  /* Mirrors getTelegramSettings().paired so the status card can be redrawn when
+     a toggle changes without re-reading the bridge. */
+  let tgPaired = false;
+  /* Telegram ships with the subscription, exactly like OCR and web search, so
+     this mirrors the one check the app makes (has_subscription()) and nothing
+     else. Defaults to allowed so a bridge that predates the field can never
+     lock a subscriber out of their own settings. */
+  let tgSubscribed = true;
+
+  /* Everything that would reach a bridge method the monitor refuses anyway.
+     Unpair and Remove bot are deliberately absent: cleaning up an account is
+     never something to block. */
+  const TG_LOCKED_IDS = [
+    "tgEnabled", "tgEvStarted", "tgEvBlocked", "tgEvFinished",
+    "tgQuietEnabled", "tgQuietStart", "tgQuietEnd",
+    "tgPairExpiry", "tgPairReusable", "tgInbound", "tgSummary",
+    "tgToken", "tgTokenChange", "tgSaveToken", "tgTokenCancel",
+    "tgPair", "tgTest",
+  ];
+
+  /* Inline feedback belongs next to the control that produced it. Every
+     message used to be written into the pairing hint, so a failed token save
+     showed up two cards below the Save button and read as a pairing problem. */
+  function setNote(id, text, kind) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.remove("is-error", "is-ok");
+    if (kind === "error") el.classList.add("is-error");
+    else if (kind === "ok") el.classList.add("is-ok");
+  }
+
+  function tgHint(text, isError) {
+    setNote("tgPairHint", text, isError ? "error" : "");
+  }
+
+  function tgTokenHint(text, isError) {
+    setNote("tgTokenHint", text, isError ? "error" : "");
+  }
+
+  /* One step carries "next" at a time, so the strip reads as a direction
+     instead of three equal badges. */
+  function tgSetStep(name, state) {
+    const el = document.querySelector('.tg-step[data-step="' + name + '"]');
+    if (!el) return;
+    el.classList.remove("is-done", "is-next");
+    if (state) el.classList.add(state);
+  }
+
+  function setPairCode(value) {
+    const el = $("tgPairCode");
+    if (!el) return;
+    el.textContent = value || "--------";
+    el.classList.toggle("is-set", !!value);
+  }
+
+  /* The status card is the only place that answers "where am I", so it is
+     written from the three real states rather than inferred per card. */
+  function renderTelegramStatus(hasToken, paired, inbound) {
+    const card = $("tgStatus");
+    if (card) card.classList.toggle("is-live", !!tgSubscribed && !!(hasToken && paired));
+    if (card) card.classList.toggle("is-locked", !tgSubscribed);
+
+    let heading = "Not connected";
+    let detail = "Paste a token from BotFather below. Nothing is sent until you do.";
+    if (!tgSubscribed) {
+      /* The plan wins over every other state: a locked account has nothing to
+         do here until the subscription is back, whether or not a token or chat
+         exists. One sentence, because there is one reason. */
+      heading = "Needs a subscription";
+      detail = "Telegram is included with Cortex Pro. Upgrade from Help -> Upgrade to Pro, then reopen this page.";
+    } else if (hasToken && !paired) {
+      heading = "Token saved, no chat paired";
+      detail = "Show a code, then send /pair CODE to your bot from the phone.";
+    } else if (hasToken && paired) {
+      heading = "Connected";
+      detail = inbound
+        ? "Reports arrive on your phone, and prompts you send there run on this PC."
+        : "Reports arrive on your phone. Prompts are off, so messages you send are ignored.";
+    }
+
+    const title = $("tgStatusTitle");
+    if (title) title.textContent = heading;
+    const text = $("tgStatusText");
+    if (text) text.textContent = detail;
+
+    /* A locked section has no next step, so the strip goes quiet instead of
+       pointing at a control that cannot be pressed. */
+    tgSetStep("token", !tgSubscribed ? "" : hasToken ? "is-done" : "is-next");
+    tgSetStep("pair", !tgSubscribed ? "" : paired ? "is-done" : hasToken ? "is-next" : "");
+    tgSetStep("prompts", !tgSubscribed ? "" : !paired ? "" : inbound ? "is-done" : "is-next");
+  }
+
+  /* Two rows only mean something while the switch above them is on: the answer
+     is appended to a finished message, and a quiet window needs quiet hours.
+     They are disabled rather than merely dimmed, so a keyboard user cannot
+     change a value that nothing reads. */
+  function refreshTelegramDependents() {
+    const pairs = [
+      ["tgEvFinished", "tgSummaryRow", ["tgSummary"]],
+      ["tgQuietEnabled", "tgQuietWindow", ["tgQuietStart", "tgQuietEnd"]],
+    ];
+    pairs.forEach(([parentId, rowId, controlIds]) => {
+      const parent = $(parentId);
+      const row = $(rowId);
+      if (!parent || !row) return;
+      const off = !parent.checked || !tgSubscribed;
+      row.classList.toggle("is-off", off);
+      controlIds.forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = off;
+      });
+    });
+  }
+
+  /* A locked section is inert, not merely dimmed: the controls are disabled so
+     a click cannot reach a bridge method that would refuse it anyway. Cleanup
+     (Unpair, Remove bot) stays live, because taking access away is always safe. */
+  function applyTelegramLock() {
+    TG_LOCKED_IDS.forEach((id) => {
+      const el = $(id);
+      if (el) el.disabled = !tgSubscribed;
+    });
+    refreshTelegramDependents();
+  }
+
+  /* A saved token is shown, not edited. Rendering it as a static mask means the
+     field only exists while a new token is being pasted, so a stored one can
+     never be clicked into and no caret or focus ring appears over a value the
+     user is not changing. */
+  function applyTokenMode(hasToken, editing) {
+    const saved = $("tgTokenSaved");
+    const edit = $("tgTokenEdit");
+    const cancel = $("tgTokenCancel");
+    const field = $("tgToken");
+    const showSaved = !!hasToken && !editing;
+    if (saved) saved.hidden = !showSaved;
+    if (edit) edit.hidden = showSaved;
+    /* Cancel only makes sense while a token is still stored: with nothing to go
+       back to it would just be a second, quieter Save. */
+    if (cancel) cancel.hidden = !hasToken;
+    if (field) field.value = "";
+  }
+
+  function applyTelegramSettings(data) {
+    if (!data || typeof data !== "object") return;
+    const enabled = $("tgEnabled");
+    if (enabled) enabled.checked = !!data.enabled;
+    const events = data.events || [];
+    for (const [name, id] of Object.entries(TG_EVENT_IDS)) {
+      const el = $(id);
+      if (el) el.checked = events.includes(name);
+    }
+    const quiet = $("tgQuietEnabled");
+    if (quiet) quiet.checked = !!data.quietEnabled;
+    if (data.quietStart && $("tgQuietStart")) $("tgQuietStart").value = data.quietStart;
+    if (data.quietEnd && $("tgQuietEnd")) $("tgQuietEnd").value = data.quietEnd;
+
+    /* Only trust a value the <select> actually offers, or the browser blanks
+       the control and the user sees an empty dropdown. */
+    const expiry = $("tgPairExpiry");
+    if (expiry) {
+      const wanted = String(data.pairExpiry || "60m");
+      const offered = Array.from(expiry.options).map((option) => option.value);
+      expiry.value = offered.includes(wanted) ? wanted : "60m";
+    }
+    const reusable = $("tgPairReusable");
+    if (reusable) reusable.checked = !!data.pairReusable;
+    const inbound = $("tgInbound");
+    if (inbound) inbound.checked = !!data.inbound;
+    /* Defaults to on, which is what the server does for a missing key. */
+    const summary = $("tgSummary");
+    if (summary) summary.checked = data.summaryEnabled !== false;
+
+    /* The token itself is never sent back to the page. A saved one renders as a
+       static mask, so the page never holds the secret and there is nothing to
+       type into until Change is pressed. */
+    tgHasToken = !!data.hasToken;
+    tgPaired = !!data.paired;
+    /* Absent means a bridge that predates the field: allow, so a subscriber is
+       never locked out by a page that simply does not know about plans. */
+    tgSubscribed = data.subscribed !== false;
+    applyTokenMode(tgHasToken, false);
+    /* The saved state lives in the status card now, so a reload must not leave
+       a stale error from an earlier attempt sitting under the pairing row. */
+    tgHint("", false);
+    tgTokenHint("", false);
+    renderTelegramStatus(tgHasToken, !!data.paired, !!data.inbound);
+    applyTelegramLock();
+    tgInboundKnown = true;
+    tgSummaryKnown = true;
+  }
+
+  function loadTelegram() {
+    callBridge(["getTelegramSettings"], [])
+      .then((raw) => applyTelegramSettings(typeof raw === "string" ? JSON.parse(raw) : raw))
+      .catch(() => {
+        const title = $("tgStatusTitle");
+        if (title) title.textContent = "Status unavailable";
+        const text = $("tgStatusText");
+        if (text) text.textContent = "The saved bot settings could not be read. Reopen this page to try again.";
+      });
+  }
+
+  function saveTelegramSettings() {
+    const events = Object.entries(TG_EVENT_IDS)
+      .filter(([, id]) => $(id) && $(id).checked)
+      .map(([name]) => name);
+    const payload = {
+      enabled: !!($("tgEnabled") && $("tgEnabled").checked),
+      events: events,
+      quietEnabled: !!($("tgQuietEnabled") && $("tgQuietEnabled").checked),
+      quietStart: $("tgQuietStart") ? $("tgQuietStart").value : "22:00",
+      quietEnd: $("tgQuietEnd") ? $("tgQuietEnd").value : "07:00",
+      pairExpiry: $("tgPairExpiry") ? $("tgPairExpiry").value : "60m",
+      pairReusable: !!($("tgPairReusable") && $("tgPairReusable").checked),
+    };
+    if (tgInboundKnown) {
+      payload.inbound = !!($("tgInbound") && $("tgInbound").checked);
+    }
+    /* Same guard, same reason: never write a switch this page never read. */
+    if (tgSummaryKnown) {
+      payload.summaryEnabled = !!($("tgSummary") && $("tgSummary").checked);
+    }
+    callBridge(["saveTelegramSettings"], [JSON.stringify(payload)])
+      .then((result) => showToast(result === "ok" ? "Telegram settings saved" : "Could not save Telegram settings"))
+      .catch(() => showToast("Could not save Telegram settings"));
+  }
+
+  /* ═══════════ DOM READY ═══════════ */
+  document.addEventListener("DOMContentLoaded", () => {
+
+    /* ── Nav ── */
+    document.querySelectorAll(".nav-item[data-section]").forEach(btn => btn.addEventListener("click", () => switchSection(btn.dataset.section)));
+    $("backBtn")?.addEventListener("click", () => { if (bridge && typeof bridge.onSettingsClosed === "function") bridge.onSettingsClosed(); else if (bridge && typeof bridge.closeSettings === "function") bridge.closeSettings(); else { window.history.back(); } });
+
+    $("skillsRefreshBtn")?.addEventListener("click", () => { loadSkills(); showToast("Skills reloaded"); });
+    $("skillsFolderBtn")?.addEventListener("click", () => {
+      callBridge(["openSkillsFolder"], []).then(path => {
+        showToast(path ? "Drop a folder with a SKILL.md here" : "Could not open the skills folder");
+      }).catch(() => showToast("Could not open the skills folder"));
+    });
+    $("skillsSearch")?.addEventListener("input", (e) => onSkillSearchInput(e.target.value));
+    $("skillsSearch")?.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.target.value = ""; onSkillSearchInput(""); }
+    });
+
+    /* ── Telegram ── */
+    ["tgEnabled", "tgEvStarted", "tgEvBlocked", "tgEvFinished", "tgEvFailed",
+     "tgQuietEnabled", "tgQuietStart", "tgQuietEnd",
+     "tgPairExpiry", "tgPairReusable", "tgInbound", "tgSummary"].forEach((id) => {
+      $(id)?.addEventListener("change", () => saveTelegramSettings());
+    });
+
+    /* Turning prompts on is step 3, so the strip has to follow the switch
+       without waiting for a reload. Nothing is redrawn before pairing, because
+       step 3 does not apply yet. */
+    $("tgInbound")?.addEventListener("change", (event) => {
+      if (!tgPaired) return;
+      renderTelegramStatus(tgHasToken, tgPaired, !!event.target.checked);
+    });
+
+    /* The dependent row has to follow its parent switch immediately; waiting
+       for a reload would leave it dim and dead for a beat after the click. */
+    ["tgEvFinished", "tgQuietEnabled"].forEach((id) => {
+      $(id)?.addEventListener("change", refreshTelegramDependents);
+    });
+
+    /* Change is the only way to reach the field once a token exists, so the
+       saved state cannot be typed into by accident. Cancel puts the mask back
+       without touching what is stored. */
+    $("tgTokenChange")?.addEventListener("click", () => {
+      applyTokenMode(tgHasToken, true);
+      $("tgToken")?.focus();
+    });
+
+    $("tgTokenCancel")?.addEventListener("click", () => {
+      applyTokenMode(tgHasToken, false);
+      tgTokenHint("", false);
+    });
+
+    $("tgSaveToken")?.addEventListener("click", () => {
+      const field = $("tgToken");
+      const typed = field ? field.value.trim() : "";
+      /* An empty field never reaches the bridge. saveTelegramToken("")
+         clears the vault, so a stray click on Save would delete a stored
+         token with no warning. Removal has its own button, Remove bot,
+         which says so before it does anything. */
+      if (!typed) {
+        if (tgHasToken) {
+          tgTokenHint("A token is already saved. Paste a new one to replace it, or use Remove bot to delete it.", false);
+        } else {
+          tgTokenHint("Paste a token from BotFather first.", true);
+        }
+        return;
+      }
+      callBridge(["saveTelegramToken"], [typed]).then((result) => {
+        if (result === "ok") {
+          tgHasToken = true;
+          applyTokenMode(true, false);
+          tgTokenHint("", false);
+          showToast("Token saved");
+          loadTelegram();
+        } else if (result === "invalid") {
+          tgTokenHint("That does not look like a BotFather token.", true);
+        } else {
+          tgTokenHint("Could not save the token.", true);
+        }
+      }).catch(() => tgTokenHint("Could not save the token.", true));
+    });
+
+    $("tgPair")?.addEventListener("click", () => {
+      callBridge(["startTelegramPairing"], [], 20000).then((result) => {
+        /* A refusal arrives as a marker, so it can name the real reason. An
+           empty answer would make every case look like a missing token. */
+        if (result === "!already-paired") {
+          tgHint(
+            "A chat is already paired. Unpair it first if you want to move Cortex to another chat.",
+            true
+          );
+          return;
+        }
+        if (result === "!no-token") {
+          tgHint("Add a bot token first.", true);
+          return;
+        }
+        if (result === "!no-subscription") {
+          tgHint("Telegram needs a Cortex subscription. Upgrade from Help -> Upgrade to Pro.", true);
+          return;
+        }
+        if (!result) {
+          tgHint("Could not start pairing.", true);
+          return;
+        }
+        const code = result;
+        setPairCode(code);
+        /* Describe what the Python side was actually told to do. The policy
+           controls are saved the moment they change, so reading them here is
+           accurate rather than optimistic. */
+        const expiry = $("tgPairExpiry") ? $("tgPairExpiry").value : "60m";
+        const phrase = TG_EXPIRY_PHRASE[expiry] || TG_EXPIRY_PHRASE["60m"];
+        const reusable = !!($("tgPairReusable") && $("tgPairReusable").checked);
+        const tail = reusable
+          ? " It keeps working until then, so another device can pair later."
+          : " It works once.";
+        tgHint("Send /pair " + code + " to your bot. Valid " + phrase + "." + tail, false);
+      }).catch(() => tgHint("Could not start pairing.", true));
+    });
+
+    $("tgTest")?.addEventListener("click", () => {
+      callBridge(["testTelegramMessage"], []).then((result) => {
+        if (result === "queued") showToast("Test message queued");
+        else if (result === "unpaired") showToast("Pair a chat first.");
+        else if (result === "!no-subscription") showToast("Telegram needs a Cortex subscription.");
+        else showToast("Could not send the test message.");
+      }).catch(() => showToast("Could not send the test message."));
+    });
+
+    $("tgUnpair")?.addEventListener("click", () => {
+      callBridge(["unpairTelegram"], []).then((result) => {
+        if (result !== "ok") { showToast("Could not unpair."); return; }
+        setPairCode("");
+        showToast("Unpaired");
+        /* The reload re-reads the saved state, so the hint it sets is the
+           truth rather than an optimistic guess made here. */
+        loadTelegram();
+      }).catch(() => tgHint("Could not unpair.", true));
+    });
+
+    $("tgForget")?.addEventListener("click", () => {
+      callBridge(["forgetTelegramBot"], []).then((result) => {
+        if (result !== "ok") { showToast("Could not remove the bot."); return; }
+        setPairCode("");
+        /* Forget bot is now the only way the token leaves the vault, so clear
+           the flag here too; loadTelegram() confirms it either way. */
+        tgHasToken = false;
+        applyTokenMode(false, false);
+        showToast("Bot removed");
+        loadTelegram();
+      }).catch(() => tgHint("Could not remove the bot.", true));
+    });
+
+    /* ── Nav search ── */
+    $("settingsSearch")?.addEventListener("input", (e) => { const q = e.target.value.toLowerCase().trim(); document.querySelectorAll(".nav-item").forEach(btn => { btn.style.display = (!q || btn.textContent.toLowerCase().includes(q)) ? "" : "none"; }); });
+
+    /* ── Theme picker (special, button group, not a single input) ── */
+    document.querySelectorAll(".theme-option").forEach(btn => btn.addEventListener("click", () => {
+      /* data-theme-choice on the button; data-theme only on <html> */
+      const theme = btn.dataset.themeChoice;
+      if (!theme) return;
+
+      /* Update button states */
+      document.querySelectorAll(".theme-option").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+
+      /* Apply theme to this page immediately.
+         "system" is not a CSS state, resolve to the OS preference the same
+         way getResolvedTheme() does, so hover/label colors stay correct. */
+      const resolved =
+        theme === "system"
+          ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark")
+          : theme;
+      if (resolved === "dark" || resolved === "light") {
+        document.documentElement.setAttribute("data-theme", resolved);
+      }
+
+      /* Notify Python to switch the entire IDE theme. setTheme() persists
+         AND applies, do not also call setSetting("theme", ...): "theme"
+         has no dot, so setSetting's dotted-path parser stored it under the
+         orphaned key ui.theme (nothing ever reads that), while setTheme()
+         separately persists the real top-level "theme" key. Every click
+         was writing two divergent copies to settings.json. */
+      /* Dark / Light / System are Cortex's own theme: leave any named
+         colour theme first, so its colours do not stay on top. */
+      const ct = $("colorTheme");
+      if (ct && ct.value !== "cortex") {
+        ct.value = "cortex";
+        persistSetting("colorTheme", "cortex");
+        refreshColorThemeNote();
+      }
+      if (bridge && typeof bridge.setTheme === "function") {
+        bridge.setTheme(theme);
+      } else if (bridge && typeof bridge.setSetting === "function") {
+        /* Fallback only when setTheme is unavailable: at least persist. */
+        bridge.setSetting("theme", theme);
+      }
+
+      /* Show theme switch notification with restart prompt */
+      const themeName =
+        theme === "light" ? "Light Mode" :
+        theme === "system" ? "System" :
+        "Dark Mode";
+      const notification = document.createElement('div');
+      notification.className = 'theme-notification';
+      notification.innerHTML = `
+        <div class="theme-notification-content">
+          <div class="theme-notification-icon">✓</div>
+          <div class="theme-notification-text">
+            <div class="theme-notification-title">Theme Changed to ${themeName}</div>
+            <div class="theme-notification-desc">For the best experience, restart Cortex to apply theme changes to all UI elements.</div>
+          </div>
+          <div class="theme-notification-actions">
+            <button class="theme-notification-dismiss" onclick="this.closest('.theme-notification').remove()">Dismiss</button>
+            <button class="theme-notification-restart" onclick="window._restartIDEForTheme && window._restartIDEForTheme()">Restart Now</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(notification);
+      
+      /* Auto-dismiss after 8 seconds if not interacted */
+      setTimeout(() => {
+        if (notification.parentNode) notification.remove();
+      }, 8000);
+    }));
+    
+    /* Restart IDE for theme change */
+    window._restartIDEForTheme = function() {
+      if (bridge && typeof bridge.restartIDE === 'function') {
+        bridge.restartIDE();
+      } else if (bridge && typeof bridge.restart === 'function') {
+        bridge.restart();
+      } else {
+        showToast('Restart IDE manually for theme changes to take full effect');
+      }
+    };
+
+    /* ── Range sliders, update display label ── */
+    [["editorFontSize", "editorFontSizeVal", "px"], ["termFontSize", "termFontSizeVal", "px"], ["watcherDebounce", "watcherDebounceVal", "ms"], ["requestTimeout", "requestTimeoutVal", "s"]].forEach(([i, v, u]) => { const inp = $(i), val = $(v); if (inp && val) inp.addEventListener("input", () => { val.textContent = inp.value + u; persistSetting(i, inp.value); }); });
+
+    /* ── All toggles, selects, inputs → live persist ── */
+    document.querySelectorAll(".switch input").forEach(t => t.addEventListener("change", () => persistSetting(t.id, t.checked)));
+    document.querySelectorAll(".setting-select").forEach(s => s.addEventListener("change", () => persistSetting(s.id, s.value)));
+    document.querySelectorAll(".setting-input, .setting-textarea").forEach(i => i.addEventListener("blur", () => persistSetting(i.id, i.value)));
+
+    /* ── Color theme: the restart note, and the mode buttons follow it ── */
+    const colorThemeSel = $("colorTheme");
+    if (colorThemeSel) {
+      colorThemeSel.addEventListener("change", () => {
+        /* persistSetting (the generic select handler above) already sent it;
+           Python switches the live surfaces and the dark/light mode. Show
+           that mode here too: the theme decides it. */
+        const v = colorThemeSel.value;
+        if (v !== "cortex") {
+          const base = ["light-plus", "github-light", "solarized-light", "high-contrast-light", "distinct-colors-light"].includes(v) ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme", base);
+          document.querySelectorAll(".theme-option").forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.themeChoice === base);
+          });
+        }
+        setTimeout(refreshColorThemeNote, 300);
+      });
+    }
+
+    /* ── Agentic Loop Mode special handler (show/hide warning) ── */
+    const agenticLoopToggle = $("agenticLoopMode");
+    if (agenticLoopToggle) {
+      agenticLoopToggle.addEventListener("change", () => {
+        persistSetting("agenticLoopMode", agenticLoopToggle.checked);
+        const warning = $("loopModeWarning");
+        if (warning) {
+          warning.style.display = agenticLoopToggle.checked ? "block" : "none";
+        }
+        showToast(agenticLoopToggle.checked ? "Agentic Loop Mode: ON, AI will autonomously iterate" : "Agentic Loop Mode: OFF, Normal mode (explicit prompts)");
+      });
+      /* Show warning on load if already enabled */
+      const warning = $("loopModeWarning");
+      if (warning && agenticLoopToggle.checked) {
+        warning.style.display = "block";
+      }
+    }
+
+    /* ── Default Model: rebuild options from the live model list ──
+       The <select> ships with a static option list baked into the HTML at
+       build time. The chat panel dropdown already iterates
+       get_model_groups() (server-published list first, built-in
+       MODEL_GROUPS as offline fallback); without this rebuild the settings
+       page would never show models added from the admin panel, and a saved
+       server-only model could not even be displayed as selected.
+       Runs once when the bridge connects. On any failure (no bridge, bad
+       JSON, empty list) the static HTML options stay, so the page keeps
+       working offline exactly as before. */
+    function populateDefaultModelSelect() {
+      callBridge(["getModelGroups"], []).then(raw => {
+        let groups = [];
+        try { groups = typeof raw === "string" ? JSON.parse(raw) : (raw || []); } catch (e) { groups = []; }
+        if (!Array.isArray(groups) || groups.length === 0) return;
+        const sel = $("defaultModel");
+        if (!sel) return;
+        const saved = sel.value;   // hydration may have run before us
+        sel.innerHTML = "";
+        groups.forEach(g => {
+          const models = Array.isArray(g.models) ? g.models : [];
+          if (!models.length) return;
+          let parent = sel;
+          if (g.label) {
+            const og = document.createElement("optgroup");
+            og.label = g.label;
+            sel.appendChild(og);
+            parent = og;
+          }
+          models.forEach(m => {
+            const opt = document.createElement("option");
+            opt.value = m.id;
+            opt.textContent = m.desc ? m.name + ", " + m.desc : m.name;
+            parent.appendChild(opt);
+          });
+        });
+        /* Keep the hydrated selection; if hydration runs after us it will
+           find its saved value among the rebuilt options and re-apply. */
+        if (saved && Array.from(sel.options).some(o => o.value === saved)) sel.value = saved;
+      }).catch(() => { /* no bridge (demo mode): static HTML list stays */ });
+    }
+    whenBridgeReady(populateDefaultModelSelect);
+
+    /* ── Default Model → also sync chat panel model button ── */
+    const modelSelect = $("defaultModel");
+    if (modelSelect) {
+      modelSelect.addEventListener("change", () => {
+        const value = modelSelect.value;
+        const label = modelSelect.options[modelSelect.selectedIndex].text;
+        persistSetting("defaultModel", value);
+        /* Notify chat panel to update model button */
+        if (bridge && typeof bridge.setDefaultModel === "function") {
+          bridge.setDefaultModel(value, label);
+        } else if (bridge && typeof bridge.setSetting === "function") {
+          bridge.setSetting("ai.model", value);
+          bridge.setSetting("ai.model_label", label);
+        }
+        showToast("Default model: " + label);
+      });
+    }
+
+    /* ── Memory controls ── */
+    $("enabledToggle")?.addEventListener("change", () => { state.enabled = $("enabledToggle").checked; $("statusDot")?.classList.toggle("enabled", state.enabled); callBridge(["setMemoryEnabled", "setEnabled", "toggle_memory"], [state.enabled]).catch(() => { }); });
+    document.querySelectorAll(".scope-tab").forEach(tab => tab.addEventListener("click", () => { state.activeScope = tab.dataset.scope; document.querySelectorAll(".scope-tab").forEach(t => t.classList.toggle("active", t === tab)); callBridge(["setActiveScope", "setScope", "switch_scope"], [state.activeScope]).catch(() => { }); renderMemoryList(); }));
+    $("searchInput")?.addEventListener("input", (e) => { uiState.query = e.target.value; renderMemoryList(); });
+    $("refreshBtn")?.addEventListener("click", () => callBridge(["refresh", "refreshMemories", "loadInitialData"], []).then(s => { if (s) window.receiveMemoryState(s); showToast("Refreshed"); }).catch(() => showToast("Refresh failed")));
+    $("clearBtn")?.addEventListener("click", async () => { if (await askConfirm("This cannot be undone.", { title: "Clear ALL memories?", okLabel: "Clear all", danger: true })) callBridge(["clearAll", "clear_all_memories"], [state.activeScope]).then(() => { state.scopes.project.memories = []; state.scopes.global.memories = []; renderMemoryList(); showToast("All memories cleared"); }).catch(() => showToast("Clear failed")); });
+    $("statsBtn")?.addEventListener("click", () => callBridge(["getMemoryStats", "getStats", "get_memory_stats"], [state.activeScope]).then(s => { if (s) showToast(JSON.stringify(s).slice(0, 200)); }).catch(() => showToast("Stats unavailable")));
+    $("consolidateBtn")?.addEventListener("click", () => callBridge(["runConsolidation", "consolidate", "consolidate_memories"], [state.activeScope, true]).then(() => { showToast("Consolidation complete"); $("consolidationModal")?.classList.remove("hidden"); }).catch(() => showToast("Consolidation unavailable")));
+    $("closeConsolidationModal")?.addEventListener("click", () => $("consolidationModal")?.classList.add("hidden"));
+    $("closeConsolidationModalBtn")?.addEventListener("click", () => $("consolidationModal")?.classList.add("hidden"));
+    $("openRulesBtn")?.addEventListener("click", () => {
+      // Show rules setup modal with instructions
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.innerHTML = `
+        <div class="consolidation-modal" style="max-width:600px;">
+          <div class="modal-header">
+            <h2>Rules Setup</h2>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="modal-body" style="max-height:400px;overflow-y:auto;">
+            <p style="color:var(--muted);margin-bottom:16px;">Rules define persistent behavior for the AI agent. Create an <code>AGENTS.md</code> file in your rules directory.</p>
+            
+            <h3 style="margin:16px 0 8px;">File Locations</h3>
+            <ul style="color:var(--muted);font-size:13px;line-height:1.8;">
+              <li><code>~/.cortex/AGENTS.md</code>, Global rules (all projects)</li>
+              <li><code>.cortex/AGENTS.md</code>, Project-specific rules</li>
+              <li><code>.cortex/rules/*.md</code>, Per-project rule files</li>
+            </ul>
+            
+            <h3 style="margin:16px 0 8px;">Rule Format</h3>
+            <pre style="background:var(--surface-2);padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;"><code>---
+name: coding-style
+description: Python coding conventions
+priority: 10
+scope: project
+---
+Always use type hints in Python functions.
+Use f-strings instead of .format().</code></pre>
+            
+            <h3 style="margin:16px 0 8px;">How Rules Connect</h3>
+            <p style="color:var(--muted);font-size:13px;">Rules are automatically injected into the system prompt when the agent starts. Higher priority rules appear first. Enable/disable rules via the toggle.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="setting-btn" onclick="this.closest('.modal-overlay').remove()">Close</button>
+            <button class="setting-btn primary-btn" id="openRulesDirBtn">Open Rules Folder</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      
+      // Handle open rules folder button
+      modal.querySelector('#openRulesDirBtn').addEventListener('click', () => {
+        callBridge(["openRulesDir", "openRules", "edit_rules"], [state.activeScope])
+          .then(() => modal.remove())
+          .catch(() => showToast("Rules editor unavailable"));
+      });
+    });
+    $("syncGlobalBtn")?.addEventListener("click", () => { const root = state.scopes.project.projectRoot || ""; callBridge(["syncGlobalMemoriesToProject", "syncGlobal", "sync_global_memories"], [root, true]).then(() => showToast("Synced")).catch(() => showToast("Sync unavailable")); });
+
+    /* ── Escape ── */
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("consolidationModal")?.classList.add("hidden"); $("modalHost")?.classList.add("hidden"); closeEditProfileModal(); } });
+
+    /* ═══════════════════════════════════════════════════════════════
+       PROFILE & USAGE
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* ── Token formatting ── */
+    /* Compact count: 950, 1.2k, 860k, 8.1M, 1.3B. One decimal below 100 of a
+       unit, none above, and never a trailing ".0". */
+    function formatCount(n) {
+      n = Number(n) || 0;
+      if (n < 999.5) return String(Math.round(n));
+      var units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
+      for (var i = 0; i < units.length; i++) {
+        // 0.9995: a value that ROUNDS to 1000 of a unit moves up one
+        // (999,999 is "1M", not "1000k").
+        if (n >= units[i][0] * 0.9995) {
+          var v = n / units[i][0];
+          var s = v >= 100 ? Math.round(v).toString() : v.toFixed(1).replace(/\.0$/, '');
+          return s + units[i][1];
+        }
+      }
+      return String(n);
+    }
+
+    /* A counter shown compact, with the exact number on hover. */
+    function setCount(id, n) {
+      var el = $(id);
+      if (!el) return;
+      el.textContent = formatCount(n);
+      el.title = (Number(n) || 0).toLocaleString();
+    }
+
+    function formatTokens(n) {
+      return formatCount(n);
+    }
+
+    function formatDuration(seconds) {
+      /* Durations are now REAL measured floats (3.4772760999... showed
+         raw on the Longest-task card), round to whole seconds first. */
+      seconds = Math.round(seconds || 0);
+      if (!seconds) return '0m 0s';
+      if (seconds >= 3600) return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+      if (seconds >= 60) return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+      return seconds + 's';
+    }
+
+    /* ── Cached usage data for chart range switching ── */
+    const MODEL_NAMES={'mimo-v2.5':{n:'MiMo V2.5',c:'#f97316'},'mimo-v2.5-pro':{n:'MiMo V2.5 Pro',c:'#f97316'},'deepseek-v4':{n:'DeepSeek V4',c:'#a78bfa'},'deepseek-v4-pro':{n:'DeepSeek V4 Pro',c:'#a78bfa'},'gpt-5.6-luna-pro':{n:'GPT-5.6 Luna Pro',c:'#10b981'},'gpt-5.6-luna':{n:'GPT-5.6 Luna',c:'#10b981'},'gpt-5.6-terra-pro':{n:'GPT-5.6 Terra Pro',c:'#10b981'},'gpt-5.6-terra':{n:'GPT-5.6 Terra',c:'#10b981'},'gpt-5.6-sol-pro':{n:'GPT-5.6 Sol Pro',c:'#10b981'},'gpt-5.6-sol':{n:'GPT-5.6 Sol',c:'#10b981'},'gpt-5.5':{n:'GPT-5.5',c:'#10b981'},'gpt-5.4':{n:'GPT-5.4',c:'#10b981'},'gpt-4o':{n:'GPT-4o',c:'#10b981'},'claude-opus':{n:'Claude Opus',c:'#d77b4a'},'claude-sonnet':{n:'Claude Sonnet',c:'#d77b4a'},'claude-fable':{n:'Claude Fable',c:'#d77b4a'},'qwen3.7-plus':{n:'Qwen 3.7 Plus',c:'#f59e0b'},'qwen3.6-plus':{n:'Qwen 3.6 Plus',c:'#f59e0b'},'gemini-3.5-flash':{n:'Gemini 3.5 Flash',c:'#4285f4'},'gemini-2.5-pro':{n:'Gemini 2.5 Pro',c:'#4285f4'},'glm-5.2':{n:'GLM 5.2',c:'#00bcd4'},'grok-4.3':{n:'Grok 4.3',c:'#1da1f2'},'kimi-k3':{n:'Kimi K3',c:'#6c5ce7'}};
+    const _IM=/^(test|mock|fake|placeholder|unknown|default)/i;
+    function isValidModel(id){return id&&typeof id==='string'&&id.length>=2&&id.length<=80&&!_IM.test(id);} function getModelName(id){if(!id)return'Unknown';var m=MODEL_NAMES[id];if(m)return m.n;return id.split(/[-_]/).map(function(w){return w.charAt(0).toUpperCase()+w.slice(1);}).join(' ');} function getModelColor(id){var m=MODEL_NAMES[id];return m?m.c:'var(--muted)';}
+    let _cachedUsageData = null;
+
+    /* ── Activity heatmap (contribution-style, no pagination) ── */
+
+    /* ── Load profile data from bridge ── */
+    function loadProfile(refresh) {
+      /* Instant render from Python's cache (slots are memory-only now);
+         a background server fetch then re-invokes us via
+         server_data_ready with refresh=false (loop guard). */
+      if (refresh !== false) callBridge(["refreshServerData"], ["account"]).catch(() => {});
+      /* First check auth status */
+      callBridge(["getAuthStatus"], []).then(authData => {
+        let auth = {};
+        try { auth = typeof authData === 'string' ? JSON.parse(authData) : authData || {}; } catch(e) {}
+        
+        const isLoggedIn = auth.logged_in || false;
+        
+        /* Show/hide login card vs profile hero */
+        const loginCard = $("loginCard");
+        const profileHero = $("profileHero");
+        
+        if (loginCard) loginCard.style.display = isLoggedIn ? 'none' : 'block';
+        if (profileHero) profileHero.style.display = isLoggedIn ? 'flex' : 'none';
+        
+        /* If logged in, populate profile from auth data */
+        if (isLoggedIn && auth.user) {
+          const u = auth.user;
+          const name = u.display_name || u.email?.split('@')[0] || 'User';
+          const email = u.email || '';
+          const initials = name.charAt(0).toUpperCase() + (name.split(' ')[1]?.charAt(0) || '').toUpperCase();
+          
+          /* Plan display, expiry-aware (see planLabel) */
+          const planText = planLabel(u);
+          
+          if ($("profileAvatar")) $("profileAvatar").textContent = initials;
+          if ($("profileName")) $("profileName").textContent = name;
+          if ($("profileEmail")) $("profileEmail").textContent = email;
+          if ($("profilePlan")) $("profilePlan").textContent = planText;
+          if ($("serverStatus")) $("serverStatus").textContent = 'Connected';
+        }
+      }).catch(() => {});
+      
+      /* Also fetch full profile from server for more details */
+      callBridge(["getProfile", "get_profile"], []).then(data => {
+        if (!data) return;
+        try {
+          const p = typeof data === 'string' ? JSON.parse(data) : data;
+          const profile = p.profile || p;
+          const auth = p.auth || {};
+          
+          /* Use server data if available */
+          const displayName = auth.display_name || profile.display_name || '';
+          const email = auth.email || profile.email || '';
+          
+          /* Plan display, expiry-aware (see planLabel) */
+          const planText = planLabel(
+            (auth && (auth.plan || auth.subscription_status)) ? auth : profile);
+          
+          if (displayName && $("profileName")) $("profileName").textContent = displayName;
+          if (email && $("profileEmail")) $("profileEmail").textContent = email;
+          if ($("profilePlan")) $("profilePlan").textContent = planText;
+          
+          /* Update avatar initials */
+          if (displayName && $("profileAvatar")) {
+            const parts = displayName.split(' ');
+            const initials = parts[0].charAt(0).toUpperCase() + (parts[1]?.charAt(0) || '').toUpperCase();
+            $("profileAvatar").textContent = initials;
+          }
+        } catch (e) { console.error('[PROFILE] parse error:', e); }
+      }).catch(() => { /* no bridge, use defaults */ });
+    }
+
+    /* ── Auth functions ── */
+    function startBrowserLogin() {
+      const status = $("loginStatus");
+      const error = $("loginError");
+      if (status) status.textContent = 'Checking server connection...';
+      if (error) error.style.display = 'none';
+      
+      callBridge(["startLogin"], []).then(ok => {
+        if (ok) {
+          if (status) status.textContent = 'Browser opened. Complete login there, then return here.';
+        } else {
+          if (status) status.textContent = '';
+          if (error) {
+            error.textContent = 'Cannot connect to server. Make sure Django is running.';
+            error.style.display = 'block';
+          }
+        }
+      }).catch(() => {
+        if (status) status.textContent = '';
+        if (error) {
+          error.textContent = 'Login failed. Check server connection.';
+          error.style.display = 'block';
+        }
+      });
+    }
+    
+    function logoutUser() {
+      callBridge(["logout"], []).then(() => {
+        loadProfile();
+        loadUsageStats();
+      }).catch(() => {});
+    }
+    
+    /* Expose auth functions to global scope for inline onclick handlers */
+    window.startBrowserLogin = startBrowserLogin;
+    window.logoutUser = logoutUser;
+    window.openUpgradePage = openUpgradePage;
+    window.loadProfile = loadProfile;
+    window.loadUsageStats = loadUsageStats;
+
+    /* ── Apply usage data to UI (shared by bridge + demo) ── */
+    function applyUsageData(u) {
+      if (!u) return;
+      const life = u.lifetime || {};
+      const peak = u.peak || {};
+      const streaks = u.streaks || {};
+      const period = u.current_period || {};
+      const models = u.model_usage || {};
+      const insights = u.insights || {};
+
+      /* Update stat cards */
+      if ($("lifetimeTokens")) $("lifetimeTokens").textContent = formatTokens(life.total_tokens);
+      if ($("peakTokens")) $("peakTokens").textContent = formatTokens(peak.peak_tokens_single_session);
+      if ($("longestTask")) $("longestTask").textContent = formatDuration(life.longest_task_seconds);
+      if ($("currentStreak")) $("currentStreak").textContent = (streaks.current_streak_days || 0) + ' days';
+      if ($("longestStreak")) $("longestStreak").textContent = (streaks.longest_streak_days || 0) + ' days';
+      /* Token split. The server (usage_tracker.get_token_breakdown) resolves
+         the relationship because cached is a SUBSET of input: adding them
+         would double-count. Older payloads without `breakdown` get the same
+         math applied locally, clamped so cached can never exceed input. */
+      const bd = u.breakdown || (function () {
+        const inp = Math.max(0, life.input_tokens || 0);
+        const cached = Math.min(Math.max(0, life.cached_tokens || 0), inp);
+        return {
+          input_tokens: inp,
+          cached_input_tokens: cached,
+          uncached_input_tokens: inp - cached,
+          output_tokens: Math.max(0, life.output_tokens || 0),
+          cache_hit_percent: inp ? Math.round((cached / inp) * 1000) / 10 : 0,
+        };
+      })();
+      if ($("inputTokens")) $("inputTokens").textContent = formatTokens(bd.input_tokens);
+      if ($("cachedTokens")) $("cachedTokens").textContent = formatTokens(bd.cached_input_tokens);
+      if ($("outputTokens")) $("outputTokens").textContent = formatTokens(bd.output_tokens);
+      if ($("inputNote")) {
+        /* Just the fresh slice: the cached tile next to it carries the
+           cached count and its percentage, so repeating both here would
+           only crowd the card. */
+        $("inputNote").textContent = formatTokens(bd.uncached_input_tokens) + ' fresh';
+      }
+      if ($("cachedNote")) $("cachedNote").textContent = bd.cache_hit_percent + '% of input';
+      if ($("outputNote")) {
+        const grand = bd.input_tokens + bd.output_tokens;
+        const outPct = grand ? Math.round((bd.output_tokens / grand) * 1000) / 10 : 0;
+        $("outputNote").textContent = outPct + '% of total';
+      }
+
+      /* Update usage meters, BYOK: no limit, show raw count only */
+      const tokensUsed = period.tokens_used || 0;
+      if ($("monthlyPercent")) $("monthlyPercent").textContent = formatTokens(tokensUsed);
+      if ($("monthlyFill")) { $("monthlyFill").style.width = '0%'; $("monthlyFill").className = 'meter-fill'; }
+      if ($("monthlyDetail")) $("monthlyDetail").textContent = formatTokens(tokensUsed) + ' tokens this month (BYOK, no limit)';
+      if ($("monthlyReset") && period.end_date) $("monthlyReset").textContent = '';
+
+      const dailyPct = 0;
+      if ($("dailyPercent")) $("dailyPercent").textContent = formatTokens(period.tokens_used || 0);
+      if ($("dailyFill")) { $("dailyFill").style.width = '0%'; $("dailyFill").className = 'meter-fill'; }
+      if ($("dailyDetail")) $("dailyDetail").textContent = formatTokens(period.tokens_used || 0) + ' tokens (BYOK)';
+
+      /* Update insights, skills only (no fake bars) */
+      const skillsExplored = insights.skills_explored || [];
+      if ($("skillsExplored")) $("skillsExplored").textContent = skillsExplored.length > 0 ? skillsExplored.slice(0, 5).join(', ') + (skillsExplored.length > 5 ? '...' : '') : 'None yet';
+      if ($("totalSkills")) $("totalSkills").textContent = insights.total_skills_used || 0;
+
+      /* Service usage, simple number counters. No OCR pages: Cortex sends
+         images to vision models natively (removed 2026-10-20). */
+      const embedUsed = period.embedding_tokens_used || 0;
+      const searchUsed = period.web_searches_used || 0;
+      setCount("embeddingsCount", embedUsed);
+      setCount("webSearches", searchUsed);
+
+      /* Update model usage list, token pills */
+      const modelList = $("modelUsageList");
+      if (modelList && Object.keys(models).length > 0) {
+        const sorted = Object.entries(models).filter(function(e){return isValidModel(e[0]);}).sort((a, b) => (b[1].total_tokens || 0) - (a[1].total_tokens || 0));
+        const topTokens = (sorted[0] && sorted[0][1].total_tokens) || 1;
+        modelList.innerHTML = sorted.map(([name, info]) => {
+          const total = info.total_tokens || 0;
+          const pct = Math.max(3, Math.round((total / topTokens) * 100));
+          const color = getModelColor(name);
+          const split = (info.input_tokens || info.output_tokens)
+            ? '<div class="bd">in ' + formatTokens(info.input_tokens || 0) +
+              ' (of which ' + formatTokens(info.cached_tokens || 0) + ' cached)' +
+              ' · out ' + formatTokens(info.output_tokens || 0) +
+              '</div>'
+            : '';
+          return '<div class="mdl" style="color:' + color + '">' +
+            '<span class="dot" style="background:' + color + '"></span>' +
+            '<span class="nm" style="color:var(--text)">' + esc(getModelName(name)) + '</span>' +
+            '<span class="tot">' + formatTokens(total) + '</span>' +
+            '<span class="track"><span class="fill" style="width:' + pct + '%;background:' + color + '"></span></span>' +
+            split +
+            '</div>';
+        }).join('');
+      }
+
+      /* Update local usage list (AI Model Usage) */
+      const localList = $("localUsageList");
+      if (localList && Object.keys(models).length > 0) {
+        const sorted = Object.entries(models).filter(function(e){return isValidModel(e[0]);}).sort((a, b) => (b[1].total_tokens || 0) - (a[1].total_tokens || 0));
+        const totalAll = sorted.reduce(function(s, e) { return s + (e[1].total_tokens || 0); }, 0);
+        localList.innerHTML =
+          '<div style="font-size:12px;color:#6b7280;margin-bottom:8px;">Total: <strong style="color:var(--text);">' + formatTokens(totalAll) + '</strong> across ' + sorted.length + ' models</div>' +
+          sorted.map(([name, info], i) => {
+          return '<div class="model-token-pill" style="margin-bottom:6px;">' +
+            '<span class="dot" style="background:' + getModelColor(name) + '"></span>' +
+            '<span>' + esc(getModelName(name)) + '</span>' +
+            '<strong>' + formatTokens(info.total_tokens || 0) + '</strong>' +
+            '</div>';
+        }).join('');
+      } else if (localList) {
+        localList.innerHTML = '<div class="empty-state-small"><p>No model usage data yet</p></div>';
+      }
+
+      /* Update model breakdown, token pills (BYOK: no limits, just counts) */
+      const breakdown = $("modelBreakdown");
+      if (breakdown && Object.keys(models).length > 0) {
+        const sorted = Object.entries(models).filter(function(e){return isValidModel(e[0]);}).sort((a, b) => (b[1].total_tokens || 0) - (a[1].total_tokens || 0));
+        const totalAll = sorted.reduce(function(s, e) { return s + (e[1].total_tokens || 0); }, 0);
+        breakdown.innerHTML =
+          '<div style="font-size:12px;color:#6b7280;margin-bottom:10px;width:100%;">Total across all models: <strong style="color:#e5e7eb;">' + formatTokens(totalAll) + '</strong></div>' +
+          sorted.map(([name, info]) => {
+          return '<div class="model-token-pill">' +
+            '<span class="dot" style="background:' + getModelColor(name) + '"></span>' +
+            '<span>' + esc(getModelName(name)) + '</span>' +
+            '<strong>' + formatTokens(info.total_tokens || 0) + '</strong>' +
+            '</div>';
+        }).join('');
+      }
+
+      /* Render contribution-style activity heatmap */
+      renderActivityChart(u.daily_usage || {});
+    }
+
+    /* ── Load usage stats from bridge ── */
+    function loadUsageStats(refresh) {
+      /* Instant render from Python's cache; background fetch re-invokes
+         via server_data_ready with refresh=false (loop guard). */
+      if (refresh !== false) callBridge(["refreshServerData"], ["usage"]).catch(() => {});
+      callBridge(["getUsageStats", "get_usage_stats"], []).then(data => {
+        if (!data) return;
+        try {
+          const u = typeof data === 'string' ? JSON.parse(data) : data;
+          _cachedUsageData = u;
+          applyUsageData(u);
+          
+          /* Update server data if available */
+          const server = u.server || {};
+          const sub = server.subscription || {};
+          const credits = server.credits || {};
+          const usage = server.usage || {};
+          
+          /* Update plan card with server data */
+          const subExpired = !!sub.expired;   // server: billing period ended
+          const hasPlan = sub.plan && sub.plan !== 'none' && sub.plan !== 'free' && !subExpired;
+          const planNames = { 'pro': 'Pro', 'pro_yearly': 'Pro (Yearly)', 'starter': 'Starter', 'free': 'Free' };
+
+          /* Service Usage card title shows the billing period, matching the
+             website. Counters cover subscription-period usage, not the
+             calendar month (which zeroed every 1st of the month). */
+          if ($("serviceUsageTitle")) {
+            let t = 'Service Usage';
+            if (sub.period_start && sub.period_end) {
+              const fmt = function(iso) {
+                var d = new Date(iso);
+                return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+              };
+              t += ' (' + fmt(sub.period_start) + ' to ' + fmt(sub.period_end) + ')';
+            } else {
+              t += ' (This Month)';
+            }
+            $("serviceUsageTitle").textContent = t;
+          }
+          if (subExpired && $("serviceUsageSubscribe")) {
+            $("serviceUsageSubscribe").innerHTML =
+              'Your subscription period has ended. ' +
+              '<a href="#" onclick="openUpgradePage();return false" style="color:#58a6ff;">Renew Cortex Pro</a> ' +
+              'to keep using OCR, embeddings, and web search.';
+          }
+          
+          if ($("planName")) {
+            $("planName").textContent = hasPlan ? (planNames[sub.plan] || sub.plan) : 'Free';
+          }
+          // Hide price display
+          if ($("planPrice")) {
+            $("planPrice").textContent = '';
+            $("planPrice").style.display = 'none';
+          }
+          
+          // Show/hide upgrade button and features
+          const upgradeBtn = $("upgradePlanBtn");
+          const planFeatures = $("planFeatures");
+          const serviceCard = $("serviceUsageCard");
+          
+          if (hasPlan) {
+            if (upgradeBtn) upgradeBtn.style.display = 'none';
+            if (planFeatures) planFeatures.style.display = 'block';
+            if (serviceCard) serviceCard.style.display = 'block';
+            // Show real counters, hide subscribe prompt
+            if ($("serviceUsageCounters")) $("serviceUsageCounters").style.display = 'flex';
+            if ($("serviceUsageSubscribe")) $("serviceUsageSubscribe").style.display = 'none';
+          } else {
+            if (upgradeBtn) upgradeBtn.style.display = 'inline-block';
+            if (planFeatures) planFeatures.style.display = 'none';
+            if (serviceCard) serviceCard.style.display = 'none';
+            // Hide counters, show subscribe prompt
+            if ($("serviceUsageCounters")) $("serviceUsageCounters").style.display = 'none';
+            if ($("serviceUsageSubscribe")) $("serviceUsageSubscribe").style.display = 'block';
+          }
+          
+          /* Show credits if available */
+          if (credits.monthly_allocation > 0) {
+            const creditsInfo = $("creditsInfo");
+            if (creditsInfo) creditsInfo.style.display = 'block';
+            if ($("creditBalance")) $("creditBalance").textContent = '$' + (credits.balance || 0).toFixed(2);
+            if ($("creditsUsed")) $("creditsUsed").textContent = '$' + (credits.used_this_month || 0).toFixed(2);
+          }
+          
+          /* Show server usage card */
+          if (usage.tokens_this_month > 0) {
+            const serverCard = $("serverUsageCard");
+            if (serverCard) serverCard.style.display = 'block';
+            const serverInfo = $("serverUsageInfo");
+            if (serverInfo) {
+              serverInfo.innerHTML = 
+                'Tokens this month: <strong>' + formatTokens(usage.tokens_this_month) + '</strong><br>' +
+                'Requests this month: <strong title="' + (usage.requests_this_month || 0).toLocaleString() + '">' + formatCount(usage.requests_this_month || 0) + '</strong>';
+            }
+          }
+        } catch (e) { console.error('[USAGE] parse error:', e); }
+      }).catch(() => { /* no bridge, use defaults */ });
+    }
+    
+    function openUpgradePage() {
+      var url = 'https://cortex-ide.app/pricing/';
+      if (bridge && typeof bridge.openExternal === 'function') {
+        bridge.openExternal(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    /* "Get API key" links on provider rows and the About-section links:
+       open the real page in the system browser. */
+    document.addEventListener('click', function(e) {
+      var link = e.target.closest ? e.target.closest('.get-key-link, .about-link[data-url]') : null;
+      if (!link) return;
+      e.preventDefault();
+      var url = link.getAttribute('data-url');
+      if (!url) return;
+      if (bridge && typeof bridge.openExternal === 'function') {
+        bridge.openExternal(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    });
+
+    /* ── Render dense contribution heatmap (weeks × weekdays) ──
+       Every cell is a real day, so the grid is full instead of the old
+       dates×weekdays layout that left 6 of every 7 cells empty. The cell
+       colour comes from CSS classes l1-l4, whose ramp is derived from the
+       active theme's --accent (see .css), so no per-theme JS is needed.
+
+       The window is the CURRENT CALENDAR YEAR (Jan 1 → Dec 31), padded to
+       whole Sun-Sat weeks; days outside the year or in the future render
+       as invisible voids. Cells are fluid (1fr columns) so the whole year
+       always fits the card width, no horizontal scrollbar clipping the
+       right edge, which is what hid late July in the rolling-window
+       version. */
+
+    function _iso(d) {
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') +
+             '-' + String(d.getDate()).padStart(2,'0');
+    }
+
+    function renderActivityChart(dailyUsage) {
+      var grid = $("heatmapGrid");
+      if (!grid) return;
+
+      var tokenMap = {};
+      Object.keys(dailyUsage || {}).forEach(function(d) {
+        var v = dailyUsage[d];
+        tokenMap[d] = typeof v === 'number' ? v : (v && v.tokens || 0);
+      });
+
+      var totalAll = Object.values(tokenMap).reduce(function(a,b){return a+b;}, 0);
+      if ($("heatmapTotal")) $("heatmapTotal").textContent = formatTokens(totalAll);
+
+      var today = new Date(); today.setHours(0,0,0,0);
+      var todayStr = _iso(today);
+      // Calendar year Jan 1 → Dec 31, padded out to whole Sun-Sat weeks.
+      var year = today.getFullYear();
+      var jan1 = new Date(year, 0, 1);
+      var dec31 = new Date(year, 11, 31);
+      var start = new Date(jan1); start.setDate(jan1.getDate() - jan1.getDay());
+      var end = new Date(dec31); end.setDate(dec31.getDate() + (6 - dec31.getDay()));
+      var weeks = Math.round((end - start) / 86400000 + 1) / 7;
+
+      if ($("heatmapSub")) {
+        $("heatmapSub").textContent = 'Jan - Dec ' + year + ' · through ' +
+          today.toLocaleDateString('en', {month:'short', day:'numeric'});
+      }
+
+      // Collect the day list; days outside the year or in the future are voids.
+      var days = [], vals = [];
+      for (var d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+        var key = _iso(d);
+        var voidDay = d > today || d < jan1 || d > dec31;
+        var t = voidDay ? -1 : (tokenMap[key] || 0);
+        days.push({ key: key, t: t, future: voidDay });
+        if (t > 0) vals.push(t);
+      }
+
+      // Empty state.
+      if (vals.length === 0) {
+        grid.innerHTML = '';
+        if ($("heatmapStats")) {
+          $("heatmapStats").innerHTML =
+            '<div class="tok-stat" style="flex:1;text-align:center;color:var(--muted);' +
+            'font-size:12.5px;">No activity yet, your daily token usage will appear here.</div>';
+        }
+        if ($("heatmapMonths")) $("heatmapMonths").innerHTML = '';
+        return;
+      }
+
+      var max = Math.max(1, Math.max.apply(null, vals));
+      function level(t) {
+        if (t <= 0) return 0;
+        var r = t / max;
+        return r > 0.72 ? 4 : r > 0.46 ? 3 : r > 0.2 ? 2 : 1;
+      }
+
+      // Cells, staggered reveal, left→right, one step per week column.
+      var html = '';
+      days.forEach(function(day, i) {
+        if (day.future) { html += '<div class="c void"></div>'; return; }
+        var delay = Math.floor(i / 7) * 22;
+        var cls = 'c l' + level(day.t);
+        if (day.key === todayStr) cls += ' today';
+        html += '<div class="' + cls + '" style="--d:' + delay + 'ms" ' +
+                'data-k="' + day.key + '" data-t="' + day.t + '"></div>';
+      });
+      grid.innerHTML = html;
+
+      // Keep rows exactly as tall as the fluid 1fr columns are wide.
+      // Without this the flex parent stretches the grid to the day-label
+      // column's height and align-content pads the auto rows, making the
+      // vertical pitch bigger than the horizontal one.
+      var syncRows = function() {
+        var gap = parseFloat(getComputedStyle(grid).columnGap) || 3;
+        var w = (grid.clientWidth - (weeks - 1) * gap) / weeks;
+        if (w > 0) grid.style.gridTemplateRows = 'repeat(7,' + w.toFixed(2) + 'px)';
+      };
+      grid._syncRows = syncRows;
+      syncRows();
+      if (window.ResizeObserver && !grid._rowRO) {
+        grid._rowRO = new ResizeObserver(function() {
+          if (grid._syncRows) grid._syncRows();
+        });
+        grid._rowRO.observe(grid);
+      }
+
+      // Month labels above the column where each month first appears.
+      // The leading fragment (late-Dec days padding the first week) spans
+      // fewer than 3 columns and is skipped, so "Jan" is the first label
+      // and nothing collides (the old "MarApr" overlap).
+      var months = $("heatmapMonths");
+      if (months) {
+        var monthOf = function(w) {
+          var d = new Date(start); d.setDate(start.getDate() + w*7);
+          return d.getMonth();
+        };
+        var mhtml = '', last = -1;
+        for (var w = 0; w < weeks; w++) {
+          var mo = monthOf(w);
+          if (mo === last) continue;
+          if (last === -1) {
+            // leading month: only label it if it has room before it changes
+            var span = 1;
+            for (var k = w+1; k < weeks && monthOf(k) === mo; k++) span++;
+            last = mo;
+            if (span < 3) continue;
+          } else {
+            last = mo;
+          }
+          var md = new Date(start); md.setDate(start.getDate() + w*7);
+          mhtml += '<span style="grid-column:' + (w+1) + '">' +
+                   md.toLocaleString('en', {month:'short'}) + '</span>';
+        }
+        // 1fr columns mirror the fluid grid, so labels stay aligned at any width.
+        months.style.gridTemplateColumns = 'repeat(' + weeks + ',1fr)';
+        months.innerHTML = mhtml;
+      }
+
+      // Stat strip.
+      if ($("heatmapStats")) {
+        var avg = Math.round(vals.reduce(function(a,b){return a+b;},0) / vals.length);
+        var best = Math.max.apply(null, vals);
+        $("heatmapStats").innerHTML =
+          _stat(vals.length + ' days', 'Active days') +
+          _stat(formatTokens(avg), 'Daily average') +
+          _stat(formatTokens(best), 'Best day');
+      }
+
+      _wireHeatmapTips(grid);
+    }
+
+    function _stat(v, k) {
+      return '<div class="tok-stat"><div class="v">' + v +
+             '</div><div class="k">' + k + '</div></div>';
+    }
+
+    /* Custom cursor-following tooltip, replaces the native title. */
+    var _tokTip = null;
+    function _wireHeatmapTips(grid) {
+      if (!_tokTip) {
+        _tokTip = document.createElement('div');
+        _tokTip.className = 'tok-tip';
+        document.body.appendChild(_tokTip);
+      }
+      grid.querySelectorAll('.c:not(.void)').forEach(function(c) {
+        c.addEventListener('mouseenter', function() {
+          var t = +c.dataset.t;
+          var d = new Date(c.dataset.k + 'T00:00:00');
+          _tokTip.innerHTML = '<b>' + formatTokens(t) + '</b> tokens ' +
+            '<span class="dim">· ' +
+            d.toLocaleDateString('en', {weekday:'short', month:'short', day:'numeric'}) +
+            '</span>';
+          _tokTip.classList.add('on');
+        });
+        c.addEventListener('mousemove', function(e) {
+          var r = _tokTip.getBoundingClientRect();
+          _tokTip.style.left = (e.clientX - r.width/2) + 'px';
+          _tokTip.style.top  = (e.clientY - r.height - 12) + 'px';
+        });
+        c.addEventListener('mouseleave', function() {
+          _tokTip.classList.remove('on');
+        });
+      });
+    }
+
+    /* ── Edit Profile modal (using CSS classes) ── */
+    function closeEditProfileModal() {
+      const existing = document.querySelector('.edit-profile-modal');
+      if (existing) existing.remove();
+    }
+
+    const editBtn = $("editProfileBtn");
+    if (editBtn) {
+      editBtn.addEventListener('click', () => {
+        closeEditProfileModal(); /* close any existing */
+        const currentName = $("profileName")?.textContent || 'User';
+        const currentUsername = $("profileUsername")?.textContent?.replace('@', '') || 'user';
+        const currentInitials = $("profileAvatar")?.textContent || 'HA';
+        /* Extract the first #hex color from the background style */
+        const bgStyle = $("profileAvatar")?.style.background || '';
+        const colorMatch = bgStyle.match(/#[0-9a-fA-F]{6}/);
+        const currentColor = colorMatch ? colorMatch[0] : '#f97316';
+        const colors = ['#f97316', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#f59e0b', '#ec4899', '#06b6d4'];
+
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-profile-modal';
+        overlay.innerHTML =
+          '<div class="ep-card">' +
+          '<h2>Edit Profile</h2>' +
+          '<div class="ep-avatar-wrap">' +
+          '<div class="ep-avatar" id="editAvatarPreview" style="background:linear-gradient(135deg,' + currentColor + ',' + currentColor + ')">' + currentInitials + '</div>' +
+          '<div class="ep-colors">' +
+          colors.map(c => '<button class="ep-color-dot' + (c === currentColor ? ' selected' : '') + '" data-color="' + c + '" style="background:' + c + '"></button>').join('') +
+          '</div></div>' +
+          '<div class="ep-field"><label>Display Name</label><input type="text" id="editDisplayName" value="' + esc(currentName) + '"></div>' +
+          '<div class="ep-field"><label>Username</label><input type="text" id="editUsername" value="' + esc(currentUsername) + '"></div>' +
+          '<div class="ep-actions">' +
+          '<button class="setting-btn" id="epCancelBtn">Cancel</button>' +
+          '<button class="setting-btn primary-btn" id="epSaveBtn">Save</button>' +
+          '</div></div>';
+
+        document.body.appendChild(overlay);
+
+        /* Color dot selection */
+        overlay.querySelectorAll('.ep-color-dot').forEach(dot => {
+          dot.addEventListener('click', () => {
+            overlay.querySelectorAll('.ep-color-dot').forEach(d => d.classList.remove('selected'));
+            dot.classList.add('selected');
+            const c = dot.dataset.color;
+            const avatar = overlay.querySelector('#editAvatarPreview');
+            if (avatar) avatar.style.background = 'linear-gradient(135deg,' + c + ',' + c + ')';
+          });
+        });
+
+        /* Cancel */
+        overlay.querySelector('#epCancelBtn')?.addEventListener('click', closeEditProfileModal);
+
+        /* Backdrop click */
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEditProfileModal(); });
+
+        /* Save */
+        overlay.querySelector('#epSaveBtn')?.addEventListener('click', () => {
+          const name = $("editDisplayName")?.value || 'User';
+          const username = $("editUsername")?.value || 'user';
+          const selectedDot = overlay.querySelector('.ep-color-dot.selected') || overlay.querySelector('.ep-color-dot');
+          const color = selectedDot?.dataset?.color || '#f97316';
+          const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+          /* Update UI */
+          if ($("profileAvatar")) { $("profileAvatar").textContent = initials; $("profileAvatar").style.background = 'linear-gradient(135deg, ' + color + ', ' + color + ')'; }
+          if ($("profileName")) $("profileName").textContent = name;
+          if ($("profileUsername")) $("profileUsername").textContent = '@' + username;
+
+          /* Save to bridge */
+          callBridge(["setProfile", "set_profile"], [JSON.stringify({ display_name: name, username: username, avatar_color: color, avatar_initials: initials })]).catch(() => {});
+          closeEditProfileModal();
+          showToast('Profile saved');
+        });
+      });
+    }
+
+    /* ── Upgrade plan button ── */
+    $("upgradePlanBtn")?.addEventListener('click', () => {
+      showToast('Upgrade plan, coming soon!');
+    });
+
+    /* ── Load profile/usage when bridge connects ── */
+    whenBridgeReady(() => { loadProfile(); loadUsageStats(); });
+
+    /* ── Refresh profile/usage when switching to those sections ── */
+    document.querySelectorAll('.nav-item[data-section="profile"], .nav-item[data-section="usage"]').forEach(btn => {
+      btn.addEventListener('click', () => { loadProfile(); loadUsageStats(); });
+    });
+
+    /* ── Init bridge ── */
+    initBridge();
+    /* Profile/usage load on init is handled by whenBridgeReady above. */
+
+    /* ═══════════════════════════════════════════════════════════════
+       API KEY MANAGEMENT
+       ═══════════════════════════════════════════════════════════════ */
+    
+    /* Filled in by _renderProviders(), one entry per row it draws, keyed on
+       the row's DOM key ("mimo" for a built-in, "dyn_nvidia" for a provider
+       the user or the server published). This used to be a hand-written
+       literal of eight entries mirroring eight hand-written <div>s in the
+       HTML; both copies are gone and every row now comes from
+       bridge.listProviders(), so a provider added in the admin panel gets a
+       row, a key field and a toggle with no desktop release. */
+    const PROVIDER_CONFIG = {};
+
+    /* Track which providers have keys stored */
+    const _providerHasKey = {};
+
+    /* The one mask used wherever a stored key is displayed. Called with no
+       argument, so a real key never passes through it and no character of one
+       can reach the page. */
+    function _maskApiKey(key) {
+      if (!key || typeof key !== 'string') return '••••••••••••••••';
+      if (key.length <= 12) return key.charAt(0) + '•'.repeat(key.length - 2) + key.charAt(key.length - 1);
+      return key.substring(0, 6) + '•'.repeat(Math.min(key.length - 10, 16)) + key.substring(key.length - 4);
+    }
+
+    /* Show masked key when a key is stored. `hint` is the "sk-a4b•••klsl"
+       form: from the bridge for a stored key (it never sends the key), or
+       built here from the key the user has just typed in. */
+    const _keyHints = {};   /* provider -> last hint shown, for redraws without one */
+    function _showMaskedState(provider, hint) {
+      const cfg = PROVIDER_CONFIG[provider];
+      if (!cfg) return;
+      if (hint) _keyHints[provider] = hint;
+      hint = hint || _keyHints[provider] || '';
+      const input = $(cfg.input);
+      const mask = $(cfg.mask);
+      const row = input?.closest('.provider-row');
+      if (input && mask) {
+        input.style.display = 'none';
+        mask.style.display = 'inline-block';
+        mask.textContent = hint || '••••••••••••••••••••••••••••';
+        mask.title = hint ? 'Saved key: first 6 and last 4 characters' : 'A key is saved';
+        if (row) row.setAttribute('data-has-key', 'true');
+        _providerHasKey[provider] = true;
+      }
+    }
+
+    /* Show input field when editing */
+    function _showEditState(provider) {
+      const cfg = PROVIDER_CONFIG[provider];
+      if (!cfg) return;
+      const input = $(cfg.input);
+      const mask = $(cfg.mask);
+      const row = input?.closest('.provider-row');
+      if (input && mask) {
+        input.style.display = '';
+        input.type = 'password';
+        mask.style.display = 'none';
+        if (row) row.setAttribute('data-has-key', 'false');
+      }
+    }
+
+    /* Toggle eye icon */
+    function _toggleEye(provider) {
+      const cfg = PROVIDER_CONFIG[provider];
+      if (!cfg) return;
+      const eyeBtn = $(cfg.eye);
+      const input = $(cfg.input);
+      const mask = $(cfg.mask);
+      if (!eyeBtn || !input) return;
+
+      const isActive = eyeBtn.classList.contains('active');
+      if (isActive) {
+        /* Hide: show masked state */
+        eyeBtn.classList.remove('active');
+        if (_providerHasKey[provider]) {
+          _showMaskedState(provider);
+        } else {
+          input.type = 'password';
+        }
+      } else {
+        /* Show: reveal partially masked key for security */
+        eyeBtn.classList.add('active');
+        if (_providerHasKey[provider]) {
+          /* Load the actual key and show partially masked version */
+          if (bridge && typeof bridge.getApiKey === 'function') {
+            bridge.getApiKey(cfg.kmName, (key) => {
+              if (key) {
+                /* The bridge sends the masked hint, never the key. */
+                mask.textContent = key;
+                mask.style.display = 'inline-block';
+                input.style.display = 'none';
+              }
+            });
+          } else {
+            /* No bridge, just show generic mask */
+            mask.textContent = '••••••••••••••••••••••••••••';
+            mask.style.display = 'inline-block';
+            input.style.display = 'none';
+          }
+        } else {
+          input.type = 'text';
+        }
+      }
+    }
+
+    /* Test connection */
+    function _testConnection(provider) {
+      const cfg = PROVIDER_CONFIG[provider];
+      if (!cfg) return;
+      const testBtn = $(cfg.test);
+      if (!testBtn) return;
+
+      testBtn.classList.add('testing');
+      testBtn.classList.remove('success', 'error');
+      testBtn.title = 'Testing...';
+
+      if (bridge && typeof bridge.testApiKey === 'function') {
+        bridge.testApiKey(cfg.kmName, (raw) => {
+          // QWebChannel returns result=str as a JSON string, parse it
+          let result;
+          try {
+            result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          } catch(e) { result = raw; }
+          testBtn.classList.remove('testing');
+          if (result && result.success) {
+            testBtn.classList.add('success');
+            testBtn.title = 'Connected ✓';
+            showToast(`${provider} connected successfully`);
+          } else {
+            testBtn.classList.add('error');
+            testBtn.title = 'Failed ✗';
+            showToast(`${provider} connection failed: ${result?.error || 'Unknown error'}`);
+          }
+          setTimeout(() => {
+            testBtn.classList.remove('success', 'error');
+            testBtn.title = 'Test connection';
+          }, 3000);
+        });
+      } else {
+        /* No bridge, simulate */
+        testBtn.classList.remove('testing');
+        testBtn.classList.add('success');
+        testBtn.title = 'Connected ✓';
+        setTimeout(() => {
+          testBtn.classList.remove('success');
+          testBtn.title = 'Test connection';
+        }, 2000);
+      }
+    }
+
+    /* There is no "forget this key" control: the row is a single field, so
+       pasting a new key is how a key is changed, and a saved key stays masked
+       until the user asks for the field back. */
+
+    /* Save key on blur */
+    /* Remove a stored key, after a confirm. The row only changes once the
+       key manager has really deleted it: showing an empty field while the
+       key is still in the vault (and still used by the chat) would lie. */
+    async function _removeKey(provider) {
+      const cfg = PROVIDER_CONFIG[provider];
+      if (!cfg) return;
+      const row = $(cfg.input)?.closest('.provider-row');
+      const name = row?.querySelector('.js-name')?.textContent || provider;
+
+      const ok = await askConfirm(
+        `Cortex stops using it right away. You'll need to paste it again to use ${name}.`,
+        { title: `Remove the ${name} API key?`, okLabel: 'Remove', danger: true }
+      );
+      if (!ok) return;
+
+      const done = (removed) => {
+        if (!removed) {
+          showToast(`Could not remove the ${name} key`);
+          return;
+        }
+        _providerHasKey[provider] = false;
+        delete _keyHints[provider];
+        _showEditState(provider);
+        const input = $(cfg.input);
+        if (input) input.value = '';
+        showToast(`${name} key removed`);
+      };
+
+      if (bridge && typeof bridge.removeApiKey === 'function') {
+        bridge.removeApiKey(cfg.kmName, done);
+      } else {
+        /* No bridge (page opened on its own): clear the placeholder only. */
+        persistSetting(cfg.settingsKey, '');
+        done(true);
+      }
+    }
+
+    function _saveKey(provider) {
+      const cfg = PROVIDER_CONFIG[provider];
+      if (!cfg) return;
+      const input = $(cfg.input);
+      if (!input) return;
+      const value = input.value.trim();
+      
+      /* Don't save empty or placeholder values */
+      if (!value || value === '***' || value === '••••••••••••••••') return;
+
+      /* Save via bridge */
+      if (bridge && typeof bridge.setApiKey === 'function') {
+        bridge.setApiKey(cfg.kmName, value, (ok) => {
+          if (ok) {
+            _showMaskedState(provider, _maskApiKey(value));
+            showToast(`${provider} key saved`);
+          } else {
+            showToast(`Failed to save ${provider} key`);
+          }
+        });
+      } else {
+        /* Fallback: save via setSetting */
+        persistSetting(cfg.settingsKey, value);
+        _showMaskedState(provider, _maskApiKey(value));
+        showToast(`${provider} key saved`);
+      }
+    }
+
+    /* Bind events for one rendered row. Called by _renderProviders() as each
+       row is appended, so built-in and published rows get identical wiring -
+       the enable toggle is deliberately NOT here, it is delegated on the
+       document (see PROVIDER ACTIVATION TOGGLES below) because rows appear
+       after this script has run. */
+    function _wireProviderRow(key) {
+      const cfg = PROVIDER_CONFIG[key];
+      if (!cfg) return;
+      const input = $(cfg.input);
+      const eyeBtn = $(cfg.eye);
+      const testBtn = $(cfg.test);
+      const removeBtn = $(cfg.remove);
+
+      /* Eye toggle */
+      if (eyeBtn) {
+        eyeBtn.addEventListener('click', () => _toggleEye(key));
+      }
+
+      /* Test connection */
+      if (testBtn) {
+        testBtn.addEventListener('click', () => _testConnection(key));
+      }
+
+      /* Remove key */
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => _removeKey(key));
+      }
+
+      /* Save on blur */
+      if (input) {
+        input.addEventListener('blur', () => _saveKey(key));
+        /* Also save on Enter */
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            input.blur();
+          }
+        });
+      }
+
+      /* Check if key exists and show masked state */
+      /* Will be populated when bridge connects */
+      _providerHasKey[key] = false;
+    }
+
+    /* Apply one row's stored-key state. Shared by the batched call below and
+       its one-at-a-time fallback, so both behave identically. */
+    function _applyKeyStatus(provider, cfg, key) {
+      /* Only show masked state if key is valid (not empty, not placeholder) */
+      if (key && key.length > 8 && key !== '***') {
+        _showMaskedState(provider, key);   /* already masked by the bridge */
+      } else {
+        /* No valid key, show empty input */
+        _showEditState(provider);
+        const input = $(cfg.input);
+        if (input) input.value = '';
+        _providerHasKey[provider] = false;
+      }
+    }
+
+    /* Load stored key status when bridge connects.
+       ONE call for every row. This used to ask getApiKey() once per provider,
+       which is N web-channel round trips through the GUI thread, and on Linux
+       each of those also re-read the key store, so opening this panel got
+       slower with every provider the account had - including each one the
+       admin panel publishes. */
+    function _loadKeyStatus() {
+      const entries = Object.entries(PROVIDER_CONFIG);
+      if (!entries.length) return;
+
+      if (bridge && typeof bridge.getApiKeyStatuses === 'function') {
+        const names = entries.map(([, cfg]) => cfg.kmName);
+        bridge.getApiKeyStatuses(JSON.stringify(names), (raw) => {
+          let keys;
+          try { keys = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { keys = null; }
+          if (!keys || typeof keys !== 'object') keys = {};
+          entries.forEach(([provider, cfg]) => _applyKeyStatus(provider, cfg, keys[cfg.kmName]));
+        });
+        return;
+      }
+
+      /* An older bridge without the batch slot: same answers, one call each. */
+      entries.forEach(([provider, cfg]) => {
+        if (bridge && typeof bridge.getApiKey === 'function') {
+          bridge.getApiKey(cfg.kmName, (key) => _applyKeyStatus(provider, cfg, key));
+        } else {
+          /* No bridge, check settings for placeholder */
+          const settingsVal = state?.settings?.[cfg.settingsKey];
+          if (settingsVal && settingsVal !== '***' && settingsVal !== '') {
+            _showMaskedState(provider);
+          } else {
+            _showEditState(provider);
+          }
+        }
+      });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       PROVIDER ROWS
+       Every row of the "Provider API Keys" card is drawn here, from
+       bridge.listProviders(): the published built-in directory first,
+       then the user's own and server-published providers. One markup
+       builder, one wiring function, one key-name convention - a row
+       cannot behave differently because of where its provider came
+       from. This used to be two halves: eight hand-written <div>s in
+       the HTML with a matching eight-entry PROVIDER_CONFIG literal,
+       plus a runtime renderer for the dynamic ones into a second host.
+       The halves drifted, and a provider published from the admin
+       panel had no row at all until a desktop release shipped one.
+       ═══════════════════════════════════════════════════════════════ */
+
+    function _rowInitial(p) {
+      const from = p.logoText || p.name || p.slug || '?';
+      const c = String(from).trim().charAt(0).toUpperCase();
+      return /[A-Z0-9]/.test(c) ? c : '?';
+    }
+
+    function _rowHtml(p) {
+      /* textContent is used for every server-supplied string below; this
+         builds the skeleton only, so a provider name can never inject
+         markup into the settings page. */
+      const k = p.domKey;
+      /* Every element id derives from the DOM key, the same key
+         PROVIDER_CONFIG is built with in _renderProviders(). A hardcoded
+         "dyn_" prefix here gave builtin rows Test/Remove ids nobody looked
+         up, so clicking their X did nothing while user-added rows worked. */
+      return (
+        '<div class="provider-info">' +
+          '<div class="provider-logo js-logo"></div>' +
+          '<div><label class="js-name"></label>' +
+            '<p class="js-desc"></p>' +
+            '<a class="get-key-link js-signup" style="display:none"></a>' +
+          '</div>' +
+        '</div>' +
+        '<div class="provider-key" style="position:relative;">' +
+          '<input type="password" class="setting-input key-input" id="' + k + 'Key" placeholder="Paste key...">' +
+          '<span class="key-mask" id="' + k + 'KeyMask" style="display:none;">••••••••••••••••</span>' +
+          '<div class="key-actions">' +
+            '<button class="setting-btn icon-btn test-btn" id="' + k + 'Test" title="Test">' +
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' +
+            '</button>' +
+            /* Shown only while a key is saved (CSS on data-has-key). It went
+               missing with the 3.0.69 row rewrite, which left no way to
+               delete a stored key from Settings. */
+            '<button class="setting-btn icon-btn remove-btn" id="' + k + 'Remove" title="Remove key" aria-label="Remove key" style="display:none">' +
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+        '<label class="switch"><input type="checkbox" class="provider-enable" id="' + k + 'Enable"><span class="switch-slider"></span></label>'
+      );
+    }
+
+    /* Which switches are on before the user has ever chosen: read off the
+       rows the bridge sent (defaultEnabled), i.e. off the server's
+       ProviderMeta table. This page used to hardcode ['mimo', 'deepseek']
+       here, a third copy of the same fact. */
+    let _defaultEnabled = [];
+
+    function _renderProviders(list) {
+      const host = document.getElementById('providerRows');
+      if (!host) return;
+      host.innerHTML = '';
+      /* The map describes the rows on the page; stale entries would point
+         _loadKeyStatus() at elements that no longer exist. */
+      Object.keys(PROVIDER_CONFIG).forEach((k) => delete PROVIDER_CONFIG[k]);
+      if (!Array.isArray(list) || !list.length) {
+        /* The catalog is server-published: an empty list means the server
+           has never been reached and no cache exists, and the user's own
+           providers list is empty too. Say that instead of showing a blank
+           card - a silent empty card reads as "the feature is broken". */
+        const empty = document.createElement('div');
+        empty.className = 'provider-empty';
+        empty.textContent =
+          'No providers yet. The provider and model list syncs from your ' +
+          'Cortex account — sign in while online and reopen this page. ' +
+          'Providers you add yourself appear here too.';
+        host.appendChild(empty);
+        return;
+      }
+
+      list.forEach((p) => {
+        if (!p || !p.slug || !p.domKey) return;
+        const key = p.domKey;
+        const row = document.createElement('div');
+        row.className = 'provider-row';
+        row.dataset.provider = key;
+        row.innerHTML = _rowHtml(p);
+
+        const logo = row.querySelector('.js-logo');
+        logo.style.background = p.color || '#6b7280';
+        logo.style.color = 'white';
+        logo.textContent = _rowInitial(p);
+
+        row.querySelector('.js-name').textContent = p.name || p.slug;
+
+        const bits = [];
+        if (p.description) bits.push(p.description);
+        else if (p.modelCount) bits.push(p.modelCount + (p.modelCount === 1 ? ' model' : ' models'));
+        if (p.authStyle === 'none') bits.push('no key needed');
+        else if (p.keyHint) bits.push('key starts ' + p.keyHint);
+        row.querySelector('.js-desc').textContent = bits.join(' · ');
+
+        if (p.signupUrl) {
+          const a = row.querySelector('.js-signup');
+          a.style.display = '';
+          a.dataset.url = p.signupUrl;
+          a.title = p.signupUrl;
+          a.textContent = 'Get API key ↗';
+          /* No click handler here on purpose: a delegated listener already
+             handles .get-key-link[data-url]. Adding another opened the
+             browser twice. */
+        }
+
+        /* A keyless provider (a user's own Ollama) has nothing to paste. */
+        if (p.authStyle === 'none') {
+          const inp = row.querySelector('.key-input');
+          inp.disabled = true;
+          inp.placeholder = 'No key required';
+        }
+
+        /* The TOGGLE is keyed on the provider slug ("nvidia"), not the DOM
+           key ("dyn_nvidia"): the chat dropdown groups these models under
+           the slug, and ai.enabled_providers is matched against it. Keyed on
+           the DOM key, the switch saved nothing, reverted on restart, and
+           the models never appeared. The key field above still uses the DOM
+           key - they are different identifiers for different jobs. */
+        const enable = row.querySelector('.provider-enable');
+        enable.dataset.provider = p.slug;
+        enable.closest('.switch').title =
+          `Show ${p.name || p.slug} models in the chat dropdown`;
+        host.appendChild(row);
+
+        /* Same shape for every row, so _saveKey/_testConnection/_removeKey/
+           _toggleEye work without knowing where the provider came from. */
+        PROVIDER_CONFIG[key] = {
+          input:  key + 'Key',
+          mask:   key + 'KeyMask',
+          eye:    key + 'Eye',
+          test:   key + 'Test',
+          remove: key + 'Remove',
+          settingsKey: p.settingsKey || ('ai.' + key + '_key'),
+          kmName: p.keyName || key,
+        };
+        _wireProviderRow(key);
+      });
+
+      /* Stored keys show masked, and the enable toggles are re-applied now
+         that the checkboxes exist. */
+      _loadKeyStatus();
+      /* Immediately from what we already know, then re-ask in case the list
+         changed. Without the first line these rows flash as "off". */
+      _defaultEnabled = list.filter((p) => p && p.defaultEnabled && p.slug)
+                            .map((p) => p.slug);
+      if (Array.isArray(_enabledCache)) _applyEnabledProviders(_enabledCache);
+      else _applyEnabledProviders(_defaultEnabled);
+      if (typeof _loadEnabledProviders === 'function') _loadEnabledProviders();
+    }
+
+    function _loadProviders() {
+      if (!bridge || typeof bridge.listProviders !== 'function') return;
+      try {
+        bridge.listProviders((raw) => {
+          let list = [];
+          try { list = JSON.parse(raw || '[]'); } catch (e) { list = []; }
+          _renderProviders(list);
+        });
+      } catch (e) {
+        /* An older build without the slot leaves the card empty rather than
+           throwing during page setup. */
+      }
+    }
+
+    /* Draw the rows, then load their key status, once the bridge is actually
+       connected (see whenBridgeReady, a fixed-delay one-shot missed in
+       compiled builds). _renderProviders() calls _loadKeyStatus() itself, so
+       the map is populated before anything reads it. */
+    whenBridgeReady(_loadProviders);
+
+    /* ═══════════════════════════════════════════════════════════════
+       PROVIDER ACTIVATION TOGGLES
+       Which providers show their models in the chat dropdown.
+       Persisted in ai.enabled_providers; the first-run defaults come
+       from the rows themselves (defaultEnabled, i.e. the server's
+       ProviderMeta table), not from a list restated in this file.
+       ═══════════════════════════════════════════════════════════════ */
+    /* The last list the bridge gave us. Rows rendered after that answer
+       arrived must start in the right state without waiting for another
+       round trip, or a dynamic provider draws as off for a moment and can
+       be left that way if nothing re-applies. */
+    let _enabledCache = null;
+
+    function _applyEnabledProviders(list) {
+      _enabledCache = list;
+      document.querySelectorAll('.provider-enable').forEach((cb) => {
+        cb.checked = list.includes(cb.dataset.provider);
+      });
+    }
+
+    function _loadEnabledProviders() {
+      if (bridge && typeof bridge.getEnabledProviders === 'function') {
+        bridge.getEnabledProviders((raw) => {
+          let list;
+          try { list = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { list = null; }
+          _applyEnabledProviders(Array.isArray(list) ? list : _defaultEnabled);
+        });
+      } else {
+        _applyEnabledProviders(_defaultEnabled);
+      }
+    }
+
+    /* DELEGATED, not bound per element.
+       querySelectorAll().forEach(addEventListener) runs ONCE, over the
+       checkboxes that exist at that moment - the hand-written rows. Every
+       server-published and user-added provider is rendered later, so those
+       toggles had NO handler: clicking one flipped the switch on screen and
+       saved nothing, and the next restart showed whatever was on disk. That
+       is the "the toggle turns itself off again" report. A listener on the
+       document catches rows that do not exist yet. */
+    document.addEventListener('change', (e) => {
+      const cb = e.target;
+      if (!cb || !cb.classList || !cb.classList.contains('provider-enable')) return;
+      const provider = cb.dataset.provider;
+      if (!provider) return;
+      if (bridge && typeof bridge.setProviderEnabled === 'function') {
+        bridge.setProviderEnabled(provider, cb.checked, (raw) => {
+          let list;
+          try { list = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e2) { list = null; }
+          if (Array.isArray(list)) {
+            _enabledCache = list;
+            _applyEnabledProviders(list);
+          }
+          showToast(cb.checked
+            ? `${provider} models shown in chat dropdown`
+            : `${provider} models hidden from chat dropdown`);
+        });
+      } else {
+        showToast('Not connected, provider setting not saved');
+      }
+    });
+
+    whenBridgeReady(_loadEnabledProviders);
+
+    /* ═══════════════════════════════════════════════════════════════
+       MCP SERVERS
+       ═══════════════════════════════════════════════════════════════ */
+
+    function _esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    const _MCP_STATUS_COLORS = {
+      connected: '#3fb950', connecting: '#d29922',
+      error: '#f85149', disabled: '#6b7280', stopped: '#6b7280',
+      needs_approval: '#d29922',
+    };
+
+    function _renderMcpServers(servers) {
+      const list = $('mcpServerList');
+      const empty = $('mcpEmptyState');
+      if (!list) return;
+      list.querySelectorAll('.mcp-server-row').forEach(el => el.remove());
+      if (!servers || !servers.length) {
+        if (empty) empty.style.display = '';
+        return;
+      }
+      if (empty) empty.style.display = 'none';
+      servers.forEach(srv => {
+        const color = _MCP_STATUS_COLORS[srv.status] || '#6b7280';
+        const row = document.createElement('div');
+        row.className = 'mcp-server-row';
+        row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 4px;' +
+                            'border-bottom:1px solid rgba(128,128,128,0.15);';
+        // A project-supplied server is listed but held back until the user
+        // approves the command, so explain that instead of showing the raw
+        // status word.
+        // Connected, but its last answer said the key/login is wrong.
+        const warnLabel = srv.status === 'connected' && srv.warning
+          ? `Server says: ${_esc(srv.warning)}` : '';
+        const toolsLabel = warnLabel ? warnLabel : srv.status === 'connected'
+          ? `${srv.tools.length} tool${srv.tools.length === 1 ? '' : 's'}` +
+            (srv.tools.length ? `, ${srv.tools.slice(0, 5).join(', ')}${srv.tools.length > 5 ? '…' : ''}` : '')
+          : (srv.status === 'error' ? _esc(srv.error)
+             : (srv.needs_approval
+                ? 'Declared in this project, approve it before it runs'
+                : srv.status));
+        const actionBtn = srv.needs_approval
+          ? `<button class="setting-btn mcp-approve" data-name="${_esc(srv.name)}" title="Run this server's command on your machine">Approve</button>`
+          : `<button class="setting-btn mcp-toggle" data-name="${_esc(srv.name)}" data-enabled="${srv.enabled ? '1' : '0'}">${srv.enabled ? 'Disable' : 'Enable'}</button>`;
+        row.innerHTML =
+          `<span title="${_esc(srv.status)}" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${color};"></span>` +
+          `<div style="flex:1;min-width:0;">` +
+            `<div style="font-weight:600;">${_esc(srv.name)} <span style="font-weight:400;color:#6b7280;font-size:11px;">(${_esc(srv.scope)})</span>${srv.source && srv.source !== 'cortex' ? `<span title="Inherited from ${_esc(srv.source)}'s config file - Cortex reads it but never writes to it" style="font-weight:500;font-size:10px;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(88,166,255,0.15);color:#58a6ff;">${_esc(srv.source)}</span>` : ''}</div>` +
+            `<div style="color:#8b949e;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_esc(srv.command)}">${_esc(srv.command)}</div>` +
+            `<div style="color:${srv.status === 'error' ? '#f85149' : ((srv.needs_approval || warnLabel) ? '#d29922' : '#6b7280')};font-size:12px;">${toolsLabel}</div>` +
+          `</div>` +
+          actionBtn +
+          `<button class="setting-btn icon-btn mcp-reconnect" data-name="${_esc(srv.name)}" title="Reconnect">↻</button>` +
+          `<button class="setting-btn icon-btn mcp-remove" data-name="${_esc(srv.name)}" title="Remove" style="color:#f85149;">✕</button>`;
+        list.appendChild(row);
+      });
+
+      list.querySelectorAll('.mcp-approve').forEach(b => b.addEventListener('click', () => {
+        if (bridge && typeof bridge.approveMcpServer === 'function') {
+          showToast(`Approving ${b.dataset.name}...`);
+          bridge.approveMcpServer(b.dataset.name, () => setTimeout(_loadMcpStatus, 400));
+        }
+      }));
+
+      list.querySelectorAll('.mcp-toggle').forEach(b => b.addEventListener('click', () => {
+        const enable = b.dataset.enabled !== '1';
+        if (bridge && typeof bridge.toggleMcpServer === 'function') {
+          bridge.toggleMcpServer(b.dataset.name, enable, () => setTimeout(_loadMcpStatus, 400));
+        }
+      }));
+      list.querySelectorAll('.mcp-reconnect').forEach(b => b.addEventListener('click', () => {
+        if (bridge && typeof bridge.reconnectMcpServer === 'function') {
+          bridge.reconnectMcpServer(b.dataset.name, () => setTimeout(_loadMcpStatus, 1200));
+          showToast(`Reconnecting ${b.dataset.name}...`);
+        }
+      }));
+      list.querySelectorAll('.mcp-remove').forEach(b => b.addEventListener('click', () => {
+        const name = b.dataset.name;
+        // Full removal: Cortex's entry, the other tool's entry and the
+        // downloaded package, each shown and ticked before anything happens.
+        // Older builds without the plan call fall back to the plain remove.
+        if (!bridge || typeof bridge.mcpRemovalPlan !== 'function') {
+          if (bridge && typeof bridge.removeMcpServer === 'function') {
+            bridge.removeMcpServer(name, (ok) => {
+              showToast(ok ? `${name} removed` : 'Remove failed');
+              _loadMcpStatus();
+            });
+          }
+          return;
+        }
+        bridge.mcpRemovalPlan(name, (raw) => {
+          let plan = {}; try { plan = JSON.parse(raw); } catch (e) {}
+          _askMcpRemoval(plan).then((choice) => {
+            if (!choice) return;
+            bridge.removeMcpServerFully(name, choice.otherTools, choice.deleteFiles, (raw2) => {
+              let r = {}; try { r = JSON.parse(raw2); } catch (e) {}
+              const freed = r.freed_mb ? `, ${r.freed_mb} MB freed` : '';
+              showToast((r.failed && r.failed.length)
+                ? `${name} removed, but some parts failed - see the log`
+                : `${name} removed${freed}`);
+              _loadMcpStatus();
+            });
+          });
+        });
+      }));
+    }
+
+    /* Confirm box for removing an MCP server: lists exactly what goes and
+       lets the user keep the other tool's entry or the download. Resolves
+       {otherTools, deleteFiles} or null when cancelled. */
+    function _askMcpRemoval(plan) {
+      return new Promise(resolve => {
+        const others = plan.other_tool_files || [];
+        const toolNames = { claude: 'Claude Code', cursor: 'Cursor' };
+        const otherRow = others.length
+          ? `<label class="mcp-rm-opt"><input type="checkbox" id="mcpRmOther" checked> ` +
+            `Also remove it from ${others.map(o => _esc(toolNames[o.tool] || o.tool)).join(', ')}'s config ` +
+            `<span class="mcp-rm-path">(${others.map(o => _esc(o.path)).join(', ')})</span><br>` +
+            `<span class="mcp-rm-note">That app will stop using it too. A backup of the file is kept in ~/.cortex/backups.</span></label>`
+          : '';
+        const pkgRow = (plan.package_dirs || []).length
+          ? `<label class="mcp-rm-opt"><input type="checkbox" id="mcpRmFiles" checked> ` +
+            `Delete its downloaded files (${_esc(plan.package)}, ${plan.package_mb} MB)</label>`
+          : (plan.package_shared
+             ? `<p class="mcp-rm-note">Its package ${_esc(plan.package)} is kept: another server uses it.</p>` : '');
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML =
+          `<div class="confirm-card" role="alertdialog" aria-modal="true">` +
+          `<h3>Remove ${_esc(plan.name || '')}?</h3>` +
+          `<p>It will be removed from Cortex.</p>` + otherRow + pkgRow +
+          `<div class="confirm-actions">` +
+          `<button class="confirm-btn" data-act="cancel">Cancel</button>` +
+          `<button class="confirm-btn danger" data-act="ok">Remove</button>` +
+          `</div></div>`;
+        let done = false;
+        const close = (ok) => {
+          if (done) return; done = true;
+          document.removeEventListener('keydown', onKey, true);
+          const result = ok ? {
+            otherTools: !!overlay.querySelector('#mcpRmOther')?.checked,
+            deleteFiles: !!overlay.querySelector('#mcpRmFiles')?.checked,
+          } : null;
+          overlay.remove();
+          resolve(result);
+        };
+        const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
+        overlay.addEventListener('click', (e) => {
+          const act = e.target.closest('[data-act]');
+          if (act) close(act.dataset.act === 'ok');
+          else if (e.target === overlay) close(false);
+        });
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(overlay);
+        overlay.querySelector('[data-act="cancel"]').focus();
+      });
+    }
+
+    function _setMcpFormEnabled(enabled) {
+      /* Enable/disable the Add Server form and Import JSON section */
+      const addBtn = $('mcpAddBtn');
+      const addName = $('mcpAddName');
+      const addCmd = $('mcpAddCommand');
+      const addEnv = $('mcpAddEnv');
+      const importBtn = $('mcpImportBtn');
+      const importJson = $('mcpImportJson');
+
+      /* Locked state must stay READABLE. Bug history: controls were dimmed
+         to 0.4 AND their parent card to 0.5, opacities MULTIPLY, so the
+         text inside rendered at ~20% ("hashed", unreadable). Dim only the
+         card, moderately; controls keep full opacity inside it. */
+      [addBtn, addName, addCmd, addEnv, importBtn, importJson].forEach(el => {
+        if (!el) return;
+        el.disabled = !enabled;
+        el.style.opacity = '';
+        el.style.pointerEvents = enabled ? '' : 'none';
+      });
+
+      const addCard = addBtn?.closest('.settings-card');
+      const importCard = importBtn?.closest('.settings-card');
+      [addCard, importCard].forEach(card => {
+        if (!card) return;
+        card.style.opacity = enabled ? '' : '0.75';
+        card.style.pointerEvents = enabled ? '' : 'none';
+      });
+    }
+
+    // Re-poll while any server is still "connecting". Without this the UI
+    // took ONE status snapshot (e.g. 1.5s after adding a server), but an
+    // npx-launched server takes 3-10s to cold-start, the backend connected
+    // moments later while the panel showed the yellow "connecting" dot
+    // forever (until a manual Refresh). Bounded so a permanently-failing
+    // server can't poll for eternity.
+    let _mcpPollTimer = null;
+    let _mcpPollCount = 0;
+    function _scheduleMcpRepoll() {
+      if (_mcpPollTimer) return;              // one pending poll at a time
+      if (_mcpPollCount >= 20) return;        // cap ~30s of polling
+      _mcpPollCount++;
+      _mcpPollTimer = setTimeout(() => { _mcpPollTimer = null; _loadMcpStatus(); }, 1500);
+    }
+
+    function _loadMcpStatus() {
+      if (bridge && typeof bridge.getMcpStatus === 'function') {
+        bridge.getMcpStatus((raw) => {
+          try {
+            const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            {
+              // MCP is free for every user: no subscription lock card.
+              _renderMcpServers(data.servers || []);
+              _setMcpFormEnabled(true);
+              const stillConnecting = (data.servers || []).some(s => s.status === 'connecting');
+              if (stillConnecting) {
+                _scheduleMcpRepoll();
+              } else {
+                _mcpPollCount = 0;            // settled, reset budget for next action
+              }
+            }
+          } catch (e) { console.error('[MCP] status parse error:', e); }
+        });
+      }
+    }
+
+    $('mcpRefreshBtn')?.addEventListener('click', () => { _loadMcpStatus(); showToast('Refreshing MCP status...'); });
+
+    $('mcpAddBtn')?.addEventListener('click', () => {
+      const name = ($('mcpAddName')?.value || '').trim();
+      const cmd = ($('mcpAddCommand')?.value || '').trim();
+      const env = ($('mcpAddEnv')?.value || '').trim();
+      if (!name || !cmd) { showToast('Name and a command or URL are required'); return; }
+      if (bridge && typeof bridge.addMcpServer === 'function') {
+        bridge.addMcpServer(name, cmd, env, (raw) => {
+          let r = {}; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) {}
+          if (r.success) {
+            showToast(`${name} added, connecting...`);
+            $('mcpAddName').value = ''; $('mcpAddCommand').value = ''; $('mcpAddEnv').value = '';
+            setTimeout(_loadMcpStatus, 1500);
+          } else {
+            showToast(`Add failed: ${r.error || 'unknown error'}`);
+          }
+        });
+      }
+    });
+
+    $('mcpImportBtn')?.addEventListener('click', () => {
+      const text = ($('mcpImportJson')?.value || '').trim();
+      if (!text) { showToast('Paste a JSON config first'); return; }
+      if (bridge && typeof bridge.importMcpJson === 'function') {
+        bridge.importMcpJson(text, (raw) => {
+          let r = {}; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) {}
+          if (r.success) {
+            showToast(`Imported ${r.added} server(s), connecting...`);
+            $('mcpImportJson').value = '';
+            setTimeout(_loadMcpStatus, 1500);
+          } else {
+            showToast(`Import failed: ${r.error || 'invalid JSON'}`);
+          }
+        });
+      }
+    });
+
+    whenBridgeReady(_loadMcpStatus);
+    /* Servers connect asynchronously, refresh status a few times after open */
+    whenBridgeReady(() => { setTimeout(_loadMcpStatus, 2500); setTimeout(_loadMcpStatus, 6000); });
+    /* Exported for Python (runJavaScript), the whole file is an IIFE, so
+       without this the login-complete handler can't refresh the MCP panel
+       and the "Subscription Required" lock card stays until a manual
+       Refresh even though the user is now signed in with Pro. */
+    window.refreshMcpStatus = _loadMcpStatus;
+
+    /* ── Standalone demo data (only when no bridge) ── */
+    setTimeout(() => {
+      if (!bridge && !window.__memMgrDebug.loaded) {
+        console.info("[SETTINGS] Standalone mode, loading demo data");
+        state.scopes.project.memories = [
+          { id: "1", title: "Project uses Django 4.2", content: "This project is built on Django 4.2 with PostgreSQL. REST API uses DRF.", type: "architecture", created_at: new Date(Date.now() - 3600000).toISOString() },
+          { id: "2", title: "Prefer pytest over unittest", content: "User prefers pytest for all testing. Fixtures in conftest.py.", type: "preference", created_at: new Date(Date.now() - 86400000).toISOString() },
+          { id: "3", title: "Database: PostgreSQL 16", content: "Production uses PostgreSQL 16 on AWS RDS. Connection pooling via pgBouncer.", type: "infrastructure", created_at: new Date(Date.now() - 172800000).toISOString() },
+        ];
+        renderMemoryList();
+
+        /* Demo profile data */
+        const demoProfile = { display_name: 'hakeemph', username: 'hakeemph', avatar_color: '#f97316', avatar_initials: 'HA', plan: 'Free' };
+        if ($("profileAvatar")) { $("profileAvatar").textContent = demoProfile.avatar_initials; $("profileAvatar").style.background = 'linear-gradient(135deg, ' + demoProfile.avatar_color + ', ' + demoProfile.avatar_color + ')'; }
+        if ($("profileName")) $("profileName").textContent = demoProfile.display_name;
+        if ($("profileUsername")) $("profileUsername").textContent = '@' + demoProfile.username;
+        if ($("profilePlan")) $("profilePlan").textContent = demoProfile.plan;
+
+        /* Demo usage data, generate realistic daily usage for last 30 days */
+        const demoDaily = {};
+        for (let i = 371; i >= 0; i--) {   // a full year for the year-view heatmap
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const key = d.toISOString().slice(0, 10);
+          const dow = d.getDay();
+          /* Simulate: weekdays busier than weekends, ~20% rest days, rare spikes */
+          let base = (dow === 0 || dow === 6) ? Math.random() * 90000 : Math.random() * 620000;
+          if (Math.random() < 0.2) base = 0;
+          if (Math.random() < 0.04) base = 1200000 + Math.random() * 800000;
+          base = Math.round(base);
+          demoDaily[key] = { tokens: base, requests: Math.floor(base / 3500), tool_calls: Math.floor(base / 1800), models: {} };
+        }
+
+        const demoUsage = {
+          lifetime: { total_tokens: 209100000, total_requests: 15420, total_tool_calls: 8230, total_sessions: 342, longest_task_seconds: 614 },
+          current_period: { start_date: '2026-06-19', end_date: '2026-07-19', tokens_used: 134000, tokens_limit: 200000, requests_used: 32, requests_limit: 100, tool_calls_used: 440, tool_calls_limit: 0 },
+          streaks: { current_streak_days: 0, longest_streak_days: 2 },
+          daily_usage: demoDaily,
+          model_usage: {
+            'deepseek-v4': { total_tokens: 72000, total_requests: 180 },
+            'gpt-5.4': { total_tokens: 38000, total_requests: 95 },
+            'qwen3.7-plus': { total_tokens: 21000, total_requests: 52 },
+            'claude-opus': { total_tokens: 12000, total_requests: 30 }
+          },
+          insights: { fast_mode_percent: 56, most_reasoning_level: 'medium', reasoning_percent: 53, skills_explored: [], total_skills_used: 0, plugins_used: [] },
+          peak: { peak_tokens_single_session: 58100000 }
+        };
+        _cachedUsageData = demoUsage;
+        applyUsageData(demoUsage);
+      }
+    }, 1000);
+  });
+})();

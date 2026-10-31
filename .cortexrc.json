@@ -1,0 +1,8 @@
+{
+  "projectRoot": "/home/hakeem/Desktop/cortex/cortex_desktop_linux/cortex_desktop_linux",
+  "restrictToProject": true,
+  "forbiddenPaths": [
+    "/opt/cortex-ide"
+  ],
+  "description": "All memory and agent operations are scoped INSIDE this project directory."
+}

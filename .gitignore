@@ -1,0 +1,243 @@
+# ============================================================================
+# SENSITIVE FILES - NEVER COMMIT TO GIT
+# ============================================================================
+
+# Environment variables with API keys (CRITICAL - contains secrets!)
+.env
+.env.local
+.env.production
+.env.development
+*.env
+
+# Exception: Allow .env.example template (contains only placeholders)
+!.env.example
+
+# .env.example2 — contains real API keys, never commit
+.env.example2
+
+# Docs/ is local only, in full. Design notes, port packs, handover
+# documents, deployment playbooks, health reports and the production
+# playbook all stay on the machine that wrote them. Nothing under Docs/
+# is tracked, and there is deliberately no negation rule here: if one
+# file needs to travel between trees it belongs at the repo root, not in
+# Docs/. The playbook in particular names the live server IP and the
+# root SSH target, and this repo is published to a public remote.
+Docs/
+
+# Forensic reports naming the production server's origin IP.
+.aiwg/
+
+# Local working notes at the repo root. Each one is written for a single
+# machine and a single session: the project health snapshot, a dated debug
+# write-up, and the agent instruction file. No code reads them. The agent's
+# rules loader reads AGENTS.md (~/.cortex/AGENTS.md, .cortex/AGENTS.md, or the
+# repo root), never CLAUDE.md, so a clone without these is complete and
+# builds and runs exactly the same.
+#
+# Every rule here is anchored with a leading slash on purpose. An unanchored
+# CLAUDE.md would also swallow any nested file of that name; only the root
+# copies are local-only. There is deliberately no negation rule.
+/CLAUDE.md
+/PROJECT_INDEX.md
+/CHAT_STUCK_ISSUES_2026-10-27.md
+
+# ============================================================================
+# Python Environment & Dependencies
+# ============================================================================
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python packages
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+# The whole build/ tree, build/linux/ included. The packaging scripts are
+# release tooling kept on the machine that builds a release; they are not
+# source, and a fresh clone no longer produces an installer on its own.
+/build/
+
+# ============================================================================
+# IDE & Editor Files
+# ============================================================================
+
+# VS Code
+.vscode/
+*.code-workspace
+
+opencode/
+
+# PyCharm
+.idea/
+*.iml
+
+# Qoder
+.qoder/
+
+# Cortex config (may contain sensitive paths)
+.cortex/
+.backup.src/
+
+
+# ============================================================================
+# Logs & Temporary Files
+# ============================================================================
+
+# Log files
+*.log
+logs/
+test_out.txt
+
+# Temporary files
+tmp/
+temp/
+nul
+*.tmp
+*.swp
+*.swo
+*~
+
+# ============================================================================
+# Test Files
+# ============================================================================
+
+# The whole tests/ tree stays out of the repository. The files remain on
+# disk for local runs; git simply does not carry them.
+#
+# There must be NO `!tests/**` negation anywhere in this file. A negation
+# placed after this rule re-includes the tree and silently defeats it.
+/tests/
+
+# Stray one-off test scripts at the repo ROOT only.
+# Must stay anchored with a leading slash: an unanchored `test_*.py` matches
+# at EVERY depth, which silently swallowed the entire tests/ package —
+# `git add tests/` reported success and committed nothing.
+/test_*.py
+clear_deepseek_key.py
+fix_deepseek_key.py
+reset_settings.py
+
+# Test cache
+.pytest_cache/
+.mypy_cache/
+coverage/
+.htmlcov/
+
+# ============================================================================
+# Build Artifacts & Installer Output
+# ============================================================================
+
+# PyInstaller onedir output and packaged artifacts
+dist/
+*.spec
+
+# ---------------------------------------------------------------------------
+# Build machinery -- kept out of the repository
+# ---------------------------------------------------------------------------
+# Specs, installer scripts and packaging helpers are release tooling that
+# lives on the machine doing the build, not source. They are no longer
+# tracked, so a published clone carries no installer definitions.
+# *.spec a few lines up already covers every PyInstaller spec, and /build/ is
+# ignored as a whole tree; these are the remaining pieces that need naming.
+/build_tools/
+/build.ps1
+/cortex_setup.iss
+
+# Inno Setup
+installer_output/
+*.exe
+*.dll
+*.pak
+*.bin
+# The installer script is release tooling, not source. Kept on the build
+# machine and never tracked (also named in the block above).
+cortex_setup.iss
+
+# ============================================================================
+# Node.js & Frontend
+# ============================================================================
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# External repos
+opencode-dev/
+vscode-main/
+claude-code/
+
+# ============================================================================
+# OS Files
+# ============================================================================
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ============================================================================
+# Build channel marker - generated by build.ps1 on every build, never commit
+# ============================================================================
+src/_build_info.py
+msix_output/
+
+# ============================================================================
+# PyInstaller / package build outputs
+# ============================================================================
+*.build/
+*.dist/
+OSX-KVM/
+
+# ============================================================================
+# SSH keys - private key material must never be committed
+# ============================================================================
+id_ed25519*
+id_rsa*
+id_ecdsa*
+id_dsa*
+
+# ====================================================================
+# KEYS, SIGNING AND CREDENTIALS - this repo is public
+# ====================================================================
+*.pem
+*.key
+*.p12
+*.pfx
+*.gpg
+*.asc
+*.keystore
+*.jks
+secrets*.json
+credentials*.json
+service-account*.json
+keys.enc
+keys.hmac
+keys.salt
+
+# Built packages belong in dist/, and a stray copy is 200MB+.
+*.deb
+*.rpm
+
+# Local databases can hold chat history and tokens.
+*.db
+*.sqlite
+*.sqlite3
+
+# Browser captures from a local MCP session.
+/.playwright-mcp/

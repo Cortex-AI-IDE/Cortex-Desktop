@@ -1,0 +1,3249 @@
+"""
+telegram_monitor.py, run notifications and inbound prompts over Telegram
+=======================================================================
+
+Two directions, and they are not symmetrical.
+
+Outbound: Cortex reports runs. Everything that can block (DNS, TLS, a 429, a
+dead bot) runs on this module's own worker thread, so a slow network cannot
+reach the GUI thread.
+
+Inbound: a message typed in the *paired* chat only becomes a prompt when the
+user turned it on in Settings (``telegram.inbound.enabled``, off by default).
+It can start a run, and it can answer a question the agent asked (a reply
+carries the same power as a prompt, so the same switch governs both). It can
+never approve a permission card: approvals happen in Cortex, on the computer.
+That asymmetry is the whole security model, so keep it when extending this
+file.
+
+The GUI side calls exactly one thing, ``enqueue``. It builds no string, parses
+no JSON, runs no regex and raises nothing: the queue is bounded and the oldest
+event is dropped when it is full. Formatting, HTTP and retry state all live on
+the worker. That is the rule in plan 5.5, and it is the shape of two previous
+freezes in this codebase.
+
+No PyQt here on purpose. Tests drive it headless, and the service layer must
+not depend on a running QApplication. An inbound prompt leaves through the
+``on_prompt`` callback, which the GUI side turns into a queued Qt signal.
+
+Usage:
+    from src.services.telegram_monitor import TelegramMonitor
+    monitor = TelegramMonitor()
+    monitor.start()
+    monitor.enqueue({"kind": "started"})
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import queue
+import re
+import secrets
+import threading
+import time
+import urllib.error
+import urllib.request
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Callable, Optional
+
+from . import telegram_config
+from .telegram_format import escape, plain_of, to_telegram
+
+log = logging.getLogger("telegram_monitor")
+
+# Telegram hard limit on one message body.
+MAX_TEXT = 4096
+
+# A chunker asked for less than this cannot make progress on real text.
+MIN_CHUNK = 32
+
+# One edit per live message per this many seconds. Telegram tolerates about
+# one message per second per chat; 4 s leaves headroom for the other messages.
+EDIT_FLOOR_S = 4.0
+
+# Pairing code lifetime, used only when no policy is supplied. The policy
+# itself lives in settings: 60m / 24h / 7d / 30d / 90d / unlimited.
+PAIR_TTL_S = 3600.0
+
+# 8 characters over 32 symbols is about 1.1e12 possibilities. No 0/O/1/I so a
+# code read off a screen can be typed without guessing which glyph it is.
+PAIR_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+PAIR_LEN = 8
+
+# Refusals are answered with a marker, not an empty string: the Settings panel
+# has to tell "you have no token yet" apart from "a chat already holds this
+# bot", and a blank code can only say "something failed". No marker can collide
+# with a real code, because PAIR_ALPHABET holds no "!".
+PAIR_REFUSED_NO_TOKEN = "!no-token"
+PAIR_REFUSED_ALREADY_PAIRED = "!already-paired"
+PAIR_REFUSED_NO_SUBSCRIPTION = "!no-subscription"
+
+# Telegram ships with the subscription, like OCR, embeddings and web search, so
+# it uses the SAME verdict they do: CortexAPIClient.has_subscription(). There is
+# no Telegram-specific entitlement rule. A plan that lapses freezes this bot at
+# the same moment it freezes the rest of Cortex, and a renewal unfreezes both.
+# The check reads the saved account copy, so it answers offline; it is cached
+# for ENTITLEMENT_TTL_S because it sits on every network path.
+SUB_REQUIRED_REASON = "Telegram needs a Cortex subscription"
+
+# How long one entitlement verdict is reused. Every outbound send, poll and
+# prompt runs through _entitled(), so without this a busy run would ask the
+# account layer on every event; with it a renewal is picked up within a minute.
+ENTITLEMENT_TTL_S = 60.0
+
+# Sent to the chat that a new pairing displaced. Losing the channel must never
+# look like the phone simply went quiet.
+PAIR_MOVED_NOTICE = (
+    "Cortex was paired to another chat, so this one no longer receives reports "
+    "or runs prompts. Show a new code in Cortex to come back."
+)
+
+# Sent into a group that tries to pair. Groups share one chat id between every
+# member, so pairing there would hand the agent to all of them.
+PAIR_GROUP_REFUSED = (
+    "Pair Cortex in a private chat with this bot, not in a group. "
+    "Group members share one chat, so anyone in it could run prompts."
+)
+
+# A wrong code used to be answered with nothing at all, on the reasoning that an
+# error reply confirms the bot exists. That reasoning only holds for a stranger.
+# It is wrong for the owner, who has just pressed Show code: their own typo
+# produced total silence, which reads as a broken bot rather than a bad paste.
+# These are said only inside an active pairing window, so the stranger rule is
+# intact everywhere else.
+PAIR_WRONG_CODE = (
+    "That code does not match. Check the code shown in Cortex and send it "
+    "again as /pair CODE."
+)
+PAIR_NEEDS_PREFIX = "Send the code as /pair CODE, for example /pair AB3D7K9Q."
+
+# How many failed attempts get an answer. Past this the window goes silent
+# again: whoever is typing has had every hint this side can give.
+MAX_PAIR_ANSWERS = 5
+
+PAIR_POLL_S = 2.0
+
+# A long-lived code (30 or 90 days) must not mean one request every 2 s for
+# months. The fast interval is held for this window, then backs off to
+# PAIR_POLL_MAX_S.
+PAIR_FAST_WINDOW_S = 300.0
+PAIR_POLL_MAX_S = 60.0
+
+# Bounded retries. After this the event is dropped and logged, never retried
+# forever and never allowed to block the queue drain.
+MAX_ATTEMPTS = 3
+
+# A retry_after above this is not waited out: retrying sooner would break the
+# limit again, so the message is dropped instead.
+MAX_RETRY_AFTER_S = 60.0
+
+# Queue depth. Bursts above this lose the oldest event, not the newest.
+QUEUE_MAX = 200
+
+ACK_EMOJI = "\U0001F440"  # eyes, proves delivery without spending a message
+
+# Every user-supplied string that reaches a message is capped. A question
+# carrying a whole file must not become a 4096-character wall on a phone.
+MAX_FIELD = 400
+
+# The Bot API refuses a photo above 10 MB and a caption above 1024 characters.
+# Both are checked before a byte leaves, so an oversized capture fails with a
+# sentence instead of a 400 from the server.
+PHOTO_MAX_BYTES = 10 * 1024 * 1024
+PHOTO_CAPTION_MAX = 1024
+
+# A photo send is one action the caller is waiting for, not a queued status
+# update, so it gets a hard ceiling instead of a retry loop.
+PHOTO_TIMEOUT_S = 20.0
+
+# Extension -> the type Telegram is told the bytes are. Anything else is
+# refused rather than guessed: a wrong type is rejected, and sending an
+# arbitrary local file to a chat is not something a photo helper should do.
+PHOTO_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+# ---------------------------------------------------------------------------
+# Inbound policy
+# ---------------------------------------------------------------------------
+# Telegram's own limit is 4096 per message. A prompt is left a little under it
+# so one prompt is always one turn, never two halves of a task.
+INBOUND_MAX_CHARS = 4000
+
+# A flood guard, not a UX feature: six a minute is far more than a person
+# types, and far less than a stuck client can send.
+INBOUND_RATE_MAX = 6
+INBOUND_RATE_WINDOW_S = 60.0
+
+# Updates older than this are dropped instead of run. Telegram keeps unread
+# updates for 24 hours, so without this a prompt typed yesterday would fire the
+# moment Cortex is opened today.
+INBOUND_STALE_S = 120.0
+
+# Inbound polling interval: short enough to feel instant, long enough that an
+# idle app is not making 30 requests a minute all day.
+INBOUND_POLL_S = 3.0
+
+CONFIRM_EMOJI = "\u2705"
+
+# The whole message has to be a plain ask for a picture of Cortex. "Screenshot
+# of the checkout page" does not match: that is a task, and goes to the agent.
+_SCREENSHOT_ASK = re.compile(
+    r"^(?:(?:please|pls|hey|cortex)\s+)*(?:(?:can|could|would)\s+you\s+)?"
+    r"(?:"
+    r"(?:(?:send|share|give|show|take|get|grab|capture)\s+(?:me\s+|us\s+)?)?"
+    r"(?:(?:a|an|the|your|current|latest|new)\s+)*"
+    r"(?:screen\s?shot|screen\s?cap(?:ture)?|snap\s?shot|screen)"
+    r"(?:\s+of\s+(?:the\s+|your\s+)?(?:current\s+)?"
+    r"(?:screen|app|application|cortex|ide|window|work|ui))?"
+    r"|show\s+(?:me\s+)?what\s+you(?:\s+are|'re)\s+(?:working\s+on|doing)"
+    r"|show\s+(?:me\s+)?(?:the\s+)?current\s+ui"
+    r")"
+    r"(?:\s+(?:please|pls|now|ayakk\w*|tharu?|thaa|edukk\w*|venam))*[\s.!?]*$",
+    re.IGNORECASE,
+)
+
+
+def is_screenshot_request(text: str) -> bool:
+    """True when a phone message only asks to see Cortex as it is now."""
+    return bool(_SCREENSHOT_ASK.match((text or "").strip()))
+
+
+INBOUND_HELP = (
+    "Send a message and Cortex runs it as a prompt.\n"
+    "A picture or a voice note works too: the caption or the transcript "
+    "becomes the prompt.\n"
+    "/status   what Cortex is doing now\n"
+    "/screenshot   a picture of Cortex right now, even during a run\n"
+    "/help     this message\n"
+    "When Cortex asks you a question, reply with an option's number or type "
+    "your own answer.\n"
+    "Approvals are still given in Cortex, on the computer."
+)
+
+# Questions the agent asks. A question message lists the options, numbered,
+# with one button each; a reply of "2" picks option 2 and any other text is a
+# custom answer. The answer reaches the same card the computer shows, so the
+# two can never disagree: whichever answers first wins, and the other side is
+# told. Only with prompts allowed, because an answer steers the run as much as
+# a prompt does.
+QUESTION_FOOTER_ANSWERABLE = "Reply with a number, or type your own answer."
+QUESTION_FOOTER_LOCAL_ONLY = (
+    "Answer in Cortex. To answer from here, turn on Allow prompts in "
+    "Settings, Telegram."
+)
+QUESTION_OPTION_MAX = 8          # Telegram is happy with more; a phone is not
+QUESTION_BUTTON_LABEL_MAX = 40   # one line on a narrow screen
+QUESTION_CLOSED_RUN_ENDED = "Closed: the run ended before this was answered."
+QUESTION_CLOSED_SUPERSEDED = "Closed: Cortex moved on to its next question."
+QUESTION_CALLBACK_PREFIX = "qa"
+
+INBOUND_STALE_REPLY = (
+    "Cortex was not listening when this was sent (it was closed, or prompts "
+    "were off). Send it again now."
+)
+
+INBOUND_BUSY_REPLY = (
+    "Cortex is busy with a run, and a picture cannot wait in the queue. Send "
+    "the request as text, or send the picture when the run finishes."
+)
+
+# A prompt sent while a run is going waits here instead of being refused.
+# Three is deliberately small: a phone must not be able to build a backlog
+# longer than the PC's own queued-prompt strip can show.
+INBOUND_QUEUE_MAX = 3
+
+INBOUND_QUEUED_REPLY = (
+    "Cortex is busy, so this prompt is queued. It runs as soon as the current "
+    "one finishes ({waiting} waiting). /status shows what it is doing."
+)
+
+INBOUND_QUEUE_FULL_REPLY = (
+    "{limit} prompts are already waiting. This one was not kept - send it "
+    "again once one of them has run. /status shows what Cortex is doing."
+)
+
+INBOUND_QUEUE_DROPPED_REPLY = (
+    "The run was stopped, so the prompt you queued was not run. Send it again "
+    "when you want it."
+)
+
+# A picture is downloaded here and handed to the same vision pipeline a pasted
+# image uses. The cap keeps one upload from becoming a multi-megabyte base64
+# string on the poller thread and again in the agent's history. Telegram
+# recompresses a photo to well under this, so only a deliberate oversized
+# upload is refused.
+INBOUND_MAX_IMAGE_BYTES = 4 * 1024 * 1024
+
+# Telegram re-encodes every photo to JPEG before getFile can reach it.
+INBOUND_IMAGE_MIME = "image/jpeg"
+
+# A caption is optional, and a picture with no words is still a fair request.
+INBOUND_PHOTO_CAPTION_DEFAULT = "What is in this image?"
+
+INBOUND_PHOTO_TOO_BIG = (
+    "That picture is too large. Cortex reads pictures up to {limit} MB."
+)
+
+INBOUND_PHOTO_FAILED = (
+    "Cortex could not fetch that picture. Send it again, or send the request "
+    "as text."
+)
+
+# The honest gate: the prompt is not run, and the phone is told why, rather
+# than starting a run that can see nothing and answers from thin air.
+INBOUND_NO_VISION_REPLY = (
+    "The model selected in Cortex cannot read pictures, so this one was not "
+    "run. Switch to a vision model in Cortex, or send the request as text."
+)
+
+# A Telegram voice note is Opus in an OGG container, roughly 1-4 KB per
+# second. The cap matches the picture cap: room for a few minutes of speech,
+# small enough that a burst cannot pile up multi-megabyte blobs in memory.
+INBOUND_MAX_VOICE_BYTES = 4 * 1024 * 1024
+
+# Voice notes are transcribed by the same server call the mic button uses,
+# which is slow and billed (Malayalam needed tens of seconds in testing).
+# Past this length the honest move is to refuse before downloading: a
+# 40-minute note would hold the queue and spend money on nothing usable.
+INBOUND_MAX_VOICE_SECONDS = 180
+
+# Telegram delivers voice notes as OGG/Opus and does not re-encode them.
+INBOUND_VOICE_MIME = "audio/ogg"
+
+INBOUND_VOICE_TOO_LONG = (
+    "That voice note is {seconds} seconds long. Cortex transcribes up to "
+    "{limit} seconds, so send the rest as a second note or type it."
+)
+
+INBOUND_VOICE_TOO_BIG = (
+    "That voice note is too large. Cortex reads voice notes up to {limit} MB."
+)
+
+INBOUND_VOICE_FAILED = (
+    "Cortex could not fetch that voice note. Send it again, or type the "
+    "request."
+)
+
+INBOUND_VOICE_EMPTY = (
+    "Cortex could not hear any words in that voice note. Try again closer to "
+    "the microphone, or type the request."
+)
+
+INBOUND_MEDIA_REPLY = (
+    "Only text, pictures and voice notes reach Cortex. Files, stickers and "
+    "video are not read. Send the request as text."
+)
+
+# request_started is emitted a few milliseconds before chat() marks the turn
+# active, so a "busy" flag younger than this is trusted even when the agent
+# reports no run yet. Anything older must be backed by a real run.
+INBOUND_BUSY_GRACE_S = 30.0
+
+
+def run_in_flight(
+    busy: bool,
+    run_active: bool,
+    stopped: bool,
+    since: float,
+    now: Optional[float] = None,
+    grace_s: float = INBOUND_BUSY_GRACE_S,
+) -> bool:
+    """Decide whether an inbound prompt has to wait for the current run.
+
+    ``busy`` is the GUI's flag, but a flag alone can be left set with no run
+    behind it: pressing Stop cancels the run's asyncio task, the worker swallows
+    the CancelledError, and nothing emits response_complete, so the flag would
+    otherwise refuse every later prompt for the rest of the session. The run's
+    own state is the tie-breaker.
+
+    ``since`` is a monotonic stamp taken when the flag was set.
+    """
+    if not busy:
+        return False
+    if stopped:
+        return False
+    if run_active:
+        return True
+    moment = time.monotonic() if now is None else now
+    return (moment - since) < grace_s
+
+
+def voiced_update(message: dict, text: str) -> dict:
+    """A text message standing in for the voice note it was transcribed from.
+
+    Keeping the original chat, sender, update id and date is the whole point:
+    the transcript then re-enters ``_handle_inbound_updates`` and meets the
+    same gates as typing - paired chat, private chat, human sender, length,
+    staleness, rate limit and the busy queue. None of that is re-implemented
+    for voice, so the two paths cannot drift apart.
+    """
+    return {
+        "update_id": message.get("update_id"),
+        "message": {
+            "message_id": message.get("message_id"),
+            "chat": message.get("chat") or {},
+            "from": message.get("from") or {},
+            "date": message.get("date"),
+            "text": text,
+            # Marks this as the second pass through the prompt path. The note
+            # was already checked for age when it was queued; transcription
+            # can take most of a minute, and that wait is not a backlog. Without
+            # this a slow Malayalam transcript would age past the stale limit
+            # and be dropped after being understood correctly.
+            "voice_transcript": True,
+        },
+    }
+
+# How much of the final answer rides along with the "finished" message. The cap
+# is applied BEFORE any regex: several whole-text passes over a multi-megabyte
+# answer is the exact shape of the tool-activity freeze.
+SUMMARY_MAX_CHARS = 2500
+
+_FENCE_LINE_RE = re.compile(r"^```[^\n]*$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^#{1,6}[ \t]+", re.MULTILINE)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_BLANK_RUN_RE = re.compile(r"\n{3,}")
+
+_PAIR_CMD_RE = re.compile(r"^/pair(?:@\w+)?\s+(\S+)\s*$", re.IGNORECASE)
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+# A getFile path, as Telegram itself writes it: "photos/file_9.jpg". Letters,
+# digits, underscore, dash, dot and single slashes only.
+_FILE_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_\-./]*$")
+
+# "argument not supplied" for PairingManager.begin, where None is a real value
+# (no deadline) and must not mean "leave the current policy alone".
+_UNSET = object()
+
+# Agent status kinds that deserve their own message rather than a live edit.
+_STATUS_MESSAGES = {"retrying": "Retrying", "failover": "Switching provider"}
+
+_STARTED = "started"
+_QUESTION = "question"
+_APPROVAL = "approval"
+_FINISHED = "finished"
+_FAILED = "failed"
+
+# Event kinds that ignore the quiet-hours window: a run that is stopped and
+# waiting for a human is exactly what the feature exists to deliver.
+
+
+# Event kinds worth a message of their own even when no run is live (a failed
+# send retried after a restart must still land).
+_QUESTION_ANSWERED = "question_answered"
+_QUESTION_CLOSED = "question_closed"
+STANDALONE_KINDS = frozenset({_QUESTION, _APPROVAL, _FINISHED, _FAILED,
+                              _QUESTION_ANSWERED, _QUESTION_CLOSED})
+
+
+class TransportError(Exception):
+    """A transport call failed in a way that is worth retrying."""
+
+
+# ---------------------------------------------------------------------------
+# Transport
+# ---------------------------------------------------------------------------
+
+
+_SSL_CONTEXT = None
+
+
+def _ssl_context():
+    """TLS context that can verify api.telegram.org on any Linux.
+
+    The packaged app carries its own OpenSSL, which looks for CA certificates
+    where the build machine keeps them (/usr/lib/ssl on Ubuntu). Fedora, RHEL
+    and openSUSE keep them elsewhere, so the default context loaded none and
+    every call failed certificate verification. When the system store yields
+    nothing, use the certifi bundle that ships with the app.
+    """
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is None:
+        import ssl
+        ctx = ssl.create_default_context()
+        if not ctx.cert_store_stats().get("x509_ca"):
+            try:
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            except Exception as e:  # no certifi: keep the system attempt
+                log.warning("[Telegram] No CA certificates found: %s", type(e).__name__)
+        _SSL_CONTEXT = ctx
+    return _SSL_CONTEXT
+
+
+class UrllibTransport:
+    """HTTPS transport on the standard library, so no new dependency.
+
+    ``call`` returns Telegram's parsed JSON for any HTTP status, because
+    Telegram puts ``retry_after`` in the body of a 429. It raises
+    ``TransportError`` only when there is no usable response at all.
+    """
+
+    BASE = "https://api.telegram.org/bot{token}/{method}"
+
+    # getFile hands back a relative path, which is fetched from this prefix.
+    FILE_BASE = "https://api.telegram.org/file/bot{token}/{path}"
+
+    def __init__(self, token: str, timeout: float = 10.0) -> None:
+        if not token:
+            raise ValueError("token required")
+        self._token = token
+        self._timeout = timeout
+
+    def call(self, method: str, params: dict) -> dict:
+        # The URL contains the token. It is never logged, never put in an
+        # exception message and never formatted into a status string.
+        url = self.BASE.format(token=self._token, method=method)
+        body = json.dumps(params or {}).encode("utf-8")
+        request = urllib.request.Request(
+            url, data=body, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout, context=_ssl_context()) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                return json.loads(e.read().decode("utf-8"))
+            except Exception:
+                raise TransportError(f"HTTP {e.code} on {method}") from e
+        except Exception as e:
+            raise TransportError(f"{type(e).__name__} on {method}") from e
+
+    def download(self, file_path: str, max_bytes: int) -> bytes:
+        """Fetch one file by the path getFile returned, capped at max_bytes.
+
+        Read one byte past the cap so an oversized file is detected rather
+        than silently truncated into a broken image.
+        """
+        url = self.FILE_BASE.format(token=self._token, path=file_path)
+        request = urllib.request.Request(url)
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout, context=_ssl_context()) as response:
+                data = response.read(int(max_bytes) + 1)
+        except urllib.error.HTTPError as e:
+            raise TransportError(f"HTTP {e.code} on file download") from e
+        except Exception as e:
+            raise TransportError(f"{type(e).__name__} on file download") from e
+        if len(data) > int(max_bytes):
+            raise TransportError("file above the size cap")
+        return data
+
+    def call_multipart(
+        self,
+        method: str,
+        fields: dict,
+        file_field: str,
+        filename: str,
+        mime: str,
+        data: bytes,
+    ) -> dict:
+        """POST one file as multipart/form-data and return Telegram's JSON.
+
+        Every other method takes JSON, but an upload cannot carry the bytes as
+        a string. Built by hand because urllib has no encoder and one call is
+        not worth a dependency. The boundary is random, not fixed, so a file
+        whose contents happen to contain it cannot break the framing.
+        """
+        boundary = f"----cortex{secrets.token_hex(16)}"
+        parts: list[bytes] = []
+        for key, value in (fields or {}).items():
+            if value is None:
+                continue
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
+                    f"{value}\r\n"
+                ).encode("utf-8")
+            )
+        # Telegram keeps the filename in the message, so it is reduced to
+        # characters that cannot terminate the header.
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", str(filename)) or "upload.bin"
+        parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{file_field}"; '
+                f'filename="{safe_name}"\r\n'
+                f"Content-Type: {mime}\r\n\r\n"
+            ).encode("utf-8")
+        )
+        parts.append(data)
+        parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        body = b"".join(parts)
+        url = self.BASE.format(token=self._token, method=method)
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Content-Length": str(len(body)),
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout, context=_ssl_context()) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                return json.loads(e.read().decode("utf-8"))
+            except Exception:
+                raise TransportError(f"HTTP {e.code} on {method}") from e
+        except Exception as e:
+            raise TransportError(f"{type(e).__name__} on {method}") from e
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (all unit-tested, none of them touch the network)
+# ---------------------------------------------------------------------------
+
+
+def format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def format_tokens(value: int) -> str:
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M".replace(".0M", "M")
+    if value >= 1000:
+        return f"{value // 1000}K"
+    return str(value)
+
+
+def clip(text: object, limit: int = MAX_FIELD) -> str:
+    """One-line, length-capped rendering of untrusted text."""
+    try:
+        value = "" if text is None else str(text)
+    except Exception:
+        # An object whose __str__ raises must not take the worker down.
+        return ""
+    value = " ".join(value.split())
+    if len(value) > limit:
+        return value[: limit - 1] + "\u2026"
+    return value
+
+
+def cap(text: object, limit: int = MAX_TEXT) -> str:
+    """Length-capped text that keeps its line breaks.
+
+    ``clip`` collapses whitespace, which is right for one field read off the
+    model and wrong for a card built here. Editing a card through ``clip``
+    delivered the same text as a single paragraph, so the first send kept its
+    lines and every refresh after it lost them.
+    """
+    try:
+        value = "" if text is None else str(text)
+    except Exception:
+        return ""
+    if len(value) > limit:
+        return value[: limit - 1] + "\u2026"
+    return value
+
+
+# The phone card is plain text, so the tool has to be named in words. Before
+# this the card said "Reading" for every explore tool (Read, Grep and Glob all
+# arrived the same way) and the file was the only thing that identified it.
+_TOOL_LABELS = {
+    "read": "Read",
+    "read_file": "Read",
+    "grep": "Grep",
+    "glob": "Glob",
+    "ls": "List",
+    "list_directory": "List",
+    "web_search": "Web Search",
+    "web_fetch": "Fetch",
+    "semantic_search": "Search",
+    "edit_file": "Edit",
+    "write_file": "Write",
+    "run_command": "Bash",
+}
+# Tools whose detail is free text (a query or a pattern), not a file. A path
+# helper would mangle them: ``**/*.py`` reduced to ``*.py`` loses the point of
+# the glob, and a search phrase has no filename at all.
+_TEXT_DETAIL = frozenset({"web_search", "web_fetch", "semantic_search", "glob"})
+# File-changing activity names. "Read" and friends also arrive on
+# ``tool_activity``; counting them there would double every read, because the
+# explore signal already carries them.
+_EDIT_ACTIVITIES = frozenset({"edit_file", "write_file"})
+_SHELL_ACTIVITIES = frozenset({"run_command"})
+_RECENT_LIMIT = 3
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+_NAME_LIMIT = 40
+_DETAIL_LIMIT = 40
+
+
+def file_name(path: object) -> str:
+    """The bare filename, with no directory and no separators.
+
+    The card used to print the whole path. It opened with ``C:,`` then the
+    120-char clip cut the filename off the end, so the only part worth reading
+    was the part that disappeared. Which folder a file sits in is a question
+    about the repo; the phone only needs to know what was touched.
+    """
+    try:
+        text = str(path or "").replace(chr(92), "/").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    name = text.rstrip("/").rsplit("/", 1)[-1]
+    if len(name) > _NAME_LIMIT:
+        name = "\u2026" + name[-(_NAME_LIMIT - 1):]
+    return name
+
+
+def _line_count(text: object) -> int:
+    """Lines in one side of an edit.
+
+    ``old_string``/``new_string`` are already truncated by the bridge at 4,000
+    chars, so this is an estimate on a huge edit, never a whole-file count.
+    """
+    try:
+        value = "" if text is None else str(text)
+    except Exception:
+        return 0
+    if not value:
+        return 0
+    return value.count("\n") + 1
+
+
+def _change_counts(added: int, removed: int) -> str:
+    """``+12 \u22123``, or nothing when there is no change to report."""
+    parts = []
+    if added:
+        parts.append(f"+{added}")
+    if removed:
+        parts.append(f"\u2212{removed}")
+    return " ".join(parts)
+
+
+def _explore_detail(tool: str, path: str) -> str:
+    """What to print after the tool name: a filename, or the query itself."""
+    if (tool or "").lower() in _TEXT_DETAIL:
+        return clip(path, _DETAIL_LIMIT)
+    return file_name(path)
+
+
+def _pack(block: str, limit: int) -> list[str]:
+    """Split one block that is too long: on newlines first, then a hard cut."""
+    if len(block) <= limit:
+        return [block]
+    out: list[str] = []
+    current = ""
+    for line in block.split("\n"):
+        candidate = line if not current else current + "\n" + line
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            out.append(current)
+            current = ""
+        while len(line) > limit:
+            out.append(line[:limit])
+            line = line[limit:]
+        current = line
+    if current or not out:
+        out.append(current)
+    return out
+
+
+def chunk_text(text: str, limit: int = MAX_TEXT) -> list[str]:
+    """Split into message-sized pieces, preferring paragraph boundaries.
+
+    A notification is never Markdown, so no escaping happens here: an
+    unbalanced ``*`` or a diff containing ``_`` is delivered literally.
+    """
+    if limit < MIN_CHUNK:
+        raise ValueError(f"limit must be at least {MIN_CHUNK}")
+    if not isinstance(text, str):
+        text = clip(text, limit)
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    for paragraph in text.split("\n\n"):
+        for block in _pack(paragraph, limit):
+            if not block:
+                continue
+            if not chunks:
+                chunks.append(block)
+            elif len(chunks[-1]) + 2 + len(block) <= limit:
+                chunks[-1] += "\n\n" + block
+            else:
+                chunks.append(block)
+    return chunks
+
+
+def _minutes_of_day(value: str) -> Optional[int]:
+    if not isinstance(value, str):
+        return None
+    match = _TIME_RE.match(value.strip())
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def is_quiet(when, start: str, end: str) -> bool:
+    """True when the wall-clock time sits inside the quiet window.
+
+    Handles the window that crosses midnight (22:00 to 07:00), and treats a
+    start equal to end as "no window" rather than "all day".
+    """
+    start_min = _minutes_of_day(start)
+    end_min = _minutes_of_day(end)
+    if start_min is None or end_min is None or start_min == end_min:
+        return False
+    now_min = when.hour * 60 + when.minute
+    if start_min < end_min:
+        return start_min <= now_min < end_min
+    return now_min >= start_min or now_min < end_min
+
+
+def make_pair_code(rng=None) -> str:
+    chooser = rng or secrets
+    return "".join(chooser.choice(PAIR_ALPHABET) for _ in range(PAIR_LEN))
+
+
+def _looks_like_bare_code(text: str) -> bool:
+    """True for a pasted code with the /pair prefix left off.
+
+    This is the mistake Settings invites: the panel shows the code on its own,
+    so it is easy to paste just that. Recognising the shape lets the bot teach
+    the format instead of ignoring the message.
+    """
+    token = (text or "").strip().upper()
+    return len(token) == PAIR_LEN and all(ch in PAIR_ALPHABET for ch in token)
+
+
+# ---------------------------------------------------------------------------
+# Client: one Telegram call, with the retry rules applied
+# ---------------------------------------------------------------------------
+
+
+def safe_file_path(path: object) -> Optional[str]:
+    """Telegram's file path, or None when it cannot be used in a URL.
+
+    The path is spliced into an https URL, so it is the place an attacker would
+    try ``../``, a second host or a query. Telegram only ever sends
+    ``photos/file_9.jpg`` and friends, so anything else is refused outright
+    rather than sanitised into something that still looks usable.
+    """
+    if not isinstance(path, str):
+        return None
+    if not path or len(path) > 256:
+        return None
+    if ".." in path or "//" in path or "\\" in path or path.startswith("/"):
+        return None
+    if not _FILE_PATH_RE.match(path):
+        return None
+    return path
+
+
+def largest_photo(photo: object) -> Optional[dict]:
+    """The biggest size in a Telegram photo array, or None.
+
+    Telegram sends the same picture at several sizes. The biggest is the only
+    one worth reading text from, and ``file_size`` is absent for some clients,
+    so the pixel area is the fallback key.
+    """
+    if not isinstance(photo, list):
+        return None
+    best = None
+    best_key = -1.0
+    for item in photo:
+        if not isinstance(item, dict):
+            continue
+        file_id = item.get("file_id")
+        if not isinstance(file_id, str) or not file_id:
+            continue
+        key = 0.0
+        try:
+            key = float(item.get("file_size") or 0)
+        except (TypeError, ValueError):
+            key = 0.0
+        if key <= 0:
+            try:
+                key = float(item.get("width") or 0) * float(item.get("height") or 0)
+            except (TypeError, ValueError):
+                key = 0.0
+        if key >= best_key:
+            best_key = key
+            best = item
+    return best
+
+
+def _is_parse_error(response: Optional[dict]) -> bool:
+    """True when Telegram refused the markup rather than the message."""
+    if not isinstance(response, dict) or response.get("ok"):
+        return False
+    if response.get("error_code") != 400:
+        return False
+    description = str(response.get("description", "")).lower()
+    return "parse" in description or "entit" in description or "tag" in description
+
+
+class TelegramClient:
+    """Thin, testable wrapper over the Bot API.
+
+    ``transport`` is injected so the suite never touches the network: any
+    object with ``call(method, params) -> dict`` works.
+    """
+
+    def __init__(
+        self,
+        transport,
+        sleep: Callable[[float], None] = time.sleep,
+        max_attempts: int = MAX_ATTEMPTS,
+    ) -> None:
+        self._transport = transport
+        self._sleep = sleep
+        self._max_attempts = max(1, int(max_attempts))
+
+    def _call(self, method: str, params: dict) -> Optional[dict]:
+        """Return Telegram's response dict, or None when nothing arrived.
+
+        A 429 waits exactly ``retry_after`` before the next attempt; if that
+        wait is longer than we are willing to hold an event, the call is
+        abandoned rather than retried early.
+        """
+        for attempt in range(1, self._max_attempts + 1):
+            try:
+                response = self._transport.call(method, params)
+            except TransportError as e:
+                log.warning("[Telegram] %s failed (%s), attempt %s/%s", method, e, attempt, self._max_attempts)
+                if attempt < self._max_attempts:
+                    self._sleep(min(2.0 ** (attempt - 1), 4.0))
+                continue
+            except Exception as e:
+                log.error("[Telegram] %s raised %s", method, type(e).__name__)
+                return None
+
+            if isinstance(response, dict) and response.get("ok"):
+                return response
+
+            error_code = (response or {}).get("error_code")
+            retry_after = ((response or {}).get("parameters") or {}).get("retry_after")
+            if error_code == 429:
+                wait = float(retry_after or 1.0)
+                if wait > MAX_RETRY_AFTER_S or attempt >= self._max_attempts:
+                    log.warning("[Telegram] %s throttled, retry_after=%ss, dropping", method, wait)
+                    return response
+                log.info("[Telegram] %s throttled, waiting %ss", method, wait)
+                self._sleep(wait)
+                continue
+
+            description = clip((response or {}).get("description", ""), 160)
+            log.warning("[Telegram] %s refused: %s %s", method, error_code, description)
+            return response
+        return None
+
+    def send_text(
+        self, chat_id: str, text: str, reply_to: Optional[int] = None,
+        reply_markup: Optional[dict] = None,
+    ) -> Optional[int]:
+        """Send one logical message, chunked. Returns the first message id.
+
+        ``reply_to`` quotes a message in the same chat, which is what makes a
+        refusal on a phone ("too long") attach to the prompt it refused. Only
+        the first chunk carries it, so a long answer is not five quotations.
+        """
+        first_id: Optional[int] = None
+        for index, chunk in enumerate(chunk_text(text)):
+            params: dict = {
+                "chat_id": chat_id,
+                "text": chunk,
+                "disable_notification": False,
+            }
+            if reply_to is not None and index == 0:
+                params["reply_parameters"] = {"message_id": int(reply_to)}
+            if reply_markup and index == 0:
+                params["reply_markup"] = reply_markup
+            response = self._call("sendMessage", params)
+            if not response or not response.get("ok"):
+                # Partial delivery is still delivery: report what landed.
+                return first_id
+            if first_id is None:
+                first_id = (response.get("result") or {}).get("message_id")
+        return first_id
+
+    def send_html(
+        self, chat_id: str, chunks: list[str], reply_to: Optional[int] = None
+    ) -> Optional[int]:
+        """Send pre-rendered HTML chunks. Returns the first message id.
+
+        ``chunks`` come from ``telegram_format.to_telegram``, which guarantees
+        balanced tags and a size under the limit, so nothing is re-split here.
+
+        A rejected entity must never cost the user their answer: Telegram
+        answers a malformed tag with error 400, and that chunk is resent as
+        plain text rather than dropped.
+        """
+        first_id: Optional[int] = None
+        for index, chunk in enumerate(chunks):
+            params: dict = {
+                "chat_id": chat_id,
+                "text": chunk,
+                "parse_mode": "HTML",
+                "disable_notification": False,
+            }
+            if reply_to is not None and index == 0:
+                params["reply_parameters"] = {"message_id": int(reply_to)}
+            response = self._call("sendMessage", params)
+            if not response or not response.get("ok"):
+                if not _is_parse_error(response):
+                    return first_id
+                log.warning("[Telegram] HTML refused, resending one chunk as text")
+                fallback: dict = {
+                    "chat_id": chat_id,
+                    "text": plain_of(chunk),
+                    "disable_notification": False,
+                }
+                if reply_to is not None and index == 0:
+                    fallback["reply_parameters"] = {"message_id": int(reply_to)}
+                response = self._call("sendMessage", fallback)
+                if not response or not response.get("ok"):
+                    return first_id
+            if first_id is None:
+                first_id = (response.get("result") or {}).get("message_id")
+        return first_id
+
+    def edit_text(
+        self,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        parse_mode: Optional[str] = None,
+    ) -> bool:
+        """Edit one message. A rejected entity falls back to plain text."""
+        params: dict = {
+            "chat_id": chat_id,
+            "message_id": int(message_id),
+            "text": cap(text, MAX_TEXT) if parse_mode is None else text,
+        }
+        if parse_mode:
+            params["parse_mode"] = parse_mode
+        response = self._call("editMessageText", params)
+        if response and response.get("ok"):
+            return True
+        if "not modified" in str((response or {}).get("description", "")).lower():
+            # Editing to an identical body is refused. That is success for us.
+            return True
+        if parse_mode and _is_parse_error(response):
+            log.warning("[Telegram] HTML edit refused, retrying as plain text")
+            params.pop("parse_mode", None)
+            params["text"] = plain_of(text)
+            response = self._call("editMessageText", params)
+            if response and response.get("ok"):
+                return True
+            return "not modified" in str(
+                (response or {}).get("description", "")
+            ).lower()
+        return False
+
+    def react(self, chat_id: str, message_id: int, emoji: str = ACK_EMOJI) -> bool:
+        """Best effort. An unsupported reaction is a no-op, never an error."""
+        response = self._call(
+            "setMessageReaction",
+            {
+                "chat_id": chat_id,
+                "message_id": int(message_id),
+                "reaction": [{"type": "emoji", "emoji": emoji}],
+            },
+        )
+        return bool(response and response.get("ok"))
+
+    def answer_callback(self, callback_id, text: str = "") -> bool:
+        """Stop the spinner on a pressed button, with an optional toast."""
+        if not callback_id:
+            return False
+        params: dict = {"callback_query_id": str(callback_id)}
+        if text:
+            params["text"] = clip(text, 180)
+        response = self._call("answerCallbackQuery", params)
+        return bool(response and response.get("ok"))
+
+    def get_updates(self, offset: Optional[int] = None, timeout: int = 0) -> list:
+        # callback_query: a pressed answer button on a question message.
+        params: dict = {"timeout": int(timeout),
+                        "allowed_updates": ["message", "callback_query"]}
+        if offset is not None:
+            params["offset"] = int(offset)
+        response = self._call("getUpdates", params)
+        if not response or not response.get("ok"):
+            return []
+        return response.get("result") or []
+
+    def get_file(self, file_id) -> Optional[dict]:
+        """Telegram's file record for one file id, or None."""
+        if not file_id:
+            return None
+        response = self._call("getFile", {"file_id": str(file_id)})
+        result = (response or {}).get("result")
+        return result if isinstance(result, dict) else None
+
+    def download_photo(self, file_id, max_bytes: int) -> Optional[bytes]:
+        """Bytes of one photo, or None when it cannot be fetched safely.
+
+        The bytes never touch the GUI thread: this runs on the poller. The
+        returned path is validated before it becomes a URL, because it is the
+        one piece of this request that Telegram could craft.
+        """
+        info = self.get_file(file_id)
+        if not info:
+            log.warning("[Telegram] getFile refused a photo")
+            return None
+        path = safe_file_path(info.get("file_path"))
+        if path is None:
+            log.warning("[Telegram] getFile returned an unusable path; refusing")
+            return None
+        try:
+            data = self._transport.download(path, int(max_bytes))
+        except TransportError as e:
+            log.warning("[Telegram] Photo download failed (%s)", e)
+            return None
+        except Exception as e:
+            log.error("[Telegram] Photo download raised %s", type(e).__name__)
+            return None
+        if not data:
+            log.warning("[Telegram] Photo download returned no bytes")
+            return None
+        return data
+
+    def send_photo(
+        self,
+        chat_id: str,
+        data: bytes,
+        filename: str,
+        mime: str,
+        caption: str = "",
+    ) -> Optional[int]:
+        """Send one image. Returns its message id, or None when it did not land.
+
+        No retry loop, unlike ``send_text``. A photo answers something the user
+        just did, so a duplicate landing twice is worse than one visible
+        failure, and the caller has a person waiting.
+
+        The caption is HTML like every other outbound message. If Telegram
+        rejects the markup it is resent as plain text, so a stray ``<`` costs
+        the formatting and not the picture.
+        """
+        fields: dict = {"chat_id": chat_id}
+        if caption:
+            fields["caption"] = caption[:PHOTO_CAPTION_MAX]
+            fields["parse_mode"] = "HTML"
+        try:
+            response = self._transport.call_multipart(
+                "sendPhoto", fields, "photo", filename, mime, data
+            )
+        except TransportError as e:
+            log.warning("[Telegram] sendPhoto failed (%s)", e)
+            return None
+        except Exception as e:
+            log.error("[Telegram] sendPhoto raised %s", type(e).__name__)
+            return None
+        if not isinstance(response, dict) or not response.get("ok"):
+            if caption and _is_parse_error(response):
+                log.info("[Telegram] photo caption markup refused; resending plain")
+                return self.send_photo(chat_id, data, filename, mime, "")
+            description = clip((response or {}).get("description", ""), 160)
+            log.warning("[Telegram] sendPhoto refused: %s", description)
+            return None
+        return (response.get("result") or {}).get("message_id")
+
+
+# ---------------------------------------------------------------------------
+# Pairing
+# ---------------------------------------------------------------------------
+
+
+class PairingManager:
+    """One pending code at a time, with a lifetime and a reuse policy.
+
+    Deliberately holds no chat id until a correct code arrives, so a stranger
+    who finds the bot cannot bind it.
+
+    Both policy values can be retargeted on ``begin``: the user may change the
+    expiry or the reuse switch while a code is outstanding, and the next
+    ``Show code`` must honour the new choice. ``ttl_s=None`` means the code has
+    no deadline at all.
+    """
+
+    def __init__(
+        self,
+        ttl_s: Optional[float] = PAIR_TTL_S,
+        code_factory: Callable[[], str] = make_pair_code,
+        reusable: bool = False,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._ttl = None if ttl_s is None else float(ttl_s)
+        self._factory = code_factory
+        self._reusable = bool(reusable)
+        self._code: Optional[str] = None
+        # None while a code has no deadline, so 0.0 can never be mistaken for
+        # "expired at the epoch".
+        self._expires_at: Optional[float] = None
+        # Failed attempts answered since this code was issued. Reset per code so
+        # a fresh Show code gets its own handful of hints.
+        self._answers = 0
+
+    @property
+    def reusable(self) -> bool:
+        """True when a successful pairing leaves the code usable."""
+        with self._lock:
+            return self._reusable
+
+    def begin(
+        self,
+        now: Optional[float] = None,
+        ttl_s: object = _UNSET,
+        reusable: object = _UNSET,
+    ) -> str:
+        """Issue a code, replacing any pending one."""
+        moment = time.time() if now is None else now
+        code = self._factory()
+        with self._lock:
+            if ttl_s is not _UNSET:
+                self._ttl = None if ttl_s is None else float(ttl_s)  # type: ignore[arg-type]
+            if reusable is not _UNSET:
+                self._reusable = bool(reusable)
+            self._code = code
+            self._expires_at = None if self._ttl is None else moment + self._ttl
+            self._answers = 0
+        return code
+
+    def _expired(self, moment: float) -> bool:
+        """Caller holds the lock."""
+        return self._expires_at is not None and moment >= self._expires_at
+
+    def pending(self, now: Optional[float] = None) -> Optional[str]:
+        moment = time.time() if now is None else now
+        with self._lock:
+            if self._code and self._expired(moment):
+                self._code = None
+                self._expires_at = None
+            return self._code
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._code = None
+            self._expires_at = None
+            self._answers = 0
+
+    def submit(self, text: str, chat_id, now: Optional[float] = None) -> bool:
+        """True when ``text`` carries the pending code.
+
+        A single-use code is cleared on success. A reusable one is kept, with
+        its original deadline untouched, so a second device can pair later.
+        """
+        if chat_id in (None, ""):
+            return False
+        if not isinstance(text, str):
+            return False
+        match = _PAIR_CMD_RE.match(text.strip())
+        if not match:
+            return False
+        supplied = match.group(1).upper()
+        moment = time.time() if now is None else now
+        with self._lock:
+            if not self._code or self._expired(moment):
+                self._code = None
+                self._expires_at = None
+                return False
+            if not secrets.compare_digest(supplied, self._code):
+                return False
+            if not self._reusable:
+                self._code = None
+                self._expires_at = None
+            return True
+
+    def answer_for_miss(self, text: str, chat_id, now: Optional[float] = None) -> Optional[str]:
+        """The reply a failed attempt should get, or None to stay silent.
+
+        Silence is still the rule for a stranger: no code outstanding means no
+        answer, so someone who merely found the bot learns nothing. Inside an
+        active pairing window the owner is the one typing, and their own typo
+        must not look like a dead bot. The count is bounded so the window cannot
+        be turned into a free oracle.
+        """
+        if chat_id in (None, ""):
+            return None
+        if not isinstance(text, str):
+            return None
+        stripped = text.strip()
+        bare = _looks_like_bare_code(stripped)
+        if not bare and not _PAIR_CMD_RE.match(stripped):
+            return None
+        moment = time.time() if now is None else now
+        with self._lock:
+            if not self._code or self._expired(moment):
+                return None
+            self._answers += 1
+            if self._answers > MAX_PAIR_ANSWERS:
+                return None
+        return PAIR_NEEDS_PREFIX if bare else PAIR_WRONG_CODE
+
+
+# ---------------------------------------------------------------------------
+# Live run state
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunState:
+    project: str = ""
+    started_at: float = 0.0
+    activity: str = ""
+    # The last few tool calls, oldest first. One line was not a picture of the
+    # run: it was overwritten by every call, so the card only ever showed the
+    # newest and the owner could not tell what had actually happened.
+    recent: list = field(default_factory=list)
+    files_read: int = 0
+    files_edited: int = 0
+    context_used: int = 0
+    context_limit: int = 0
+    message_id: Optional[int] = None
+    last_edit: float = 0.0
+    dirty: bool = False
+    acked: bool = False
+    finished: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Monitor
+# ---------------------------------------------------------------------------
+
+
+class TelegramMonitor:
+    """Owns the queue, the worker thread and the live message.
+
+    ``config_loader`` and ``clock`` are injectable so tests can drive a whole
+    run without settings on disk and without sleeping.
+    """
+
+    def __init__(
+        self,
+        client: Optional[TelegramClient] = None,
+        config_loader: Callable[[], "telegram_config.TelegramConfig"] = telegram_config.load,
+        clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = datetime.now,
+        on_paired: Optional[Callable[[str], None]] = None,
+        edit_floor_s: float = EDIT_FLOOR_S,
+        poll_interval_s: float = PAIR_POLL_S,
+        on_prompt: Optional[Callable[[str], None]] = None,
+        is_busy: Optional[Callable[[], bool]] = None,
+        is_subscribed: Optional[Callable[[], bool]] = None,
+        voice_language: Optional[Callable[[], str]] = None,
+    ) -> None:
+        self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
+        self._stop = threading.Event()
+        # Separate from _stop so revoke can silence the poller without
+        # also telling the worker thread to die.
+        self._pair_stop = threading.Event()
+        self._worker: Optional[threading.Thread] = None
+        self._pair_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self._client = client
+        self._client_probe = 0.0
+        self._config_loader = config_loader
+        self._clock = clock
+        self._wall_clock = wall_clock
+        self._on_paired = on_paired
+        self._edit_floor = float(edit_floor_s)
+        self._poll_interval = float(poll_interval_s)
+        self._on_prompt = on_prompt
+        self._is_busy = is_busy
+        # Subscription verdict. None means no policy is wired, which is the
+        # case for this module's own tests: the monitor is transport, the
+        # application decides who may use it, and get_monitor() always wires
+        # the real check. See _entitled().
+        self._is_subscribed = is_subscribed
+        self._entitled_verdict = False
+        self._entitled_at: Optional[float] = None
+        # Questions the agent asked that Telegram has been shown, oldest
+        # first: question_id -> {token, options, chat_id, message_id, body,
+        # asked_at, remote_answer}. Written by the worker (on send) and the
+        # poller (on a reply), so every touch is under _lock.
+        self._questions: dict = {}
+        # Where a phone's answer goes: (question_id, answer). Runs on the
+        # poller thread, so the GUI side hands it on as a queued Qt signal.
+        self._on_answer: Optional[Callable[[str, str], None]] = None
+        # A picture takes a separate callback, because its payload is not a
+        # string. Set through set_image_handler; both default to off.
+        self._on_image: Optional[Callable[[str, str, str], None]] = None
+        self._vision_ok: Optional[Callable[[], bool]] = None
+        # Only the poller thread touches these.
+        self._inbound_times: deque = deque()
+        self._last_rate_warn = 0.0
+        # A backlog left while nothing was polling is answered once, not once
+        # per message: Telegram keeps up to 100 pending updates.
+        self._last_stale_warn = 0.0
+        # Same reasoning for unsupported (non-text) messages: a burst of photos
+        # is answered once, not once per photo.
+        self._last_media_warn = 0.0
+        # And for a lapsed subscription: one explanation per window, so a phone
+        # left sending prompts does not turn into a wall of identical replies.
+        self._last_sub_warn = 0.0
+        # Set by _handle_pair_updates so the update that paired is not also
+        # fed to the prompt path.
+        self._pair_update_id = None
+        # Prompts that arrived while a run was going, oldest first. Appended
+        # by the poller thread, popped by the GUI thread when the run ends, so
+        # every touch is under _lock.
+        self._queued_prompts: deque = deque()
+        # Voice notes wait here while they are transcribed. One worker drains
+        # them in order, so two notes keep the sequence they were spoken in.
+        self._voice_queue: "queue.Queue" = queue.Queue()
+        self._voice_thread: Optional[threading.Thread] = None
+        # Injected in tests; None means use src.core.voice_input, the same
+        # call the mic button makes. See _take_voice().
+        self._transcribe: Optional[Callable] = None
+        # None falls back to the language already chosen next to the mic.
+        self._voice_language = voice_language
+        self._run = RunState()
+        self._pairing = PairingManager()
+        self.stats: dict = {"sent": 0, "edited": 0, "dropped": 0, "failed": 0, "prompts": 0}
+
+    # -- lifecycle ---------------------------------------------------------
+
+    @property
+    def pairing(self) -> PairingManager:
+        return self._pairing
+
+    def has_chat(self) -> bool:
+        """True once a chat has paired. Cheap: settings only, no network."""
+        try:
+            return bool(self._config_loader().chat_id)
+        except Exception:
+            return False
+
+    def _entitled(self) -> bool:
+        """Whether this account may use Telegram at all.
+
+        The verdict comes from an injected predicate that reads the saved
+        account copy (no network, no blocking), and it is reused for
+        ENTITLEMENT_TTL_S because this sits on every send, poll and prompt.
+        get_monitor() wires the app's single subscription check into it.
+
+        With no predicate wired the answer is True: this class is transport,
+        and only the application knows about billing.
+
+        Failing closed matters more than convenience here: an exception in the
+        predicate, or an account whose plan lookup broke, must not hand out a
+        remote-control channel for free.
+        """
+        if self._is_subscribed is None:
+            return True
+        now = self._clock()
+        if self._entitled_at is not None and now - self._entitled_at < ENTITLEMENT_TTL_S:
+            return self._entitled_verdict
+        try:
+            verdict = bool(self._is_subscribed())
+        except Exception as e:
+            log.error("[Telegram] Subscription check failed: %s", type(e).__name__)
+            verdict = False
+        was = self._entitled_verdict
+        self._entitled_verdict = verdict
+        self._entitled_at = now
+        # Log the transitions only. This runs on every send, poll and prompt, so
+        # an unconditional line would fill the log during a normal session.
+        if not verdict and was is not False:
+            log.info("[Telegram] Frozen: the subscription is not active")
+        elif verdict and was is False:
+            log.info("[Telegram] Resumed: the subscription is active again")
+        return verdict
+
+    def _ensure_client(self) -> Optional[TelegramClient]:
+        # The single choke point every network path passes through, so it is
+        # also where the subscription gate lives: no subscription, no client,
+        # therefore no getUpdates, no message and no upload. Checked before the
+        # cached client is returned, or a plan that lapsed mid-session would
+        # keep sending through the client it already built.
+        if not self._entitled():
+            return None
+        if self._client is not None:
+            return self._client
+        # Without a token this is called on every status tick. Decrypting the
+        # vault that often would be pure waste, so a miss is remembered.
+        now = time.monotonic()
+        if now - self._client_probe < 30.0:
+            return None
+        self._client_probe = now
+        token = telegram_config.get_token()
+        if not token:
+            return None
+        try:
+            self._client = TelegramClient(UrllibTransport(token))
+        except Exception as e:
+            log.error("[Telegram] Could not build transport: %s", type(e).__name__)
+            return None
+        return self._client
+
+    def invalidate_client(self) -> None:
+        """Drop the cached transport so the next call reads the current token.
+
+        Pasting a new token without unpairing used to leave the old bot in
+        place: the client is cached with the token it was built from, and only
+        revoke_pairing ever dropped it. A replaced token then took effect only
+        after a restart, which looks exactly like a bot that ignores messages.
+        """
+        self._client = None
+        self._client_probe = 0.0
+
+    def start(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self._stop.clear()
+        self._worker = threading.Thread(target=self._run_worker, name="telegram-notify", daemon=True)
+        self._worker.start()
+
+    def stop(self, timeout: float = 2.0) -> None:
+        self._stop.set()
+        self._pair_stop.set()
+        for thread in (self._worker, self._pair_thread):
+            if thread and thread.is_alive():
+                thread.join(timeout=timeout)
+        self._worker = None
+        self._pair_thread = None
+
+    def revoke_pairing(self, forget_token: bool = False) -> bool:
+        """Unpair: forget the chat and everything held for it.
+
+        Ordered so revoking bites immediately. The pending code dies first, so
+        a poll that is already in flight cannot bind a stranger, and the cached
+        client is dropped so a later token is never sent through the old one.
+        The token is kept by default, which makes re-pairing a single click.
+        """
+        self._pairing.cancel()
+        self._pair_stop.set()
+        self._client = None
+        self._client_probe = 0.0
+        self._run = RunState()
+        self._discard_queue()
+        # Inbound state belongs to the chat that just went away.
+        self._inbound_times.clear()
+        self._last_rate_warn = 0.0
+        self._last_stale_warn = 0.0
+        self._last_media_warn = 0.0
+        self._last_sub_warn = 0.0
+        self._pair_update_id = None
+        # A prompt waiting for a run must not outlive the pairing it came from.
+        self.clear_queued_prompts()
+        try:
+            telegram_config.set_chat_id("")
+            telegram_config.set_enabled(False)
+            if forget_token:
+                telegram_config.clear_token()
+            return True
+        except Exception as e:
+            log.error("[Telegram] Could not save the unpair: %s", type(e).__name__)
+            return False
+
+    def _discard_queue(self) -> int:
+        """Drop every queued event. Callers see a count, never an exception."""
+        dropped = 0
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return dropped
+            except Exception as e:
+                log.debug("[Telegram] Queue drain stopped: %s", type(e).__name__)
+                return dropped
+            dropped += 1
+
+    # -- the only entry point the GUI touches ------------------------------
+
+    def enqueue(self, event: dict) -> None:
+        """Never raises, never blocks, never formats. Safe from any thread."""
+        try:
+            self._queue.put_nowait(event)
+        except queue.Full:
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait(event)
+            except Exception as e:
+                # The queue itself is broken, not just full. Losing a
+                # notification is survivable; the caller is a Qt signal slot
+                # in the GUI thread and must not see an exception.
+                log.debug("[Telegram] Drop-oldest failed: %s", type(e).__name__)
+            self.stats["dropped"] += 1
+        except Exception as e:
+            log.debug("[Telegram] Enqueue failed: %s", type(e).__name__)
+            self.stats["dropped"] += 1
+
+    # -- GUI signal slots --------------------------------------------------
+    # Each one builds a tiny dict and nothing else: no str(), no json.loads(),
+    # no regex over caller text. Tests assert this by passing objects whose
+    # __str__ raises.
+
+    def on_request_started(self, project: str = "") -> None:
+        self.enqueue({"kind": _STARTED, "project": project})
+
+    def on_explore_file(self, raw_json) -> None:
+        self.enqueue({"kind": "explore", "raw": raw_json})
+
+    def on_tool_activity(self, name, info, phase) -> None:
+        """Edits and commands, already JSON. Parsed on the worker, never here."""
+        self.enqueue({"kind": "tool", "name": name, "info": info, "phase": phase})
+
+    def on_thinking(self, active: bool) -> None:
+        self.enqueue({"kind": "thinking", "active": bool(active)})
+
+    def on_task_progress(self, done=None, total=None, *_rest) -> None:
+        self.enqueue({"kind": "progress", "done": done, "total": total})
+
+    def on_context_budget(self, used=None, limit=None, _model=None) -> None:
+        self.enqueue({"kind": "context", "used": used, "limit": limit})
+
+    def on_agent_status(self, status, message=None) -> None:
+        self.enqueue({"kind": "status", "status": status, "message": message})
+
+    def on_question(self, payload) -> None:
+        self.enqueue({"kind": _QUESTION, "payload": payload})
+
+    def on_question_answered(self, question_id, answer=None) -> None:
+        """The card was answered, in Cortex or from here. Updates the message."""
+        self.enqueue({"kind": _QUESTION_ANSWERED, "id": question_id, "answer": answer})
+
+    def on_question_closed(self, question_id, reason=None) -> None:
+        """A phone's answer found no open card (answered or gone)."""
+        self.enqueue({"kind": _QUESTION_CLOSED, "id": question_id, "reason": reason})
+
+    def on_permission_requested(self, command, warning=None, _files=None) -> None:
+        self.enqueue({"kind": _APPROVAL, "command": command, "warning": warning})
+
+    def on_finished(self, text=None) -> None:
+        self.enqueue({"kind": _FINISHED, "text": text})
+
+    def on_error(self, message=None) -> None:
+        self.enqueue({"kind": _FAILED, "message": message})
+
+    def on_test_message(self) -> None:
+        self.enqueue({"kind": "test"})
+
+    def ensure_running(self) -> None:
+        """Start the worker if it is not up. Idempotent and cheap."""
+        self.start()
+
+    def send_test(self) -> None:
+        """Queue a test message. Safe from a GUI slot: it only enqueues."""
+        self.start()
+        self.enqueue({"kind": "test"})
+
+    def send_photo(self, path, caption: str = "", timeout: float = PHOTO_TIMEOUT_S) -> dict:
+        """Send one image file to the paired chat. Never raises, never hangs.
+
+        Deliberately *not* queued. The event queue exists for status updates
+        that may be dropped when busy; an image is something a caller asked for
+        and is waiting on, so its outcome is returned to that caller.
+
+        The upload runs on a short-lived daemon thread and is abandoned after
+        ``timeout``, so a socket that never answers cannot wedge the agent's
+        tool loop or a Settings button. Every failure comes back as a dict
+        rather than an exception:
+
+            {"ok": bool, "message_id": int | None, "reason": str}
+
+        ``reason`` is empty on success and a sentence a person can act on
+        otherwise. Nothing about the token is ever included.
+        """
+
+        def _fail(reason: str) -> dict:
+            log.warning("[Telegram] Photo not sent: %s", reason)
+            return {"ok": False, "message_id": None, "reason": reason}
+
+        # Cheapest refusal first. The subscription is checked before the file
+        # is opened, so a lapsed account never spends a 10 MB read (or an
+        # upload) on a picture that cannot leave.
+        if not self._entitled():
+            return _fail(SUB_REQUIRED_REASON)
+        if not path:
+            return _fail("no file was given")
+        name = os.path.basename(str(path))
+        mime = PHOTO_MIME.get(os.path.splitext(name)[1].lower())
+        if not mime:
+            return _fail("only .png, .jpg, .jpeg and .webp can be sent as a photo")
+        try:
+            with open(str(path), "rb") as handle:
+                data = handle.read(PHOTO_MAX_BYTES + 1)
+        except FileNotFoundError:
+            return _fail(f"file not found: {name}")
+        except OSError as e:
+            return _fail(f"could not read {name}: {e.strerror or type(e).__name__}")
+        if not data:
+            return _fail(f"{name} is empty")
+        if len(data) > PHOTO_MAX_BYTES:
+            return _fail(
+                f"{name} is above {PHOTO_MAX_BYTES // (1024 * 1024)} MB"
+            )
+        try:
+            chat_id = self._config_loader().chat_id
+        except Exception:
+            chat_id = ""
+        if not chat_id:
+            return _fail("no chat is paired")
+        client = self._ensure_client()
+        if client is None:
+            return _fail("the bot token is missing")
+
+        outcome: dict = {}
+
+        def _send() -> None:
+            try:
+                outcome["message_id"] = client.send_photo(
+                    chat_id, data, name, mime, caption or ""
+                )
+            except Exception as e:
+                outcome["error"] = type(e).__name__
+
+        # The bytes are read on the caller's thread (a local file, bounded) and
+        # only the network part is offloaded, so a stalled upload is the only
+        # thing that can be late.
+        worker = threading.Thread(target=_send, name="telegram-photo", daemon=True)
+        worker.start()
+        worker.join(timeout=max(1.0, float(timeout)))
+        if worker.is_alive():
+            return _fail(f"no answer within {float(timeout):.0f}s")
+        if outcome.get("error"):
+            return _fail(str(outcome["error"]))
+        message_id = outcome.get("message_id")
+        if message_id is None:
+            return _fail("Telegram refused the image")
+        self.stats["sent"] = self.stats.get("sent", 0) + 1
+        log.info("[Telegram] Photo sent (%s, %.0f KB)", name, len(data) / 1024.0)
+        return {"ok": True, "message_id": message_id, "reason": ""}
+
+    # -- pairing -----------------------------------------------------------
+
+    def _pairing_policy(self):
+        """(ttl_seconds, reusable) from settings, falling back to the old default.
+
+        Read per code rather than cached: the user can change either value in
+        Settings while the monitor is already running.
+        """
+        try:
+            cfg = self._config_loader()
+            return cfg.pair_ttl_s, cfg.pair_reusable
+        except Exception as e:
+            log.error("[Telegram] Could not read the pairing policy: %s", type(e).__name__)
+            return PAIR_TTL_S, False
+
+    def _pairing_thread_live(self) -> bool:
+        """True when a poller is running for a code that is still being served."""
+        return bool(
+            self._pair_thread
+            and self._pair_thread.is_alive()
+            and not self._pair_stop.is_set()
+        )
+
+    def _ensure_poller(self) -> bool:
+        """Start the single poll loop if it is not already running.
+
+        A fresh event per poller: a thread left over from before a revoke holds
+        the old, already-set event, so it can never serve the next code or carry
+        a prompt into a chat that was unpaired.
+        """
+        # The worker start is idempotent, and a monitor that was stopped earlier
+        # has to come back up or nothing would ever be answered.
+        self.start()
+        if self._pairing_thread_live():
+            return True
+        stop_event = threading.Event()
+        self._pair_stop = stop_event
+        self._pair_thread = threading.Thread(
+            target=self._poll_loop, args=(stop_event,), name="telegram-poll", daemon=True
+        )
+        self._pair_thread.start()
+        return True
+
+    def begin_pairing(self) -> str:
+        """Issue a code, or a refusal marker when it cannot be issued safely.
+
+        A code is refused while a chat is already paired. Today a second code
+        would be accepted and silently overwrite the saved chat, which is the
+        takeover path: whoever holds a fresh code moves the channel and the
+        owner's phone just goes quiet. Moving it stays possible, but it has to
+        be deliberate: unpair first, which is one click.
+
+        A code is also refused without an active subscription, and that is
+        checked before the token for a reason: _ensure_client() already answers
+        None for a lapsed account, so testing it first would report "no token"
+        to someone whose token is fine and whose plan simply ended.
+        """
+        if not self._entitled():
+            log.info("[Telegram] Pairing refused: no active subscription")
+            return PAIR_REFUSED_NO_SUBSCRIPTION
+        if self._ensure_client() is None:
+            return PAIR_REFUSED_NO_TOKEN
+        if (self._safe_config().chat_id or "").strip():
+            log.info("[Telegram] Pairing refused: a chat is already paired")
+            return PAIR_REFUSED_ALREADY_PAIRED
+        ttl_s, reusable = self._pairing_policy()
+        code = self._pairing.begin(ttl_s=ttl_s, reusable=reusable)
+        self._ensure_poller()
+        # The code itself never reaches the log. This line exists so the next
+        # "it did nothing" report can be answered from the file instead of
+        # guessed at: issued, then paired, or issued and never answered.
+        log.info("[Telegram] Pairing code issued (reusable=%s)", bool(reusable))
+        return code
+
+    def set_prompt_handler(
+        self,
+        handler: Optional[Callable[[str], None]],
+        is_busy: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        """Register where an inbound prompt goes.
+
+        ``handler`` runs on the poller thread and must return immediately: the
+        GUI side turns it into a queued Qt signal rather than touching a widget
+        from here. ``is_busy`` is read on the same thread, so it must only look
+        at plain Python state, never at a Qt object.
+        """
+        self._on_prompt = handler
+        self._is_busy = is_busy
+
+    def set_screenshot_handler(self, handler: Optional[Callable[[], None]]) -> None:
+        """Register who takes a picture of Cortex.
+
+        Same rule as the prompt handler: it runs on the poller thread and must
+        return at once, so the GUI side makes it a queued Qt signal.
+        """
+        self._on_screenshot = handler
+
+    def deliver_screenshot(self, path: Optional[str], caption: str = "", error: str = "") -> None:
+        """Send a capture to the paired chat, or say why there is none. Any thread.
+
+        The upload gets its own thread so the window never waits on the network.
+        """
+        chat_id = self._safe_config().chat_id
+
+        def _deliver() -> None:
+            outcome = self.send_photo(path, caption) if path else {}
+            if not outcome.get("ok"):
+                reason = error or outcome.get("reason") or "unknown error"
+                self._reply(chat_id, f"Could not send the screenshot: {reason}.")
+
+        threading.Thread(target=_deliver, daemon=True, name="telegram-screenshot").start()
+
+    def set_answer_handler(
+        self, handler: Optional[Callable[[str, str], None]]
+    ) -> None:
+        """Register where a phone's answer to a question goes.
+
+        ``handler(question_id, answer)`` runs on the poller thread, so it must
+        only raise a queued Qt signal. With no handler a reply is not taken as
+        an answer, and the question message says to answer in Cortex.
+        """
+        self._on_answer = handler
+
+    def set_image_handler(
+        self,
+        handler: Optional[Callable[[str, str, str], None]],
+        vision_ok: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        """Register where an inbound picture goes.
+
+        ``handler`` receives ``(caption, base64_data, mime)`` and runs on the
+        poller thread, so it must only raise a queued Qt signal. ``vision_ok``
+        is asked before anything is downloaded: a picture sent to a model that
+        cannot see it is refused on the phone with a reason, instead of
+        spending the download and then running a blind prompt.
+        """
+        self._on_image = handler
+        self._vision_ok = vision_ok
+
+    def ensure_inbound(self) -> bool:
+        """Start polling when inbound prompts are on and a chat is paired.
+
+        Called at startup and again whenever the Settings switch changes, so
+        turning it on takes effect without a restart. Turning it off needs no
+        call: the loop re-reads the setting and exits by itself.
+        """
+        config = self._safe_config()
+        if not (config.inbound_enabled and config.chat_id):
+            return False
+        if self._ensure_client() is None:
+            return False
+        return self._ensure_poller()
+
+    def _safe_config(self):
+        """Settings, or a blank config when the read fails.
+
+        A broken settings file must not kill the poller thread: a blank config
+        means "nothing wanted", which is the safe direction.
+        """
+        try:
+            return self._config_loader()
+        except Exception as e:
+            log.error("[Telegram] Could not read settings: %s", type(e).__name__)
+            return telegram_config.TelegramConfig()
+
+    def _poll_loop(self, stop_event: Optional[threading.Event] = None) -> None:
+        """One getUpdates loop for both jobs.
+
+        Pairing and inbound prompts must share a loop. Telegram's offset is per
+        bot, not per request, so two pollers would each consume the other's
+        updates and one of them would lose messages without any error.
+        """
+        stop_event = stop_event or self._pair_stop
+        offset: Optional[int] = None
+        delay = self._poll_interval
+        # A freshly issued code is almost always paired within minutes, so the
+        # fast interval is held for a short window and only then backed off.
+        # Without this a 90-day code would be two requests a second for months.
+        fast_until = time.monotonic() + PAIR_FAST_WINDOW_S
+        while not (self._stop.is_set() or stop_event.is_set()):
+            config = self._safe_config()
+            pairing_wanted = self._pairing.pending() is not None
+            inbound_wanted = bool(config.inbound_enabled and config.chat_id)
+            if not (pairing_wanted or inbound_wanted):
+                return
+            if self._ensure_client() is None:
+                if self._is_subscribed is not None and not self._entitled():
+                    # A paid feature that lapsed. Stay alive but silent and
+                    # retry slowly, so a renewal resumes the bot on its own
+                    # instead of needing a restart. The entitlement cache is
+                    # shorter than this wait, so every pass asks again.
+                    stop_event.wait(PAIR_POLL_MAX_S)
+                    continue
+                return
+            updates = self._client.get_updates(offset=offset)
+            if stop_event.is_set():
+                # Revoked while the poll was in flight: that batch is no longer
+                # ours to act on, so it is dropped instead of dispatched.
+                return
+            for update in updates or []:
+                # The offset is advanced BEFORE dispatching, so a crash while
+                # handling a prompt cannot make Telegram deliver it twice. A
+                # lost prompt is recoverable; a second agent run is not.
+                if not isinstance(update, dict):
+                    continue
+                try:
+                    next_offset = int(update.get("update_id", 0)) + 1
+                except (TypeError, ValueError):
+                    log.warning("[Telegram] Update with no usable id, skipped")
+                    continue
+                offset = max(offset or 0, next_offset)
+            paired = self._handle_pair_updates(updates)
+            if inbound_wanted:
+                self._handle_inbound_updates(
+                    updates, config, skip_update_ids={self._pair_update_id}
+                )
+            now = time.monotonic()
+            if paired:
+                fast_until = now + PAIR_FAST_WINDOW_S
+                delay = self._poll_interval
+            elif inbound_wanted:
+                # Steady and short, so a prompt typed on a phone lands promptly.
+                delay = INBOUND_POLL_S
+            elif now >= fast_until:
+                delay = min(delay * 2, PAIR_POLL_MAX_S)
+            stop_event.wait(delay)
+
+    def _handle_pair_updates(self, updates, now: Optional[float] = None) -> bool:
+        """Pair on the first update carrying the pending code. Testable."""
+        self._pair_update_id = None
+        for update in updates or []:
+            message = update.get("message") or {}
+            chat_id = (message.get("chat") or {}).get("id")
+            text = message.get("text") or ""
+            if not self._is_private_chat(message.get("chat")):
+                # A group shares one chat id between every member, so pairing
+                # there would hand the agent to all of them. The code is left
+                # unspent, so an honest paste into the wrong chat costs nothing
+                # but one message.
+                if chat_id not in (None, "") and _PAIR_CMD_RE.match(text.strip()):
+                    if self._client:
+                        self._client.send_text(str(chat_id), PAIR_GROUP_REFUSED)
+                    log.info("[Telegram] Refused a pairing attempt from a group chat")
+                continue
+            if self._pairing.submit(text, chat_id, now):
+                # Remembered so the same update is not also offered to the
+                # prompt path, which would answer "that code is not valid any
+                # more" one message after "Paired".
+                self._pair_update_id = update.get("update_id")
+                paired_chat = str(chat_id)
+                # Read before the save: this is the chat that is about to lose
+                # the channel, if any.
+                previous = (self._safe_config().chat_id or "").strip()
+                try:
+                    telegram_config.set_chat_id(paired_chat)
+                    telegram_config.set_enabled(True)
+                except Exception as e:
+                    log.error("[Telegram] Could not save the paired chat: %s", type(e).__name__)
+                if previous and not self._same_chat(paired_chat, previous):
+                    # Moving the channel is allowed but never silent: the chat
+                    # that just lost it is told, so a takeover cannot be
+                    # mistaken for the phone simply going quiet.
+                    if self._client:
+                        try:
+                            self._client.send_text(previous, PAIR_MOVED_NOTICE)
+                        except Exception as e:
+                            log.error(
+                                "[Telegram] Could not notice the old chat: %s",
+                                type(e).__name__,
+                            )
+                    log.info("[Telegram] The paired chat changed to another chat")
+                if self._client:
+                    self._client.send_text(paired_chat, "Paired. Cortex will report runs here.")
+                log.info("[Telegram] Paired with a chat")
+                if self._on_paired:
+                    try:
+                        self._on_paired(paired_chat)
+                    except Exception as e:
+                        log.error("[Telegram] on_paired callback failed: %s", type(e).__name__)
+                return True
+            # Silence is still the default, but not while a code is outstanding
+            # from this desktop: the owner typing their own code wrong must be
+            # told, or a typo looks exactly like a dead bot. answer_for_miss
+            # keeps a stranger silent and the number of answers bounded.
+            reply = self._pairing.answer_for_miss(text, chat_id, now)
+            if reply:
+                if self._client:
+                    self._client.send_text(str(chat_id), reply)
+                log.info("[Telegram] A pairing attempt did not match the pending code")
+        return False
+
+    # -- inbound prompts ---------------------------------------------------
+    # A prompt may start a run or answer the question the agent asked. It may
+    # never approve a permission card: that stays in Cortex, on the computer.
+    # Everything below is a refusal first and a feature second.
+
+    @staticmethod
+    def _is_private_chat(chat) -> bool:
+        """True only for a one-to-one chat with the bot.
+
+        Telegram ids are positive in a private chat and negative in groups,
+        supergroups and channels, so both signals are read: the type is
+        authoritative when Telegram sends it, and the sign still catches a
+        group when an update omits it.
+        """
+        if not isinstance(chat, dict):
+            return False
+        kind = chat.get("type")
+        if kind in ("group", "supergroup", "channel"):
+            return False
+        if kind == "private":
+            return True
+        try:
+            return int(chat.get("id")) > 0
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _same_chat(candidate: str, paired: str) -> bool:
+        """Constant-time chat comparison.
+
+        Not ``==``: a timing difference here would let someone discover the
+        paired id one character at a time.
+        """
+        try:
+            return secrets.compare_digest(candidate, paired)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _stale(message: dict, now: float) -> bool:
+        """True when the message predates this session by too long to run."""
+        try:
+            sent_at = float(message.get("date"))
+        except (TypeError, ValueError):
+            # No usable timestamp: cannot prove it is old, so it is treated as
+            # fresh. Telegram always sends one, so this is a defensive branch.
+            return False
+        return now - sent_at > INBOUND_STALE_S
+
+    def _allow_rate(self, now: float) -> bool:
+        """True when one more prompt fits inside the minute.
+
+        Called from the poller for typed text and from the voice worker once a
+        transcript is ready, so the window is updated under the lock: two
+        threads counting the same minute must not add up to two minutes.
+        """
+        cutoff = now - INBOUND_RATE_WINDOW_S
+        with self._lock:
+            while self._inbound_times and self._inbound_times[0] <= cutoff:
+                self._inbound_times.popleft()
+            if len(self._inbound_times) >= INBOUND_RATE_MAX:
+                return False
+            self._inbound_times.append(now)
+            return True
+
+    def _react(self, chat_id: str, message_id, emoji: str) -> bool:
+        """Best effort acknowledgement. Never raises."""
+        if message_id in (None, ""):
+            return False
+        client = self._ensure_client()
+        if client is None:
+            return False
+        try:
+            return client.react(chat_id, int(message_id), emoji)
+        except Exception:
+            return False
+
+    def _reply(self, chat_id: str, text: str, message_id=None) -> None:
+        """Answer in the paired chat, quoting the message it answers."""
+        client = self._ensure_client()
+        if client is None:
+            return
+        try:
+            client.send_text(chat_id, text, reply_to=message_id)
+        except Exception as e:
+            log.debug("[Telegram] Reply failed: %s", type(e).__name__)
+
+    # -- prompts that wait for a run ---------------------------------------
+
+    def _enqueue_prompt(self, chat_id: str, body: str, message_id) -> bool:
+        """Hold one prompt until the run in progress ends. False when full.
+
+        Refusing was the old behaviour, and it threw away work the user had
+        already typed on a phone. A bounded queue is the honest middle: the
+        phone is told where it stands, and the prompt still runs.
+        """
+        with self._lock:
+            if len(self._queued_prompts) >= INBOUND_QUEUE_MAX:
+                return False
+            self._queued_prompts.append((chat_id, body, message_id))
+            waiting = len(self._queued_prompts)
+        self._reply(chat_id, INBOUND_QUEUED_REPLY.format(waiting=waiting), message_id)
+        log.info("[Telegram] Prompt queued behind the active run (%d waiting)", waiting)
+        return True
+
+    def queued_count(self) -> int:
+        """How many prompts are waiting. Safe from either thread."""
+        with self._lock:
+            return len(self._queued_prompts)
+
+    def pop_queued_prompt(self):
+        """Take the oldest waiting prompt, or None. No network, so the GUI
+        thread may call this."""
+        with self._lock:
+            if not self._queued_prompts:
+                return None
+            return self._queued_prompts.popleft()
+
+    def clear_queued_prompts(self) -> int:
+        """Forget every waiting prompt, silently."""
+        with self._lock:
+            dropped = len(self._queued_prompts)
+            self._queued_prompts.clear()
+        return dropped
+
+    def drop_queued_prompts(self) -> int:
+        """Forget every waiting prompt and tell the phone why.
+
+        The replies go out on their own thread: Stop is pressed on the GUI
+        thread, and a network call there would freeze the window.
+        """
+        with self._lock:
+            dropped = list(self._queued_prompts)
+            self._queued_prompts.clear()
+        if not dropped:
+            return 0
+
+        def _tell() -> None:
+            for chat_id, _body, message_id in dropped:
+                self._reply(chat_id, INBOUND_QUEUE_DROPPED_REPLY, message_id)
+
+        threading.Thread(
+            target=_tell, name="telegram-queue-drop", daemon=True
+        ).start()
+        log.info("[Telegram] Dropped %d queued prompt(s)", len(dropped))
+        return len(dropped)
+
+    def inbound_allowed(self) -> bool:
+        """Whether prompts are still being taken. A plain settings read."""
+        try:
+            config = self._config_loader()
+            return bool(config.inbound_enabled and config.chat_id)
+        except Exception:
+            return False
+
+    def _refuse_unsupported(
+        self,
+        chat_id: str,
+        message: dict,
+        message_id,
+        now: float,
+    ) -> None:
+        """Explain why an unreadable message did nothing. Once per window.
+
+        Only voice notes, files, stickers and video reach here now: a picture
+        is downloaded and run. One reply per window, because Telegram keeps up
+        to 100 pending updates, so a burst of voice notes must not become a
+        burst of identical replies.
+        """
+        if now - self._last_media_warn <= INBOUND_RATE_WINDOW_S:
+            return
+        self._last_media_warn = now
+        self._reply(chat_id, INBOUND_MEDIA_REPLY, message_id)
+        log.info("[Telegram] Refused a message with nothing readable in it")
+
+    def _accept_photo(
+        self,
+        chat_id: str,
+        message_id,
+        photo: dict,
+        caption: str,
+    ) -> bool:
+        """Download one photo and hand it to the GUI. True when it was taken.
+
+        Everything that can refuse happens before the download: no handler
+        registered, a model that cannot see, an oversized upload. A refusal is
+        always explained on the phone, because a picture that vanishes looks
+        like a broken bot rather than a missing capability.
+        """
+        if self._on_image is None:
+            self._reply(chat_id, INBOUND_NO_VISION_REPLY, message_id)
+            return False
+        if self._vision_ok is not None:
+            try:
+                allowed = bool(self._vision_ok())
+            except Exception as e:
+                # A foreign callback. Failing closed is the safe direction: a
+                # picture the model cannot see is a wasted run and a wasted
+                # download.
+                log.error("[Telegram] Vision check raised %s", type(e).__name__)
+                allowed = False
+            if not allowed:
+                self._reply(chat_id, INBOUND_NO_VISION_REPLY, message_id)
+                log.info("[Telegram] Refused a picture: the model cannot read images")
+                return False
+        try:
+            declared = int(photo.get("file_size") or 0)
+        except (TypeError, ValueError):
+            declared = 0
+        if declared > INBOUND_MAX_IMAGE_BYTES:
+            self._reply(
+                chat_id,
+                INBOUND_PHOTO_TOO_BIG.format(limit=INBOUND_MAX_IMAGE_BYTES // (1024 * 1024)),
+                message_id,
+            )
+            return False
+        client = self._ensure_client()
+        if client is None:
+            self._reply(chat_id, INBOUND_PHOTO_FAILED, message_id)
+            return False
+        data = client.download_photo(photo.get("file_id"), INBOUND_MAX_IMAGE_BYTES)
+        if not data:
+            self._reply(chat_id, INBOUND_PHOTO_FAILED, message_id)
+            return False
+        try:
+            self._on_image(caption, base64.b64encode(data).decode("ascii"), INBOUND_IMAGE_MIME)
+        except Exception as e:
+            log.error("[Telegram] Image handler failed: %s", type(e).__name__)
+            self._reply(chat_id, "Cortex could not take that picture.", message_id)
+            return False
+        return True
+
+
+
+    def _voice_lang(self) -> str:
+        """The language chosen next to the mic, so the phone transcribes the
+        same way the desktop does. No second dropdown, no second default."""
+        if self._voice_language is not None:
+            try:
+                return str(self._voice_language() or "en")
+            except Exception:
+                return "en"
+        try:
+            from src.config.settings import get_settings
+            return str(
+                get_settings().get("ui", "voice_language", default="en") or "en"
+            )
+        except Exception:
+            return "en"
+
+    def _accept_voice(
+        self,
+        chat_id: str,
+        message_id,
+        voice: dict,
+        message: dict,
+        now: float,
+    ) -> bool:
+        """Queue one voice note for transcription. True when it was taken.
+
+        Every refusal that needs no network happens here, on the poller: a
+        note that is too long, too old, too large, or arrives while nothing is
+        taking prompts is answered immediately instead of costing a download.
+        """
+        if self._on_prompt is None:
+            self._reply(chat_id, "Cortex is not ready to take prompts.", message_id)
+            return False
+        if self._stale(message, now):
+            # Same answer a stale text message gets. Refused here rather than
+            # after transcription: there is no point paying to transcribe a
+            # note that predates this session.
+            if now - self._last_stale_warn > INBOUND_RATE_WINDOW_S:
+                self._last_stale_warn = now
+                self._reply(chat_id, INBOUND_STALE_REPLY, message_id)
+            log.info("[Telegram] Dropped a voice note sent before this session")
+            return False
+        try:
+            seconds = int(voice.get("duration") or 0)
+        except (TypeError, ValueError):
+            seconds = 0
+        if seconds > INBOUND_MAX_VOICE_SECONDS:
+            self._reply(
+                chat_id,
+                INBOUND_VOICE_TOO_LONG.format(
+                    seconds=seconds, limit=INBOUND_MAX_VOICE_SECONDS
+                ),
+                message_id,
+            )
+            log.info("[Telegram] Refused a voice note: %ss is over the limit", seconds)
+            return False
+        try:
+            declared = int(voice.get("file_size") or 0)
+        except (TypeError, ValueError):
+            declared = 0
+        if declared > INBOUND_MAX_VOICE_BYTES:
+            self._reply(
+                chat_id,
+                INBOUND_VOICE_TOO_BIG.format(
+                    limit=INBOUND_MAX_VOICE_BYTES // (1024 * 1024)
+                ),
+                message_id,
+            )
+            return False
+        file_id = voice.get("file_id")
+        if not file_id:
+            self._reply(chat_id, INBOUND_VOICE_FAILED, message_id)
+            return False
+        # Eyes now: the transcript is tens of seconds away, and silence in
+        # between is indistinguishable from a message that never arrived.
+        self._react(chat_id, message_id, ACK_EMOJI)
+        self._voice_queue.put((chat_id, message_id, str(file_id), message))
+        self._start_voice_worker()
+        return True
+
+    def _start_voice_worker(self) -> None:
+        """Start the transcriber if it is not up. Idempotent and cheap."""
+        if self._voice_thread is not None and self._voice_thread.is_alive():
+            return
+        self._voice_thread = threading.Thread(
+            target=self._voice_loop, name="telegram-voice", daemon=True
+        )
+        self._voice_thread.start()
+
+    def _voice_loop(self) -> None:
+        """One worker, so transcripts keep the order the notes arrived in."""
+        while True:
+            chat_id, message_id, file_id, message = self._voice_queue.get()
+            try:
+                self._take_voice(chat_id, message_id, file_id, message)
+            except Exception as e:
+                # One unusable note must not stop every note after it.
+                log.error("[Telegram] Voice note failed: %s", type(e).__name__)
+            finally:
+                self._voice_queue.task_done()
+
+    def _take_voice(self, chat_id: str, message_id, file_id, message: dict) -> None:
+        """Download, transcribe, then re-enter the ordinary prompt path.
+
+        ``download_photo`` is used for the bytes because it is the generic
+        getFile + bounded download: nothing in it is JPEG-specific.
+        """
+        if not self._entitled():
+            # The plan can lapse between the queue and here.
+            return
+        client = self._ensure_client()
+        if client is None:
+            self._reply(chat_id, INBOUND_VOICE_FAILED, message_id)
+            return
+        data = client.download_photo(file_id, INBOUND_MAX_VOICE_BYTES)
+        if not data:
+            self._reply(chat_id, INBOUND_VOICE_FAILED, message_id)
+            return
+        transcribe = self._transcribe
+        if transcribe is None:
+            from src.core.voice_input import transcribe_bytes
+            transcribe = transcribe_bytes
+        text, error = transcribe(data, INBOUND_VOICE_MIME, [], self._voice_lang())
+        if error:
+            # The server's own sentence: it already names a missing
+            # subscription, a too-long recording or a transport failure.
+            self._reply(chat_id, str(error), message_id)
+            return
+        text = (text or "").strip()
+        if not text:
+            self._reply(chat_id, INBOUND_VOICE_EMPTY, message_id)
+            return
+        try:
+            config = self._config_loader()
+        except Exception as e:
+            log.error("[Telegram] Config read failed for a voice note: %s",
+                      type(e).__name__)
+            return
+        log.info("[Telegram] Voice note transcribed (%d chars)", len(text))
+        self._handle_inbound_updates([voiced_update(message, text)], config)
+
+    def _handle_inbound_updates(
+        self,
+        updates,
+        config,
+        now: Optional[float] = None,
+        skip_update_ids=None,
+    ) -> int:
+        """Turn messages from the paired chat into prompts. Returns how many ran.
+
+        Every check is a deliberate refusal: the saved chat only, humans only,
+        readable content only, within the length cap, fresh, and inside the
+        rate limit. ``skip_update_ids`` holds updates already consumed by
+        pairing.
+        """
+        if not config.inbound_enabled:
+            return 0
+        skip = {i for i in (skip_update_ids or ()) if i is not None}
+        paired = (config.chat_id or "").strip()
+        if not paired:
+            return 0
+        moment = time.time() if now is None else now
+        if not self._entitled():
+            # Checked once per batch, after the cheap settings tests. Nothing
+            # is sent back: replying would need the very network access the
+            # gate is refusing, and a bot that keeps answering "you cannot use
+            # me" is still a bot that answers. One line per window in the log,
+            # so the reason is findable without a flood.
+            if moment - self._last_sub_warn > INBOUND_RATE_WINDOW_S:
+                self._last_sub_warn = moment
+                log.info("[Telegram] Ignored prompts: no active subscription")
+            return 0
+        accepted = 0
+        for update in updates or []:
+            if skip and update.get("update_id") in skip:
+                continue
+            if isinstance(update.get("callback_query"), dict):
+                self._take_answer_button(update["callback_query"], paired)
+                continue
+            message = update.get("message") or {}
+            chat_id = (message.get("chat") or {}).get("id")
+            if chat_id in (None, ""):
+                continue
+            if not self._same_chat(str(chat_id), paired):
+                # Silence, exactly like a stranger with a pairing code.
+                continue
+            if not self._is_private_chat(message.get("chat")):
+                # The chat id matches, but in a group every member shares it,
+                # so any of them could drive the agent. Prompts stay one-to-one.
+                log.info("[Telegram] Ignored a prompt from a group chat")
+                continue
+            sender = message.get("from") or {}
+            if sender.get("is_bot"):
+                # Another bot in the chat must not be able to drive the agent.
+                continue
+            message_id = message.get("message_id")
+            text = message.get("text")
+            photo = largest_photo(message.get("photo"))
+            voice = message.get("voice") or message.get("audio")
+            if not isinstance(text, str) and photo is None and isinstance(voice, dict):
+                # Queued, not transcribed here: the server call takes seconds
+                # and this thread is also the heartbeat and the Stop path.
+                self._accept_voice(paired, message_id, voice, message, moment)
+                continue
+            if not isinstance(text, str) and photo is None:
+                self._refuse_unsupported(paired, message, message_id, moment)
+                continue
+            if isinstance(text, str):
+                body = text.strip()
+            else:
+                # A picture's caption is its prompt. An uncaptioned picture
+                # still asks the one question a picture implies.
+                body = (message.get("caption") or "").strip() or INBOUND_PHOTO_CAPTION_DEFAULT
+            if not body:
+                continue
+            if (photo is None and not body.startswith("/")
+                    and self._take_answer(paired, body, message, message_id, moment)):
+                # A reply to the open question, not a new prompt. Checked
+                # before the busy test: a run that asked is always busy.
+                continue
+            if photo is None and body.startswith("/"):
+                # A caption starting with "/" is still a picture to look at:
+                # the photo is the request, not the word.
+                self._handle_inbound_command(paired, body, message_id)
+                continue
+            if len(body) > INBOUND_MAX_CHARS:
+                self._reply(
+                    paired,
+                    f"Too long: {len(body)} characters. Keep a prompt under "
+                    f"{INBOUND_MAX_CHARS}.",
+                    message_id,
+                )
+                continue
+            if not message.get("voice_transcript") and self._stale(message, moment):
+                # Silence here reads as "broken": the message was typed while
+                # nothing was polling, so the phone must be told to send again.
+                # One reply per window, because the backlog can hold a hundred.
+                if moment - self._last_stale_warn > INBOUND_RATE_WINDOW_S:
+                    self._last_stale_warn = moment
+                    self._reply(paired, INBOUND_STALE_REPLY, message_id)
+                log.info("[Telegram] Dropped a prompt sent before this session")
+                continue
+            if not self._allow_rate(moment):
+                # One warning per window, so a flood cannot become a flood of
+                # warning messages.
+                if moment - self._last_rate_warn > INBOUND_RATE_WINDOW_S:
+                    self._last_rate_warn = moment
+                    self._reply(
+                        paired,
+                        "Too many prompts. Wait a minute, then send again.",
+                        message_id,
+                    )
+                continue
+            if photo is None and is_screenshot_request(body):
+                # Answered here, not by the agent: it works in the middle of a
+                # run, when a prompt would wait for the run to end, and it
+                # spends no tokens on a picture of the window.
+                self._take_screenshot(paired, message_id)
+                continue
+            if self._is_busy and self._is_busy():
+                # A text prompt waits; a picture does not. Holding a photo
+                # means holding its bytes for as long as the run lasts, and a
+                # queue of those can be tens of megabytes on the poller thread.
+                if photo is None and self._enqueue_prompt(paired, body, message_id):
+                    accepted += 1
+                    self.stats["prompts"] += 1
+                    self._react(paired, message_id, CONFIRM_EMOJI)
+                    continue
+                self._reply(
+                    paired,
+                    INBOUND_BUSY_REPLY
+                    if photo is not None
+                    else INBOUND_QUEUE_FULL_REPLY.format(limit=INBOUND_QUEUE_MAX),
+                    message_id,
+                )
+                continue
+            if photo is not None:
+                if not self._accept_photo(paired, message_id, photo, body):
+                    continue
+                accepted += 1
+                self.stats["prompts"] += 1
+                self._react(paired, message_id, CONFIRM_EMOJI)
+                log.info("[Telegram] Picture accepted from the paired chat")
+                continue
+            handler = self._on_prompt
+            if handler is None:
+                self._reply(paired, "Cortex is not ready to take prompts.", message_id)
+                continue
+            try:
+                handler(body)
+            except Exception as e:
+                # The handler is foreign code (a Qt signal emit). A failure
+                # there must not take the poller down and lose later prompts.
+                log.error("[Telegram] Prompt handler failed: %s", type(e).__name__)
+                self._reply(paired, "Cortex could not take that prompt.", message_id)
+                continue
+            accepted += 1
+            self.stats["prompts"] += 1
+            self._react(paired, message_id, CONFIRM_EMOJI)
+            log.info("[Telegram] Prompt accepted from the paired chat (%d chars)", len(body))
+        return accepted
+
+    def _take_screenshot(self, chat_id: str, message_id=None) -> None:
+        handler = getattr(self, "_on_screenshot", None)
+        if handler is None:
+            self._reply(chat_id, "Cortex is not ready to take a screenshot yet.", message_id)
+            return
+        handler()
+        log.info("[Telegram] Screenshot requested from the paired chat")
+
+    def _handle_inbound_command(self, chat_id: str, body: str, message_id=None) -> None:
+        """The whole command surface: /start, /help, /status, /screenshot.
+
+        Anything else beginning with a slash is refused rather than treated as
+        a prompt, so a typo cannot become a task and a stray command from a
+        phone keyboard cannot start a run.
+        """
+        command = (body.split() or [""])[0].split("@")[0].lower()
+        if command in ("/start", "/help"):
+            self._reply(chat_id, INBOUND_HELP, message_id)
+            return
+        if command == "/screenshot":
+            self._take_screenshot(chat_id, message_id)
+            return
+        if command == "/status":
+            busy = bool(self._is_busy and self._is_busy())
+            self._reply(chat_id, self._status_text() if busy else "Cortex is idle.", message_id)
+            return
+        if command == "/pair":
+            self._reply(
+                chat_id,
+                "That pairing code is not valid any more. Press Show code in Cortex for a new one.",
+                message_id,
+            )
+            return
+        self._reply(
+            chat_id,
+            "Unknown command. Send plain text to run it as a prompt, or /help.",
+            message_id,
+        )
+
+    # -- worker ------------------------------------------------------------
+
+    def _dispatch(self, event: dict) -> None:
+        try:
+            self._handle(event)
+        except Exception as e:
+            self.stats["failed"] += 1
+            log.error("[Telegram] Event %r failed: %s", (event or {}).get("kind"), type(e).__name__)
+
+    def drain(self, max_events: int = 500) -> int:
+        """Process the queue synchronously, without the worker thread.
+
+        Used by the tests, and worth having at shutdown: the last few events
+        should not be lost because the GUI is going away.
+        """
+        handled = 0
+        while handled < max_events:
+            try:
+                event = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            handled += 1
+            self._dispatch(event)
+        self._flush_status(force=False)
+        return handled
+
+    def _run_worker(self) -> None:
+        while not self._stop.is_set():
+            try:
+                event = self._queue.get(timeout=1.0)
+            except queue.Empty:
+                self._flush_status(force=False)
+                continue
+            self._dispatch(event)
+            self._flush_status(force=False)
+
+    def _handle(self, event: dict) -> None:
+        if not isinstance(event, dict):
+            return
+        kind = event.get("kind")
+        if kind == "test":
+            self._send_test()
+            return
+
+        config = self._config_loader()
+        if not config.enabled and not (
+            kind in (_QUESTION, _QUESTION_ANSWERED, _QUESTION_CLOSED)
+            and self._answerable(config)
+        ):
+            # "Notifications on" off silences run reports. A question still
+            # goes out while prompts are allowed: the phone is where it gets
+            # answered, and a question nobody can see just times out.
+            return
+        chat_id = config.chat_id
+        if not chat_id:
+            return
+        if kind != _STARTED and not self._run.message_id and kind not in STANDALONE_KINDS:
+            # Nothing to fold into and it is not worth a message on its own.
+            return
+
+        if kind == _STARTED:
+            self._handle_started(chat_id, event, config)
+        elif kind == _FINISHED:
+            self._close_questions(QUESTION_CLOSED_RUN_ENDED)
+            self._handle_finished(chat_id, config, event)
+        elif kind == _FAILED:
+            self._close_questions(QUESTION_CLOSED_RUN_ENDED)
+            self._send(chat_id, self._format_failed(event), config, urgent=True)
+        elif kind == _QUESTION:
+            self._handle_question(chat_id, event.get("payload"), config)
+        elif kind == _QUESTION_ANSWERED:
+            self._handle_question_answered(event)
+        elif kind == _QUESTION_CLOSED:
+            self._close_questions(event.get("reason") or "Closed.", only=event.get("id"))
+        elif kind == _APPROVAL:
+            self._send(chat_id, self._format_approval(event), config, urgent=True)
+        elif kind == "explore":
+            self._handle_explore(event.get("raw"))
+        elif kind == "tool":
+            self._handle_tool(event)
+        elif kind == "thinking":
+            self._run.activity = "Thinking" if event.get("active") else self._run.activity
+            self._run.dirty = True
+        elif kind == "progress":
+            self._handle_progress(event)
+        elif kind == "context":
+            self._handle_context(event)
+        elif kind == "status":
+            self._handle_status(chat_id, event, config)
+
+    # -- event handlers ----------------------------------------------------
+
+    def _handle_started(self, chat_id: str, event: dict, config) -> None:
+        self._run = RunState(
+            project=clip(event.get("project") or "", 120),
+            started_at=self._clock(),
+        )
+        if not config.wants(_STARTED):
+            return
+        text = "Cortex started"
+        if self._run.project:
+            text += f"\n{self._run.project}"
+        message_id = self._send(chat_id, text, config, urgent=False)
+        if message_id:
+            self._run.message_id = message_id
+            self._run.last_edit = self._clock()
+            # React the moment the live message lands: one call per run, and it
+            # proves delivery without spending a second message.
+            client = self._ensure_client()
+            if client is not None:
+                self._run.acked = client.react(chat_id, message_id)
+
+    def _handle_explore(self, raw) -> None:
+        # The path arrives as JSON. Anything oversized is ignored rather than
+        # regexed: this is the exact shape of the tool-activity freeze.
+        if not isinstance(raw, str) or len(raw) > 8192:
+            return
+        path, tool = "", ""
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                path = clip(payload.get("path") or "", 400)
+                tool = clip(payload.get("tool") or "", 40)
+        except Exception:
+            return
+        if not path:
+            return
+        self._run.files_read += 1
+        label = _TOOL_LABELS.get(tool.lower(), clip(tool, 20).capitalize() or "Read")
+        detail = _explore_detail(tool, path)
+        self._note(f"{label} · {detail}" if detail else label)
+
+    def _handle_tool(self, event: dict) -> None:
+        """Edits and shell commands, the tools the explore signal never sees."""
+        if clip(event.get("phase") or "", 20) != "complete":
+            return
+        name = clip(event.get("name") or "", 40)
+        is_edit = name in _EDIT_ACTIVITIES
+        if not is_edit and name not in _SHELL_ACTIVITIES:
+            return
+        self._run.files_edited += 1 if is_edit else 0
+        label = _TOOL_LABELS.get(name, name or "Tool")
+        if name in _SHELL_ACTIVITIES:
+            # The owner's call: the phone says a shell ran, not what it ran.
+            # A command line is mostly paths and flags, the exact noise this
+            # card was cleaned of.
+            self._note(label)
+            return
+        detail, counts = "", ""
+        raw = event.get("info")
+        if isinstance(raw, str) and 0 < len(raw) <= 8192:
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                detail = file_name(payload.get("file_path") or payload.get("path"))
+                if name == "write_file":
+                    counts = _change_counts(_line_count(payload.get("content")), 0)
+                else:
+                    counts = _change_counts(
+                        _line_count(payload.get("new_string")),
+                        _line_count(payload.get("old_string")),
+                    )
+        if counts:
+            detail = f"{detail} {counts}".strip()
+        self._note(f"{label} · {detail}" if detail else label)
+
+    def _note(self, line: str) -> None:
+        """Keep the last few lines, no consecutive repeats, newest last."""
+        line = clip(line, 96)
+        if not line:
+            return
+        if self._run.recent and self._run.recent[-1] == line:
+            return
+        self._run.recent.append(line)
+        del self._run.recent[:-_RECENT_LIMIT]
+        self._run.activity = line
+        self._run.dirty = True
+
+    def _tally(self) -> str:
+        """One honest line of counters. Empty when nothing has happened yet.
+
+        ``files_read`` counts calls, not files, so it is labelled "reads".
+        Saying "24 files read" when a file was read 24 times was simply wrong.
+        """
+        parts = []
+        if self._run.files_read:
+            parts.append(_plural(self._run.files_read, "read"))
+        if self._run.files_edited:
+            parts.append(_plural(self._run.files_edited, "edit"))
+        if self._run.context_used and self._run.context_limit:
+            parts.append(
+                f"{format_tokens(self._run.context_used)} / "
+                f"{format_tokens(self._run.context_limit)} context"
+            )
+        return " · ".join(parts)
+
+    def _handle_progress(self, event: dict) -> None:
+        done, total = event.get("done"), event.get("total")
+        if isinstance(done, int) and isinstance(total, int) and total > 0:
+            self._run.activity = f"Step {min(done, total)} of {total}"
+            self._run.dirty = True
+
+    def _handle_context(self, event: dict) -> None:
+        used, limit = event.get("used"), event.get("limit")
+        if isinstance(used, int):
+            self._run.context_used = used
+        if isinstance(limit, int):
+            self._run.context_limit = limit
+        self._run.dirty = True
+
+    def _handle_status(self, chat_id: str, event: dict, config) -> None:
+        status = clip(event.get("status") or "", 40)
+        label = _STATUS_MESSAGES.get(status)
+        if not label:
+            self._run.dirty = True
+            return
+        detail = clip(event.get("message") or "", 200)
+        text = f"{label}\n{detail}" if detail else label
+        self._send(chat_id, text, config, urgent=False)
+
+    def _handle_finished(
+        self, chat_id: str, config, event: Optional[dict] = None
+    ) -> None:
+        self._run.finished = True
+        if not config.wants(_FINISHED):
+            return
+        elapsed = self._clock() - self._run.started_at if self._run.started_at else 0.0
+        lines = [f"Finished in {format_duration(elapsed)}"]
+        if self._run.project:
+            lines.append(self._run.project)
+        tally = self._tally()
+        if tally:
+            lines.append(tally)
+        status = "\n".join(lines)
+        # ``event["text"]`` is the assistant's last reply, the same string the
+        # chat panel renders. That string is Markdown and Telegram renders none
+        # of it, so it is translated to HTML and rides along with the status in
+        # one message: two messages would be two notifications for one run.
+        answer = None
+        if event and getattr(config, "summary_enabled", False):
+            answer = event.get("text")
+        chunks = to_telegram(
+            answer,
+            max_chars=getattr(config, "summary_max_chars", SUMMARY_MAX_CHARS),
+            limit=MAX_TEXT - 96,
+        )
+        if not chunks:
+            self._finish_plain(chat_id, status, config)
+            return
+        if self._quiet_now(config):
+            log.info("[Telegram] Quiet hours, dropping the finished message")
+            return
+
+        head = escape(status) + "\n\n" + chunks[0]
+        if len(head) <= MAX_TEXT - 8:
+            chunks[0] = head
+        else:
+            chunks.insert(0, escape(status))
+
+        client = self._ensure_client()
+        if client is None:
+            return
+        rest = chunks
+        if self._run.message_id:
+            if client.edit_text(
+                chat_id, self._run.message_id, chunks[0], parse_mode="HTML"
+            ):
+                self.stats["edited"] += 1
+                self._run.message_id = None
+                rest = chunks[1:]
+        if rest:
+            client.send_html(chat_id, rest)
+            self.stats["sent"] += 1
+
+    def _finish_plain(self, chat_id: str, status: str, config) -> None:
+        """The status alone, used when the answer is off or came back empty."""
+        if self._run.message_id and self._client:
+            if self._client.edit_text(chat_id, self._run.message_id, status):
+                self.stats["edited"] += 1
+                self._run.message_id = None
+                return
+        self._send(chat_id, status, config, urgent=False)
+
+    # -- formatting --------------------------------------------------------
+
+    def _status_text(self) -> str:
+        elapsed = self._clock() - self._run.started_at if self._run.started_at else 0.0
+        lines = [f"Cortex is working \u00b7 {format_duration(elapsed)}"]
+        if self._run.project:
+            lines.append(self._run.project)
+        if self._run.recent:
+            lines.append("")
+            lines.extend(self._run.recent)
+        tally = self._tally()
+        if tally:
+            lines.append("")
+            lines.append(tally)
+        waiting = self.queued_count()
+        if waiting:
+            lines.append(f"{waiting} queued behind this run")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _question_parts(payload):
+        """(question text, details, [option labels]) from the bridge payload.
+
+        The bridge sends the question as ``text`` and the options as
+        ``choices`` (dicts with ``label``/``description``, or plain strings).
+        This used to read ``question``, which the payload never carries, so
+        the phone saw "Waiting for your answer" with no question at all.
+        """
+        if not isinstance(payload, dict):
+            return "", "", []
+        question = clip(payload.get("text") or payload.get("question") or "", MAX_FIELD)
+        details = clip(payload.get("details") or "", MAX_FIELD)
+        options = []
+        for choice in (payload.get("choices") or [])[:QUESTION_OPTION_MAX]:
+            if isinstance(choice, dict):
+                label = choice.get("label") or choice.get("value") or ""
+                desc = choice.get("description") or ""
+            else:
+                label, desc = choice, ""
+            label = clip(label, 120)
+            if label:
+                options.append((label, clip(desc, 160)))
+        return question, details, options
+
+    def _format_question(self, payload, answerable: bool = False) -> str:
+        question, details, options = self._question_parts(payload)
+        lines = ["Cortex needs your answer"]
+        if question:
+            lines.append(question)
+        if details:
+            lines.append(details)
+        for index, (label, desc) in enumerate(options, 1):
+            lines.append(f"{index}. {label}" + (f" - {desc}" if desc else ""))
+        lines.append("")
+        lines.append(QUESTION_FOOTER_ANSWERABLE if answerable else QUESTION_FOOTER_LOCAL_ONLY)
+        return "\n".join(lines)
+
+    def _answerable(self, config) -> bool:
+        """A reply here can answer: prompts allowed, and Cortex listening."""
+        return bool(config.inbound_enabled and config.chat_id and self._on_answer)
+
+    def _handle_question(self, chat_id: str, payload, config) -> None:
+        question_id = str((payload or {}).get("id") or "") if isinstance(payload, dict) else ""
+        # The bridge asks one question at a time, so a new one means the
+        # previous was answered or given up on. Its buttons must not linger.
+        self._close_questions(QUESTION_CLOSED_SUPERSEDED, keep=question_id)
+        answerable = self._answerable(config) and bool(question_id)
+        _q, _d, options = self._question_parts(payload)
+        body = self._format_question(payload, answerable)
+        token = secrets.token_hex(4)
+        markup = None
+        if answerable and options:
+            markup = {"inline_keyboard": [
+                [{"text": clip(f"{i}. {label}", QUESTION_BUTTON_LABEL_MAX),
+                  "callback_data": f"{QUESTION_CALLBACK_PREFIX}:{token}:{i}"}]
+                for i, (label, _desc) in enumerate(options, 1)
+            ]}
+        client = self._ensure_client()
+        if client is None:
+            return
+        message_id = client.send_text(chat_id, body, reply_markup=markup)
+        if message_id:
+            self.stats["sent"] += 1
+        if question_id and message_id:
+            # Kept even when replies are off, so the message can still say
+            # how the question was settled once Cortex answers it.
+            with self._lock:
+                self._questions[question_id] = {
+                    "answerable": answerable,
+                    "token": token,
+                    "options": [label for label, _desc in options],
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "body": body,
+                    "asked_at": time.time(),
+                    "remote_answer": None,
+                }
+
+    def _handle_question_answered(self, event: dict) -> None:
+        question_id = str(event.get("id") or "")
+        with self._lock:
+            q = self._questions.pop(question_id, None)
+        if not q:
+            return
+        answer = clip(event.get("answer") or "", 200)
+        where = ("from Telegram" if q.get("remote_answer") is not None
+                 and q["remote_answer"] == event.get("answer") else "in Cortex")
+        self._edit_question(q, f"{CONFIRM_EMOJI} Answered {where}: {answer}")
+
+    def _close_questions(self, reason: str, keep: str = "", only=None) -> None:
+        """Strip the buttons off open questions and say why they closed."""
+        with self._lock:
+            ids = [i for i in self._questions if i != keep and (only is None or i == str(only))]
+            closing = [self._questions.pop(i) for i in ids]
+        for q in closing:
+            self._edit_question(q, reason)
+
+    def _edit_question(self, q: dict, status: str) -> None:
+        """Rewrite a question message with its outcome. Editing without a
+        reply_markup also removes the buttons, so nothing stays pressable."""
+        client = self._ensure_client()
+        if client is None or not q.get("message_id"):
+            return
+        body = q.get("body") or ""
+        # The footer told the user how to reply; once closed it is noise.
+        for footer in (QUESTION_FOOTER_ANSWERABLE, QUESTION_FOOTER_LOCAL_ONLY):
+            body = body.replace("\n\n" + footer, "")
+        try:
+            if client.edit_text(q["chat_id"], q["message_id"], f"{body}\n\n{status}"):
+                self.stats["edited"] += 1
+        except Exception as e:
+            log.debug("[Telegram] Question edit failed: %s", type(e).__name__)
+
+    # -- answers from the phone (poller thread) ------------------------------
+
+    def _open_question(self, token: Optional[str] = None):
+        """(question_id, record) still waiting for an answer, newest first."""
+        with self._lock:
+            for question_id in reversed(list(self._questions)):
+                q = self._questions[question_id]
+                if not q.get("answerable") or q.get("remote_answer") is not None:
+                    continue
+                if token is None or q.get("token") == token:
+                    return question_id, q
+        return None, None
+
+    def _deliver_answer(self, question_id: str, q: dict, answer: str) -> bool:
+        handler = self._on_answer
+        if handler is None:
+            return False
+        with self._lock:
+            if q.get("remote_answer") is not None:
+                return False
+            q["remote_answer"] = answer
+        try:
+            handler(question_id, answer)
+        except Exception as e:
+            log.error("[Telegram] Answer handler failed: %s", type(e).__name__)
+            with self._lock:
+                q["remote_answer"] = None
+            return False
+        log.info("[Telegram] Question answered from the paired chat (%d chars)", len(answer))
+        return True
+
+    def _take_answer(self, chat_id: str, body: str, message: dict,
+                     message_id, moment: float) -> bool:
+        """A typed reply while a question is open is its answer.
+
+        "2" picks option 2; anything else is a custom answer, exactly like
+        typing in the card's own box. Returns False when no question is open,
+        so the text goes on to be an ordinary prompt.
+        """
+        question_id, q = self._open_question()
+        if q is None:
+            return False
+        try:
+            sent_at = float(message.get("date"))
+        except (TypeError, ValueError):
+            sent_at = moment
+        if sent_at < q.get("asked_at", 0) - 2:
+            return False  # typed before the question existed: not an answer
+        if len(body) > INBOUND_MAX_CHARS:
+            self._reply(chat_id, f"Too long: {len(body)} characters. Keep an "
+                        f"answer under {INBOUND_MAX_CHARS}.", message_id)
+            return True
+        if not self._allow_rate(moment):
+            return True
+        answer = body
+        number = body.strip().rstrip(".)")
+        options = q.get("options") or []
+        if number.isdigit() and 1 <= int(number) <= len(options):
+            answer = options[int(number) - 1]
+        if self._deliver_answer(question_id, q, answer):
+            self._react(chat_id, message_id, CONFIRM_EMOJI)
+        else:
+            self._reply(chat_id, "That question is already closed.", message_id)
+        return True
+
+    def _take_answer_button(self, callback: dict, paired: str) -> None:
+        """A pressed option button on a question message."""
+        client = self._ensure_client()
+        callback_id = callback.get("id")
+        message = callback.get("message") or {}
+        chat = message.get("chat") or {}
+        sender = callback.get("from") or {}
+        if (not self._same_chat(str(chat.get("id", "")), paired)
+                or not self._is_private_chat(chat) or sender.get("is_bot")):
+            return  # silence, as for any stranger
+        parts = str(callback.get("data") or "").split(":")
+        reply = "That question is already closed."
+        if len(parts) == 3 and parts[0] == QUESTION_CALLBACK_PREFIX and parts[2].isdigit():
+            question_id, q = self._open_question(parts[1])
+            options = (q or {}).get("options") or []
+            index = int(parts[2])
+            if q is not None and 1 <= index <= len(options):
+                if self._deliver_answer(question_id, q, options[index - 1]):
+                    reply = f"Sent to Cortex: {options[index - 1]}"
+        if client is not None:
+            try:
+                client.answer_callback(callback_id, reply)
+            except Exception:
+                pass
+
+    def _format_approval(self, event: dict) -> str:
+        command = clip(event.get("command") or "", MAX_FIELD)
+        lines = ["Waiting for approval"]
+        if command:
+            lines.append(command)
+        warning = clip(event.get("warning") or "", 200)
+        if warning:
+            lines.append(warning)
+        lines.append("Approve or reject in Cortex. Approvals cannot be given from Telegram.")
+        return "\n".join(lines)
+
+    def _format_failed(self, event: dict) -> str:
+        lines = ["Run failed"]
+        if self._run.project:
+            lines.append(self._run.project)
+        message = clip(event.get("message") or "", MAX_FIELD)
+        if message:
+            lines.append(message)
+        return "\n".join(lines)
+
+    # -- sending -----------------------------------------------------------
+
+    def _quiet_now(self, config) -> bool:
+        if not config.quiet_enabled:
+            return False
+        return is_quiet(self._wall_clock().time(), config.quiet_start, config.quiet_end)
+
+    def _send(self, chat_id: str, text: str, config, urgent: bool) -> Optional[int]:
+        if not text:
+            return None
+        if not urgent and self._quiet_now(config):
+            log.info("[Telegram] Quiet hours, dropping %s", clip(text, 40))
+            return None
+        client = self._ensure_client()
+        if client is None:
+            return None
+        message_id = client.send_text(chat_id, text)
+        if message_id:
+            self.stats["sent"] += 1
+        return message_id
+
+    def _send_test(self) -> None:
+        """Explicit user action, so quiet hours and the event flags do not apply."""
+        config = self._config_loader()
+        if not config.chat_id:
+            log.info("[Telegram] Test message skipped: not paired")
+            return
+        client = self._ensure_client()
+        if client is None:
+            log.info("[Telegram] Test message skipped: no token")
+            return
+        if client.send_text(config.chat_id, "Test message. Cortex can reach this chat."):
+            self.stats["sent"] += 1
+
+    def _flush_status(self, force: bool) -> None:
+        run = self._run
+        if not run.dirty or run.finished:
+            return
+        client = self._ensure_client()
+        if client is None:
+            return
+        config = self._config_loader()
+        if not config.enabled:
+            return
+        chat_id = config.chat_id
+        if not chat_id:
+            return
+        now = self._clock()
+        if not force and now - run.last_edit < self._edit_floor:
+            return
+        text = self._status_text()
+
+        if run.message_id:
+            if client.edit_text(chat_id, run.message_id, text):
+                self.stats["edited"] += 1
+                run.last_edit = now
+                run.dirty = False
+            return
+
+        if not config.wants(_STARTED):
+            run.dirty = False
+            return
+        if self._quiet_now(config):
+            run.dirty = False
+            return
+        message_id = client.send_text(chat_id, text)
+        if message_id:
+            run.message_id = message_id
+            run.last_edit = now
+            run.dirty = False
+            self.stats["sent"] += 1
+            if not run.acked:
+                run.acked = client.react(chat_id, message_id)
+
+
+# ---------------------------------------------------------------------------
+# Shared instance
+# ---------------------------------------------------------------------------
+# The Settings dialog is rebuilt every time it opens and it has no reference to
+# the main window's agent, so both sides meet here instead of threading a
+# dependency through the dialog constructor. Same shape as get_settings().
+
+_shared: Optional[TelegramMonitor] = None
+_shared_lock = threading.Lock()
+
+
+def _subscription_verdict() -> bool:
+    """Whether the signed-in account may use Telegram.
+
+    Exactly the check OCR, embeddings and web search use:
+    CortexAPIClient.has_subscription(). Keeping one verdict for the whole app is
+    the point: a plan that lapses freezes everything together, and a renewal
+    unfreezes everything together, so this bot can never run on a rule of its
+    own.
+
+    Answers from the saved account copy (no network, no blocking) and refreshes
+    behind the scenes, so the freeze happens on the same tick as the rest of
+    Cortex.
+
+    Fail closed: an account that cannot be read is not an entitled one.
+    """
+    try:
+        from src.core.cortex_api import get_api_client
+        return bool(get_api_client().has_subscription())
+    except Exception as e:
+        log.error("[Telegram] Could not read the subscription: %s", type(e).__name__)
+        return False
+
+
+def get_monitor() -> TelegramMonitor:
+    global _shared
+    if _shared is None:
+        with _shared_lock:
+            if _shared is None:
+                _shared = TelegramMonitor(is_subscribed=_subscription_verdict)
+    return _shared
+
+
+
