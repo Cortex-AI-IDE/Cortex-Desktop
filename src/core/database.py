@@ -708,6 +708,33 @@ class CortexDatabase:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    def get_conversation_project_paths(self) -> List[str]:
+        """Every distinct project_path that has at least one conversation."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT project_path FROM conversations "
+                           "WHERE project_path IS NOT NULL AND project_path != ''")
+            return [row[0] for row in cursor.fetchall()]
+
+    def move_project_chats(self, old_path: str, new_path: str) -> int:
+        """Re-key one project's chats from `old_path` to `new_path`.
+
+        Covers the conversations (what the panel and History list read) and
+        the agent's sessions/messages rows, which carry the same path as
+        project_id. Exact matches only: a subfolder opened as its own project
+        keeps its own chats. Returns the number of conversations moved.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE conversations SET project_path = ? WHERE project_path = ?",
+                           (new_path, old_path))
+            moved = cursor.rowcount
+            cursor.execute("UPDATE sessions SET project_id = ? WHERE project_id = ?",
+                           (new_path, old_path))
+            cursor.execute("UPDATE messages SET project_id = ? WHERE project_id = ?",
+                           (new_path, old_path))
+            return moved
+
     def get_message_count(self, conversation_id: str) -> int:
         """Get message count for a conversation."""
         with self._get_connection() as conn:

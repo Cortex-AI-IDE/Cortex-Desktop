@@ -13,6 +13,20 @@ from src.core.database import CortexDatabase, get_database
 log = get_logger("chat_history")
 
 
+def _path_parts(path: str) -> List[str]:
+    """Folder names of a path, case-folded where the OS ignores case."""
+    norm = os.path.normcase(os.path.normpath(path))
+    return [p for p in norm.replace("\\", "/").split("/") if p]
+
+
+def _shared_tail(a: List[str], b: List[str]) -> int:
+    """How many trailing folder names two paths have in common."""
+    n = 0
+    while n < min(len(a), len(b)) and a[-1 - n] == b[-1 - n]:
+        n += 1
+    return n
+
+
 @dataclass
 class Conversation:
     """A chat conversation."""
@@ -148,6 +162,12 @@ class ChatHistoryManager:
         Prefers conversations that have timeline data (actual chat history).
         Falls back to most recent conversation, then creates new.
         """
+        try:
+            self.adopt_moved_project_chats(project_path)
+        except Exception as e:
+            # Only costs the old chats staying under their old path.
+            log.warning(f"[ChatPersist] could not check for a moved project: {e}")
+
         if conversation_id:
             # Fast path: check if conversation exists without loading all
             try:
@@ -197,6 +217,43 @@ class ChatHistoryManager:
         log.info(f"[ChatPersist] Created new conversation {conv_id} for project={project_path}")
         return conv_id
     
+    def adopt_moved_project_chats(self, project_path: str) -> int:
+        """Bring over the chats of this project from a path it no longer has.
+
+        Chats are keyed on the exact project path, so the same folder reached
+        through a new path looked like a new project and opened with an empty
+        panel: the HDD remounted from /run/media/<user>/CORTEX-HDD to
+        /mnt/cortex-hdd on 2026-11-04 and every project on it "lost" its
+        history. A saved path counts as this project when it no longer exists
+        and its last two or more folder names match the current path's (the
+        folder name alone is too weak, "app" or "src" repeat everywhere). The
+        closest match wins; a tie is left alone rather than guessed.
+        Returns the number of conversations moved.
+        """
+        if not project_path:
+            return 0
+        project_path = os.path.normpath(project_path)
+        here = _path_parts(project_path)
+        candidates = []
+        for old in self.db.get_conversation_project_paths():
+            parts = _path_parts(old)
+            if parts == here:
+                continue
+            score = _shared_tail(here, parts)
+            if score >= 2 and not os.path.exists(old):
+                candidates.append((score, old))
+        if not candidates:
+            return 0
+        top = max(score for score, _ in candidates)
+        best = [old for score, old in candidates if score == top]
+        if len(best) > 1:
+            log.info(f"[ChatPersist] Several moved folders match {project_path}, leaving their chats alone")
+            return 0
+        best = best[0]
+        moved = self.db.move_project_chats(best, project_path)
+        log.info(f"[ChatPersist] Project moved from {best}: brought over {moved} conversation(s)")
+        return moved
+
     def save_timeline(self, conversation_id: str, timeline_data: list):
         """Save the dynamic timeline array for a conversation."""
         try:
