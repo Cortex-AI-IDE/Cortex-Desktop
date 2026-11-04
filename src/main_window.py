@@ -6400,7 +6400,7 @@ class CortexMainWindow(QMainWindow):
                 discard()
             log.info("[Resume] User dismissed the interrupted run")
 
-    def _chat_heal_check(self, project_path: str) -> None:
+    def _chat_heal_check(self, project_path: str, epoch: int = 0) -> None:
         """One-shot startup guard: welcome on screen + history in DB = reload.
 
         Runs 12 s after chat persistence is wired. If the panel still shows
@@ -6409,6 +6409,8 @@ class CortexMainWindow(QMainWindow):
         timeline, load it once. Never fights the user: a running restore, an
         active turn, or a genuinely empty project all return early.
         """
+        if epoch != getattr(self, "_chat_heal_epoch", 0):
+            return
         try:
             chat = getattr(self, "_ai_chat", None)
             if chat is None or not getattr(chat, "panel_shows_welcome", False):
@@ -6514,7 +6516,9 @@ class CortexMainWindow(QMainWindow):
             # causes it, one delayed re-check that compares the panel with
             # the DB and reloads once turns "history is gone" back into the
             # chat, and logs [ChatHeal] so the next report is not guesswork.
-            QTimer.singleShot(12000, lambda: self._chat_heal_check(project_path))
+            self._chat_heal_epoch = getattr(self, "_chat_heal_epoch", 0) + 1
+            _heal_epoch = self._chat_heal_epoch
+            QTimer.singleShot(12000, lambda: self._chat_heal_check(project_path, _heal_epoch))
 
             # ── CRASH RECOVERY: Check if previous session crashed mid-turn ──
             try:

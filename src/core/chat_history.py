@@ -220,15 +220,10 @@ class ChatHistoryManager:
     def adopt_moved_project_chats(self, project_path: str) -> int:
         """Bring over the chats of this project from a path it no longer has.
 
-        Chats are keyed on the exact project path, so the same folder reached
-        through a new path looked like a new project and opened with an empty
-        panel: the HDD remounted from /run/media/<user>/CORTEX-HDD to
-        /mnt/cortex-hdd on 2026-11-04 and every project on it "lost" its
-        history. A saved path counts as this project when it no longer exists
-        and its last two or more folder names match the current path's (the
-        folder name alone is too weak, "app" or "src" repeat everywhere). The
-        closest match wins; a tie is left alone rather than guessed.
-        Returns the number of conversations moved.
+        A saved path counts as this project when it no longer exists and its
+        last two or more folder names match the current path's. The closest
+        match wins; a tie is left alone. Returns the number of conversations
+        moved.
         """
         if not project_path:
             return 0
