@@ -403,9 +403,16 @@ class TerminalSession:
         self._cap_tail = ""
         self._cap_done = False
         self._cap_code: Optional[int] = None
+        # Characters captured so far for this command. Never trimmed (unlike
+        # _cap_len on floods), so it can mark a point in the output.
+        self._cap_seen = 0
         # handover state
         self._awaiting: Optional[Tuple[str, str]] = None   # (kind, prompt line)
         self._awaiting_since = 0.0
+        self._awaiting_mark = 0      # _cap_seen when the open prompt was raised
+        # _cap_seen when the last prompt was answered: text before it has been
+        # dealt with and must not raise a prompt again.
+        self._prompt_floor = 0
         self._answered_at: Optional[float] = None
         self._gcm_checked = 0.0      # last look for a Git Credential Manager window
         # background command left running (output keeps being captured)
@@ -687,6 +694,7 @@ class TerminalSession:
         if self._cap_started:
             self._cap_buf.append(t)
             self._cap_len += len(t)
+            self._cap_seen += len(t)
             self._cap_tail = (self._cap_tail + t)[-_TAIL_MAX:]
             if self._cap_len > 4 * _OUTPUT_MAX:  # bound memory on floods
                 joined = "".join(self._cap_buf)[-2 * _OUTPUT_MAX:]
@@ -821,6 +829,7 @@ class TerminalSession:
         """Caller holds the lock."""
         self._awaiting = (kind, prompt)
         self._awaiting_since = time.monotonic()
+        self._awaiting_mark = self._cap_seen
         self._answered_at = None
         log.info("[AI-TERM] session %d: command is waiting for user input (%s)", self.id, kind)
         if kind in _PAUSING and on_wait:
@@ -832,9 +841,33 @@ class TerminalSession:
         kind = self._awaiting[0] if self._awaiting else ""
         self._awaiting = None
         self._answered_at = None
+        if how == "answered":
+            # The answered prompt line stays the last line until the program
+            # prints something (ssh checks the password for a second or two).
+            # Without this floor that same line was raised again as a NEW
+            # prompt: a second "Password needed" card after a successful
+            # login, which nothing could clear (see _check_prompt).
+            self._prompt_floor = self._cap_seen
         if kind in _PAUSING and on_wait:
             _safe(on_wait, False)
         _safe(self.on_input_done, how)
+
+    def _text_since(self, mark: int) -> str:
+        """Raw captured text after `mark` (a _cap_seen value), from the
+        bounded tail. Caller holds the lock."""
+        new = self._cap_seen - mark
+        if new <= 0:
+            return ""
+        return self._cap_tail[-new:] if new < len(self._cap_tail) else self._cap_tail
+
+    def _shell_prompt_since_mark(self) -> bool:
+        """Did a shell prompt arrive after the open prompt was raised?
+        Caller holds the lock."""
+        if self._last_output <= self._awaiting_since:
+            return False
+        seg = clean_output(self._text_since(self._awaiting_mark))
+        last = seg.rsplit("\n", 1)[-1].strip() if seg else ""
+        return bool(last) and bool(_SHELL_PROMPT_RE.search(last))
 
     def _check_prompt(self, now: float, checked: dict, on_wait) -> bool:
         """Look at a quiet command's last line. Caller holds the lock.
@@ -856,6 +889,14 @@ class TerminalSession:
             elif self._answered_at is not None and self._last_output > self._answered_at:
                 self._clear_awaiting("answered", on_wait)
                 answered = True
+            elif self._shell_prompt_since_mark():
+                # A shell prompt came after it ("root@host:~# "): whatever was
+                # asked is over, typed or not. Without this a prompt raised by
+                # mistake stayed open for good, and an open password prompt
+                # pauses both clocks and the SSH "connected" check, so the run
+                # sat at "AI working" until Stop.
+                self._clear_awaiting("answered", on_wait)
+                answered = True
             return answered
         if not self._cap_started:
             return False
@@ -870,7 +911,9 @@ class TerminalSession:
         need = _INPUT_QUIET if checked.get(stamp) == "specific" else _PROMPT_QUIET
         if quiet < need or checked.get(stamp) == "all":
             return False
-        tail = clean_output(self._cap_tail)
+        # Only text after the last answered prompt counts: the answered line
+        # itself is still the last line while the program works on the answer.
+        tail = clean_output(self._text_since(self._prompt_floor))
         last = tail.rsplit("\n", 1)[-1][-300:] if tail else ""
         kind = classify_prompt(last, quiet)
         checked.clear()
@@ -1000,6 +1043,7 @@ class TerminalSession:
                 self._cap_active, self._cap_done = True, False
                 self._cap_started = bool(remote)   # no C marker over SSH
                 self._cap_pre, self._cap_buf, self._cap_len, self._cap_tail = [], [], 0, ""
+                self._cap_seen = self._prompt_floor = self._awaiting_mark = 0
                 self._cap_code = None
                 self._remote_re = (re.compile(r"__CX_D" + nonce + r"_(-?\d+)__")
                                    if nonce else None)
