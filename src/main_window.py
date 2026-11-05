@@ -3260,6 +3260,21 @@ class CortexMainWindow(QMainWindow):
         except Exception as _at_err:
             log.warning(f"[AI-TERM] shared terminal wiring failed: {_at_err}")
 
+        # The AI's browser (chrome-devtools): a sign-in, a 2-step code or a
+        # security check is handed to the user with a chat card; the agent
+        # waits for Continue (src/services/ai_browser.py).
+        try:
+            from src.services.ai_browser import BrowserHandoverRelay, get_handover
+            _handover = get_handover()
+            self._browser_relay = BrowserHandoverRelay(self)
+            self._browser_relay.needed.connect(self._on_browser_handover_needed)
+            self._browser_relay.done.connect(self._ai_chat.browser_handover_done)
+            self._ai_chat.browser_handover_answer.connect(_handover.answer)
+            _handover.on_needed = self._browser_relay.needed.emit
+            _handover.on_done = self._browser_relay.done.emit
+        except Exception as _bh_err:
+            log.warning(f"[AI-BROWSER] handover wiring failed: {_bh_err}")
+
         # ========== PERMISSION SYSTEM CONNECTION (NEW) ==========
         # Connect AI agent to UI for permission dialogs
         self._ai_agent.set_ui_parent(self)
@@ -7790,6 +7805,23 @@ class CortexMainWindow(QMainWindow):
             self._ai_chat.show_terminal_input_needed(kind, prompt)
         except Exception as e:
             log.warning(f"[AI-TERM] input card failed: {e}")
+
+    def _on_browser_handover_needed(self, kind: str, url: str, token: str):
+        """The AI's browser needs the user: sign in, a code, a check, or setup."""
+        try:
+            from src.services.ai_browser import KIND_TEXT
+            notify_input_needed(KIND_TEXT.get(kind, KIND_TEXT["signin"])[0].split("  ", 1)[-1])
+        except Exception as e:
+            log.info(f"[AI-BROWSER] notification not shown, the chat card still is: {e}")
+        try:
+            self._ai_chat.show_browser_handover(kind, url, token)
+        except Exception as e:
+            log.warning(f"[AI-BROWSER] handover card failed: {e}")
+            try:
+                from src.services.ai_browser import get_handover
+                get_handover().answer(token, "skipped")   # never leave the agent waiting
+            except Exception as e2:
+                log.warning(f"[AI-BROWSER] could not release the agent: {e2}")
 
     def _on_ai_terminal_input_done(self, session, how: str):
         try:

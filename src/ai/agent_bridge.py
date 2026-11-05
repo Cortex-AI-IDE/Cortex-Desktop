@@ -2001,7 +2001,8 @@ class BridgeBashTool:
                                f"SSH and is busy (something is running there, or the user is "
                                f"typing). Nothing was run, and commands never fall back to this "
                                f"machine while it is connected. Wait, or ask the user; `exit` in "
-                               f"that terminal ends the SSH session."))
+                               f"that terminal ends the SSH session."
+                               + (f"\n\n{_sess_res.note}" if _sess_res.note else "")))
                 if _sess_res.running:
                     _bg_out = _sess_res.output or "(no output yet)"
                     log.info("[BASH] left running in the background (shell %s): %s",
@@ -2294,6 +2295,28 @@ def _shared_terminal_on() -> bool:
         return False
 
 
+def _browser_notice() -> str:
+    """System-prompt note while the browser tools work in the user's own
+    Chrome (Settings > MCP Servers > Browser for AI = my Chrome)."""
+    try:
+        from src.services import ai_browser
+        if ai_browser.mode() != ai_browser.MODE_OWN:
+            return ""
+    except Exception:
+        return ""
+    return (
+        "## BROWSER: THE USER'S OWN CHROME\n"
+        "The chrome-devtools browser tools work in the user's real Chrome, with their "
+        "profile and the sites they are signed in to. Use them for every web page; do not "
+        "use Playwright's browser tools (they open a separate browser without the user's "
+        "sign-ins, and Cortex refuses them in this mode). Open a new tab (new_page) for your "
+        "work and leave their other tabs alone. Never close, sign out of, or change settings "
+        "on their accounts unless they asked. If a page needs a sign-in, a verification code "
+        "or a security check, Cortex hands it to the user automatically and tells you when "
+        "they are done: never type passwords or codes and never try to get past a check "
+        "yourself.")
+
+
 def _terminal_notice() -> str:
     """System-prompt note, every turn, while a Cortex AI terminal is on a
     server. Field case (2026-09-13): the user opened SSH themselves and the
@@ -2312,7 +2335,9 @@ def _terminal_notice() -> str:
         f"user gave you access to their session). Your Bash commands run ON THAT "
         f"SERVER, in its shell (bash syntax), not on this PC, until the SSH session "
         f"ends. Do not tell the user you cannot access the server: run the commands "
-        f"yourself with Bash."
+        f"yourself with Bash. Never put PowerShell (Get-FileHash, $env:, ...) or a "
+        f"local Windows path in a Bash command now. To compare with this PC, read local "
+        f"files with Read/Grep/Glob; Bash cannot run anything on this PC while connected."
     )
 
 
@@ -10907,8 +10932,17 @@ Required behavior:
         _announce_mcp = getattr(self, "_announce_mcp_in_use", None)
         if _announce_mcp is not None:
             _announce_mcp(tool_name)
+        _browser = self._browser_server_kind(_mgr, tool_name)
+        if _browser == "playwright" and self._devtools_preferred(_mgr):
+            from src.services.ai_browser import USE_DEVTOOLS
+            log.info(f"[AI-BROWSER] {tool_name} refused: browsing goes to the user's Chrome")
+            return ToolResult(tool_id=tool_id, result=None, success=False, error=USE_DEVTOOLS)
         _ok, _text, _images = await asyncio.get_event_loop().run_in_executor(
             None, lambda: _mgr.call_tool_full(tool_name, args or {}))
+        if _browser:
+            _ok, _text, _images = await self._browser_handover(
+                _mgr, tool_name, args or {}, _ok, _text, _images,
+                devtools=_browser == "devtools")
 
         # Images (screenshots) go to the model itself. They used to be
         # replaced by a sentence saying an image existed, so the agent
@@ -10919,6 +10953,79 @@ Required behavior:
         if _ok:
             return ToolResult(tool_id=tool_id, result=_text, success=True)
         return ToolResult(tool_id=tool_id, result=None, success=False, error=_text)
+
+    @staticmethod
+    def _browser_server_kind(mgr, tool_name: str) -> str:
+        """'devtools', 'playwright' or '' for an MCP tool, by the server's
+        command, not its name: the user may have called the server anything."""
+        try:
+            from src.services.ai_browser import is_chrome_devtools, is_playwright
+            state = mgr._states.get(tool_name.split("__", 2)[1])
+            if state is None:
+                return ""
+            cmd, cargs = state.config.command, state.config.args
+            if is_chrome_devtools(cmd, cargs):
+                return "devtools"
+            return "playwright" if is_playwright(cmd, cargs) else ""
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _devtools_preferred(mgr) -> bool:
+        """Own-Chrome mode and a chrome-devtools server to send browsing to."""
+        try:
+            from src.services import ai_browser
+            if ai_browser.mode() != ai_browser.MODE_OWN:
+                return False
+            return any(s.status == "connected"
+                       and ai_browser.is_chrome_devtools(s.config.command, s.config.args)
+                       for s in list(mgr._states.values()))
+        except Exception:
+            return False
+
+    async def _browser_handover(self, mgr, tool_name: str, args: Dict[str, Any],
+                                ok: bool, text: str, images, devtools: bool = True):
+        """Hand the browser to the user when only they can go on.
+
+        * Own-Chrome mode and Chrome can't be reached: the setup card (turn on
+          remote debugging), then the same call once more.
+        * The page is a sign-in, a 2-step code or a security check: a card
+          asks the user to finish it in Chrome; the agent waits, untimed, and
+          is then told what happened. See src/services/ai_browser.py."""
+        from src.services import ai_browser
+        handover = ai_browser.get_handover()
+
+        def _ask(kind: str, url: str) -> str:
+            return handover.ask(kind, url, lambda: self.stop_requested)
+
+        if devtools and not ok and ai_browser.mode() == ai_browser.MODE_OWN \
+                and ai_browser.is_connection_error(text):
+            with self.human_wait():
+                how = await asyncio.to_thread(_ask, "setup", "")
+            if how != "continued":
+                return False, (
+                    f"{text}\n\nCortex is set to use the user's own Chrome and could not "
+                    f"reach it. Ask the user to open {ai_browser.REMOTE_DEBUGGING_URL} in "
+                    f"Chrome and turn on remote debugging (or switch Settings > MCP Servers "
+                    f"> Browser for AI back to a separate browser). Do not retry until they "
+                    f"say it is done."), images
+            ok, text, images = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: mgr.call_tool_full(tool_name, args))
+            if not ok:
+                return ok, text, images
+        if not ok:
+            return ok, text, images
+        kind = ai_browser.classify_page(text)
+        if not kind:
+            return ok, text, images
+        url = ai_browser.page_url(text)
+        if not handover.should_ask(kind, url):
+            return ok, (text + f"\n\n[Cortex: this page needs the user ({kind}). They were "
+                        f"already asked about this site. Do not type passwords or codes "
+                        f"or try to pass the check; ask the user in chat.]"), images
+        with self.human_wait():
+            how = await asyncio.to_thread(_ask, kind, url)
+        return ok, f"{text}\n\n[Cortex: {ai_browser.AFTER.get(how, '')}]", images
 
     async def _dispatch_read(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Dispatch to real FileReadTool or bridge-native fallback."""
@@ -15876,6 +15983,9 @@ Required behavior:
         term = _terminal_notice()
         if term:
             notice = f"{notice}\n\n{term}" if notice else term
+        browser = _browser_notice()
+        if browser:
+            notice = f"{notice}\n\n{browser}" if notice else browser
         return f"{system_prompt}\n\n{notice}" if notice else system_prompt
 
     def set_ui_parent(self, parent: Any) -> None:

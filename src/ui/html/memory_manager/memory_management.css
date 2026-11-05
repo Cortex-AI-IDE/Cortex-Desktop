@@ -1309,6 +1309,20 @@ kbd {
     margin-top: 16px
 }
 
+/* Browser for AI: connection status under the one-time setup */
+.setting-info p.ai-browser-status {
+    margin-top: 6px;
+    font-weight: 600
+}
+
+.ai-browser-status[data-state="ok"] {
+    color: var(--success)
+}
+
+.ai-browser-status[data-state="bad"] {
+    color: var(--danger)
+}
+
 /* About */
 .about-card {
     text-align: center;

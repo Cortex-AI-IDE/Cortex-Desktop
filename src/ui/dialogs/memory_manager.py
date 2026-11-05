@@ -1475,6 +1475,41 @@ scope: project
 
     # ── MCP Servers (Settings → MCP Servers) ────────────────────────────
 
+    @pyqtSlot(str, result=bool)
+    def copyText(self, text: str) -> bool:
+        """Put text on the clipboard. This page has JavascriptCanAccessClipboard
+        off (see the view setup), so navigator.clipboard fails silently here:
+        "Copy link" under Browser for AI copied nothing (2026-11-05)."""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            QApplication.clipboard().setText(text or "")
+            return True
+        except Exception as e:
+            log.warning(f"[MemoryManager] copyText failed: {e}")
+            return False
+
+    @pyqtSlot(result=str)
+    def getAiBrowser(self) -> str:
+        """Browser for AI: mode, and whether the user's Chrome is reachable."""
+        try:
+            from src.services.ai_browser import chrome_status
+            return json.dumps(chrome_status())
+        except Exception as e:
+            log.warning(f"[MemoryManager] getAiBrowser error: {e}")
+            return json.dumps({"mode": "separate", "error": str(e)})
+
+    @pyqtSlot(str, result=str)
+    def setAiBrowserMode(self, mode: str) -> str:
+        """Switch between the user's own Chrome and a separate one; restarts
+        the chrome-devtools server so the next browser action uses it."""
+        try:
+            from src.services.ai_browser import chrome_status, set_mode
+            set_mode(mode)
+            return json.dumps(chrome_status())
+        except Exception as e:
+            log.warning(f"[MemoryManager] setAiBrowserMode error: {e}")
+            return json.dumps({"mode": "separate", "error": str(e)})
+
     @pyqtSlot(result=str)
     def getMcpStatus(self) -> str:
         """JSON list of configured MCP servers with live status/tools.

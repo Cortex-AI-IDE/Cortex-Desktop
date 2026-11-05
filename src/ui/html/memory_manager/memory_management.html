@@ -904,6 +904,34 @@
           </div>
         </div>
 
+        <!-- Browser for AI (chrome-devtools) -->
+        <div class="settings-card" id="aiBrowserCard">
+          <h3 class="card-title">Browser for AI</h3>
+          <div class="setting-row">
+            <div class="setting-info"><label for="aiBrowserMode">Which Chrome the AI's browser tools use</label>
+              <p>With <strong>My Chrome</strong>, the AI works in the Chrome you already use, with your
+                profile and sign-ins, and no "controlled by automated software" bar. When a page needs a
+                sign-in, a code or a security check, Cortex asks you to do it in Chrome, then the AI
+                carries on. It never types your passwords.</p>
+            </div>
+            <select class="setting-select" id="aiBrowserMode">
+              <option value="separate">Separate test browser</option>
+              <option value="own">My Chrome (signed in)</option>
+            </select>
+          </div>
+          <div class="setting-row" id="aiBrowserSetup" hidden>
+            <div class="setting-info"><label>One-time setup in Chrome</label>
+              <p>Open <code>chrome://inspect/#remote-debugging</code> in Chrome, turn on remote debugging,
+                and allow the prompt Chrome shows when the AI first connects. Needs Chrome 144 or later.</p>
+              <p id="aiBrowserStatus" class="ai-browser-status" role="status"></p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="setting-btn" id="aiBrowserCopy">Copy link</button>
+              <button class="setting-btn" id="aiBrowserCheck">Check</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Add server -->
         <div class="settings-card">
           <h3 class="card-title">Add server</h3>

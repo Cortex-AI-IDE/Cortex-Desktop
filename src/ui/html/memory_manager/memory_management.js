@@ -2855,6 +2855,50 @@ Use f-strings instead of .format().</code></pre>
       }
     });
 
+    /* ── Browser for AI: the user's own Chrome or a separate one ──
+       Python: getAiBrowser / setAiBrowserMode (src/services/ai_browser.py). */
+    function _renderAiBrowser(raw) {
+      let s = {};
+      try { s = typeof raw === 'string' ? JSON.parse(raw) : (raw || {}); } catch (e) { return; }
+      const sel = $('aiBrowserMode');
+      if (sel && s.mode) sel.value = s.mode;
+      const own = s.mode === 'own';
+      const setup = $('aiBrowserSetup');
+      if (setup) setup.hidden = !own;
+      const st = $('aiBrowserStatus');
+      if (!st || !own) return;
+      if (s.error) { st.textContent = 'Could not check: ' + s.error; st.dataset.state = 'bad'; }
+      else if (s.ready) { st.textContent = '✓ Connected: Chrome is running with remote debugging on.'; st.dataset.state = 'ok'; }
+      else if (!s.chrome_running) { st.textContent = 'Chrome is not running. Open Chrome, then press Check.'; st.dataset.state = 'bad'; }
+      else { st.textContent = 'Remote debugging is off. Turn it on at chrome://inspect/#remote-debugging, then press Check.'; st.dataset.state = 'bad'; }
+    }
+    function _loadAiBrowser() {
+      if (bridge && typeof bridge.getAiBrowser === 'function') bridge.getAiBrowser(_renderAiBrowser);
+    }
+    $('aiBrowserMode')?.addEventListener('change', (e) => {
+      const mode = e.target.value;
+      if (bridge && typeof bridge.setAiBrowserMode === 'function') {
+        bridge.setAiBrowserMode(mode, (raw) => {
+          _renderAiBrowser(raw);
+          showToast(mode === 'own' ? 'The AI will use your Chrome' : 'The AI will use a separate browser');
+          setTimeout(_loadMcpStatus, 1500);
+        });
+      }
+    });
+    $('aiBrowserCheck')?.addEventListener('click', () => { _loadAiBrowser(); showToast('Checking Chrome...'); });
+    /* Copy through Python: this view has JS clipboard access turned off, so
+       navigator.clipboard fails silently here. */
+    $('aiBrowserCopy')?.addEventListener('click', () => {
+      const link = 'chrome://inspect/#remote-debugging';
+      if (bridge && typeof bridge.copyText === 'function') {
+        bridge.copyText(link, (ok) => showToast(ok ? 'Copied, paste it in Chrome\'s address bar'
+                                                   : 'Could not copy: ' + link));
+      } else {
+        showToast(link);
+      }
+    });
+    whenBridgeReady(_loadAiBrowser);
+
     whenBridgeReady(_loadMcpStatus);
     /* Servers connect asynchronously, refresh status a few times after open */
     whenBridgeReady(() => { setTimeout(_loadMcpStatus, 2500); setTimeout(_loadMcpStatus, 6000); });

@@ -222,6 +222,13 @@ _TERMINAL_REPORT_RE = re.compile(
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\")
 
 _REMOTE_FMT = "__CX_%s_%s__"       # printf format typed after a remote command
+# Set for each AI command on a server only (see _remote_line): git, man,
+# systemctl and journalctl print straight through instead of opening a pager.
+_REMOTE_ENV = "PAGER=cat GIT_PAGER=cat SYSTEMD_PAGER=cat "
+# The last screen line while a pager waits for a key: less (":", "(END)",
+# "lines 1-20/80", "... (press h for help or q to quit)") and more ("--More--").
+_PAGER_RE = re.compile(
+    r"^\s*(?::|\(END\)|--More--.*|lines \d+-\d+.*|.*\(END\)|.*press h for help.*)\s*$", re.I)
 _SSH_OPTS_WITH_ARG = set("BbcDEeFIiJLlmOopQRSWw")
 
 _PROMPT_QUIET = 0.5        # s of silence before a prompt-shaped line counts
@@ -278,6 +285,33 @@ def clean_output(raw: str) -> str:
             line = next((p for p in reversed(line.split("\r")) if p), "")
         lines.append(_CTRL_RE.sub("", line).rstrip())
     return "\n".join(lines).strip("\n")
+
+
+def _busy_note(last_line: str, typing: bool) -> str:
+    """Why a server terminal can't take a command, from what is on screen,
+    so the agent says something true instead of guessing."""
+    shown = last_line.strip()[-120:]
+    if typing:
+        why = "The user is typing a line in that terminal."
+    elif _PAGER_RE.match(last_line):
+        why = ("A pager (less / more) is open there, waiting for a key. Ask the user to "
+               "press q in that terminal.")
+    elif classify_prompt(shown, 1.0):
+        why = "A program there is waiting for the user's answer."
+    else:
+        why = "A program is still running there."
+    return f"Last line on that terminal: {shown!r}. {why}" if shown else why
+
+
+def _bash_syntax_note(output: str, code: Optional[int], host: str) -> str:
+    """A command typed into a server shell failed to parse. Field case,
+    2026-11-05: the agent mixed PowerShell into a command for the server."""
+    if code != 2 or "syntax error" not in output:
+        return ""
+    return (f"bash on {host} could not parse that command, so none of it ran. Bash runs "
+            f"ON THE SERVER while connected: use bash/POSIX syntax there (md5sum, sha256sum, "
+            f"grep ...), never PowerShell. Bash cannot run anything on this PC while "
+            f"connected; local files can still be read with Read/Grep/Glob.")
 
 
 def _git_auth_note(output: str) -> str:
@@ -391,13 +425,26 @@ def _remote_line(command: str, nonce: str, sudo_reprompt: bool = True) -> str:
 
     sudo remembers a password for ~15 minutes. With `sudo_reprompt`, a
     command that uses sudo first drops that memory (`sudo -k`), so sudo asks
-    the user again: the AI can never ride on a password typed earlier."""
+    the user again: the AI can never ride on a password typed earlier.
+
+    The command always runs through `eval`. Field case, 2026-11-05 13:33, in
+    a tab the user lent: the agent sent `git rev-parse HEAD; ...;
+    (Get-FileHash x).Hash`. bash parses a whole line before running any of
+    it, so that one PowerShell fragment threw the line away, token included,
+    and the run sat silent until its timeout. Inside eval a syntax error is
+    just exit code 2 and the token still prints.
+
+    Pagers are switched off for the command (not for the user's shell): a
+    pager waits for a key on a terminal, Ctrl+C does not close less, and the
+    tab then never shows a prompt again, so every later command was "busy"."""
     cmd = command.strip().rstrip(";").rstrip()
     tail = f"; printf '\\n{_REMOTE_FMT}\\n' D{nonce} \"$?\""
-    if (not cmd or "\n" in cmd or "\r" in cmd or "\t" in cmd or "#" in cmd
-            or cmd.endswith(("&", "|", "\\")) or len(cmd) > 1500):
+    if (not cmd or "\n" in cmd or "\r" in cmd or "\t" in cmd or len(cmd) > 1500):
         b64 = base64.b64encode(command.encode("utf-8")).decode("ascii")
         cmd = f"eval \"$(printf %s '{b64}' | base64 -d)\""
+    else:
+        cmd = "eval '" + cmd.replace("'", "'\\''") + "'"
+    cmd = _REMOTE_ENV + cmd
     if sudo_reprompt and _SUDO_RE.search(command):
         cmd = "sudo -k 2>/dev/null; " + cmd
     return cmd + tail
@@ -448,6 +495,7 @@ class TerminalSession:
         self._user_dirty = False     # user has typed part of a line at the prompt
         self._last_activity = time.monotonic()   # output or user typing
         self._last_output = time.monotonic()     # output only
+        self._last_key = 0.0                     # the user's last keystroke
         # capture state for the AI command in flight
         self._cap_active = False
         self._cap_started = False    # saw C (or remote mode)
@@ -522,7 +570,7 @@ class TerminalSession:
         if not data:
             return
         now = time.monotonic()
-        self._last_activity = now
+        self._last_activity = self._last_key = now
         if "\r" in data or "\n" in data:
             self._user_dirty = False
             if self._awaiting is not None:
@@ -630,6 +678,10 @@ class TerminalSession:
     @property
     def background_running(self) -> bool:
         return self._bg is not None and not self._cap_done and self._alive
+
+    def _screen_line(self) -> str:
+        """The last line on the terminal now. Caller holds the lock."""
+        return clean_output(self._replay[-2000:]).rsplit("\n", 1)[-1]
 
     @property
     def usable(self) -> bool:
@@ -1064,24 +1116,36 @@ class TerminalSession:
             # The tab is shared: never type over a command the user started
             # there, or a line they are halfway through typing.
             with self._cond:
+                ok = at_prompt = False
+                last = ""
                 if remote:
-                    ok = self._cond.wait_for(lambda: not self._user_dirty or not self._alive, 5)
+                    # The previous command's token is seen a few ms before
+                    # the remote shell redraws its prompt, so allow the prompt
+                    # a moment to arrive before calling the shell busy.
+                    deadline = time.monotonic() + 5.0
+                    while True:
+                        last = self._screen_line()
+                        # The prompt regex only matches a line that ENDS at
+                        # the prompt, so nothing is typed after it.
+                        at_prompt = bool(_SHELL_PROMPT_RE.search(last))
+                        if (self._user_dirty and at_prompt
+                                and self._last_output > self._last_key):
+                            # A key with no Enter that ended a program (q in
+                            # less, a y/n answer), and a fresh prompt drawn
+                            # after it: nothing is half-typed. Field case,
+                            # 2026-11-05: the user pressed q as asked and the
+                            # tab stayed "user typing" until they hit Enter.
+                            self._user_dirty = False
+                        ok = not self._user_dirty
+                        if (ok and at_prompt) or not self._alive or time.monotonic() > deadline:
+                            break
+                        self._cond.wait(0.05)
                 else:
                     ok = self._cond.wait_for(
                         lambda: (not self._busy and not self._user_dirty) or not self._alive, 5)
                 if not self._alive:
                     return None
                 if remote:
-                    # The previous command's token is seen a few ms before
-                    # the remote shell redraws its prompt, so allow the prompt
-                    # a moment to arrive before calling the shell busy.
-                    deadline = time.monotonic() + 3.0
-                    while True:
-                        last = clean_output(self._replay[-2000:]).rsplit("\n", 1)[-1]
-                        at_prompt = bool(_SHELL_PROMPT_RE.search(last))
-                        if (ok and at_prompt) or not self._alive or time.monotonic() > deadline:
-                            break
-                        self._cond.wait(0.05)
                     if not ok or not at_prompt:
                         # Which wait failed decides the fix; the log used to
                         # show only a run that came back without a result.
@@ -1089,7 +1153,9 @@ class TerminalSession:
                                  "(user typing=%s, at prompt=%s)",
                                  self.id, self._user_dirty, at_prompt)
                         # Never fall back to this machine while connected.
-                        return RunResult(-1, "", False, busy=True, shell_id=self.id, remote=remote)
+                        return RunResult(-1, "", False, busy=True, shell_id=self.id,
+                                         remote=remote,
+                                         note=_busy_note(last, self._user_dirty))
                 elif not ok:
                     log.info("[AI-TERM] session %d is in use", self.id)
                     return None
@@ -1173,7 +1239,17 @@ class TerminalSession:
             if timed_out:
                 self.interrupt()
                 with self._cond:
-                    self._cond.wait_for(lambda: self._cap_done or not self._alive, 5)
+                    self._cond.wait_for(lambda: self._cap_done or not self._alive,
+                                        1.5 if remote else 5)
+                    pager = (remote and not self._cap_done and self._alive
+                             and bool(_PAGER_RE.match(self._screen_line())))
+                if pager:
+                    # Ctrl+C does not close less: the command it belongs to is
+                    # ours, so quit it, or the tab never shows a prompt again.
+                    log.info("[AI-TERM] session %d: a pager was left open, quitting it", self.id)
+                    self.write("q")
+                    with self._cond:
+                        self._cond.wait_for(lambda: self._cap_done or not self._alive, 3.5)
 
             with self._cond:
                 if self._cap_started:
@@ -1230,6 +1306,8 @@ class TerminalSession:
                         f"ran on the server. Tell the user the password was not accepted; "
                         f"offer to run the ssh command again so they can retype it, or to "
                         f"set up key-based login.")
+            elif remote:
+                note = _bash_syntax_note(out, code, remote)
             if not note:
                 note = _git_auth_note(out)
             if code is None:

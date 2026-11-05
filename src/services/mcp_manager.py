@@ -99,6 +99,22 @@ def tool_input_schema(tool: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _field(obj: Any, snake: str, camel: str, default: Any = None) -> Any:
+    """A field of an MCP SDK object under its new or old name.
+
+    mcp 2.x renamed the protocol fields to snake_case (is_error, mime_type,
+    server_info) and the camelCase attributes are gone, not aliased: reading
+    `isError` returned the getattr default, so every MCP tool error reached
+    the agent as a success (found 2026-11-05, chrome-devtools "Could not
+    connect to Chrome" came back ok), screenshots were all labelled
+    image/png, and server titles were empty.
+    """
+    val = getattr(obj, snake, None)
+    if val is None:
+        val = getattr(obj, camel, None)
+    return default if val is None else val
+
+
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -273,6 +289,16 @@ def _launch_args(cfg: "McpServerConfig", project_root: Optional[str]) -> List[st
         shots = _shots_dir(project_root)
         if shots:
             args += ["--output-dir", shots]
+    # Settings > MCP Servers > "Browser for AI": the user's own Chrome
+    # (chrome-devtools-mcp --autoConnect) instead of a separate one.
+    try:
+        from src.services.ai_browser import launch_args as _browser_args
+        extra = _browser_args(cfg.command, args)
+        if extra:
+            log.info(f"[MCP] '{cfg.name}' will use the user's own Chrome ({' '.join(extra)})")
+        args += extra
+    except Exception as e:
+        log.warning(f"[MCP] browser mode not applied to '{cfg.name}': {e}")
     return args
 
 
@@ -1006,7 +1032,7 @@ class MCPManager:
             async with ClientSession(read, write, list_roots_callback=self._list_roots) as session:
                 _init = await asyncio.wait_for(session.initialize(), self.CONNECT_TIMEOUT)
                 state.instructions = str(getattr(_init, "instructions", None) or "")[:4000]
-                _info = getattr(_init, "serverInfo", None)
+                _info = _field(_init, "server_info", "serverInfo")
                 state.title = str(getattr(_info, "title", None) or "")[:80]
                 tools_resp = await asyncio.wait_for(session.list_tools(), self.CONNECT_TIMEOUT)
                 state.tools = list(tools_resp.tools)
@@ -1287,10 +1313,10 @@ class MCPManager:
             if t:
                 texts.append(t)
             elif getattr(item, "type", "") == "image" and getattr(item, "data", None):
-                images.append((getattr(item, "mimeType", None) or "image/png",
+                images.append((_field(item, "mime_type", "mimeType") or "image/png",
                                item.data))
         text = "\n".join(texts) if texts else ("" if images else "(empty result)")
-        if getattr(result, "isError", False):
+        if _field(result, "is_error", "isError", False):
             return False, text or "(the MCP server reported an error with no message)", images
         return True, text, images
 

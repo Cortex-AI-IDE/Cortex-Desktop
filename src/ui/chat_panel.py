@@ -10116,6 +10116,7 @@ class ChatPanel(QWidget):
     open_ai_terminal_requested = pyqtSignal()  # "Open terminal" on a terminal-input card
     run_in_terminal_requested = pyqtSignal(str, str)  # ▶ Run on a code block: code, lang
     ssh_access_answer = pyqtSignal(str, str)  # token, allow | deny | revoke
+    browser_handover_answer = pyqtSignal(str, str)  # token, continued | skipped
     crash_recovery_finished = pyqtSignal()  # recovered crash messages are all on screen
     interrupted_run_answer = pyqtSignal(str, str)  # "resume" | "dismiss", continuation prompt
 
@@ -14003,6 +14004,99 @@ class ChatPanel(QWidget):
             btn.hide()
         except RuntimeError:
             _swallow("settle the terminal input card")
+
+    def show_browser_handover(self, kind: str, url: str, token: str):
+        """Card: the AI's browser needs the user (sign in, a code, a security
+        check, or connecting Cortex to their Chrome). The agent waits until
+        Continue or Not now (src/services/ai_browser.py)."""
+        from src.services.ai_browser import KIND_TEXT, REMOTE_DEBUGGING_URL
+        title_text, note_text = KIND_TEXT.get(kind, KIND_TEXT["signin"])
+        card = QFrame()
+        card.setObjectName("browserHandoverCard")
+        card.setStyleSheet(f"""
+            QFrame#browserHandoverCard {{
+                background: {T.get('bg_card', '#1e1e1e')};
+                border: 1px solid {T.get('accent', '#7c6ce7')};
+                border-radius: 6px;
+                margin: 4px 0px;
+            }}
+        """)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(14, 10, 14, 10)
+        v.setSpacing(6)
+        title = QLabel(title_text)
+        title.setStyleSheet(f"color: {T['text']}; font-size: 13px; font-weight: 600; border: none;")
+        v.addWidget(title)
+        if url:
+            u = QLabel()
+            u.setTextFormat(Qt.TextFormat.PlainText)
+            u.setText(url[:160])
+            u.setWordWrap(True)
+            u.setStyleSheet(f"color: {T['text']}; font-family: {T['font_mono']}; "
+                            f"font-size: 12px; border: none;")
+            v.addWidget(u)
+        note = QLabel(note_text)
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {T['muted']}; font-size: 12px; border: none;")
+        v.addWidget(note)
+
+        def _btn(text: str, primary: bool) -> QPushButton:
+            b = QPushButton(text)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            if primary:
+                b.setStyleSheet(
+                    f"QPushButton {{ background: {T['accent_fill']}; color: {T['accent_ink']};"
+                    f" border: none; border-radius: 4px; padding: 5px 12px; font-size: 12px; }}")
+            else:
+                b.setStyleSheet(
+                    f"QPushButton {{ background: transparent; color: {T['text']};"
+                    f" border: 1px solid {T.get('border', '#444')}; border-radius: 4px;"
+                    f" padding: 4px 12px; font-size: 12px; }}")
+            return b
+
+        go = _btn("Continue", True)
+        later = _btn("Not now", False)
+        go.clicked.connect(lambda: self.browser_handover_answer.emit(token, "continued"))
+        later.clicked.connect(lambda: self.browser_handover_answer.emit(token, "skipped"))
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(go)
+        if kind == "setup":
+            # chrome:// pages can't be opened from outside Chrome: copy it.
+            copy = _btn("Copy setup link", False)
+
+            def _copy():
+                QApplication.clipboard().setText(REMOTE_DEBUGGING_URL)
+                copy.setText("Copied, paste it in Chrome's address bar")
+            copy.clicked.connect(_copy)
+            row.addWidget(copy)
+        row.addWidget(later)
+        row.addStretch()
+        v.addLayout(row)
+        if not hasattr(self, "_browser_cards"):
+            self._browser_cards = {}
+        self._browser_cards[token] = (card, title, note, go, later)
+        if self._cur_msg is not None and hasattr(self._cur_msg, "_card_v"):
+            self._cur_msg._card_v.addWidget(card)
+        else:
+            self._insert(card)
+        self._autoscroll()
+
+    def browser_handover_done(self, token: str, how: str):
+        """Settle the browser card after Continue, Not now or Stop."""
+        entry = getattr(self, "_browser_cards", {}).pop(token, None)
+        if not entry:
+            return
+        card, title, note, go, later = entry
+        try:
+            title.setText({"continued": "✓  Done in Chrome, the AI carried on",
+                           "skipped": "Skipped, the AI was told"}.get(how, "Stopped"))
+            note.hide()
+            for b in card.findChildren(QPushButton):
+                b.hide()
+        except RuntimeError:
+            _swallow("settle the browser handover card")
 
     def on_chat_error(self, error: str):
         """Display a clean error message in the chat when the AI request fails."""
