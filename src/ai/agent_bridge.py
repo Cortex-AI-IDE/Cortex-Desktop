@@ -2620,7 +2620,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "SementicSearch",
-            "description": "[SUBSCRIBER-ONLY] Search codebase semantically using natural language. Finds code by MEANING, not exact text, ideal for large codebases and conceptual queries like 'authentication flow', 'error handling pattern', 'database migration logic'. Use this when Grep returns too many or too few results, or when you need to understand code behavior rather than find exact strings. REQUIRES Cortex subscription, falls back to Grep/Glob for non-subscribers.",
+            "description": "Search codebase semantically using natural language. Finds code by MEANING, not exact text, ideal for large codebases and conceptual queries like 'authentication flow', 'error handling pattern', 'database migration logic'. Use this when Grep returns too many or too few results, or when you need to understand code behavior rather than find exact strings. Works for every user: with a Cortex subscription it uses cloud embeddings, without one a local index. Never tell the user to subscribe because of this tool.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -13394,11 +13394,12 @@ Required behavior:
         # Both modes work, cloud gives better semantic quality,
         # local uses TF-IDF term-frequency vectors (no API needed).
         if not _has_semantic_access:
+            # Log only. This used to print "Using local semantic search...
+            # subscribe for cloud embeddings" into the chat on EVERY search,
+            # so a user without an account or plan saw a subscribe nag each
+            # time the AI indexed or searched, although the local index works
+            # without one (owner report 2026-11-05).
             log.info("[SemanticSearch] No subscription, using local TF-IDF embeddings (lower quality)")
-            self._safe_emit(self.response_chunk,
-                "*ℹ️ Using local semantic search (TF-IDF). "
-                "For better results, [subscribe](https://cortex-ide.app/pricing/) for cloud embeddings.*\n\n"
-            )
         else:
             log.info("[SemanticSearch] ACCESS GRANTED, subscription verified, using cloud embeddings")
 
@@ -14450,15 +14451,33 @@ Required behavior:
         Shows a consistent, styled message when a subscription-only feature
         is used by a non-subscribed user.
         """
-        msg = (
-            f"🔒 **{feature_name}, Subscription Required**\n\n"
-            f"{feature_desc}\n\n"
-            f"**To enable this feature:**\n"
-            f"1. Visit [cortex-ide.app/pricing](https://cortex-ide.app/pricing/)\n"
-            f"2. Choose a plan and activate your subscription\n"
-            f"3. Sign in via Settings → Account\n\n"
-            f"Once subscribed, {feature_name.lower()} will work immediately."
-        )
+        # Someone who chose "Skip for now" at the sign-in screen has no
+        # account here at all: the first step is to sign in, not to buy.
+        try:
+            from src.core.cortex_api import get_api_client
+            _signed_in = get_api_client().is_logged_in()
+        except Exception:
+            _signed_in = True
+        if not _signed_in:
+            msg = (
+                f"🔒 **{feature_name}, Sign In Required**\n\n"
+                f"{feature_desc}\n\n"
+                f"**To enable this feature:**\n"
+                f"1. Open Settings → Profile and click **Sign in with Browser**\n"
+                f"2. If you have no plan yet, choose one at "
+                f"[cortex-ide.app/pricing](https://cortex-ide.app/pricing/)\n\n"
+                f"Everything else in Cortex works without an account."
+            )
+        else:
+            msg = (
+                f"🔒 **{feature_name}, Subscription Required**\n\n"
+                f"{feature_desc}\n\n"
+                f"**To enable this feature:**\n"
+                f"1. Visit [cortex-ide.app/pricing](https://cortex-ide.app/pricing/)\n"
+                f"2. Choose a plan and activate your subscription\n"
+                f"3. Sign in via Settings → Profile\n\n"
+                f"Once subscribed, {feature_name.lower()} will work immediately."
+            )
         self._safe_emit(self.response_chunk, msg)
         log.info(f"[SUBSCRIPTION] Emitted subscription-required message for: {feature_name}")
 

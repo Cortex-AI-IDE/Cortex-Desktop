@@ -140,6 +140,66 @@ def _write_secret_text(path: Path, text: str) -> None:
     _restrict_existing(path)
 
 
+# ── This install's device id, and the "you were signed out" note ───────────
+# An account may be signed in on 2 Cortex desktops at once (server side:
+# api/devices.py). The server tells them apart by a random id this install
+# makes once and keeps. It is random, not read from the hardware, so it says
+# nothing about the machine and is gone if ~/.cortex is deleted (the server
+# then just sees a new device).
+_DEVICE_ID_FILE = Path.home() / ".cortex" / "device_id"
+# Why the server signed this device out, kept for the sign-in screen, which
+# may only appear on the next launch.
+SIGNOUT_NOTICE_FILE = Path.home() / ".cortex" / "signout_notice.json"
+
+
+def get_device_id() -> str:
+    """This install's id (32 hex chars), created on first use. "" on failure."""
+    import re
+    import secrets
+    try:
+        if _DEVICE_ID_FILE.exists():
+            value = _DEVICE_ID_FILE.read_text(encoding="utf-8").strip()
+            if re.fullmatch(r"[A-Za-z0-9_-]{8,64}", value):
+                return value
+        value = secrets.token_hex(16)
+        _write_secret_text(_DEVICE_ID_FILE, value)
+        return value
+    except Exception as e:
+        log.warning(f"[CortexAPI] no device id ({e}); the server will guess from the OS")
+        return ""
+
+
+def write_signout_notice(message: str) -> None:
+    try:
+        _write_secret_text(SIGNOUT_NOTICE_FILE, json.dumps(
+            {"message": str(message)[:300], "at": time.time()}))
+    except Exception as e:
+        log.warning(f"[CortexAPI] could not save the sign-out note: {e}")
+
+
+def pop_signout_notice() -> str:
+    """The saved sign-out message, removed once read. "" when there is none.
+
+    A note older than 30 days is dropped unread: by then it explains nothing.
+    """
+    try:
+        if not SIGNOUT_NOTICE_FILE.exists():
+            return ""
+        data = json.loads(SIGNOUT_NOTICE_FILE.read_text(encoding="utf-8"))
+        SIGNOUT_NOTICE_FILE.unlink()
+        if not isinstance(data, dict):
+            return ""
+        if time.time() - float(data.get("at") or 0) > 30 * 86400:
+            return ""
+        return str(data.get("message") or "")[:300]
+    except Exception:
+        try:
+            SIGNOUT_NOTICE_FILE.unlink()
+        except Exception:
+            pass  # silent-ok: an unreadable note is just not shown
+        return ""
+
+
 class CortexAPIClient:
     """HTTP client for Cortex Django backend.
 
@@ -173,6 +233,12 @@ class CortexAPIClient:
         self._http_lock = threading.RLock()
         self.last_error: Optional[str] = None
         self._token_file = Path.home() / ".cortex" / "auth.json"
+        # When the server signs this device out (another device took its
+        # place, or it was signed out from the website), listeners are told
+        # once. A revoke seen before anyone listens is kept for the first one.
+        self._revoked_listeners: list = []
+        self._revoked_pending: Optional[tuple] = None
+        self._revoked_seen = False
         self._load_tokens()
 
         # Persistent HTTP client for connection pooling
@@ -377,10 +443,67 @@ class CortexAPIClient:
                 log.info("[CortexAPI] Token refreshed successfully")
                 return True
 
+            if resp.status_code == 401:
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = {}
+                if isinstance(body, dict) and body.get("error") == "session_revoked":
+                    self._session_revoked(str(body.get("reason") or ""),
+                                          str(body.get("detail") or ""))
+
         except Exception as e:
             log.warning(f"[CortexAPI] Token refresh failed: {e}")
 
         return False
+
+    # ── Signed out by the server ───────────────────────────────────────
+
+    # Reasons the user caused themselves on this device need no message.
+    _QUIET_REVOKE_REASONS = ("signed_out", "same_device")
+
+    def _session_revoked(self, reason: str, detail: str) -> None:
+        """The server says this device was signed out on purpose.
+
+        An account can be signed in on a limited number of devices (2), so
+        signing in on another one signs out the device used least recently.
+        The tokens are dead for good, so drop them now, leave a note for the
+        sign-in screen, and tell the window once.
+        """
+        log.warning(f"[CortexAPI] This device was signed out by the server "
+                    f"(reason={reason or 'unknown'})")
+        self._clear_tokens()
+        if reason in self._QUIET_REVOKE_REASONS:
+            return
+        message = detail or "This device was signed out of your Cortex account."
+        write_signout_notice(message)
+        with self._lock:
+            if self._revoked_seen:
+                return
+            self._revoked_seen = True
+            listeners = list(self._revoked_listeners)
+            if not listeners:
+                self._revoked_pending = (reason, message)
+        for fn in listeners:
+            try:
+                fn(reason, message)
+            except Exception as e:
+                log.warning(f"[CortexAPI] signed-out listener failed: {e}")
+
+    def add_session_revoked_listener(self, fn) -> None:
+        """Call fn(reason, message) when the server signs this device out.
+
+        fn may run on a worker thread; a Qt window should pass a signal's
+        emit. A sign-out that happened before this call is delivered now.
+        """
+        with self._lock:
+            self._revoked_listeners.append(fn)
+            pending, self._revoked_pending = self._revoked_pending, None
+        if pending:
+            try:
+                fn(*pending)
+            except Exception as e:
+                log.warning(f"[CortexAPI] signed-out listener failed: {e}")
 
     # ── Auth endpoints ─────────────────────────────────────────────────
 
@@ -425,6 +548,7 @@ class CortexAPIClient:
             self.expires_at = result.get("expires_at")
             self.user_info = result.get("user")
             self._save_tokens()
+            self._signed_in_again()
             log.info(f"[CortexAPI] Logged in as {self.user_info.get('email')}")
             return True
         log.error(f"[CortexAPI] Auth code exchange failed: {self.last_error}")
@@ -443,12 +567,27 @@ class CortexAPIClient:
             self.expires_at = result.get("expires_at")
             self.user_info = result.get("user")
             self._save_tokens()
+            self._signed_in_again()
             log.info(f"[CortexAPI] Logged in as {self.user_info.get('email')}")
             return True
         return False
 
+    def _signed_in_again(self) -> None:
+        """A fresh sign-in: forget the last sign-out, its note, and any
+        earlier "Skip for now" (a later sign-out shows the sign-in screen
+        again, with Skip on it)."""
+        with self._lock:
+            self._revoked_seen = False
+            self._revoked_pending = None
+        pop_signout_notice()
+        try:
+            from src.core.login_gate import clear_skipped
+            clear_skipped()
+        except Exception as e:
+            log.debug(f"[CortexAPI] could not clear the sign-in skip: {e}")
+
     def logout(self):
-        """Logout and revoke tokens."""
+        """Sign out this device. Other signed-in devices stay signed in."""
         if self.access_token:
             self._request("POST", "/api/v1/auth/logout/")
         self._clear_tokens()
@@ -761,15 +900,31 @@ class CortexAPIClient:
     # ── Helpers ────────────────────────────────────────────────────────
 
     def _get_device_info(self) -> Dict:
-        """Get device info for auth."""
+        """Get device info for auth.
+
+        device_id lets the server tell this install apart from the user's
+        other computer: an account may be signed in on 2 devices, and signing
+        in again here must replace this device's sign-in, not the other one's.
+        name is the computer name, shown only to the account owner on the
+        website's Security page so they can tell their devices apart.
+        """
         import platform
-        return {
+        info = {
             "os": platform.system(),
             "os_version": platform.version(),
             "machine": platform.machine(),
             "python": platform.python_version(),
             "app": "cortex_desktop",
+            "app_version": APP_VERSION,
         }
+        try:
+            info["name"] = (platform.node() or "")[:100]
+        except Exception:
+            pass  # silent-ok: the website then shows "<OS> computer"
+        device_id = get_device_id()
+        if device_id:
+            info["device_id"] = device_id
+        return info
 
 
 # ── Singleton ──────────────────────────────────────────────────────────

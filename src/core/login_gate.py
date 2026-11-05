@@ -8,6 +8,9 @@ wrote to ~/.cortex/auth.json and answers one question: has this machine been
 signed in?
 
     no token at all            -> BLOCK, show the login window
+                                  (unless the user chose "Skip for now"
+                                  before: then main.py opens Cortex without
+                                  an account, see was_skipped())
     token present, in date     -> ALLOW
     token present, expired     -> ALLOW, and refresh in the background
 
@@ -117,6 +120,48 @@ def evaluate(session: dict | None = None, now: float | None = None) -> GateResul
         return GateResult(True, "signed in (token near expiry, will refresh)", True, user)
 
     return GateResult(True, "signed in", False, user)
+
+
+# ── "Skip for now" ─────────────────────────────────────────────────────────
+# Owner request 2026-11-05: the sign-in screen offers "Skip for now". Cortex
+# then works without an account (editor, terminal, AI with the user's own API
+# keys); only the subscription features need one: Cortex models, web search,
+# OCR, voice, cloud semantic search, Telegram. They already check
+# CortexAPIClient.has_subscription(), which is False without an account, and
+# ask the user to sign in from Settings > Profile.
+#
+# The choice is remembered: once skipped, startup never shows the sign-in
+# screen again. It is forgotten when the user signs in, so a later sign-out or
+# a sign-out by the server shows the screen once more, with Skip on it.
+SKIP_FILE = Path.home() / ".cortex" / "login_skipped.json"
+
+
+def was_skipped(path: Path | None = None) -> bool:
+    """True when the user chose "Skip for now" and has not signed in since."""
+    try:
+        return (path or SKIP_FILE).exists()
+    except OSError:
+        return False
+
+
+def mark_skipped(path: Path | None = None) -> None:
+    p = path or SKIP_FILE
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"skipped_at": time.time()}), encoding="utf-8")
+    except OSError as exc:
+        # Not fatal: the user still gets in this time, and is only asked
+        # again at the next launch.
+        log.warning(f"[LoginGate] could not remember the skip ({exc})")
+
+
+def clear_skipped(path: Path | None = None) -> None:
+    try:
+        (path or SKIP_FILE).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log.warning(f"[LoginGate] could not clear the skip ({exc})")
 
 
 def refresh_in_background() -> None:

@@ -750,6 +750,10 @@ class CortexMainWindow(QMainWindow):
     # caption, base64 image, mime. A picture is a second payload shape, so it
     # gets its own signal rather than a tuple smuggled through the text one.
     _telegram_image_ready = pyqtSignal(str, str, str)
+    # (reason, message) the server signed this device out, e.g. the account
+    # signed in on a third device. Raised on whichever thread made the API
+    # call, so it crosses to the GUI thread as a signal.
+    _session_revoked = pyqtSignal(str, str)
 
 
     def __init__(self):
@@ -3274,6 +3278,15 @@ class CortexMainWindow(QMainWindow):
             _handover.on_done = self._browser_relay.done.emit
         except Exception as _bh_err:
             log.warning(f"[AI-BROWSER] handover wiring failed: {_bh_err}")
+
+        # The server signed this device out (2 devices per account, or signed
+        # out from the website): tell the user now, not at the next launch.
+        try:
+            from src.core.cortex_api import get_api_client
+            self._session_revoked.connect(self._on_session_revoked)
+            get_api_client().add_session_revoked_listener(self._session_revoked.emit)
+        except Exception as _sr_err:
+            log.warning(f"[AUTH] signed-out notice wiring failed: {_sr_err}")
 
         # ========== PERMISSION SYSTEM CONNECTION (NEW) ==========
         # Connect AI agent to UI for permission dialogs
@@ -7805,6 +7818,42 @@ class CortexMainWindow(QMainWindow):
             self._ai_chat.show_terminal_input_needed(kind, prompt)
         except Exception as e:
             log.warning(f"[AI-TERM] input card failed: {e}")
+
+    def _on_session_revoked(self, reason: str, message: str):
+        """This device was signed out by the server. Offer to sign in again.
+
+        Not modal and no forced sign-in screen: the user may be mid-edit, and
+        their open files must not be put at risk by a gate that quits Cortex
+        when dismissed. "Later" leaves the note for the next launch's sign-in
+        screen.
+        """
+        log.info(f"[AUTH] showing the signed-out notice (reason={reason})")
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle("Signed out of Cortex")
+            box.setText(message)
+            box.setInformativeText(
+                "Features that use your Cortex account stop working until you "
+                "sign in again. Your open files are not affected.")
+            sign_in = box.addButton("Sign in again", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+            box.setModal(False)
+
+            def _answered(_button):
+                if box.clickedButton() is sign_in:
+                    # require_login, not relogin_or_quit: closing the sign-in
+                    # screen here must not quit Cortex with unsaved work open.
+                    from src.ui.dialogs.login_dialog import require_login
+                    if require_login(self):
+                        log.info("[AUTH] signed in again after the server sign-out")
+
+            box.buttonClicked.connect(_answered)
+            box.open()
+            self._session_revoked_box = box   # keep it alive while open
+        except Exception as e:
+            log.warning(f"[AUTH] signed-out notice not shown: {e}")
 
     def _on_browser_handover_needed(self, kind: str, url: str, token: str):
         """The AI's browser needs the user: sign in, a code, a check, or setup."""

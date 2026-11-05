@@ -14691,6 +14691,37 @@ class ChatPanel(QWidget):
         does not need an active turn, and worded without naming the service
         behind the feature.
         """
+        # Someone who chose "Skip for now" at the sign-in screen has no
+        # account here at all: the first step is to sign in, not to buy.
+        try:
+            from src.core.cortex_api import get_api_client
+            signed_in = get_api_client().is_logged_in()
+        except Exception:
+            signed_in = True
+        if not signed_in:
+            try:
+                html = (
+                    f"<div style='color:{T['text']};font-weight:600;margin-bottom:6px;'>"
+                    f"&#128274; {feature}, Sign In Required</div>"
+                    f"<div style='color:{T['text_secondary']};line-height:1.5;'>{desc}</div>"
+                    f"<div style='color:{T['text']};font-weight:600;margin:10px 0 4px;'>"
+                    f"To enable this feature:</div>"
+                    f"<div style='color:{T['text_secondary']};line-height:1.7;'>"
+                    f"1. Open Settings › Profile and click <b>Sign in with Browser</b><br>"
+                    f"2. If you have no plan yet, choose one at "
+                    f"<a href='https://cortex-ide.app/pricing/' "
+                    f"style='color:{T['md_link']};text-decoration:none;'>cortex-ide.app/pricing</a></div>"
+                    f"<div style='color:{T['muted']};margin-top:8px;'>"
+                    f"Everything else in Cortex works without an account.</div>"
+                )
+                m = MessageWidget(role="assistant", parent=self)
+                body = m.new_prose(streaming=False)
+                body.setOpenExternalLinks(True)
+                body.setHtml(html)
+                self._insert(m)
+            except Exception as exc:
+                log.warning("[ChatPanel] sign-in notice failed: %s", exc)
+            return
         try:
             html = (
                 f"<div style='color:{T['text']};font-weight:600;margin-bottom:6px;'>"
@@ -14702,7 +14733,7 @@ class ChatPanel(QWidget):
                 f"1. Visit <a href='https://cortex-ide.app/pricing/' "
                 f"style='color:{T['md_link']};text-decoration:none;'>cortex-ide.app/pricing</a><br>"
                 f"2. Choose a plan and activate your subscription<br>"
-                f"3. Sign in via Settings, Account</div>"
+                f"3. Sign in via Settings › Profile</div>"
                 f"<div style='color:{T['muted']};margin-top:8px;'>"
                 f"Once subscribed, {feature.lower()} works immediately.</div>"
             )

@@ -701,6 +701,7 @@
      else. Defaults to allowed so a bridge that predates the field can never
      lock a subscriber out of their own settings. */
   let tgSubscribed = true;
+  let tgSignedIn = true;
 
   /* Everything that would reach a bridge method the monitor refuses anyway.
      Unpair and Remove bot are deliberately absent: cleaning up an account is
@@ -762,8 +763,10 @@
       /* The plan wins over every other state: a locked account has nothing to
          do here until the subscription is back, whether or not a token or chat
          exists. One sentence, because there is one reason. */
-      heading = "Needs a subscription";
-      detail = "Telegram is included with Cortex Pro. Upgrade from Help -> Upgrade to Pro, then reopen this page.";
+      heading = tgSignedIn ? "Needs a subscription" : "Sign in needed";
+      detail = tgSignedIn
+        ? "Telegram is included with Cortex Pro. Upgrade from Help -> Upgrade to Pro, then reopen this page."
+        : "Telegram is included with Cortex Pro. Sign in from Settings > Profile, then reopen this page.";
     } else if (hasToken && !paired) {
       heading = "Token saved, no chat paired";
       detail = "Show a code, then send /pair CODE to your bot from the phone.";
@@ -875,6 +878,7 @@
     /* Absent means a bridge that predates the field: allow, so a subscriber is
        never locked out by a page that simply does not know about plans. */
     tgSubscribed = data.subscribed !== false;
+    tgSignedIn = data.signedIn !== false;
     applyTokenMode(tgHasToken, false);
     /* The saved state lives in the status card now, so a reload must not leave
        a stale error from an earlier attempt sitting under the pairing row. */

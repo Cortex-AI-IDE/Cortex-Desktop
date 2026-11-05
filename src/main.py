@@ -1064,7 +1064,13 @@ def main():
         from src.core.login_gate import evaluate as _gate_eval, refresh_in_background
         _gate = _gate_eval()
         log.info(f"[LoginGate] {_gate.reason}")
-        if _gate.blocked:
+        from src.core.login_gate import was_skipped as _gate_skipped
+        if _gate.blocked and _gate_skipped():
+            # "Skip for now" was chosen earlier: open without an account and
+            # do not ask again. Subscription features ask for a sign-in
+            # themselves when used.
+            log.info("[LoginGate] sign-in skipped earlier, opening without an account")
+        elif _gate.blocked:
             from src.ui.dialogs.login_dialog import require_login
             if not require_login():
                 log.info("[LoginGate] sign-in cancelled, exiting")

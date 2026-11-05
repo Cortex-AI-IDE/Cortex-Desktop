@@ -1761,6 +1761,9 @@ scope: project
                 # from the saved account copy, so this never blocks the GUI
                 # thread. Absent field (older page) is treated as allowed.
                 "subscribed": self._telegram_subscribed(),
+                # False after "Skip for now" at the sign-in screen: the card
+                # then asks for a sign-in rather than an upgrade.
+                "signedIn": self._signed_in(),
                 "events": sorted(cfg.events),
                 "quietEnabled": cfg.quiet_enabled,
                 "quietStart": cfg.quiet_start,
@@ -1775,6 +1778,14 @@ scope: project
         except Exception as exc:
             log.warning(f"[MemoryManager] getTelegramSettings failed: {exc}")
             return "{}"
+
+    @staticmethod
+    def _signed_in() -> bool:
+        try:
+            from src.core.cortex_api import get_api_client
+            return bool(get_api_client().is_logged_in())
+        except Exception:
+            return True   # unknown: keep the older "needs a subscription" text
 
     def _telegram_subscribed(self) -> bool:
         """Whether this account may use Telegram at all, for the settings page.

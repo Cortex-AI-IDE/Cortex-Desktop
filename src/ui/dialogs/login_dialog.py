@@ -374,6 +374,17 @@ def _qss(p: dict) -> str:
         background: {p['btn_off']};
         color: {p['btn_off_ink']};
     }}
+    QPushButton#loginSecondary {{
+        background: transparent;
+        color: {p['fg']};
+        border: 1px solid {p['border']};
+        border-radius: {BUTTON_RADIUS}px;
+    }}
+    QPushButton#loginSecondary:hover {{ border-color: {p['fg_dim']}; }}
+    QPushButton#loginSecondary:pressed {{ background: {p['canvas_alt']}; }}
+    QPushButton#loginSecondary:focus {{ border: 2px solid {p['fg']}; }}
+    QPushButton#loginSecondary:disabled {{ color: {p['muted']}; }}
+    QLabel#loginSkipNote {{ color: {p['muted']}; }}
     QProgressBar#loginBusy {{
         background: {p['border']};
         border: none;
@@ -407,6 +418,10 @@ def _qss(p: dict) -> str:
 # Generous on purpose: it can mean finding a password manager, or 2FA on a
 # phone that is in another room.
 BROWSER_TIMEOUT_SECONDS = 300
+
+# QDialog result for "Skip for now": not Accepted (no account) and not
+# Rejected (the user did not quit).
+SKIPPED = 2
 
 
 class _DotField(QWidget):
@@ -519,6 +534,7 @@ class LoginDialog(QDialog):
         self.setObjectName("loginRoot")
         self._worker: _LoginWorker | None = None
         self.user_info: dict | None = None
+        self.skipped = False
         self._p = theme_palette(theme_id)
         self.setStyleSheet(_qss(self._p))
 
@@ -542,6 +558,17 @@ class LoginDialog(QDialog):
 
         outer.addWidget(self._build_status_bar())
         self._set_state("idle", "Not signed in")
+        # Signed out by the server (e.g. the account signed in on a third
+        # device)? Say so here instead of a bare "Not signed in".
+        try:
+            from src.core.cortex_api import pop_signout_notice
+            notice = pop_signout_notice()
+        except Exception:
+            notice = ""
+        if notice:
+            self._set_state("error", notice)
+            self._status.setWordWrap(True)
+            self._status.setToolTip(notice)
 
     # ── brand ─────────────────────────────────────────────────────────────
 
@@ -608,7 +635,7 @@ class LoginDialog(QDialog):
 
         v.addSpacing(7)
 
-        note = QLabel("A Cortex account is required to use the IDE.")
+        note = QLabel("Sign in to use your Cortex account and subscription.")
         note.setObjectName("loginNote")
         note.setFont(_ui_font(12, 400))
         note.setWordWrap(True)
@@ -634,6 +661,28 @@ class LoginDialog(QDialog):
         self._busy.setTextVisible(False)
         v.addSpacing(8)
         v.addWidget(self._busy)
+
+        # Use Cortex without an account. Remembered, so startup does not ask
+        # again (src/core/login_gate.py, was_skipped()).
+        v.addSpacing(4)
+        self._skip_btn = QPushButton("Skip for now")
+        self._skip_btn.setObjectName("loginSecondary")
+        self._skip_btn.setFixedHeight(BUTTON_HEIGHT)
+        self._skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._skip_btn.setFont(_ui_font(13, 600))
+        self._skip_btn.setAutoDefault(False)
+        self._skip_btn.setAccessibleName("Skip sign-in and use Cortex without an account")
+        self._skip_btn.clicked.connect(self._skip)
+        v.addWidget(self._skip_btn)
+
+        v.addSpacing(10)
+        skip_note = QLabel(
+            "Web search, Telegram, voice and other subscription features need "
+            "an account. You can sign in any time from Settings › Profile.")
+        skip_note.setObjectName("loginSkipNote")
+        skip_note.setFont(_ui_font(11, 400))
+        skip_note.setWordWrap(True)
+        v.addWidget(skip_note)
         return card
 
     def _build_help(self) -> QWidget:
@@ -717,6 +766,16 @@ class LoginDialog(QDialog):
         self._busy.setVisible(busy)
         self._browser_btn.setEnabled(not busy)
 
+    def _skip(self):
+        """Open Cortex without an account, and remember the choice."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+        from src.core.login_gate import mark_skipped
+        mark_skipped()
+        self.skipped = True
+        log.info("[Login] sign-in skipped, opening Cortex without an account")
+        self.done(SKIPPED)
+
     def _start(self, worker: _LoginWorker, message: str):
         self._worker = worker
         worker.finished_ok.connect(self._on_ok)
@@ -763,7 +822,7 @@ class LoginDialog(QDialog):
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(2000)
-        if self.result() != QDialog.DialogCode.Accepted:
+        if self.result() != QDialog.DialogCode.Accepted and not self.skipped:
             self.reject()
         super().closeEvent(e)
 
@@ -771,14 +830,13 @@ class LoginDialog(QDialog):
 def relogin_or_quit(parent=None) -> bool:
     """Sign-out lands back on the gate.
 
-    Login is mandatory, so clearing the tokens cannot simply leave the IDE
-    sitting there signed out - every API call would fail and the window would
-    look broken. Show the gate again; if the user declines it, Cortex closes.
+    Show the gate again: sign in, or "Skip for now" to keep using Cortex
+    without an account. Only Quit (or closing the window) closes Cortex.
     Deferred to the next event-loop turn by the caller so the web-channel slot
     that triggered the sign-out can return before this goes modal.
     """
     if require_login(parent):
-        log.info("[Login] signed in again after sign-out")
+        log.info("[Login] signed in again (or skipped) after sign-out")
         return True
     log.info("[Login] sign-out declined the gate, quitting")
     app = QApplication.instance()
@@ -788,7 +846,7 @@ def relogin_or_quit(parent=None) -> bool:
 
 
 def require_login(parent=None) -> bool:
-    """Show the gate, maximised. True when signed in, False when quit.
+    """Show the gate, maximised. True when signed in or skipped, False when quit.
 
     Maximised, not showFullScreen(): full screen takes the title bar with it,
     so the window has no close button, no minimise, and no way out except one
@@ -800,4 +858,5 @@ def require_login(parent=None) -> bool:
     if screen is not None:
         dlg.resize(screen.availableGeometry().size())
     dlg.showMaximized()
-    return dlg.exec() == QDialog.DialogCode.Accepted
+    result = dlg.exec()
+    return result == QDialog.DialogCode.Accepted or dlg.skipped
