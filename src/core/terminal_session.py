@@ -213,6 +213,14 @@ _SHELL_PROMPT_RE = re.compile(r"[$#%>]\s*$")
 _LOCAL_PROMPT_RE = re.compile(r"^PS [^\n>]*>\s*$")
 _SSH_CLOSED_RE = re.compile(r"Connection to \S+ closed", re.I)
 
+# What a terminal sends without anyone typing: focus in/out (ESC[I, ESC[O),
+# device-attribute replies (ESC[?1;2c, ESC[>0;10;1c), cursor-position and
+# status reports (ESC[12;1R, ESC[0n), mode reports (ESC[?2004;1$y), and
+# OSC / DCS replies (colour queries, ESC P ... ESC \).
+_TERMINAL_REPORT_RE = re.compile(
+    r"\x1b\[[IO]|\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d?n|\x1b\[\?[\d;]*\$y"
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\")
+
 _REMOTE_FMT = "__CX_%s_%s__"       # printf format typed after a remote command
 _SSH_OPTS_WITH_ARG = set("BbcDEeFIiJLlmOopQRSWw")
 
@@ -227,6 +235,24 @@ _READY_TIMEOUT = 30.0      # first prompt (profile + integration) took 3.7s here
 _MAX_AI_SESSIONS = 4
 
 ANSWERED_NOTE = "[The user answered a prompt in the terminal. Their input is not shown.]"
+
+# A password the program refused, printed before it asks again: ssh, sudo, su,
+# login, and the usual wording of other tools.
+_AUTH_FAILED_RE = re.compile(
+    r"permission denied|sorry, try again|authentication fail|incorrect password"
+    r"|login incorrect|access denied|invalid password", re.I)
+# ssh's last word after the final refused password: it gave up.
+_SSH_GAVE_UP_RE = re.compile(r"Permission denied \((?:[\w-]+,?)+\)")
+# git over HTTPS refused the sign-in. GitHub has not taken account passwords
+# for git since 2021: "Invalid username or token. Password authentication is
+# not supported for Git operations." Other hosts say "Authentication failed".
+_GIT_AUTH_FAILED_RE = re.compile(
+    r"Password authentication is not supported for Git operations"
+    r"|Invalid username or (?:password|token)"
+    r"|Authentication failed for '(?P<url>https?://[^']+)'", re.I)
+# Start of a password prompt raised after a refused one. The chat card keys
+# its "not accepted" title on it, so keep the two in step.
+RETRY_PROMPT_PREFIX = "Password not accepted"
 
 
 class RunResult(NamedTuple):
@@ -252,6 +278,34 @@ def clean_output(raw: str) -> str:
             line = next((p for p in reversed(line.split("\r")) if p), "")
         lines.append(_CTRL_RE.sub("", line).rstrip())
     return "\n".join(lines).strip("\n")
+
+
+def _git_auth_note(output: str) -> str:
+    """What to tell the agent when git over HTTPS refused the sign-in.
+
+    Field case 2026-11-05: `git pull` on a droplet asked for a GitHub username
+    and password; the user typed their account password, GitHub refused it,
+    and the agent went hunting the server for credential files instead of
+    saying why. GitHub needs a Personal Access Token at that prompt.
+    """
+    m = _GIT_AUTH_FAILED_RE.search(output or "")
+    if not m:
+        return ""
+    github = "github.com" in (output or "").lower()
+    if github:
+        return ("git sign-in to GitHub FAILED. GitHub does not accept account passwords "
+                "for git: at the 'Password for https://...github.com' prompt the user "
+                "must paste a Personal Access Token (GitHub > Settings > Developer "
+                "settings > Personal access tokens, with read access to this "
+                "repository), or the machine needs an SSH deploy key. Nothing was "
+                "pulled or pushed. Tell the user this plainly. Never ask for the token "
+                "or password in chat: offer to run the git command again so they paste "
+                "the token in the terminal, or to set up a deploy key. Do not search "
+                "the machine for stored credentials.")
+    return ("git sign-in FAILED: the server refused the username or password. Nothing "
+            "was pulled or pushed. Tell the user; many hosts need an access token or an "
+            "SSH key instead of the account password. Never ask for it in chat: offer "
+            "to run the command again so they type it in the terminal.")
 
 
 def classify_prompt(line: str, quiet: float) -> Optional[str]:
@@ -413,6 +467,7 @@ class TerminalSession:
         # _cap_seen when the last prompt was answered: text before it has been
         # dealt with and must not raise a prompt again.
         self._prompt_floor = 0
+        self._refused = 0            # passwords refused during this command
         self._answered_at: Optional[float] = None
         self._gcm_checked = 0.0      # last look for a Git Credential Manager window
         # background command left running (output keeps being captured)
@@ -456,6 +511,16 @@ class TerminalSession:
             self._note_user_locked(data)
 
     def _note_user_locked(self, data: str):
+        # Replies the terminal sends by itself are not typing. Measured on
+        # Windows 11: ConPTY asks for focus reporting (ESC[?1004h) and device
+        # attributes (ESC[c), so xterm sends ESC[O every time the user clicks
+        # from the terminal back to the chat. With no Enter in it, that
+        # counted as a half-typed line: after an SSH login every AI command
+        # came back "terminal busy" until the user pressed Enter. They still
+        # reach the shell (write() sends them); they just mean nothing here.
+        data = _TERMINAL_REPORT_RE.sub("", data)
+        if not data:
+            return
         now = time.monotonic()
         self._last_activity = now
         if "\r" in data or "\n" in data:
@@ -919,7 +984,18 @@ class TerminalSession:
         checked.clear()
         checked[stamp] = "all" if quiet >= _INPUT_QUIET else "specific"
         if kind:
-            self._set_awaiting(kind, last.strip(), on_wait)
+            prompt = last.strip()
+            # Asked again right after an answer, with a refusal in between:
+            # the password was wrong. Say so on the card, so it does not look
+            # like the same request appearing twice.
+            if (kind == "secret" and self._prompt_floor
+                    and _AUTH_FAILED_RE.search(tail.rsplit("\n", 1)[0] if "\n" in tail else "")):
+                self._refused += 1
+                log.info("[AI-TERM] session %d: password refused (%d), asking again",
+                         self.id, self._refused)
+                prompt = (f"{RETRY_PROMPT_PREFIX} (attempt {self._refused + 1}). "
+                          f"Type it again.\n{prompt}")
+            self._set_awaiting(kind, prompt, on_wait)
         return False
 
     # ── background commands ───────────────────────────────────────────
@@ -1007,6 +1083,11 @@ class TerminalSession:
                             break
                         self._cond.wait(0.05)
                     if not ok or not at_prompt:
+                        # Which wait failed decides the fix; the log used to
+                        # show only a run that came back without a result.
+                        log.info("[AI-TERM] session %d: remote shell busy "
+                                 "(user typing=%s, at prompt=%s)",
+                                 self.id, self._user_dirty, at_prompt)
                         # Never fall back to this machine while connected.
                         return RunResult(-1, "", False, busy=True, shell_id=self.id, remote=remote)
                 elif not ok:
@@ -1044,6 +1125,7 @@ class TerminalSession:
                 self._cap_started = bool(remote)   # no C marker over SSH
                 self._cap_pre, self._cap_buf, self._cap_len, self._cap_tail = [], [], 0, ""
                 self._cap_seen = self._prompt_floor = self._awaiting_mark = 0
+                self._refused = 0
                 self._cap_code = None
                 self._remote_re = (re.compile(r"__CX_D" + nonce + r"_(-?\d+)__")
                                    if nonce else None)
@@ -1136,6 +1218,20 @@ class TerminalSession:
             if dropped and remote:
                 note = (f"The SSH session to {remote} ended. The Cortex AI terminal is "
                         f"back on this machine (PowerShell).")
+            elif ssh_dest and _SSH_GAVE_UP_RE.search(out):
+                # The user typed the password and the server refused it until
+                # ssh gave up. Plainly, so the agent neither retries blind nor
+                # assumes it is on the server.
+                tries = self._refused + 1
+                log.info("[AI-TERM] session %d: SSH login to %s failed after %d refused "
+                         "password(s)", self.id, ssh_dest, tries)
+                note = (f"SSH login to {ssh_dest} FAILED: the server refused the password "
+                        f"{tries} time(s) and ssh gave up. You are NOT connected and nothing "
+                        f"ran on the server. Tell the user the password was not accepted; "
+                        f"offer to run the ssh command again so they can retype it, or to "
+                        f"set up key-based login.")
+            if not note:
+                note = _git_auth_note(out)
             if code is None:
                 code = 0 if alive else -1  # the command ended the shell (exit)
             return RunResult(code, out, False, shell_id=self.id, remote=remote, note=note)

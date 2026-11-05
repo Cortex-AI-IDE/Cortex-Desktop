@@ -13906,6 +13906,32 @@ class ChatPanel(QWidget):
         """Card: a command in the Cortex AI terminal is waiting for the user."""
         self.terminal_input_done("dismissed")  # one card at a time
         title_text, note_text = self._TERM_INPUT_TEXT.get(kind, self._TERM_INPUT_TEXT["input"])
+        retry = False
+        try:
+            from src.core.terminal_session import RETRY_PROMPT_PREFIX
+            retry = kind == "secret" and (prompt or "").startswith(RETRY_PROMPT_PREFIX)
+        except Exception:
+            _swallow("read the password-retry marker")
+        if retry:
+            # The server refused the last password and asked again. Without
+            # this the card looked identical to the first one, as if the
+            # same request had simply appeared twice.
+            title_text = "\U0001F512  Password not accepted, type it again"
+            prompt = prompt.split("\n", 1)[-1]   # the card title says the rest
+        low = (prompt or "").lower()
+        if "github.com" in low and kind in ("secret", "login"):
+            # git over HTTPS to GitHub. It refuses account passwords for git
+            # (since 2021); a user who types theirs gets "Password
+            # authentication is not supported". Say it before they type.
+            if kind == "secret":
+                title_text = "\U0001F511  GitHub token needed in the terminal"
+                note_text = ("Paste a GitHub Personal Access Token here, not your account "
+                             "password: GitHub refuses passwords for git. Create one under "
+                             "GitHub > Settings > Developer settings > Personal access "
+                             "tokens. It goes straight to git; the AI never sees it.")
+            else:
+                note_text = ("Type your GitHub username in the Cortex AI terminal. At the "
+                             "next prompt, paste a Personal Access Token, not your password.")
         card = QFrame()
         card.setObjectName("termInputCard")
         card._kind = kind
