@@ -2295,6 +2295,36 @@ def _shared_terminal_on() -> bool:
         return False
 
 
+_ANNOUNCE_INTENT_RE = re.compile(
+    r"\b(?:let me|let's|i'll|i will|i'm going to|i am going to|now i'll|next,? i'll|"
+    r"checking|looking|reading|running|searching|opening|verifying|testing)\b", re.I)
+
+
+def _announced_but_stopped(text: Optional[str]) -> bool:
+    """Does a reply with no tool call end by announcing a step it never took?
+
+    Field case 2026-11-05 (qwen3.8-flash): the whole reply was one line,
+    "checking the timezone config in Settings:", and the run ended there.
+
+    * The last line ends with a colon: in any language that introduces
+      something, and nothing follows. (A code block or list after the colon
+      means the last line is not the colon line.)
+    * Or a short reply whose last line is "let me check..." / "checking…".
+    A question to the user ("Should I restart it?") is a real stop.
+    """
+    body = (text or "").strip()
+    if not body:
+        return False
+    last = body.rsplit("\n", 1)[-1].strip().rstrip("*_` ").strip()
+    if not last or last.endswith("?"):
+        return False
+    if last.endswith((":", "：")):
+        return True
+    if last.endswith(("...", "…")) and len(body) <= 400:
+        return bool(_ANNOUNCE_INTENT_RE.search(last))
+    return False
+
+
 def _browser_notice() -> str:
     """System-prompt note while the browser tools work in the user's own
     Chrome (Settings > MCP Servers > Browser for AI = my Chrome)."""
@@ -6226,6 +6256,9 @@ Required behavior:
             # One-shot: screenshot pasted + user asked for a FIX + model
             # diagnosed and stopped without a single tool call.
             _image_action_nudged = False
+            # Replies that announced a step ("checking X:") and stopped. Up to
+            # two nudges per message; see _announced_but_stopped.
+            _announce_nudges = 0
 
             # ── Auto-continue: use pre-compacted messages from previous cycle ──
             _pre_compacted = self._auto_continue_compacted
@@ -7896,6 +7929,28 @@ Required behavior:
                             "change (Edit/Write), and verify. Keep the explanation to "
                             "one line and let the tool calls do the work."
                         )))
+                        continue
+
+                    # Case 2.7: the reply ANNOUNCED the next step and stopped.
+                    # 2026-11-05 17:47 and 17:49 (qwen3.8-flash): twice the whole
+                    # reply was "checking the timezone config in Settings:",
+                    # 59 tokens, no tool call. It was taken as "done", the run
+                    # ended and the user had to ask again. A reply ending in a
+                    # colon, or in "let me check..." with nothing after it, is
+                    # a step not taken.
+                    if (_announce_nudges < 2 and active_tool_defs
+                            and _announced_but_stopped(turn_text)):
+                        _announce_nudges += 1
+                        log.warning(
+                            f"[BRIDGE] Turn {turn + 1} announced a step and stopped with no "
+                            f"tool call ({len((turn_text or '').strip())} chars), nudging "
+                            f"({_announce_nudges}/2)")
+                        messages.append(PCM(role="user", content=(
+                            "Your reply says what you are about to do but stops there: no "
+                            "tool was called, so nothing was checked. Do that step now by "
+                            "calling the tool(s). If you already have everything you need, "
+                            "give the complete answer instead. Do not repeat the "
+                            "announcement.")))
                         continue
 
                     # Case 3: Legitimate exit - all done or informational
