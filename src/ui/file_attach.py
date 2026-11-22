@@ -24,6 +24,7 @@ Qt-free so it can be tested on its own.
 from __future__ import annotations
 
 import datetime as _dt
+import html
 import os
 import re
 from typing import Dict, List, Optional
@@ -118,8 +119,12 @@ def describe(path: str) -> Dict:
             "inline": text and size <= INLINE_MAX_BYTES}
 
 
-def message_block(info: Dict) -> str:
-    """What the model receives for one attachment."""
+_TAG = "cortex_attachment"
+_CLOSE = f"</{_TAG}>"
+
+
+def _body(info: Dict) -> str:
+    """The instruction/content part the model reads for one attachment."""
     path, name = info["path"], info["name"]
     if info.get("kind") == "folder":
         return (f"[Attached folder: {path}]\n"
@@ -132,12 +137,68 @@ def message_block(info: Dict) -> str:
         except OSError:
             content = None
         if content is not None and content.count("\n") < INLINE_MAX_LINES:
+            content = content.replace(_CLOSE, f"&lt;/{_TAG}&gt;")  # keep the block closable
             lang = os.path.splitext(name)[1].lstrip(".").lower()
             fence = "````" if "```" in content else "```"
             return f"{head}\n{fence}{lang}\n{content.rstrip()}\n{fence}"
     return (f"{head}\n"
             "Open it with the Read tool before answering; it reads PDFs and "
             "long files in parts. Do not guess its contents.")
+
+
+def message_block(info: Dict) -> str:
+    """What the model receives for one attachment, wrapped in a marker.
+
+    The marker is what lets the sent message show a file CARD instead of
+    this text (owner report 2026-11-22: the bubble showed the path, the
+    "Open it with the Read tool" instruction, or a small file's whole
+    content). The model reads everything inside; the chat lifts the block
+    out and draws the card from the attributes. The marker is saved with
+    the chat, so a restored chat shows the cards again.
+    """
+    attrs = " ".join(
+        f'{k}="{html.escape(str(v), quote=True)}"'
+        for k, v in (("path", info.get("path", "")), ("name", info.get("name", "")),
+                     ("badge", info.get("badge", "FILE")), ("size", info.get("size_text", "")))
+    )
+    return f"<{_TAG} {attrs}>\n{_body(info)}\n{_CLOSE}"
+
+
+_ATT_RE = re.compile(rf"<{_TAG}\s+([^>]*)>\n?(.*?)\n?{re.escape(_CLOSE)}\n*", re.S)
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+
+def _attrs(raw: str) -> Dict[str, str]:
+    return {k: html.unescape(v) for k, v in _ATTR_RE.findall(raw)}
+
+
+def split_attachments(text: str):
+    """(text without attachment blocks, [card info]) for drawing a sent message."""
+    cards: List[Dict] = []
+
+    def _take(m):
+        a = _attrs(m.group(1))
+        cards.append({"path": a.get("path", ""), "name": a.get("name", "file"),
+                      "badge": a.get("badge", "FILE"), "size_text": a.get("size", "")})
+        return ""
+
+    rest = _ATT_RE.sub(_take, text or "")
+    return rest.strip("\n"), cards
+
+
+def readable(text: str) -> str:
+    """The message for the Copy button: each attachment as one line."""
+    return _ATT_RE.sub(lambda m: f"[Attached: {_attrs(m.group(1)).get('path', '')}]\n",
+                       text or "").strip()
+
+
+def title_text(text: str) -> str:
+    """Text for a chat title: the typed words, or the file names when the
+    message is only attachments. Never the marker or the file content."""
+    body, cards = split_attachments(text or "")
+    if body.strip():
+        return body
+    return " ".join(c.get("name", "") for c in cards if c.get("name")) or (text or "")
 
 
 # A pasted line that is only a path: file:///C:/x.pdf, C:\x.pdf, "C:\a b\x.pdf",

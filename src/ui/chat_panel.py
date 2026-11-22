@@ -954,7 +954,16 @@ _WHEEL_FILTER = None
 
 def _get_wheel_filter():
     global _WHEEL_FILTER
-    if _WHEEL_FILTER is None:
+    stale = False
+    if _WHEEL_FILTER is not None:
+        try:
+            from PyQt6 import sip
+            stale = sip.isdeleted(_WHEEL_FILTER)
+        except Exception:
+            stale = False
+    if _WHEEL_FILTER is None or stale:
+        # Qt can delete the shared filter when its QApplication goes away;
+        # build a fresh one instead of handing out a dead wrapper.
         _WHEEL_FILTER = _WheelFilter()
     return _WHEEL_FILTER
 
@@ -5762,7 +5771,12 @@ class MessageWidget(QWidget):
             # the very command the user pasted.
             full = getattr(self, "_user_text", "")
             if full.strip():
-                return full.strip()
+                # Attachments copy as "[Attached: <path>]", not the AI-facing block.
+                try:
+                    from src.ui.file_attach import readable
+                    return readable(full)
+                except Exception:
+                    return full.strip()
             try:
                 return self._user_label.toPlainText().strip()
             except RuntimeError:
@@ -5842,15 +5856,49 @@ class MessageWidget(QWidget):
         # button and the saved transcript must use this, never just the prose
         # that stays in the bubble once a fenced block is lifted into a card.
         self._user_text = display
+        # Attached files travel to the AI as marked blocks (path, instruction,
+        # or a small file's content). The bubble shows a card for each one,
+        # like the input did, never that text (src/ui/file_attach.py).
+        try:
+            from src.ui.file_attach import split_attachments
+            body, attachments = split_attachments(display)
+        except Exception:
+            body, attachments = display, []
         prose, code_parts = split_user_code_blocks(
-            "" if self._user_images and display == self._IMAGE_ONLY else display)
+            "" if self._user_images and body == self._IMAGE_ONLY else body)
         self._user_label.setPlainText(prose)
         self._user_label.setVisible(bool(prose.strip()))
         if 'skills:' in prose or 'mcp:' in prose:
             _paint_invocation_chips(self._user_label.document(), prose)
         self._build_user_image_row(remove_only=True)
         self._build_user_code_cards(code_parts)
+        self._build_user_attachment_row(attachments)
         self._build_user_image_row()
+
+    def _build_user_attachment_row(self, cards: list):
+        """The attached files of a sent message, as cards on the right."""
+        old = getattr(self, "_user_attachment_row", None)
+        if old is not None:
+            try:
+                old.setParent(None)
+                old.deleteLater()
+            except RuntimeError:
+                _swallow("drop a stale attachment row from a user message")
+            self._user_attachment_row = None
+        if not cards:
+            return
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        outer = QHBoxLayout(row)
+        outer.setContentsMargins(0, 0, 0, 4)
+        outer.addStretch(1)
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        outer.addLayout(grid)
+        for i, info in enumerate(cards):
+            grid.addWidget(_FileCard(info, removable=False), i // 3, i % 3)
+        self.v.insertWidget(0, row)
+        self._user_attachment_row = row
 
     def _build_user_image_row(self, remove_only: bool = False):
         """The images of a user message: above its text, on the right.
@@ -6983,7 +7031,7 @@ class _FileCard(QFrame):
     ("PDF", "PY"), size, and a remove button. The full path is the tooltip."""
     remove_clicked = pyqtSignal()
 
-    def __init__(self, info: dict, parent=None):
+    def __init__(self, info: dict, parent=None, removable: bool = True):
         super().__init__(parent)
         self.setObjectName("fileCard")
         self.setFixedSize(168, 64)
@@ -7003,6 +7051,7 @@ class _FileCard(QFrame):
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setToolTip("Remove")
         close.clicked.connect(self.remove_clicked.emit)
+        close.setVisible(removable)   # a sent message's card cannot be removed
         top.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
         v.addLayout(top, 1)
         bottom = QHBoxLayout()
@@ -7309,6 +7358,8 @@ class InputArea(QWidget):
     """Compact command bar with auto-grow + paste chip."""
     # Prompts that can wait while the AI works; see _emit_send.
     MAX_QUEUED = 2
+    ATTACHMENT_ONLY_PROMPT = "Please look at the attached file."
+    ATTACHMENTS_ONLY_PROMPT = "Please look at the attached files."
     send_requested = pyqtSignal(str)
     stop_requested = pyqtSignal()
     # feature name, description. Shown as the same card OCR and web search
@@ -8673,7 +8724,13 @@ class InputArea(QWidget):
                 header = ""
             parts.append(header + body)
 
-        # 2. Add user's typed text
+        # 2. Add user's typed text. Files sent with nothing typed get a plain
+        # prompt, shown under the cards and sent to the AI like typed text.
+        if not typed_text:
+            n_files = sum(1 for c in self._chip_widgets if c.get("type") == "file")
+            if n_files:
+                typed_text = self.ATTACHMENT_ONLY_PROMPT if n_files == 1 \
+                    else self.ATTACHMENTS_ONLY_PROMPT
         if typed_text:
             parts.append(typed_text)
 

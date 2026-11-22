@@ -186,7 +186,12 @@ class CrashStore:
                         (conversation_id,)
                     )
                     if not cursor.fetchone():
-                        title = content.strip()[:50] + ("..." if len(content.strip()) > 50 else "")
+                        try:
+                            from src.ui.file_attach import title_text
+                            plain = title_text(content).strip()
+                        except Exception:
+                            plain = content.strip()
+                        title = plain[:50] + ("..." if len(plain) > 50 else "")
                         cursor.execute(
                             "INSERT OR IGNORE INTO conversations "
                             "(conversation_id, project_path, title, created_at, updated_at) "

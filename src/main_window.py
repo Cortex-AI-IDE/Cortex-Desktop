@@ -9507,7 +9507,12 @@ class CortexMainWindow(QMainWindow):
         conv_id = getattr(self._ai_chat, '_current_conversation_id', None) if hasattr(self._ai_chat, '_current_conversation_id') else None
         
         if conv_id and not self._title_generator.get_cached_title(conv_id):
-            title = self._ai_agent.generate_chat_title(message, conv_id)
+            try:
+                from src.ui.file_attach import title_text
+                title_src = title_text(message)
+            except Exception:
+                title_src = message
+            title = self._ai_agent.generate_chat_title(title_src, conv_id)
             if title:
                 log.info(f"Generated chat title: {title}")
                 if hasattr(self._ai_chat, 'update_conversation_title'):
