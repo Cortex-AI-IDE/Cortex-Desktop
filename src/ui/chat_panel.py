@@ -4500,6 +4500,13 @@ class CodeBlockWidget(QFrame):
         # setHtml → contentsChanged cascade). Only setMinimumHeight so the
         # widget can grow naturally as content reflows.
         def _fit():
+            # Timers below are not tied to the widget: a chat clear can delete
+            # this code block while a retry is pending (see _alive in make_body).
+            try:
+                if _sip_isdeleted(code_browser) or _sip_isdeleted(code_browser.document()):
+                    return
+            except RuntimeError:
+                return
             w = code_browser.viewport().width() or code_browser.width() or 600
             if w <= 10:
                 # Widget not yet laid out, retry after layout settles
@@ -5209,8 +5216,23 @@ def make_body(streaming: bool = False) -> QTextBrowser:
     # Expose on instance so _flush_prose can use the same width as fit()
     tb._get_effective_width = _get_effective_width
 
+    def _alive():
+        # Crash 2026-11-07/13 and 2026-11-21 (3.0.78, two in four minutes):
+        # "Windows fatal exception: access violation" inside _delayed_fit on
+        # the GUI thread. The fit timers were not tied to this widget, so a
+        # clear/rebuild of the chat (project switch, history reload, startup
+        # restore) could delete the body while a fit was still pending, and
+        # the callback then called into a destroyed Qt object. A native fault
+        # cannot be caught by `except RuntimeError`, so check first.
+        try:
+            return not _sip_isdeleted(tb) and not _sip_isdeleted(tb.document())
+        except RuntimeError:
+            return False
+
     def fit():
         import math
+        if not _alive():
+            return
         try:
             w = _get_effective_width()
             tb.document().setTextWidth(w)
@@ -5238,6 +5260,8 @@ def make_body(streaming: bool = False) -> QTextBrowser:
 
     def _delayed_fit():
         import math
+        if not _alive():
+            return
         try:
             w = _get_effective_width()
             if w > 0:
@@ -5250,11 +5274,21 @@ def make_body(streaming: bool = False) -> QTextBrowser:
         except RuntimeError:
             _swallow("fit a card body on the delayed timer")
 
-    tb._fit_timer = QTimer()
+    # Every timer below is a CHILD of tb: Qt destroys it together with the
+    # widget, so it can never fire on a deleted body. The old parentless
+    # QTimer() and QTimer.singleShot(ms, closure) calls outlived the widget.
+    def _later(ms, fn):
+        t = QTimer(tb)
+        t.setSingleShot(True)
+        t.timeout.connect(fn)
+        t.timeout.connect(t.deleteLater)
+        t.start(ms)
+
+    tb._fit_timer = QTimer(tb)
     tb._fit_timer.setSingleShot(True)
     tb._fit_timer.setInterval(60)
     tb._fit_timer.timeout.connect(fit)
-    tb._delayed_fit_timer = QTimer()
+    tb._delayed_fit_timer = QTimer(tb)
     tb._delayed_fit_timer.setSingleShot(True)
     tb._delayed_fit_timer.setInterval(300)
     tb._delayed_fit_timer.timeout.connect(_delayed_fit)
@@ -5269,21 +5303,23 @@ def make_body(streaming: bool = False) -> QTextBrowser:
         # width changes via direct _fit() call.
         if getattr(tb, '_streaming_skip_fit', False):
             return  # Skip ALL deferred fits during streaming
+        if not _alive():
+            return  # the document emits while the widget is being torn down
         tb._fit_timer.start()
         tb._delayed_fit_timer.start()
     tb.document().contentsChanged.connect(_on_contents_changed)
     tb._fit = fit
     tb._delayed_fit = _delayed_fit
     if not streaming:
-        QTimer.singleShot(0, fit)
-        QTimer.singleShot(150, _delayed_fit)
-        QTimer.singleShot(500, _delayed_fit)
+        _later(0, fit)
+        _later(150, _delayed_fit)
+        _later(500, _delayed_fit)
     else:
         # FIX 2026-06-22: For streaming blocks, set the text width immediately
         # via a zero-delay timer. The _ensure("prose") already sets textWidth,
         # but we also need the initial height set so the widget doesn't stay at
         # minimum size until the first _fit_timer fires 60ms later.
-        QTimer.singleShot(0, fit)
+        _later(0, fit)
     # Safety net: forward any remaining internal wheel scroll to the
     # parent QScrollArea, prevents hidden scrolling if a layout edge
     # case lets the widget height fall behind the document height.
@@ -5598,6 +5634,12 @@ class MessageWidget(QWidget):
             def _fit_bubble():
                 nonlocal _fit_running
                 if _fit_running:
+                    return
+                # A pending retry can outlive the bubble (chat cleared).
+                try:
+                    if _sip_isdeleted(bub) or _sip_isdeleted(self):
+                        return
+                except RuntimeError:
                     return
                 _fit_running = True
                 try:
@@ -6936,6 +6978,68 @@ def _paint_invocation_chips(doc, text: str) -> bool:
     return found
 
 
+class _FileCard(QFrame):
+    """An attached file above the chat input, like Claude's: name, type badge
+    ("PDF", "PY"), size, and a remove button. The full path is the tooltip."""
+    remove_clicked = pyqtSignal()
+
+    def __init__(self, info: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("fileCard")
+        self.setFixedSize(168, 64)
+        self.setToolTip(f"{info.get('path', '')}\n{info.get('size_text', '')}")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(10, 6, 4, 6)
+        v.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(2)
+        name = info.get("name", "file")
+        shown = name if len(name) <= 40 else name[:24] + "…" + name[-14:]
+        self._name = lbl = QLabel(shown)
+        lbl.setWordWrap(True)
+        top.addWidget(lbl, 1, Qt.AlignmentFlag.AlignTop)
+        self._close = close = QPushButton("×")
+        close.setFixedSize(18, 18)
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setToolTip("Remove")
+        close.clicked.connect(self.remove_clicked.emit)
+        top.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
+        v.addLayout(top, 1)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(6)
+        self._tag = tag = QLabel(info.get("badge", "FILE"))
+        bottom.addWidget(tag)
+        self._size = size = QLabel(info.get("size_text", ""))
+        bottom.addWidget(size)
+        bottom.addStretch(1)
+        v.addLayout(bottom)
+        self.restyle()
+
+    def restyle(self):
+        """Colours from the live theme: the same surface and border as the
+        input box it sits in, so it matches light and dark themes alike.
+        Called again by InputArea.retheme() on a theme switch."""
+        try:
+            self.setStyleSheet(
+                f"QFrame#fileCard {{ background:{T['bg_input']};"
+                f" border:1px solid {T['input_border']}; border-radius:8px; }}"
+                f"QFrame#fileCard:hover {{ border-color:{T['accent_primary']}; }}"
+                f"QFrame#fileCard QLabel {{ background:transparent; border:none; }}")
+            self._name.setStyleSheet(
+                f"color:{T['menu_text']}; font-size:12px; font-family:{T['font_ui']};")
+            self._close.setStyleSheet(
+                f"QPushButton {{ background:transparent; color:{T['muted']}; border:none;"
+                f" font-size:14px; padding:0; }}"
+                f"QPushButton:hover {{ color:{T['red']}; }}")
+            self._tag.setStyleSheet(
+                f"QLabel {{ color:{T['btn_text']}; background:{T['btn_bg']};"
+                f" border:1px solid {T['separator']}; border-radius:4px;"
+                f" padding:0px 5px; font-size:10px; font-weight:600; }}")
+            self._size.setStyleSheet(f"color:{T['muted']}; font-size:10px;")
+        except RuntimeError:
+            _swallow("restyle a file card")
+
+
 class SpellCheckInput(QTextEdit):
     """QTextEdit with real-time spell-check underlines and a dark-mode suggestion menu."""
 
@@ -7016,6 +7120,22 @@ class SpellCheckInput(QTextEdit):
             e.accept()
             return
         super().mouseDoubleClickEvent(e)
+
+    # Set by the input area: called with the QMimeData of a drop or a
+    # right-click paste; returns True when it took the files as attachments.
+    file_drop_handler = None
+
+    def insertFromMimeData(self, source):
+        # A dropped/pasted file used to land here as its raw path text
+        # ("file:///C:/Users/.../plan.pdf"). Files become attachment cards.
+        handler = self.file_drop_handler
+        if handler is not None and source is not None and source.hasUrls():
+            try:
+                if handler(source):
+                    return
+            except Exception:
+                _swallow("attach dropped files")
+        super().insertFromMimeData(source)
 
     def _init_spellchecker(self):
         try:
@@ -7230,6 +7350,8 @@ class InputArea(QWidget):
         self._chip_layout = QHBoxLayout(self._chip_row)
         self._chip_layout.setContentsMargins(4, 0, 4, 0)
         self._chip_layout.setSpacing(6)
+        # Fixed-size file cards line up from the left instead of spreading out.
+        self._chip_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._chip_row.setVisible(False)
         outer.addWidget(self._chip_row)
 
@@ -7345,6 +7467,8 @@ class InputArea(QWidget):
         # Auto-grow input
         self.input.document().contentsChanged.connect(self._autogrow)
         self.input.installEventFilter(self)
+        # Dropped / right-click-pasted files become attachment cards.
+        self.input.file_drop_handler = self._attach_mime_files
 
         # ── Slash-command skill menu (type "/" to call a skill) ──
         # Child widget of THIS input area (never a top-level window, avoids
@@ -8274,6 +8398,11 @@ class InputArea(QWidget):
                 f"  background:{T['bg_input']}; border:1px solid {T['input_border']}; border-radius:0px;"
                 "}"
             )
+            # Attached-file cards follow the theme too.
+            for _chip in self._chip_widgets:
+                _w = _chip.get("widget")
+                if isinstance(_w, _FileCard):
+                    _w.restyle()
             _tool_btn_qss = (
                 f"QToolButton {{ background:{T['btn_bg']}; color:{T['btn_text']};"
                 f"  border:1px solid {T['separator']}; border-radius:4px;"
@@ -8519,6 +8648,16 @@ class InputArea(QWidget):
         # code fences. The label is the string "Pasted ~31 lines", so that is
         # literally what the model received for every paste but the last.
         for chip in self._chip_widgets:
+            if chip.get("type") == "file":
+                # The full path (which also lets the agent read a file outside
+                # the project), type and size; a small text file's content
+                # too. Big files and PDFs are read by the agent, not pasted in.
+                try:
+                    from src.ui.file_attach import message_block
+                    parts.append(message_block(chip["info"]))
+                except Exception:
+                    _swallow("describe an attached file for the prompt")
+                continue
             if chip.get("type") != "code":
                 continue
             body = chip.get("payload")
@@ -8775,8 +8914,9 @@ class InputArea(QWidget):
         self.input.setFocus()
 
     def _clear_code_chips(self):
-        """Drop the pasted-text chips once their content has been sent."""
-        for chip in [c for c in self._chip_widgets if c.get("type") == "code"]:
+        """Drop the pasted-text and file chips once their content has been sent
+        (warnings about refused files go with them)."""
+        for chip in [c for c in self._chip_widgets if c.get("type") in ("code", "file", "warn")]:
             widget = chip.get("widget")
             if widget:
                 self._chip_layout.removeWidget(widget)
@@ -9156,6 +9296,7 @@ class InputArea(QWidget):
                              '.bmp', '.svg', '.avif', '.heic', '.heif',
                              '.ico', '.tiff', '.tif', '.jfif', '.pjpeg',
                              '.pjp'}
+        _other_files = []
         if mime.hasUrls():
             for url in mime.urls():
                 if url.isLocalFile():
@@ -9165,8 +9306,11 @@ class InputArea(QWidget):
                     if is_video_file(local_path):
                         return self._attach_video(local_path)
                     # Only process recognised image extensions so we don't
-                    # accidentally paste arbitrary files as images.
+                    # accidentally paste arbitrary files as images. Every
+                    # other file (PDF, .py, a folder...) becomes a file card
+                    # below instead of its path landing in the input as text.
                     if _ext not in _IMAGE_EXTENSIONS:
+                        _other_files.append(local_path)
                         continue
                     try:
                         # ── Fast path: QImage rasteriser ──
@@ -9223,6 +9367,9 @@ class InputArea(QWidget):
                         log.warning("[ImagePaste] Permission denied: %s", local_path)
                     except Exception as exc:
                         log.warning("[ImagePaste] Could not load local image %s: %s", local_path, exc)
+        if _other_files:
+            self._attach_files(_other_files)
+            return True
 
         # ── Text-that-looks-like-image-path fallback ──
         # When a user copies a downloaded image file in Explorer, some Windows
@@ -9261,6 +9408,16 @@ class InputArea(QWidget):
                 except Exception as exc:
                     log.warning("[ImagePaste] Text path image load failed %s: %s", _text, exc)
 
+        # ── A paste that is only file paths / file:/// URLs ──
+        # e.g. "file:///C:/Users/.../plan.pdf" copied from a browser: attach
+        # the files as cards instead of pasting the address as text.
+        if mime.hasText():
+            from src.ui.file_attach import paths_from_text
+            _paths = paths_from_text(mime.text())
+            if _paths:
+                self._attach_local_paths(_paths)
+                return True
+
         # ── Text paste ──
         if not mime.hasText():
             return False
@@ -9272,6 +9429,19 @@ class InputArea(QWidget):
             return False  # small paste, paste normally
 
         line_count = len(lines)
+        # A very large paste does not go into the prompt: it is saved as a
+        # file and attached, and the AI reads it in parts. Megabytes of text
+        # in the prompt is what made Cortex hang.
+        from src.ui.file_attach import PASTE_INLINE_MAX_CHARS, describe, save_large_paste
+        if len(text) > PASTE_INLINE_MAX_CHARS:
+            saved = save_large_paste(text)
+            if saved:
+                info = describe(saved)
+                if not info.get("refused"):
+                    info["name"] = f"Pasted text ({line_count:,} lines)"
+                    self._add_file_chip(info)
+                    log.info("[Paste] %d chars saved to %s and attached", len(text), saved)
+                    return True
         chip_text = f"Pasted ~{line_count} lines"
         # The chip owns the text. Paste twice and you get two chips, each
         # holding its own content, instead of the second silently replacing
@@ -9403,6 +9573,87 @@ class InputArea(QWidget):
         self._add_chip(f"Video {self._video_count}: {name} ({why}, {sound})", "image")
         log.info("[VIDEO] Attached %s (%s, %s) for %s", name, why, sound, model)
         return True
+
+    # ── File attachments (cards above the input; src/ui/file_attach.py) ──
+
+    def _attach_mime_files(self, mime) -> bool:
+        """Drop / right-click paste: local files become attachments."""
+        paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+        if not paths:
+            return False
+        self._attach_local_paths(paths)
+        return True
+
+    def _attach_local_paths(self, paths) -> None:
+        """Videos, images and other files, each to its own kind of chip."""
+        from src.ai.model_media import is_video_file
+        image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.avif',
+                      '.heic', '.heif', '.ico', '.tiff', '.tif', '.jfif'}
+        others = []
+        for path in paths:
+            if os.path.isfile(path) and is_video_file(path):
+                self._attach_video(path)
+            elif os.path.isfile(path) and os.path.splitext(path)[1].lower() in image_exts:
+                if not self._attach_image_path(path):
+                    others.append(path)
+            else:
+                others.append(path)
+        if others:
+            self._attach_files(others)
+
+    def _attach_image_path(self, path: str) -> bool:
+        """Attach an image file the way a pasted image is attached."""
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            if not raw:
+                return False
+            from src.ui.image_intake import normalize_for_vision
+            data_uri, why = normalize_for_vision(raw)
+            name = os.path.basename(path)
+            if data_uri is None:
+                self._add_chip(f"⚠ {name}: {why}", "warn")
+                return True
+            self._image_count += 1
+            self._pasted_images.append({"data": data_uri, "index": self._image_count})
+            self._add_chip(f"Image {self._image_count}: {name}", "image")
+            return True
+        except Exception as exc:
+            log.warning("[Attach] image %s not loaded: %s", path, exc)
+            return False
+
+    def _attachment_count(self) -> int:
+        return sum(1 for c in self._chip_widgets if c.get("type") in ("file", "image"))
+
+    def _attach_files(self, paths) -> None:
+        """Attach files/folders as cards, within the per-message limits."""
+        from src.ui.file_attach import MAX_ATTACHMENTS, describe
+        for path in paths:
+            if self._attachment_count() >= MAX_ATTACHMENTS:
+                self._add_chip(f"⚠ Up to {MAX_ATTACHMENTS} attachments per message", "warn")
+                break
+            info = describe(path)
+            if info.get("refused"):
+                self._add_chip(f"⚠ {info.get('name')}: {info['refused']}", "warn")
+                log.info("[Attach] refused %s: %s", path, info["refused"])
+                continue
+            if any(c.get("type") == "file" and c.get("info", {}).get("path") == info["path"]
+                   for c in self._chip_widgets):
+                continue   # already attached
+            self._add_file_chip(info)
+
+    def _add_file_chip(self, info: dict) -> dict:
+        card = _FileCard(info)
+        chip_data = {"type": "file", "text": info.get("name", ""), "payload": None,
+                     "info": info, "label": None, "file": "", "lines": None,
+                     "widget": card}
+        card.remove_clicked.connect(lambda: self._remove_chip(chip_data))
+        self._chip_widgets.append(chip_data)
+        self._chip_layout.addWidget(card)
+        self._chip_row.setVisible(True)
+        log.info("[Attach] %s (%s, %s, inline=%s)", info.get("path"), info.get("kind"),
+                 info.get("size_text"), info.get("inline"))
+        return chip_data
 
     def _add_chip(self, text: str, chip_type: str = "code", payload: str | None = None):
         """Add an orange chip label to the chip row above input. Each chip has a trash button.

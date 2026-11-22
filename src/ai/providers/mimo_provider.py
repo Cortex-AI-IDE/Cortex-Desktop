@@ -675,6 +675,11 @@ class MimoProvider(BaseProvider):
         url = f"{self._base_url}/chat/completions"
 
         last_error: Optional[Exception] = None
+        # Once anything has been streamed, an error must NOT restart the
+        # request (here or on the fallback host): MiMo would send the whole
+        # answer again and the chat would show it twice, once per retry
+        # (owner report 2026-11-22: replies repeating in the chat).
+        _streamed_any = False
         for attempt in range(self._max_retries + 1):
             if attempt > 0:
                 backoff = self._retry_delay * (2 ** (attempt - 1)) + random.random()
@@ -788,13 +793,13 @@ class MimoProvider(BaseProvider):
                         reasoning = ""  # prevent double-emit as thought card
 
                     if reasoning:
-                        _yielded_content = True
+                        _yielded_content = _streamed_any = True
                         _st_mark()
                         _st_reason_deltas += 1
                         _st_chars += len(reasoning)
                         yield "__REASONING_DELTA__:" + reasoning
                     if content:
-                        _yielded_content = True
+                        _yielded_content = _streamed_any = True
                         _st_mark()
                         _st_content_deltas += 1
                         _st_chars += len(content)
@@ -802,7 +807,7 @@ class MimoProvider(BaseProvider):
 
                     # Agentic tool calls (function calling)
                     if tool_calls:
-                        _yielded_content = True
+                        _yielded_content = _streamed_any = True
                         _st_mark()
                         _st_tool_deltas += 1
                         _seen_tool_call_deltas = True
@@ -830,6 +835,10 @@ class MimoProvider(BaseProvider):
                     f"read={self._read_timeout}s (attempt {attempt + 1})"
                 )
                 log.warning(str(last_error))
+                if _streamed_any:
+                    raise RuntimeError(
+                        "MiMo stopped responding in the middle of the answer. "
+                        "Send the message again to continue.") from None
                 continue
 
             except requests.exceptions.HTTPError as e:
@@ -938,19 +947,21 @@ class MimoProvider(BaseProvider):
                 _is_premature = ("ended prematurely" in _err_str
                                  or "incomplete" in _err_str
                                  or "chunked" in _err_str)
-                if _yielded_content:
-                    # CRITICAL: If tool call deltas were in flight when the stream
-                    # dropped, the accumulated arguments are likely truncated JSON.
-                    # The agent bridge will fail to parse them, causing Write/Bash
-                    # to get empty args and reject the call. We must retry instead
-                    # of treating this as complete.
+                if _streamed_any:
+                    # If tool call deltas were in flight when the stream dropped,
+                    # the accumulated arguments are likely truncated JSON. This
+                    # used to RETRY the request, which streamed the whole answer
+                    # again on top of what the chat already showed (and doubled
+                    # the tool-call deltas). Fail the turn with a clear message
+                    # instead; the user can send again.
                     if _seen_tool_call_deltas and _is_premature:
                         log.warning(
                             f"Mimo API stream ended early DURING tool call streaming "
-                            f"(attempt {attempt + 1}): {e}, retrying to get complete tool args"
+                            f"(attempt {attempt + 1}): {e}, not retrying (would replay the answer)"
                         )
-                        last_error = e
-                        continue  # retry the request
+                        raise RuntimeError(
+                            "MiMo's connection dropped while it was writing a tool call. "
+                            "Send the message again to continue.") from e
                     log.info(
                         f"Mimo API stream ended early but content received "
                         f"(attempt {attempt + 1}): {e}, treating as complete"
@@ -966,10 +977,15 @@ class MimoProvider(BaseProvider):
             except requests.exceptions.RequestException as e:
                 last_error = e
                 log.warning(f"Mimo API stream error (attempt {attempt + 1}): {e}")
+                if _streamed_any:
+                    raise RuntimeError(
+                        "MiMo's connection failed in the middle of the answer. "
+                        "Send the message again to continue.") from e
                 continue
 
-        # All retries exhausted, try fallback host if available
-        if self._try_fallback_host():
+        # All retries exhausted, try fallback host if available - but only
+        # when nothing was streamed yet, or the answer would start over.
+        if not _streamed_any and self._try_fallback_host():
             log.info("[MiMo] Retrying chat_stream() with fallback host...")
             yield from self.chat_stream(
                 messages=messages, model=model, temperature=temperature,
@@ -1100,8 +1116,8 @@ class MimoProvider(BaseProvider):
             except requests.exceptions.ConnectionError as conn_err:
                 # Connection errors (refused, reset), may be transient
                 last_error = conn_err
-                log.warning(f"[MiMo] Connection error (attempt {attempt} + 1/{max_retries} + 1): {conn_err}")
-                if attempt < max_retries:
+                log.warning(f"[MiMo] Connection error (attempt {attempt + 1}/{self._max_retries + 1}): {conn_err}")
+                if attempt < self._max_retries:
                     continue
                 raise RuntimeError(
                     f"Network error: Cannot connect to MiMo API. "

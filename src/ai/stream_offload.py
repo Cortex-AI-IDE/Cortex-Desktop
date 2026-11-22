@@ -47,7 +47,6 @@ skips the timer while the queue is non-empty.
 """
 
 import asyncio
-import concurrent.futures
 import logging
 import threading
 from typing import Any, AsyncIterator, Callable, Iterable, Optional
@@ -82,28 +81,36 @@ async def aiter_offloaded(
     traceback, so existing error handling around the call site is unaffected.
     """
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
+    # Unbounded asyncio queue; the bound lives in `slots` below, on the
+    # worker's side, where blocking is allowed.
+    queue: asyncio.Queue = asyncio.Queue()
+    slots = threading.Semaphore(queue_size)
     cancelled = threading.Event()
 
     def _put(item: Any) -> None:
-        """Hand one item to the loop. Blocks the WORKER, never the loop.
+        """Hand one item to the loop, exactly once. Blocks the WORKER, never the loop.
 
         Blocking here is deliberate: it is the backpressure that stops a fast
-        provider from queueing an unbounded number of chunks. It gives up in
+        provider from queueing an unbounded number of chunks. It waits in
         slices so that a consumer which has stopped reading cannot strand the
         thread.
+
+        It used to put with run_coroutine_threadsafe(queue.put(item)), wait
+        2 s, then cancel and put the SAME item again. When the first put had
+        in fact completed just as the wait timed out (the agent loop was
+        slow: fast models, a busy GUI), the chunk was delivered twice - text
+        repeated in the chat (owner report 2026-11-22). Now a slot is taken
+        first and the item is handed over with one call_soon_threadsafe,
+        which cannot be half-done.
         """
         while not cancelled.is_set():
-            future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
-            try:
-                future.result(timeout=_PUT_SLICE_SECONDS)
-                return
-            except concurrent.futures.TimeoutError:
-                future.cancel()
+            if not slots.acquire(timeout=_PUT_SLICE_SECONDS):
                 continue
-            except Exception:
-                # Loop is closing or already closed. Nothing can be delivered.
-                return
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+            except RuntimeError:
+                return  # loop closed: nothing can be delivered
+            return
 
     def _pump() -> None:
         gen: Any = None
@@ -133,6 +140,7 @@ async def aiter_offloaded(
         while True:
             try:
                 kind, payload = await asyncio.wait_for(queue.get(), poll_interval)
+                slots.release()   # one more item may be queued by the worker
             except asyncio.TimeoutError:
                 # Nothing arrived this slice. This is the only place a stop can
                 # be noticed when the provider has sent no chunks at all.

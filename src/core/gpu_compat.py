@@ -18,6 +18,9 @@ Decision order (first match wins):
   1. CORTEX_SOFTWARE_RENDERING=1 in the environment   -> software
   2. settings.json ui.rendering_mode = software|gpu   -> explicit user choice
   3. legacy settings.json ui.software_rendering=true  -> software
+  3b. a crash on a native (Chromium GPU) thread in    -> software, this
+      the last 7 days (crash_fallback)                    launch; the window
+                                                          then asks to keep it
   4. Automatic hardware detection:
        - ONLY Microsoft Basic Display/Render adapters  -> software
          (no real driver installed, GPU rendering is guaranteed to fail)
@@ -68,6 +71,10 @@ def set_current_mode(mode: str, reason: str = "") -> None:
 
 def current_mode() -> Optional[str]:
     return _current_mode
+
+
+def current_reason() -> str:
+    return _current_reason
 
 
 
@@ -251,6 +258,88 @@ def gpu_inventory_summary(gpus: Optional[List[Dict]] = None) -> str:
 # Resolution
 # ──────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────
+# Crash-driven fallback
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Qt WebEngine runs Chromium's GPU code on a thread INSIDE Cortex.exe
+# ("Chrome_InProcGpuThread"), whatever flags we pass. In Chrome a graphics
+# driver crash only kills the GPU process; here it kills the whole app.
+# Microsoft Store report, 3.0.73 on Windows 11 + NVIDIA: write access
+# violation on Chrome_InProcGpuThread, Qt6WebEngineCore -> d3d11 ->
+# nvwgf2umx.dll. crash.log, 3.0.78, 2026-11-21: two access violations four
+# minutes apart, both on a thread that was not Python's.
+#
+# faulthandler marks the crashing thread "Current thread" when it is a
+# Python thread. A fatal native exception with NO "Current thread" in the
+# dump happened on a native thread, which in this process means Chromium,
+# and almost always its GPU thread. One of those within a week switches the
+# next launch to CPU rendering; the window then asks whether to keep it.
+# One, not two: waiting for a second crash cost the user their work twice
+# (2026-11-21: two crashes four minutes apart). A false alarm only costs
+# some speed, and "Use the graphics card again" undoes it.
+
+CRASH_LOG = os.path.join(os.path.expanduser("~"), ".cortex", "crash.log")
+CRASH_WINDOW_DAYS = 7
+CRASH_THRESHOLD = 1
+# Exceptions that end the process. 0x8001010d (a COM call refused during
+# input processing) is logged by faulthandler too but is usually handled,
+# so it is not counted.
+_FATAL_MARKERS = ("access violation", "illegal instruction", "stack overflow",
+                  "in page error", "integer divide by zero")
+_SESSION_PREFIX = "===== Cortex crash session "
+
+
+def native_thread_crashes(path: Optional[str] = None, since: Optional[_dt.datetime] = None,
+                          tail_bytes: int = 2_000_000) -> List[_dt.datetime]:
+    """Start times of earlier sessions that died on a native (non-Python) thread."""
+    try:
+        with open(path or CRASH_LOG, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - tail_bytes))
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    found: List[_dt.datetime] = []
+    for block in text.split(_SESSION_PREFIX)[1:]:
+        header, _, body = block.partition("\n")
+        try:
+            started = _dt.datetime.fromisoformat(header.strip().strip("=").strip())
+        except ValueError:
+            continue
+        if since is not None and started <= since:
+            continue
+        for line_no, line in enumerate(body.splitlines()):
+            if line.startswith("Windows fatal exception:") and any(
+                    m in line for m in _FATAL_MARKERS):
+                after = body.splitlines()[line_no + 1:]
+                if not any(l.startswith("Current thread 0x") for l in after):
+                    found.append(started)
+                break
+    return found
+
+
+def crash_fallback(ui: dict, now: Optional[_dt.datetime] = None) -> Optional[str]:
+    """A reason string when recent native crashes call for CPU rendering."""
+    now = now or _dt.datetime.now()
+    since = now - _dt.timedelta(days=CRASH_WINDOW_DAYS)
+    # "Use the graphics card again" in the prompt records when the user
+    # chose that; crashes up to that moment are not counted again.
+    ack = str(ui.get("gpu_crash_ack") or "").strip()
+    if ack:
+        try:
+            since = max(since, _dt.datetime.fromisoformat(ack))
+        except ValueError:
+            pass
+    crashes = native_thread_crashes(since=since)
+    if len(crashes) < CRASH_THRESHOLD:
+        return None
+    times = "once" if len(crashes) == 1 else f"{len(crashes)} times"
+    return (f"crash fallback: Cortex closed {times} since "
+            f"{crashes[0]:%Y-%m-%d %H:%M} on a graphics (Chromium) thread")
+
+
 def resolve_render_mode(settings: Optional[dict] = None) -> Tuple[str, str]:
     """Resolve the render mode for this launch.
 
@@ -276,6 +365,14 @@ def resolve_render_mode(settings: Optional[dict] = None) -> Tuple[str, str]:
     #    writes, so the existing fix path keeps working unchanged).
     if bool(ui.get("software_rendering")):
         return ("software", "legacy user setting ui.software_rendering=true")
+
+    # 3b. Recent crashes on Chromium's GPU thread (see crash_fallback).
+    try:
+        reason = crash_fallback(ui)
+    except Exception:
+        reason = None
+    if reason:
+        return ("software", reason)
 
     # 4. Automatic hardware detection.
     detected, reason = classify_gpus(enumerate_gpus())

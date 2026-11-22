@@ -379,6 +379,11 @@ class DeepSeekProvider(BaseProvider):
         retry_callback = kwargs.pop("retry_callback", None)
         max_retries = self._max_retries
         last_error: Optional[Exception] = None
+        # Once anything has been streamed, an error must NOT restart the
+        # request: the model would send the whole answer again from the
+        # start and the chat would show it twice (or once per retry). Only
+        # failures before the first piece are retried.
+        _streamed_any = False
 
         for attempt in range(max_retries + 1):
             if attempt > 0:
@@ -473,11 +478,13 @@ class DeepSeekProvider(BaseProvider):
                                             if content:
                                                 content = re.sub(r'[\ufffd\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]', '', content)
                                                 if content:
+                                                    _streamed_any = True
                                                     yield content
                                             elif reasoning:
                                                 reasoning = re.sub(r'[\ufffd\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]', '', reasoning)
                                                 if reasoning:
                                                     log.debug("[DeepSeek] Received reasoning_content chunk (%d chars)", len(reasoning))
+                                                    _streamed_any = True
                                                     yield f"__REASONING_DELTA__:{reasoning}"
 
                                             if tool_calls:
@@ -498,6 +505,7 @@ class DeepSeekProvider(BaseProvider):
                                                             'arguments': raw_args if isinstance(raw_args, str) else str(raw_args)
                                                         }
                                                     })
+                                                _streamed_any = True
                                                 yield f"__TOOL_CALL_DELTA__:{json.dumps(tool_call_data)}"
 
                                             if 'usage' in data:
@@ -565,13 +573,13 @@ class DeepSeekProvider(BaseProvider):
                 # Other RuntimeErrors may be retryable
                 last_error = _rt_err
                 log.warning(f"[DeepSeek] Runtime error (attempt {attempt + 1}/{max_retries + 1}): {_rt_err}")
-                if attempt < max_retries:
+                if attempt < max_retries and not _streamed_any:
                     continue
                 raise last_error
             except requests.exceptions.Timeout:
                 last_error = Exception(f"DeepSeek API timeout after connect={self._connect_timeout}s / read={self._read_timeout}s")
                 log.warning(f"[DeepSeek] Timeout (attempt {attempt + 1}/{max_retries + 1})")
-                if attempt < max_retries:
+                if attempt < max_retries and not _streamed_any:
                     continue
                 raise last_error
             except requests.exceptions.HTTPError as e:
@@ -602,7 +610,7 @@ class DeepSeekProvider(BaseProvider):
                         "Please visit https://platform.deepseek.com to check your balance, "
                         "or switch to a different model provider."
                     )
-                if status in (429, 502, 503, 504) and attempt < max_retries:
+                if status in (429, 502, 503, 504) and attempt < max_retries and not _streamed_any:
                     log.warning(f"[DeepSeek] Transient error {status} (attempt {attempt + 1}/{max_retries + 1})")
                     # No sleep here, loop-top already handles backoff
                     continue
@@ -635,7 +643,7 @@ class DeepSeekProvider(BaseProvider):
                 # Connection errors (refused, reset, DNS), may be transient
                 last_error = conn_err
                 log.warning(f"[DeepSeek] Connection error (attempt {attempt + 1}/{max_retries + 1}): {conn_err}")
-                if attempt < max_retries:
+                if attempt < max_retries and not _streamed_any:
                     continue
                 raise RuntimeError(
                     f"Network error: Cannot connect to DeepSeek API. "
@@ -644,7 +652,7 @@ class DeepSeekProvider(BaseProvider):
             except requests.exceptions.RequestException as e:
                 last_error = e
                 log.warning(f"[DeepSeek] Request error (attempt {attempt + 1}/{max_retries + 1}): {e}")
-                if attempt < max_retries:
+                if attempt < max_retries and not _streamed_any:
                     continue
                 detail = ""
                 try:

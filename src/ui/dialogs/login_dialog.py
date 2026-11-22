@@ -859,4 +859,33 @@ def require_login(parent=None) -> bool:
         dlg.resize(screen.availableGeometry().size())
     dlg.showMaximized()
     result = dlg.exec()
-    return result == QDialog.DialogCode.Accepted or dlg.skipped
+    ok = result == QDialog.DialogCode.Accepted or dlg.skipped
+    _release_worker(dlg)
+    return ok
+
+
+# Sign-in workers that did not stop in time. Kept referenced so Python never
+# frees a QThread that is still running (see _release_worker).
+_LINGERING_WORKERS: list = []
+
+
+def _release_worker(dlg) -> None:
+    """Stop the dialog's sign-in worker before the dialog is freed.
+
+    Linux crash.log 2026-10-30, "Fatal Python error: Aborted" at the login
+    gate: when require_login() returned, its LoginDialog was freed and took
+    the still-running _LoginWorker with it; Qt aborts on a QThread destroyed
+    while running. It happens after a sign-in (the worker is still finishing
+    its run()), after "Skip for now" while a browser sign-in was waiting,
+    and after Quit.
+    """
+    worker = getattr(dlg, "_worker", None)
+    if worker is None:
+        return
+    try:
+        worker.cancel()
+        if not worker.wait(3000):
+            log.warning("[Login] sign-in worker still running; keeping it alive")
+            _LINGERING_WORKERS.append(worker)
+    except RuntimeError:
+        pass  # silent-ok: the C++ thread object is already gone

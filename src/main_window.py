@@ -1209,6 +1209,14 @@ class CortexMainWindow(QMainWindow):
         try:
             QTimer.singleShot(8000, self._check_render_health)
             QTimer.singleShot(20000, self._check_render_health)
+            # This launch fell back to CPU rendering after crashes on
+            # Chromium's GPU thread: tell the user and ask (gpu_compat).
+            from src.ui.render_health import offer_after_crash_fallback
+            QTimer.singleShot(5000, lambda: offer_after_crash_fallback(self))
+            # Windows 10 versions Microsoft no longer updates have a text-
+            # input bug that closes Cortex (Store report, src/core/os_support).
+            from src.core.os_support import offer_windows_update_notice
+            QTimer.singleShot(9000, lambda: offer_windows_update_notice(self))
         except Exception as e:
             log.info(f"[Startup] render-health checks not scheduled: {e}")
 

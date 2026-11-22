@@ -6837,6 +6837,9 @@ Required behavior:
                     _reasoning_token_count = 0  # approximate token count (chars / 4)
                     from src.ai.reasoning_loop import ReasoningLoopDetector, LOOP_NOTE
                     _reasoning_loop = ReasoningLoopDetector()
+                    # Same idea for the answer text itself (src/ai/text_loop.py).
+                    from src.ai.text_loop import TextLoopDetector, LOOP_NOTE as _TEXT_LOOP_NOTE
+                    _text_loop = TextLoopDetector()
                     _has_received_content_or_tools = False
                     _thinking_budget_exceeded = False  # flag to prevent repeated warnings
                     try:
@@ -7471,6 +7474,27 @@ Required behavior:
                                     if _diff > 0:
                                         turn_text = turn_text[:-len(chunk)] + _clean
                                         full_response = full_response[:-len(chunk)] + _clean
+                                    # ── Answer loop: the same block over and over ──
+                                    # Fast models (DeepSeek V4.1 Flash, MiMo) sometimes
+                                    # stream one paragraph 10-100 times until Stop
+                                    # (owner report 2026-11-22). Stop reading, keep one
+                                    # copy in the saved answer, and say what happened.
+                                    if _text_loop.feed(_clean):
+                                        _cut = _text_loop.cut
+                                        log.warning(
+                                            f"[BRIDGE] Answer loop on turn {turn + 1}: a "
+                                            f"{_text_loop.block}-char block repeated; stopping "
+                                            f"the stream and dropping {_cut} chars of copies")
+                                        if 0 < _cut < len(turn_text):
+                                            turn_text = turn_text[:-_cut]
+                                        if 0 < _cut < len(full_response):
+                                            full_response = full_response[:-_cut]
+                                        full_response += _TEXT_LOOP_NOTE
+                                        try:
+                                            self._safe_emit(self.response_chunk, _TEXT_LOOP_NOTE)
+                                        except Exception:
+                                            _swallow()
+                                        break
                         # Harvest the provider-reported usage for THIS call -
                         # real billed numbers (input incl. history/system
                         # prompt/tool results, output incl. tool args and

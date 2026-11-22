@@ -393,6 +393,45 @@ def _offer_compat_mode(parent, evidence: str) -> bool:
     return True
 
 
+def offer_after_crash_fallback(parent) -> None:
+    """This launch is on CPU rendering because of recent crashes on
+    Chromium's GPU thread (gpu_compat.crash_fallback). Say so, and let the
+    user keep it or go back to the graphics card. Nothing is switched for
+    good without an answer: closing the box asks again next launch."""
+    try:
+        from src.core import gpu_compat
+        reason = gpu_compat.current_reason()
+        if gpu_compat.current_mode() != "software" or not reason.startswith("crash fallback"):
+            return
+        from PyQt6.QtWidgets import QMessageBox
+        box = QMessageBox(parent)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Cortex closed unexpectedly")
+        box.setText("Cortex closed unexpectedly because of a graphics problem.")
+        box.setInformativeText(
+            reason.split(": ", 1)[-1].capitalize() + ".\n\n"
+            "This time Cortex draws its panels with the processor instead of the "
+            "graphics card, which avoids the crash. It is slightly slower.\n\n"
+            "Updating the graphics driver usually fixes the cause.")
+        keep = box.addButton("Keep compatibility mode", QMessageBox.ButtonRole.AcceptRole)
+        gpu = box.addButton("Use the graphics card again", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is keep:
+            enable_software_rendering()
+            log.info("[RenderHealth] crash fallback: user kept compatibility mode")
+        elif clicked is gpu:
+            import datetime as _dt
+            from src.config.settings import get_settings
+            get_settings().set("ui", "gpu_crash_ack",
+                               _dt.datetime.now().isoformat(timespec="seconds"))
+            log.info("[RenderHealth] crash fallback: user chose the graphics card "
+                     "again (from the next start)")
+    except Exception as exc:
+        log.warning("[RenderHealth] crash-fallback prompt failed: %s", exc)
+
+
 def check_and_offer_fix(parent, widgets: Iterable) -> bool:
     """Crash-driven path: offer the fix when Chromium itself reported a
     render failure. Returns True when the user accepted and it was saved.

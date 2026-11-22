@@ -418,11 +418,13 @@ os.environ['QT_SCALE_FACTOR_ROUNDING_POLICY'] = 'PassThrough'
 if sys.platform == 'win32':
     os.environ['QT_QPA_PLATFORM'] = 'windows'
     
-# GPU stability: --in-process-gpu runs Chromium's GPU in the same process as
-# the renderer, so GPU crashes (like SharedImage corruption) become render
-# crashes, which are caught and auto-recovered by renderProcessTerminated
-# handlers in webview_panel.py and ai_chat.py. Without this, GPU crashes
-# silently kill the entire process with no recovery.
+# GPU stability. Qt WebEngine runs Chromium's GPU code on a thread inside
+# Cortex.exe ("Chrome_InProcGpuThread") whatever flags are passed, so a
+# graphics-driver crash there ends the whole app: renderProcessTerminated
+# does NOT see it. Store crash report 2026-11 (Windows 11 + NVIDIA): access
+# violation on that thread in d3d11/nvwgf2umx.dll. The defence is the
+# crash-driven fallback in src/core/gpu_compat.py (crash_fallback): after
+# such a crash the next launch uses CPU rendering and asks.
 #
 # Additional crash prevention:
 #   1. Reduced Monaco rendering features (no bracket colorization, smooth scroll, etc.)
@@ -1074,7 +1076,11 @@ def main():
             from src.ui.dialogs.login_dialog import require_login
             if not require_login():
                 log.info("[LoginGate] sign-in cancelled, exiting")
-                sys.exit(0)
+                # Not sys.exit(): Python's full teardown destroyed the
+                # sign-in worker thread while it was still running and Qt
+                # aborted ("Fatal Python error: Aborted", Linux crash.log
+                # 2026-10-30, main.py login gate). See _exit_without_teardown.
+                _exit_without_teardown(0)
             _gate = _gate_eval()          # re-read what the login just wrote
         if _gate.should_refresh:
             refresh_in_background()
@@ -1387,10 +1393,30 @@ def main():
         # Stop the timer to prevent re-entry
         try:
             _auto_save_timer.stop()
-        except Exception:  # silent-ok: sys.exit(0) follows on the next line
+        except Exception:  # silent-ok: the quit below still runs
             pass
-        # Give the save a moment to flush, then exit
-        sys.exit(0)
+        # NOT sys.exit(0). Python runs this handler inside whatever Qt
+        # callback is active (main_window.event, a streaming chunk slot...),
+        # and a SystemExit raised there makes Python do its FULL teardown:
+        # it destroyed the chat's still-running render thread and Qt aborted
+        # (Linux crash.log: "Received SIGTERM" then "Fatal Python error:
+        # Aborted" in Py_Exit, 2026-10-31, 11-03, 11-19). Ask Qt to quit
+        # instead: app.exec() returns, aboutToQuit stops the threads, and
+        # main() leaves through _exit_without_teardown. If the event loop
+        # is stuck, a watchdog ends the process after 5 seconds.
+        try:
+            _qapp = QApplication.instance()
+            if _qapp is not None:
+                _qapp.quit()
+        except Exception as exc:
+            log.debug("[SHUTDOWN] quit request failed: %s", exc)
+
+        def _force_exit():
+            time.sleep(5)
+            log.warning("[SHUTDOWN] event loop did not stop after %s; exiting", sig_name)
+            _exit_without_teardown(0)
+
+        threading.Thread(target=_force_exit, daemon=True, name="signal-exit").start()
 
     try:
         signal.signal(signal.SIGTERM, _signal_handler)
@@ -1487,7 +1513,9 @@ def main():
         _exit_without_teardown(res)
     except Exception as e:
         log.critical(f"FATAL EXCEPTION in main loop: {e}", exc_info=True)
-        sys.exit(1)
+        # Same reason as the signal handler: a full teardown here crashes in
+        # native code and hides the real error behind an abort.
+        _exit_without_teardown(1)
 
 
 def _exit_without_teardown(code: int) -> None:
