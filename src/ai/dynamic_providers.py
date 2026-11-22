@@ -309,6 +309,16 @@ def refresh_async(app_version: str = "", force: bool = False) -> None:
             if status != 200 or not isinstance(data, dict):
                 log.warning(f"[dynamic] sync failed: HTTP {status}")
                 return
+            # The server reports providers withheld because this build is older
+            # than their minimum. Without this line the symptom is a provider
+            # that simply is not there: no error, nothing in the log, and a
+            # server-side row that looks perfectly healthy (2026-11-22).
+            withheld = int(data.get("hidden_by_version") or 0)
+            if withheld:
+                log.warning(
+                    f"[dynamic] server withheld {withheld} provider(s) from this build "
+                    f"({app_version or 'unknown version'}): "
+                    f"{data.get('hidden_reason') or 'requires a newer IDE'}")
             _apply(data, from_disk=False)
             _write_cache(data)
             _notify()
@@ -446,6 +456,20 @@ def supports_thinking(model_id: str) -> Optional[bool]:
     return m["supports_thinking"] if m else (False if is_dynamic_id(model_id) else None)
 
 
+def _context_label(tokens: int) -> str:
+    """The window the way people quote it: 1M, 1.05M, 500K, 262K.
+
+    Integer division printed a million-token window as "1000K", which reads
+    like a limit rather than a feature and is not the number the server's
+    admin panel shows for the same model (1,000,000). (2026-11-22)
+    """
+    n = int(tokens or 0)
+    if n >= 1_000_000:
+        millions = f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".")
+        return f"{millions}M ctx"
+    return f"{round(n / 1000)}K ctx"
+
+
 def dropdown_groups() -> List[ModelGroup]:
     """One BYOK group per provider that is usable right now (key set or keyless)."""
     groups: List[ModelGroup] = []
@@ -456,7 +480,7 @@ def dropdown_groups() -> List[ModelGroup]:
         for m in spec["models"]:
             bits = []
             if m["context_window"]:
-                bits.append(f"{m['context_window'] // 1000}K ctx")
+                bits.append(_context_label(m["context_window"]))
             if m["is_free"]:
                 bits.append("FREE")
             if m["supports_vision"]:
