@@ -325,9 +325,11 @@ class MermaidStreamingCard(QFrame):
         h.setSpacing(10)
 
         from src.ui.spinner import MermaidSpinner
-        self._spinner = MermaidSpinner(size=18, color=T['accent'])
-        self._spinner.start()
+        # Parented and in the layout BEFORE start(): start() shows the
+        # spinner, and a parentless show() is a top-level window.
+        self._spinner = MermaidSpinner(size=18, color=T['accent'], parent=self)
         h.addWidget(self._spinner)
+        self._spinner.start()
 
         self._lbl = lbl = QLabel("Generating diagram…")
         h.addWidget(lbl)
