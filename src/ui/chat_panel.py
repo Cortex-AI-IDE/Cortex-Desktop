@@ -359,6 +359,35 @@ class MermaidStreamingCard(QFrame):
         self._spinner.stop()
 
 
+def _closed_fence_end(buf: str) -> int:
+    """Offset just past the newline of the LAST line that closes a ``` fence,
+    or -1. Unlike the seal fallback, text after the fence is not required:
+    the card is complete as soon as its closing line is."""
+    off, end, in_fence = 0, -1, False
+    lines = buf.split('\n')
+    for i, ln in enumerate(lines):
+        is_last = i == len(lines) - 1
+        if ln.lstrip().startswith('```'):
+            if in_fence:
+                in_fence = False
+                if not is_last:          # the closing line has its newline
+                    end = off + len(ln) + 1
+            else:
+                in_fence = True
+        off += len(ln) + 1
+    return -1 if in_fence and end < 0 else end
+
+
+def _block_end_unsafe(s: str) -> bool:
+    """True when the turn-end coalescer would join this block with the next
+    (odd fence count, a cut ``` marker, or no paragraph break at its end)."""
+    if s.count("```") % 2 != 0:
+        return True
+    m = re.search(r'`+\s*$', s)
+    run = len(m.group(0).strip()) if m else 0
+    return 0 < run < 3 or not s.endswith("\n\n")
+
+
 def _auto_wrap_paths_and_commands(markdown_text: str) -> str:
     """Wrap standalone Windows paths and common shell commands in backticks so they render as code."""
     # 1. Wrap lines that are clearly shell commands (cd, npm, python, etc.) FIRST
@@ -11207,13 +11236,113 @@ class ChatPanel(QWidget):
                 buf, self._PROSE_TAIL_TARGET)
         if split_at < 0:
             return  # no safe boundary yet, keep growing
+        self._seal_split(split_at, prefix_xfix, tail_xfix)
+
+    # A code card is finished the moment its closing fence is on screen, not
+    # at turn end: the header (language, Copy, Run) and full width appear
+    # before the text after it streams. Prefixes holding these keep the
+    # turn-end path, which has its own handling for them.
+    _NO_LIVE_FINALIZE = ("```mermaid", "<questions", "<question")
+
+    def _seal_at_closed_fence(self) -> bool:
+        """Seal the live block right after a code fence that just closed.
+
+        The sealed part is rendered by the turn-end renderer immediately, so
+        the code block becomes a real CodeBlockWidget card while the answer
+        is still streaming. Returns True when it sealed.
+        """
+        if not (self._RENDERED_REVEAL and getattr(self, '_turn_active', False)):
+            return False
+        if self._open_kind != "prose" or self._open_block is None:
+            return False
+        buf = self._visible_prose()
+        if buf.count("```") < 2:
+            return False
+        split_at = _closed_fence_end(buf)
+        if split_at <= 0:
+            return False
+        prefix = buf[:split_at]
+        low = prefix.lower()
+        if any(tag in low for tag in self._NO_LIVE_FINALIZE):
+            return False
+        # The turn-end coalescer joins a block that does not end on a clean
+        # boundary with the NEXT one. If the block before this one would be
+        # joined into it, rendering it now would show that text twice.
+        if self._prose_blocks:
+            prev_tb, prev_buf = self._prose_blocks[-1]
+            if (id(prev_tb) not in getattr(self, '_hard_breaks', set())
+                    and not getattr(prev_tb, '_finalized_live', False)
+                    and _block_end_unsafe(prev_buf)):
+                return False
+        self._seal_split(split_at, finalize=True)
+        return True
+
+    def _finalize_live_block(self, block, text: str) -> bool:
+        """Render a sealed block exactly as turn end would, right now."""
+        from src.ui.chat_text import strip_all_control_tags, strip_todo_blocks, \
+            clean_broken_windows_paths, clean_markdown_urls, auto_fix_broken_code_fences
+        try:
+            from src.ui.syntax_highlight import highlight_code
+        except ImportError:
+            def highlight_code(code: str, lang: str = "") -> str:
+                import html as _html
+                return _html.escape(code)
+        block._streaming_skip_fit = False
+        try:
+            self._render_single_prose(block, text, highlight_code,
+                                      strip_all_control_tags, strip_todo_blocks,
+                                      clean_broken_windows_paths, clean_markdown_urls,
+                                      auto_fix_broken_code_fences)
+        except Exception as exc:
+            log.warning(f"[ChatPanel] live code-card render failed, kept for turn end: {exc}")
+            return False
+        block._finalized_live = True
+        return True
+
+    def _seal_split(self, split_at: int, prefix_xfix: str = "", tail_xfix: str = "",
+                    finalize: bool = False):
+        """Seal the live block at ``split_at`` (an offset into the visible
+        text) and continue streaming the rest into a fresh block."""
+        full = self._prose_buf
+        buf = self._visible_prose()
         prefix, tail = buf[:split_at] + prefix_xfix, tail_xfix + full[split_at:]
         if not prefix.strip():
             return
         old_block = self._open_block
         if old_block is None or not hasattr(old_block, 'setHtml'):
             return
+        finalized = False
+        if finalize:
+            with self._stabilize_scroll():
+                finalized = self._finalize_live_block(old_block, prefix)
         try:
+            if not finalized:
+                self._seal_render_old(old_block, prefix)
+        except RuntimeError:
+            return
+        self._prose_blocks.append((old_block, prefix))
+        if finalized:
+            # Never merge across it at turn end, and never render it again.
+            if not hasattr(self, "_hard_breaks"):
+                self._hard_breaks = set()
+            self._hard_breaks.add(id(old_block))
+        # Open a fresh prose block for the live tail. _open_kind must be
+        # cleared first so _ensure doesn't early-return (and doesn't
+        # double-push the buffer we just sealed).
+        self._open_kind = None
+        with self._stabilize_scroll():
+            self._ensure("prose")
+        self._prose_buf = tail
+        if self._RENDERED_REVEAL:
+            # The revealed part of the tail belongs on the new block now;
+            # waiting for the next frame would blank it for one paint.
+            self._flush_prose()
+        log.debug(f"[ChatPanel] Sealed prose block at {len(prefix)} chars, "
+                  f"tail={len(tail)}, finalized={finalized}")
+
+    def _seal_render_old(self, old_block, prefix: str):
+        """Final streaming render of a block being sealed, fitted to its text."""
+        if old_block is not None:
             self._render_stream_html(old_block, prefix)
             # Fit the block we are leaving behind to the text it now holds.
             #
@@ -11233,21 +11362,6 @@ class ChatPanel(QWidget):
                 if _shrinking:
                     # Shrinks do not reach the layout on their own (see fit()).
                     old_block.updateGeometry()
-        except RuntimeError:
-            return
-        self._prose_blocks.append((old_block, prefix))
-        # Open a fresh prose block for the live tail. _open_kind must be
-        # cleared first so _ensure doesn't early-return (and doesn't
-        # double-push the buffer we just sealed).
-        self._open_kind = None
-        with self._stabilize_scroll():
-            self._ensure("prose")
-        self._prose_buf = tail
-        if self._RENDERED_REVEAL:
-            # The revealed part of the tail belongs on the new block now;
-            # waiting for the next frame would blank it for one paint.
-            self._flush_prose()
-        log.debug(f"[ChatPanel] Sealed prose block at {len(prefix)} chars, tail={len(tail)}")
 
     def _render_stream_html(self, block, text: str):
         """Run one streaming render of `text` into `block` (same pipeline
@@ -12121,6 +12235,14 @@ class ChatPanel(QWidget):
             # Advance the frontier and render it; no raw text is ever typed.
             self._stream_pending = pending[n:]
             self._stream_frames = getattr(self, '_stream_frames', 0) + 1
+            _delta = pending[:n]
+            # The closing ``` and its newline can land in different frames.
+            if paced and ("`" in _delta or "\n" in _delta) and self._seal_at_closed_fence():
+                # The finished code card is on screen and the rest streams
+                # into a new block (_seal_split already rendered it).
+                if self._stream_pending:
+                    self._arm_stream_timer()
+                return
             if not getattr(self, '_t_first_paint', 0.0):
                 self._t_first_paint = time.perf_counter()
             if paced:
@@ -13595,6 +13717,8 @@ class ChatPanel(QWidget):
             self.container.setUpdatesEnabled(False)
             try:
                 for tb, buf, _extras in blocks[start_idx:end_idx]:
+                    if getattr(tb, '_finalized_live', False):
+                        continue   # rendered as cards when its fence closed
                     tb._streaming_skip_fit = False
                     # Widgets whose buffers were coalesced into this one:
                     # their text now renders inside `tb`, so blank + hide
