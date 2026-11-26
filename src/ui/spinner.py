@@ -1036,7 +1036,12 @@ class MermaidSpinner(QWidget):
         if not self._alive:
             return
         self._timer.start(50)
-        self.show()
+        # show() on a widget with no parent opens it as its own top-level
+        # window: an 18px "ghost pill" with the app icon flashed on screen
+        # while a mermaid diagram was generating. Without a parent yet, the
+        # layout that adopts it shows it.
+        if self.parent() is not None:
+            self.show()
 
     def stop(self):
         if not self._alive:
