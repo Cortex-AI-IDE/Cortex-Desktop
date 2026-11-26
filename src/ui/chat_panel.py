@@ -6794,6 +6794,31 @@ class _PaintAudit(QObject):
         return False
 
 
+class _RenderCostProbe(QObject):
+    """Times one live-block rebuild from setHtml to the paint that shows it.
+
+    Timing setHtml alone leaves out the layout, height fit and paint that
+    follow it, which is most of the cost for Malayalam and other scripts
+    that must be reshaped. The panel arms ``_e2e_t0`` before a rebuild; the
+    next paint of the live viewport closes the measurement.
+    """
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self._panel = panel
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Paint:
+            p = self._panel
+            t0 = getattr(p, '_e2e_t0', 0.0)
+            if t0:
+                p._e2e_t0 = 0.0
+                ms = (time.perf_counter() - t0) * 1000.0
+                if ms < 1000.0:   # a paint long after is not this rebuild's
+                    p._record_render_e2e(ms)
+        return False
+
+
 # ============================================================
 # 6d. STREAMING CURSOR, blinking bar during text streaming
 # ============================================================
@@ -10675,6 +10700,7 @@ class ChatPanel(QWidget):
         self._stream_chars = self._stale_renders = 0
         self._render_ms_total = self._render_ms_max = 0.0
         self._last_render_ts = 0.0
+        self._reset_smooth_metrics()
 
         # Auto-create conversation_id on first message
         if not self._conversation_id:
@@ -11086,6 +11112,7 @@ class ChatPanel(QWidget):
         else:
             self._ensure("prose")
         self._prose_buf += chunk
+        self._note_arrival()
         log.debug(f"[ChatPanel] on_text: chunk_len={len(chunk)}, total_buf_len={len(self._prose_buf)}")
         # Put the new words on screen NOW. The markdown render below runs on
         # a 150-400ms debounce, so without this the newest text waits for a
@@ -11972,6 +11999,10 @@ class ChatPanel(QWidget):
         self._arr_last_ts = now
         if last and (now - last) < self._ARRIVAL_RESET_S:
             gap = now - last
+            _sm = self._smooth_metrics()
+            _sm["prov_max_gap"] = max(_sm["prov_max_gap"], gap * 1000.0)
+            if gap * 1000.0 > self._PROVIDER_PAUSE_MS:
+                _sm["prov_paused"] = True
             prev_gap = getattr(self, '_arr_gap_s', 0.0)
             self._arr_gap_s = gap if not prev_gap else prev_gap * 0.8 + gap * 0.2
         win_start = getattr(self, '_arr_win_ts', 0.0)
@@ -12304,6 +12335,81 @@ class ChatPanel(QWidget):
         except Exception:
             pass
 
+    # Smoothness metrics: one dict per turn, reported in [STREAM PERF].
+    # A gap between chunks longer than this is the model pausing; a frame
+    # gap that spans one is not counted as a UI stall.
+    _PROVIDER_PAUSE_MS = 250.0
+    def _reset_smooth_metrics(self) -> None:
+        self._sm = {
+            "vis_last": 0.0, "vis_had_pending": False, "arr_after_vis": 0.0,
+            "worst_gap": 0.0, "gaps_100": 0, "prov_paused": False,
+            "holdbacks": 0, "emoji_holds": 0, "held_max": 0.0,
+            "prov_max_gap": 0.0,
+            "e2e_n": 0, "e2e_total": 0.0, "e2e_max": 0.0,
+            "rtl_blocks": 0,
+        }
+
+    def _smooth_metrics(self) -> dict:
+        if not isinstance(getattr(self, '_sm', None), dict):
+            self._reset_smooth_metrics()
+        return self._sm
+
+    def _note_arrival(self) -> None:
+        """A chunk arrived: text is now available to show."""
+        sm = self._smooth_metrics()
+        if sm["vis_last"] and not sm["arr_after_vis"]:
+            sm["arr_after_vis"] = time.perf_counter()
+
+    def _note_visible_update(self) -> None:
+        """The visible text changed. Measure how long text waited for it.
+
+        The wait starts at the previous update when text was already queued
+        then, otherwise at the first arrival after it. A gap that spans a
+        pause by the model itself (reported as provider_max_gap_ms) is not
+        counted as a UI stall.
+        """
+        sm = self._smooth_metrics()
+        now = time.perf_counter()
+        if sm["vis_last"] and not sm["prov_paused"]:
+            start = sm["vis_last"] if sm["vis_had_pending"] else sm["arr_after_vis"]
+            if start:
+                gap = (now - start) * 1000.0
+                sm["worst_gap"] = max(sm["worst_gap"], gap)
+                if gap > 100.0:
+                    sm["gaps_100"] += 1
+        sm["vis_last"] = now
+        sm["vis_had_pending"] = bool(getattr(self, '_stream_pending', ''))
+        sm["arr_after_vis"] = 0.0
+        sm["prov_paused"] = False
+
+    def _note_holdback(self, held_ms: float = 0.0, emoji: bool = False) -> None:
+        sm = self._smooth_metrics()
+        sm["holdbacks"] += 1
+        if emoji:
+            sm["emoji_holds"] += 1
+        sm["held_max"] = max(sm["held_max"], held_ms)
+
+    def _arm_render_e2e(self, block) -> None:
+        """Start timing a rebuild; the live viewport's next paint ends it."""
+        try:
+            vp = block.viewport() if hasattr(block, 'viewport') else block
+            if not vp.property('_e2eProbed'):
+                vp.setProperty('_e2eProbed', True)
+                if getattr(self, '_e2e_probe', None) is None:
+                    self._e2e_probe = _RenderCostProbe(self)
+                vp.installEventFilter(self._e2e_probe)
+        except RuntimeError:
+            return
+        self._e2e_t0 = time.perf_counter()
+
+    def _record_render_e2e(self, ms: float) -> None:
+        prev = getattr(self, '_render_e2e_ms', 0.0)
+        self._render_e2e_ms = ms if not prev else prev * 0.7 + ms * 0.3
+        sm = self._smooth_metrics()
+        sm["e2e_n"] += 1
+        sm["e2e_total"] += ms
+        sm["e2e_max"] = max(sm["e2e_max"], ms)
+
     def _log_stream_perf(self) -> None:
         """One aggregate line per turn, never per token.
 
@@ -12321,6 +12427,8 @@ class ChatPanel(QWidget):
         t_chunk = getattr(self, '_t_first_chunk', 0.0)
         t_paint = getattr(self, '_t_first_paint', 0.0)
         gap = lambda a, b: f"{(b - a) * 1000:.0f}ms" if (a and b) else "n/a"
+        sm = self._smooth_metrics()
+        e2e_avg = (sm["e2e_total"] / sm["e2e_n"]) if sm["e2e_n"] else 0.0
         log.info(
             f"[STREAM PERF] chars={getattr(self, '_stream_chars', 0)} chunks={chunks} "
             f"paints={getattr(self, '_stream_frames', 0)} markdown_renders={renders} "
@@ -12328,7 +12436,12 @@ class ChatPanel(QWidget):
             f"stale_renders={getattr(self, '_stale_renders', 0)} "
             f"max_backlog={getattr(self, '_stream_backlog_max', 0)}c "
             f"send_to_first_text={gap(t_send, t_paint)} "
-            f"first_chunk_to_text={gap(t_chunk, t_paint)}"
+            f"first_chunk_to_text={gap(t_chunk, t_paint)} "
+            f"worst_frame_gap_ms={sm['worst_gap']:.0f} gaps_over_100ms={sm['gaps_100']} "
+            f"holdbacks={sm['holdbacks']} emoji_holds={sm['emoji_holds']} "
+            f"held_ms_max={sm['held_max']:.0f} provider_max_gap_ms={sm['prov_max_gap']:.0f} "
+            f"render_e2e_avg_ms={e2e_avg:.1f} render_e2e_max_ms={sm['e2e_max']:.1f} "
+            f"rtl_blocks={sm['rtl_blocks']}"
         )
 
     def _prewarm_text_engine(self) -> None:
@@ -12572,6 +12685,9 @@ class ChatPanel(QWidget):
                 return
 
         log.debug(f"[ChatPanel] _apply_prose_render: rendering {len(display_text)} chars")
+        if getattr(self, '_turn_active', False) and display_text != prev_text:
+            self._note_visible_update()
+            self._arm_render_e2e(self._open_block)
 
         already_frozen = self._freeze_depth > 0
         # ── SINGLE FREEZE: batch ALL mutations (mermaid + render + height + scroll) ──
@@ -13336,6 +13452,7 @@ class ChatPanel(QWidget):
         self._stream_chars = self._stale_renders = self._stream_backlog_max = 0
         self._render_ms_total = self._render_ms_max = 0.0
         self._t_send = self._t_first_chunk = self._t_first_paint = self._t_first_render = 0.0
+        self._reset_smooth_metrics()
         # The final render below paints the whole buffer, so the reveal has
         # nothing left to add: stop its timer and drop the queue.
         _frame_timer = getattr(self, '_stream_frame_timer', None)
