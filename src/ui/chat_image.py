@@ -158,7 +158,7 @@ class ImageViewer(QDialog):
         self.setWindowTitle("Image")
         self.setStyleSheet(f"QDialog {{ background:{_BACKDROP}; }}")
         if parent is not None:
-            self.setGeometry(parent.geometry())
+            self.setGeometry(self._on_screen(parent.geometry(), parent))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         pixmap = QPixmap(path) if is_chat_image(path) else QPixmap()
@@ -182,7 +182,36 @@ class ImageViewer(QDialog):
             "QPushButton:hover { background:rgba(255,255,255,0.24); }")
         self._close.clicked.connect(self.accept)
 
+    @staticmethod
+    def _on_screen(rect, widget):
+        """``rect`` cut to the visible part of the screen it is on.
+
+        A maximized window's geometry can reach past the screen edge (its
+        invisible resize frame, or rounding at fractional display scaling).
+        The viewer copied it, so the ✕ at its right edge sat half off-screen.
+        """
+        screen = widget.screen() if widget is not None else None
+        if screen is None:
+            from PyQt6.QtWidgets import QApplication
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            return rect
+        visible = rect.intersected(screen.availableGeometry())
+        return visible if visible.isValid() and not visible.isEmpty() else rect
+
+    def _place_close(self):
+        """Top-right corner of the part of the viewer that is on screen."""
+        visible = self._on_screen(self.geometry(), self)
+        right = min(self.width(), visible.right() - self.x() + 1)
+        top = max(0, visible.top() - self.y())
+        self._close.move(max(0, right - 44), top + 12)
+        self._close.raise_()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._close.move(self.width() - 44, 12)
-        self._close.raise_()
+        self._place_close()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The window manager can move or resize the dialog while showing it.
+        self._place_close()
