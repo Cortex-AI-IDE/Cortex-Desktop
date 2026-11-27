@@ -31,9 +31,7 @@ from typing import Optional
 logger = logging.getLogger("cortex.filesystem_security")
 
 
-# ============================================================================
 # Phase 1: Dangerous File/Directory Lists
-# ============================================================================
 
 # Dangerous files that should be protected from auto-editing.
 # These files can be used for code execution or data exfiltration.
@@ -68,9 +66,7 @@ DANGEROUS_DIRECTORIES: set[str] = {
     '.cortex',
 }
 
-# ============================================================================
 # Phase 1: Path Safety Utilities
-# ============================================================================
 
 def normalize_case_for_comparison(path: str) -> str:
     """
@@ -124,9 +120,7 @@ def contains_path_traversal(path: str) -> bool:
     return '..' in parts
 
 
-# ============================================================================
 # Phase 1: Windows Path Pattern Detection
-# ============================================================================
 
 def has_suspicious_windows_path_pattern(path: str) -> bool:
     """
@@ -209,9 +203,7 @@ def has_suspicious_windows_path_pattern(path: str) -> bool:
     return False
 
 
-# ============================================================================
 # Phase 1: Dangerous File/Directory Detection
-# ============================================================================
 
 def is_dangerous_file_to_auto_edit(path: str) -> Optional[str]:
     """
@@ -285,9 +277,7 @@ def is_dangerous_directory_to_auto_edit(path: str) -> Optional[str]:
     return None
 
 
-# ============================================================================
 # Phase 1: Comprehensive Path Safety Check
-# ============================================================================
 
 def check_path_safety_for_auto_edit(path: str) -> dict:
     """
@@ -422,9 +412,7 @@ def get_paths_for_permission_check(path: str) -> list[str]:
     return paths
 
 
-# ============================================================================
 # Phase 1: Utility Functions for Cortex IDE
-# ============================================================================
 
 def get_dangerous_files_list() -> list[str]:
     """Get list of dangerous files for UI display or configuration."""
@@ -460,9 +448,7 @@ def get_security_summary() -> dict:
     }
 
 
-# ============================================================================
 # Phase 2: Permission Decision Framework
-# ============================================================================
 
 # Type definition for permission decisions
 PermissionDecision = dict
@@ -662,9 +648,7 @@ def is_path_in_working_directories(path: str, working_directories: list[str]) ->
     return False
 
 
-# ============================================================================
 # Phase 3: Internal Path Allowances
-# ============================================================================
 
 def check_editable_internal_path(path: str) -> PermissionDecision:
     """
@@ -824,9 +808,7 @@ def check_readable_internal_path(path: str) -> PermissionDecision:
     return {'behavior': 'passthrough'}
 
 
-# ============================================================================
 # Phase 3: Internal Path Helper Functions
-# ============================================================================
 
 def _is_session_plan_file(path: str) -> bool:
     """Check if path is a session plan file (*.md in plans directory)"""

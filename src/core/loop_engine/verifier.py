@@ -170,7 +170,7 @@ class Verifier:
             duration = time.time() - t0
             combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
 
-            # ── Empty gate detection ────────────────────────────────────
+# Empty gate detection
             # "No tests were collected" is NOT "the code is broken", it means
             # this check cannot evaluate anything, so it can never pass and can
             # never point at a real defect. Reporting it as an ordinary failure
@@ -223,9 +223,7 @@ class Verifier:
                 error=str(exc),
             )
 
-    # ------------------------------------------------------------------
     # Parsers, each turns raw command output into stable-id Failures.
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse(check: VerifyCheck, output: str, exit_code: int) -> List[Failure]:
@@ -382,9 +380,7 @@ class Verifier:
             return Verifier._parse_exit_code(check, output, exit_code)
         return failures
 
-    # ------------------------------------------------------------------
     # Progress comparison, the Ralph-Wiggum detector (agent_loop.md §4.1)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def compare(prev: Optional[VerifyResult], curr: VerifyResult) -> Progress:

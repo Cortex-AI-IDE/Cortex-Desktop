@@ -217,7 +217,6 @@ class MemoryManagerBridge(QObject):
         return self._global_memory_dir if scope == "global" else self._project_memory_dir
 
 
-
     def _serialize_state(self) -> str:
         project_memories = _load_memories(self._project_memory_dir)
         global_memories = _load_memories(self._global_memory_dir)
@@ -643,9 +642,7 @@ scope: project
             log.error(f"[MemoryManager] Failed to sync global memories: {e}")
             return json.dumps({"error": str(e)})
     
-    # ═══════════════════════════════════════════════════════════════
     # SETTINGS BRIDGE (JS calls these for settings persistence)
-    # ═══════════════════════════════════════════════════════════════
 
     @pyqtSlot(result=str)
     def getState(self) -> str:
@@ -927,7 +924,7 @@ scope: project
             log.warning(f"[MemoryManager] getModelGroups failed: {e}")
             return "[]"
 
-    # ── Profile & Usage Bridge Methods ────────────────────────────
+# Profile & Usage Bridge Methods
 
     @pyqtSlot(result=str)
     def getProfile(self) -> str:
@@ -1042,7 +1039,7 @@ scope: project
         except Exception as e:
             log.warning(f"[MemoryManager] setProfile failed: {e}")
 
-    # ── Auth Bridge Methods ───────────────────────────────────────
+# Auth Bridge Methods
 
     @pyqtSlot(result=str)
     def getAuthStatus(self) -> str:
@@ -1473,7 +1470,7 @@ scope: project
             log.error(f"[MemoryManager] removeApiKey error for {provider}: {e}")
             return False
 
-    # ── MCP Servers (Settings → MCP Servers) ────────────────────────────
+# MCP Servers (Settings → MCP Servers)
 
     @pyqtSlot(str, result=bool)
     def copyText(self, text: str) -> bool:
@@ -1736,7 +1733,7 @@ scope: project
         except Exception:
             return "[]"
 
-    # ── Telegram run notifications ──────────────────────────────────────────
+# Telegram run notifications
     # These cannot ride the generic SETTINGS_MAP path: setSetting splits a
     # dotted key on the FIRST dot only, so "telegram.quiet_hours.start" would
     # be stored under a key literally named "quiet_hours.start". The token

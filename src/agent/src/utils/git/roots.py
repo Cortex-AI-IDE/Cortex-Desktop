@@ -63,9 +63,7 @@ def is_current_directory_bare_git_repo() -> bool:
     return (out or '').lower() == 'true'
 
 
-# -----------------------------
 # camelCase compatibility layer
-# -----------------------------
 
 def findGitRoot(cwd: str) -> Optional[str]:
     return find_git_root(cwd)

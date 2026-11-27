@@ -40,9 +40,7 @@ def _generate_worker_id() -> str:
         return f"bw_{int(time.time())}_{_worker_counter}"
 
 
-# ---------------------------------------------------------------------------
 # Message protocol types
-# ---------------------------------------------------------------------------
 
 
 class WorkerMessageType(str, Enum):
@@ -63,9 +61,7 @@ class WorkerMessage:
     timestamp: float = field(default_factory=time.time)
 
 
-# ---------------------------------------------------------------------------
 # Background worker state
-# ---------------------------------------------------------------------------
 
 
 class WorkerState(Enum):
@@ -76,9 +72,7 @@ class WorkerState(Enum):
     TERMINATED = "terminated"
 
 
-# ---------------------------------------------------------------------------
 # BackgroundWorker, controller side (spawns & manages QProcess)
-# ---------------------------------------------------------------------------
 
 
 class BackgroundWorker:
@@ -138,9 +132,7 @@ class BackgroundWorker:
 
         log.info(f"[WORKER-{self.worker_id}] Initialized (python={self._python_path})")
 
-    # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
 
     def start(self) -> bool:
         """Spawn the worker subprocess."""
@@ -225,9 +217,7 @@ class BackgroundWorker:
             return False
         return True
 
-    # ------------------------------------------------------------------
     # Task dispatch
-    # ------------------------------------------------------------------
 
     def dispatch_task(self, task_description: str, context: Optional[Dict[str, Any]] = None) -> bool:
         """
@@ -305,9 +295,7 @@ class BackgroundWorker:
             "result_ready": self._result_summary is not None,
         }
 
-    # ------------------------------------------------------------------
     # Callbacks
-    # ------------------------------------------------------------------
 
     def on_complete(self, callback: Callable[[str], None]) -> None:
         self._on_complete = callback
@@ -318,9 +306,7 @@ class BackgroundWorker:
     def on_progress(self, callback: Callable[[str], None]) -> None:
         self._on_progress = callback
 
-    # ------------------------------------------------------------------
     # Internal, communication
-    # ------------------------------------------------------------------
 
     def _send_message(self, msg: WorkerMessage) -> None:
         """Write a JSON-line message to the worker's stdin."""
@@ -459,9 +445,7 @@ class BackgroundWorker:
         return default
 
 
-# ---------------------------------------------------------------------------
 # Worker-side execution (runs in a subprocess)
-# ---------------------------------------------------------------------------
 
 
 class WorkerAgent:
@@ -578,9 +562,7 @@ class WorkerAgent:
         self._send_message("task_error", {"error": error})
 
 
-# ---------------------------------------------------------------------------
 # Module-level entry point
-# ---------------------------------------------------------------------------
 
 
 def run_worker() -> None:

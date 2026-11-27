@@ -127,7 +127,7 @@ def _cortex_home() -> str:
     return os.path.join(os.path.expanduser("~"), ".cortex")
 
 
-# ── Protected files in Cortex's own folder ──────────────────────────────────
+# Protected files in Cortex's own folder
 # Rule 2 above makes ~/.cortex fully accessible, and that folder also holds
 # the login session and the key vault, plus the files that decide what Cortex
 # runs and trusts. Security review 2026-10-23, run through the real tools:

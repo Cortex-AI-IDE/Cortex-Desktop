@@ -24,9 +24,7 @@ from src.utils.logger import get_logger
 
 log = get_logger("semantic_memory")
 
-# ---------------------------------------------------------------------------
 # Query cache
-# ---------------------------------------------------------------------------
 # The query embedding is a network round-trip. Measured on a real session it
 # cost 1.9-3.4 s and was paid before every prompt. Repeating a prompt (a
 # retry, a queued prompt, the same text sent twice) must not pay it again.
@@ -65,9 +63,7 @@ def _cache_put(query: str, top_k: int,
         while len(_SEARCH_CACHE) > _SEARCH_CACHE_MAX:
             _SEARCH_CACHE.popitem(last=False)
 
-# ---------------------------------------------------------------------------
 # Embedding backend — try SiliconFlow first, fall back gracefully
-# ---------------------------------------------------------------------------
 try:
     from src.core.embeddings import EmbeddingsGenerator, EmbeddingResult
 
@@ -96,9 +92,7 @@ except ImportError:
     def _get_embedder():
         return None
 
-# ---------------------------------------------------------------------------
 # Semantic memory index
-# ---------------------------------------------------------------------------
 
 DEFAULT_MEMORY_DIR = Path.cwd() / ".cortex" / "semantic_memory" if (Path.cwd() / ".cortex").is_dir() else Path.home() / ".cortex" / "semantic_memory"
 MAX_ENTRIES = 100  # hard limit — oldest entries are pruned first
@@ -137,9 +131,7 @@ class SemanticMemoryIndex:
         self._lock = threading.Lock()
         self._load_index()
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
 
     def store_session(
         self,
@@ -350,9 +342,7 @@ class SemanticMemoryIndex:
                 self._entries[eid] = SemanticMemoryEntry(**edata)
         log.info(f"[SEMANTIC] Restored {len(self._entries)} entries from dict")
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _cosine_similarity(self, a: List[float], b: List[float]) -> float:
         """Compute cosine similarity between two vectors."""
@@ -412,9 +402,7 @@ class SemanticMemoryIndex:
             log.debug(f"[SEMANTIC] Pruned oldest entry: {oldest[0]}")
 
 
-# ---------------------------------------------------------------------------
 # Global singleton
-# ---------------------------------------------------------------------------
 
 _semantic_index: Optional[SemanticMemoryIndex] = None
 _semantic_index_lock = threading.Lock()
@@ -434,6 +422,3 @@ def get_semantic_memory_index(
                     log.error(f"[SEMANTIC] Failed to create index: {exc}")
                     return None
     return _semantic_index
-
-
-

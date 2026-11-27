@@ -97,7 +97,7 @@ _RESTORING_ACTIVE = False
 # Qt constant: maximum allowed widget size (2^24 - 1)
 _QWIDGETSIZE_MAX = 0xffffff  # 16777215, Qt's maximum widget size
 
-# ── Diff-size guards ──────────────────────────────────────────────────────
+# Diff size guards
 # A diff used to store EVERY unchanged line as context, so a 2-line edit of a
 # 5,343-line file carried 5,343 context entries. Re-edits of the same file then
 # appended without a cap, and one styles.css diff block reached 5,627,791
@@ -135,14 +135,14 @@ def _compact_diff_rows(rows: list, ctx: int = _DIFF_CONTEXT_LINES) -> list:
     return out
 
 
-# ── Tool-card data guards ────────────────────────────────────────────────
-# A tool card is rebuilt on restore from the dict it was constructed with,
-# so that dict has to reach timeline_json. It can also hold a command's full
-# stdout, a read file's whole text, or every grep match, which is the same
+# Tool card data guards.
+# A tool card is rebuilt on restore from the dict it was constructed with, so
+# that dict has to reach timeline_json. It can also hold a command's full
+# stdout, a read file's whole text, or every grep match, the same
 # unbounded-growth problem the diff guards above were added for. These caps
-# keep a card FIDELITY-safe (the card still rebuilds with its real content)
-# while stopping one heavy turn from re-inflating the saved timeline that
-# every restart has to json.loads before the chat can render.
+# keep a card FIDELITY-safe (it still rebuilds with its real content) while
+# stopping one heavy turn from re-inflating the saved timeline that every
+# restart has to json.loads before the chat can render.
 _TOOL_DATA_MAX_STR = 8000      # one string value: stdout, file text, ...
 _TOOL_DATA_MAX_LIST = 200      # one list value: matches, entries, files
 _TOOL_DATA_MAX_KEYS = 40       # keys kept from one card's data dict
@@ -206,12 +206,11 @@ from PyQt6.QtCore import QUrl
 _MERMAID_DIR = os.path.dirname(os.path.abspath(__file__))
 MERMAID_HTML_PATH = os.path.join(_MERMAID_DIR, "html", "ai_chat", "mermaid.html")
 
-# ── Streaming text pipeline ───────────────────────────────────────────────────
+# Streaming text pipeline.
 # Mermaid/question stripping, fence extraction, live code-card highlighting and
-# the seal-boundary splitters now live in src/ui/stream_text.py. They are pure
+# the seal-boundary splitters live in src/ui/stream_text.py. They are pure
 # string functions with no widget of their own, so that module imports and runs
 # without a QApplication (W1) and tests can exercise them directly.
-#
 # The names are re-exported here because every call site below, and several
 # tests, import them from this module. Re-exporting rather than rewriting those
 # call sites keeps the move mechanical: the risk is a bad import, not a
@@ -406,10 +405,8 @@ def _auto_wrap_paths_and_commands(markdown_text: str) -> str:
     return markdown_text
 
 
-# ============================================================
 # WEB SEARCH/FETCH RESULT FORMATTER, Phase 6
 # Renders structured result cards instead of raw JSON dumps.
-# ============================================================
 def _format_web_tool_result(tool_name: str, result_data) -> str | None:
     """Format web_search / web_fetch tool results as structured HTML.
 
@@ -594,7 +591,6 @@ def _fade_in_widget(widget, duration_ms=150, slide_px=8):
     Now just ensures the widget is visible. Zero compositing overhead.
     """
     widget.setVisible(True)
-
 
 
 def prose_debounce_interval(buf_len: int) -> int:
@@ -888,16 +884,15 @@ def _fix_prose_code_blocks(html: str) -> str:
         # Insert style before the closing >
         return re.sub(r'>', f' {pre_style}>', tag, count=1)
 
-    # Style <code> NOT inside <pre> (inline code).
-    # NOT a filled chip. Qt paints an inline background across the whole
-    # text-height rectangle of the line while the glyphs are far shorter, and
-    # it IGNORES padding, border-radius and em font sizes on inline spans
-    # (measured 2026-10-24: changing padding to "0 20px" moved nothing,
-    # "font-size:0.9em" rendered at the body size, only px sizes took effect).
-    # So the old "2px 6px, radius 4" chip drew a tall hard-edged grey bar with
-    # zero room beside the word, and an answer with a dozen inline code spans
-    # read as a wall of grey bars. Emphasis now comes from the mono face and
-    # the 12px size, which Qt does honour.
+    # Style <code> NOT inside <pre> (inline code), and NOT as a filled chip.
+    # Qt paints an inline background across the whole text-height rectangle of
+    # the line while the glyphs are far shorter, and it IGNORES padding,
+    # border-radius and em font sizes on inline spans (measured 2026-10-24:
+    # padding "0 20px" moved nothing, "font-size:0.9em" rendered at body size,
+    # only px sizes took effect). So the old "2px 6px, radius 4" chip drew a
+    # tall hard-edged grey bar with zero room beside the word, and a dozen
+    # inline spans read as a wall of grey bars. Emphasis now comes from the
+    # mono face and the 12px size, which Qt does honour.
     def _style_inline_code(m):
         tag = m.group(0)
         code_style = (f'style="color:{md_code};background:transparent;'
@@ -932,7 +927,6 @@ def _fix_prose_code_blocks(html: str) -> str:
                 pre_end, inner, pre_close = code_match.groups()
                 inner = re.sub(r'<code\b[^>]*>', _style_pre_code, inner, count=1)
                 # Everything AFTER </pre> belongs to the document too.
-                #
                 # re.match anchors at the start of `part`, so its groups cover
                 # only the code block itself. Rebuilding the part from the
                 # groups alone DELETED whatever followed it - a table, a
@@ -955,9 +949,7 @@ def _fix_prose_code_blocks(html: str) -> str:
 
     return html
 
-# ============================================================
 # 1b. SCROLL PASSTHROUGH, forward wheel events to parent QScrollArea
-# ============================================================
 def _pass_wheel_to_scroll_area(widget, event):
     """Walk up parent chain and forward wheel event to the first QScrollArea found."""
     from PyQt6.QtCore import QEvent
@@ -1007,9 +999,7 @@ def install_scroll_passthrough(widget):
         child.installEventFilter(f)
 
 
-# ============================================================
 # SHARED QSS HELPERS, eliminates duplicated stylesheet patterns
-# ============================================================
 def _card_frame_qss(border_color=None, bg_color=None):
     return (f"QFrame#cardFrame {{ border:1px solid {border_color or T['border']};"
             f" border-radius:0px; background:{bg_color or T['bg_card']}; }}")
@@ -1183,21 +1173,11 @@ class _ThemedBG(QWidget):
         super().__init__(parent)
         from PyQt6.QtGui import QColor
         self._bg = QColor(color)
-        # FLICKER FIX 2026-10-27: paintEvent below fills the ENTIRE rect, so
-        # this widget really is opaque. Without WA_OpaquePaintEvent Qt keeps
-        # painting the scroll viewport's background behind it on every frame,
-        # doubling the paint work for the whole chat column.
-        #
-        # WA_StaticContents is the important one. The transcript lives in a
-        # QScrollArea, so every scroll step used to invalidate the container's
-        # full rect; Qt then repainted the container AND dragged every visible
-        # child QTextBrowser into a full repaint with it. Measured with
-        # .cortex/experiments/ab_flicker.py (reader scrolled up and locked,
-        # 6334-char answer): container 479 paints, earlier messages' browsers
-        # 466 paints of which 221 were FULL, while only 63 height changes
-        # actually happened. Static contents tells Qt that scrolling does not
-        # change what is already drawn, so it blits the existing pixels and
-        # repaints only the newly exposed strip.
+        # paintEvent fills the whole rect, so mark opaque to stop Qt painting
+        # the viewport behind it. WA_StaticContents is the key one: scrolling
+        # otherwise repainted the container and every visible browser (479 +
+        # 466 paints for 63 height changes). It blits pixels and paints only
+        # the newly exposed strip.
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StaticContents, True)
 
@@ -1249,15 +1229,11 @@ def _CARD_FRAME_DEFAULT() -> str:
 def _CARD_FRAME_SUBTLE() -> str:
     return _card_frame_qss(T['card_border_subtle'], T['card_bg_subtle'])
 
-# ============================================================
 # 2. SIGNAL CONTRACT  (replaces every runJavaScript / bridge call)
-# ============================================================
 from src.ui.agent_signals import AgentSignals  # noqa: E402, shared module breaks import coupling
 
 
-# ============================================================
 # 3. COLLAPSIBLE BASE CARD
-# ============================================================
 # NOTE: _fade_in_widget is defined once at module top (L228) with
 # duration_ms + slide_px params. The duplicate was removed to fix
 # TypeError: got unexpected keyword argument 'duration_ms'.
@@ -1400,13 +1376,12 @@ class CollapsibleCard(QFrame):
 
         self.header = QWidget(); self.header.setObjectName(header_id)
         # Explicit transparent background, REQUIRED. A bare QWidget with no
-        # stylesheet of its own still matches the app-wide `QWidget {
-        # background-color }` rule in dark.qss/light.qss, which is set ONLY
-        # ONCE at startup and never re-applied at runtime (that's what
-        # prevents the 75s freeze). Without this, the header shows whatever
-        # theme was active at APP STARTUP forever, a solid box of the
-        # wrong color sitting on top of the correctly-rethemed card frame,
-        # regardless of how many live theme switches happen afterward.
+        # stylesheet still matches the app-wide `QWidget { background-color }`
+        # rule in dark.qss/light.qss, which is set ONLY ONCE at startup and
+        # never re-applied at runtime (that is what prevents the 75s freeze).
+        # Without this the header shows whatever theme was active at APP
+        # STARTUP forever: a solid box of the wrong color on top of the
+        # correctly-rethemed card frame, however many live switches follow.
         self.header.setStyleSheet("background: transparent;")
         self.header.setCursor(Qt.CursorShape.PointingHandCursor)
         h = QHBoxLayout(self.header); h.setContentsMargins(12, 8, 12, 8); h.setSpacing(8)
@@ -1491,9 +1466,7 @@ class CollapsibleCard(QFrame):
         self._header_layout.insertWidget(idx, w)
 
 
-# ============================================================
 # 4. THINKING BLOCK  (its own block, per your spec)
-# ============================================================
 class ThoughtsBlock(CollapsibleCard):
     # Phase 4: Animated thinking dots timer, shared across all instances
     _dots_timer = None
@@ -1603,7 +1576,7 @@ class ThoughtsBlock(CollapsibleCard):
             self.add_header_widget(self._spinner)
         return self._spinner
 
-    # ── Phase 4: Animated thinking dots ──────────────────────────
+# Phase 4: Animated thinking dots
     @classmethod
     def _start_dots_timer(cls):
         """Start the shared animated dots timer if not already running."""
@@ -1651,7 +1624,7 @@ class ThoughtsBlock(CollapsibleCard):
         if not cls._active_instances:
             cls._stop_dots_timer()
 
-    # ── Resize / layout ──────────────────────────────────────────
+# Resize / layout
     def _auto_resize_body(self):
         """Resize QTextBrowser height to fit its document content.
         Caps at _MAX_THOUGHT_HEIGHT so scrollbar activates for long thinking.
@@ -1666,17 +1639,9 @@ class ThoughtsBlock(CollapsibleCard):
         ONE paint frame per thinking chunk instead of THREE."""
         if self._body_fit_running:
             return
-        # Skip the whole measurement once the widget is capped.
-        #
-        # doc.size().height() below forces a full synchronous re-layout of
-        # the ENTIRE thought document, and contentsChanged fires it on every
-        # streaming chunk. As the thought grows that is O(length) per chunk,
-        # O(length^2) over the stream, and the watchdog caught it freezing
-        # the GUI thread ~4.8s inside this call:
-        #   _flush_think -> append -> _auto_resize_body -> doc.size().height()
-        # After the height hits the cap the widget cannot grow, so there is
-        # nothing left to measure. A width change resets the flag (resizeEvent)
-        # so a genuine relayout still happens, just not per chunk.
+        # Skip measurement once capped: doc.size().height() relayouts the
+        # whole document per chunk (O(n^2), caught at 4.8s). A width change
+        # resets the flag, so genuine relayouts still happen.
         if self._body_capped:
             return
         self._body_fit_running = True
@@ -1691,15 +1656,13 @@ class ThoughtsBlock(CollapsibleCard):
                 QTimer.singleShot(100, self._auto_resize_body)
                 return
             # Cheap length check before the expensive layout.
-            #
             # doc.size().height() lays the whole document out synchronously.
-            # For content that is obviously far past the height cap, that work
-            # is thrown away, we cap it regardless. Restoring a long chat
-            # rebuilds every such thought and measured each one, which froze
-            # startup (watchdog: from_serialized -> ... -> doc.size()). A plain
-            # character count is O(1); past ~2000 chars the content cannot fit
-            # in the cap, so skip straight to the capped height without laying
-            # it out.
+            # For content obviously far past the height cap that work is thrown
+            # away, we cap it regardless. Restoring a long chat rebuilt every
+            # such thought and measured each one, freezing startup (watchdog:
+            # from_serialized -> ... -> doc.size()). A plain character count is
+            # O(1); past ~2000 chars the content cannot fit in the cap, so skip
+            # straight to the capped height without laying it out.
             if len(doc.toRawText()) > 2000:
                 _capped = _MAX_THOUGHT_HEIGHT
                 if abs(_capped - self._lbl.height()) > 1:
@@ -1773,7 +1736,7 @@ class ThoughtsBlock(CollapsibleCard):
                 self._resize_debounce.timeout.connect(self._auto_resize_body)
             self._resize_debounce.start()
 
-    # ── Theming ──────────────────────────────────────────────────
+# Theming
     def _apply_theme_styles(self):
         """Re-apply all styles from current theme tokens, called on init and on theme switch."""
         _get_theme = chat_theme
@@ -1826,18 +1789,18 @@ class ThoughtsBlock(CollapsibleCard):
             f"white-space:pre-wrap;"
         )
 
-    # ── Content streaming ────────────────────────────────────────
+# Content streaming
     def append(self, chunk: str):
         prev = self._text
         self._text = prev + chunk
         # Phase 4: word count in the header, INCREMENTAL. Re-splitting the
         # WHOLE accumulated text on every 60ms flush made a long reasoning
-        # block O(total) per flush (O(n^2) over the stream) on the GUI
-        # thread inside the freeze window - the slow thinking cards on
-        # every reasoning model. Count this chunk's words and merge across
-        # the seam instead. _counted_len proves the base is still the text
-        # the count covers; anything that mutates _text directly triggers
-        # a full recount rather than a wrong number.
+        # block O(total) per flush (O(n^2) over the stream) on the GUI thread
+        # inside the freeze window, the slow thinking cards on every reasoning
+        # model. Count this chunk's words and merge across the seam instead.
+        # _counted_len proves the base is still the text the count covers;
+        # anything mutating _text directly triggers a full recount rather than
+        # a wrong number.
         wc = getattr(self, '_word_count', 0)
         if getattr(self, '_counted_len', 0) != len(prev):
             wc = len(prev.split())  # _text moved under us: recount the base
@@ -1956,9 +1919,7 @@ class ThoughtsBlock(CollapsibleCard):
             pass  # silent-ok: __del__ may run after the logging system is torn down
 
 
-# ============================================================
 # 5. TOOL GROUP  ("Ran N commands", collapsed by default)
-# ============================================================
 class ToolRow(QWidget):
     """Tool row with spinner + name + arg summary, expandable for full details."""
     def __init__(self, name: str, arg: str, kind="generic", parent=None):
@@ -2281,7 +2242,6 @@ class ToolGroup(CollapsibleCard):
         return None
 
 
-
     def end_tool(self, tool_id: str, ok=True, result_data=None):
         if tool_id in self._rows:
             row = self._rows[tool_id]
@@ -2477,7 +2437,7 @@ class ToolGroup(CollapsibleCard):
 
         # Plain tool output (bash, file content, grep text) goes into a
         # RichText label: escape it and keep its line breaks. Unescaped, the
-        # newlines collapsed ("M a.html === BRANCH === main") and any "<tag>"
+# newlines collapsed ("M a.html BRANCH main") and any "<tag>"
         # in the output was parsed as markup instead of shown.
         if _result_is_plain(data):
             import html as _html
@@ -2639,7 +2599,7 @@ class ToolGroup(CollapsibleCard):
         dir_count = 0
         file_count = 0
         for entry in entries[:100]:  # Cap to prevent huge output
-            # ---- STRING entries (from BridgeLSTool: "src/", "README.md") ----
+# STRING entries (from BridgeLSTool: "src/", "README.md")
             if isinstance(entry, str):
                 stripped = entry.strip()
                 if not stripped:
@@ -2666,7 +2626,7 @@ class ToolGroup(CollapsibleCard):
                     lines.append(f"{icon} {html.escape(name)}")
                 continue
             
-            # ---- DICT entries (from GlobTool or structured agents) ----
+# DICT entries (from GlobTool or structured agents)
             if not isinstance(entry, dict):
                 lines.append(f"  {html.escape(str(entry))}")
                 continue
@@ -2887,9 +2847,7 @@ class ToolGroup(CollapsibleCard):
         return card
 
 
-# ============================================================
 # 5b. FILE EDIT CARDS  (diff, creating animation, edited-files section)
-# ============================================================
 LANG_BADGE = {  # extension -> (label, bg color)
     "py": ("py", "#1f6feb"), "js": ("js", "#c2a000"), "ts": ("ts", "#2f74c0"),
     "tsx": ("tsx", "#2f74c0"), "jsx": ("jsx", "#c2a000"), "html": ("html", "#e34c26"),
@@ -3069,15 +3027,9 @@ class DiffCard(CollapsibleCard):
         except RuntimeError:
             _swallow("restyle a diff card")
 
-    # Phase 3A: Hover glow on DiffCard, DISABLED (was causing visible border flicker on filename hover)
-    # def enterEvent(self, event):
-    #     self._hover_base = self.styleSheet()
-    #     self.setStyleSheet(self._hover_base + f"QFrame {{ border:1px solid {T.get('border_hover', '#444')}; }}")
-    #     super().enterEvent(event)
-    #
-    # def leaveEvent(self, event):
-    #     self.setStyleSheet(getattr(self, '_hover_base', _CARD_FRAME_SUBTLE))
-    #     super().leaveEvent(event)
+    # Phase 3A: hover glow on DiffCard is DISABLED, it caused visible border
+    # flicker on filename hover. The enterEvent/leaveEvent pair that did it is
+    # in git history if it is ever revisited.
 
     @staticmethod
     def _normalize_2tuple(hunk_lines: list) -> list:
@@ -3160,21 +3112,10 @@ class DiffCard(CollapsibleCard):
         _MAX_DIFF_ROWS = 300
         _rendered_rows = 0
 
-        # ── One stylesheet for the whole diff, not one per label ──────────
-        # PERF: every rendered row used to call setStyleSheet 4-5 times (line
-        # number, prefix, code, row background, plus a SECOND line-number call
-        # for add/del rows). Qt re-parses the CSS string on every one of those
-        # calls, and caching the strings does not help because the parse is per
-        # call, not per string. Measured on 300 rows (the cap): 117ms with
-        # per-row stylesheets vs 16ms for the same widgets with none, so 86% of
-        # diff-render time was CSS parsing. Profiling a real 20-block chat
-        # message showed _render_diff_body was 67% of the entire message render
-        # (154ms per diff block), which is what made chat restore log
-        # "SLOW batch ... 1837ms" and freeze the window on startup.
-        #
-        # Same widget tree, same appearance: each label carries a "dl" property
-        # and the container holds one stylesheet whose property selectors do
-        # the work. One parse instead of ~1400. Measured 117ms -> 48ms (2.4x).
+        # One stylesheet on the container, not 4-5 per row: Qt re-parses CSS
+        # on every setStyleSheet call regardless of string caching. 300 rows
+        # cost 117ms of parsing (86% of diff render). Labels carry a "dl"
+        # property so selectors do the work: 117ms -> 48ms, same appearance.
         _diff_host = layout.parentWidget()
         if _diff_host is not None and not _diff_host.property("_dl_styled"):
             _diff_host.setProperty("_dl_styled", True)
@@ -3429,7 +3370,7 @@ class ActivityGroup(CollapsibleCard):
         self._style()
         self._refresh()
 
-    # ---- look -------------------------------------------------------
+# look
     def _activity_qss(self) -> str:
         return "QFrame#activityGroup { border: none; background: transparent; }"
 
@@ -3472,7 +3413,7 @@ class ActivityGroup(CollapsibleCard):
             if callable(fit):
                 QTimer.singleShot(0, fit)
 
-    # ---- content ----------------------------------------------------
+# content
     def add_block(self, w):
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.body_layout.addWidget(w)
@@ -3592,7 +3533,7 @@ class ActivityGroup(CollapsibleCard):
                 t[3] = "ok"
         self._refresh()
 
-    # ---- the summary --------------------------------------------------
+# the summary
     @staticmethod
     def _short(text, n=48):
         text = str(text or "")
@@ -4059,9 +4000,7 @@ class EditedFilesSection(QFrame):
         self._count.setText(str(len(self._file_rows)))
 
 
-# ============================================================
 # 5b. TABLE WIDGET  (QTableWidget for proper table rendering)
-# ============================================================
 class TableWidget(QFrame):
     """
     Proper table rendering using QTableWidget.
@@ -4181,7 +4120,7 @@ class TableWidget(QFrame):
         # Forward scroll events to parent QScrollArea
         install_scroll_passthrough(table)
 
-    # ── copying ──────────────────────────────────────────────────────
+# copying
     # A table is text like any other part of a reply, so the usual gestures
     # work on it: drag to select, Ctrl+A, Ctrl+C, right-click.
 
@@ -4394,9 +4333,7 @@ class TableWidget(QFrame):
         self._calc_table_height()
 
 
-# ============================================================
 # 5c. CODE BLOCK WIDGET  (language label + copy button + highlighted code)
-# ============================================================
 # Code-block languages that get a ▶ Run button (typed into a Cortex AI terminal).
 _RUN_LANGS = frozenset({
     "bash", "sh", "shell", "zsh", "console", "terminal",
@@ -4680,9 +4617,7 @@ class CodeBlockWidget(QFrame):
         )
 
 
-# ============================================================
 # 5d. MERMAID DIAGRAM CARD  (Expand + Copy + fullscreen viewer)
-# ============================================================
 class MermaidDiagramCard(QFrame):
     """Compact mermaid card, header only with name, expand, copy buttons.
     Expand opens mermaid.html fullscreen dialog."""
@@ -4933,9 +4868,7 @@ class MermaidFullViewDialog(QDialog):
         ))
 
 
-# ============================================================
 # 6. MESSAGE WIDGET  (one per turn; holds ordered blocks)
-# ============================================================
 
 class _ChatBrowser(QTextBrowser):
     """QTextBrowser with a dark-themed right-click context menu.
@@ -5004,20 +4937,9 @@ class _ChatBrowser(QTextBrowser):
         """Handle Ctrl+C to copy selected text, Ctrl+A to select all."""
         if e.key() == Qt.Key.Key_C and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if self.textCursor().hasSelection():
-                # Qt's own copy(), NOT clipboard().setText(selectedText()).
-                #
-                # selectedText() separates lines with U+2029 PARAGRAPH
-                # SEPARATOR, never "\n". Putting that string on the clipboard
-                # verbatim is why a multi-line copy pasted back into Cortex
-                # looked right (Qt understands U+2029) while Notepad, a
-                # browser or any other app received one run-on line: they do
-                # not treat U+2029 as a break. Copying a table out of a reply
-                # was unusable everywhere except here.
-                #
-                # copy() writes proper text/plain with real newlines, plus
-                # text/html for apps that want it. editor.py already worked
-                # around this with an explicit U+2029 replace; this
-                # path was missed.
+                # Use Qt's copy(), not setText(selectedText()): selectedText
+                # uses U+2029, so other apps pasted one run-on line. copy()
+                # writes real newlines (and HTML) to the clipboard.
                 self.copy()
                 return
         if e.key() == Qt.Key.Key_A and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -5287,12 +5209,12 @@ def make_body(streaming: bool = False) -> QTextBrowser:
                 tb.setMinimumHeight(h)
                 # updateGeometry() was removed for GROWTH (micro-flicker:
                 # min-height increases propagate to the layout on their own).
-                # But SHRINKS do NOT propagate without it, Qt keeps the
-                # widget at the old inflated height. That left every short
-                # prose line stuck at the height of its FIRST premature-width
-                # measurement (~30px+ of dead space under each one-liner -
-                # the "gaps between cards" bug). Shrinks are rare (once, at
-                # turn end), so the extra layout pass costs nothing.
+                # But SHRINKS do NOT propagate without it, Qt keeps the widget
+                # at the old inflated height. That left every short prose line
+                # stuck at the height of its FIRST premature-width measurement
+                # (~30px+ of dead space under each one-liner, the "gaps between
+                # cards" bug). Shrinks are rare (once, at turn end), so the
+                # extra layout pass costs nothing.
                 if h < _old_min:
                     tb.updateGeometry()
         except RuntimeError:
@@ -5336,11 +5258,11 @@ def make_body(streaming: bool = False) -> QTextBrowser:
         # FLICKER FIX 2026-06-24: During streaming, _flush_prose() already
         # calls _fit() SYNCHRONOUSLY inside the freeze/thaw boundary.
         # BOTH _fit_timer (60ms) and _delayed_fit (300ms) fire AFTER the
-        # viewport is thawed → their setMinimumHeight() calls cause visible
+        # viewport is thawed, so their setMinimumHeight() calls cause visible
         # height changes that shift all cards below = VIBRATION.
-        # Suppress BOTH deferred timers during streaming. The synchronous
-        # _fit() in _flush_prose is sufficient, and resizeEvent handles
-        # width changes via direct _fit() call.
+        # Suppress BOTH deferred timers during streaming. The synchronous _fit()
+        # in _flush_prose is sufficient, and resizeEvent handles width changes
+        # via a direct _fit() call.
         if getattr(tb, '_streaming_skip_fit', False):
             return  # Skip ALL deferred fits during streaming
         if not _alive():
@@ -5631,12 +5553,12 @@ class MessageWidget(QWidget):
         super().__init__(parent)
         self.role = role
         # Creation time, preserved across save/restore. Bug history: messages
-        # carried NO timestamp, serialize() dropped it, so after an IDE
+        # carried NO timestamp and serialize() dropped it, so after an IDE
         # restart nobody could tell WHEN anything was said. set_created_ts()
         # overwrites this with the ORIGINAL time during restore.
         # NEVER expose this via setToolTip(): QToolTip spawns a NATIVE
         # top-level window, and on Windows that triggers the DWM "capsule"
-        # ghost fragment (see editor.py Round 6 note), hovering chat spammed
+        # ghost fragment (see editor.py Round 6 note); hovering chat spammed
         # white capsules. Display must use in-widget labels only.
         self.created_ts = time.time()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -6008,7 +5930,7 @@ class MessageWidget(QWidget):
             self.v.insertWidget(1 + len(self._user_code_cards), holder)
             self._user_code_cards.append(holder)
 
-    # ----- ordered-block builders (called by the timeline router) -----
+# ordered block builders (called by the timeline router)
     def new_thoughts(self, into=None) -> ThoughtsBlock:
         b = ThoughtsBlock()
         b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -6071,7 +5993,7 @@ class MessageWidget(QWidget):
             self._card_v.addWidget(self._efs)
         return self._efs
 
-    # ---- serialization (save/restore) ----
+# serialization (save/restore)
     def serialize(self) -> dict | None:
         """Serialize this message to a JSON-friendly dict for persistence."""
         # Collapsed to a one-line label to save memory (ChatPanel.
@@ -6178,12 +6100,12 @@ class MessageWidget(QWidget):
                         # Prefer the MARKDOWN source over Qt's toHtml().
                         # Bug history: toHtml() of a rendered table is
                         # extremely verbose (inline cell styles + Qt's nested
-                        # spans), easily >20,000 chars, which the restore
-                        # path truncates to 5,000, cutting mid-<table> and
-                        # destroying it ("tables disappear after IDE
-                        # restart"). The markdown source is ~100x smaller,
-                        # can never be structurally broken by a cap, and
-                        # re-renders with CURRENT theme colors at restore.
+                        # spans), easily >20,000 chars, which the restore path
+                        # truncates to 5,000, cutting mid-<table> and
+                        # destroying it ("tables disappear after IDE restart").
+                        # The markdown source is ~100x smaller, can never be
+                        # structurally broken by a cap, and re-renders with
+                        # CURRENT theme colors at restore.
                         _md_src = getattr(w, '_rendered_text', '') or ''
                         if _md_src:
                             # Save it repaired, so the stored copy is clean
@@ -6318,39 +6240,17 @@ class MessageWidget(QWidget):
             else:
                 msg.set_user_text(data.get("content", ""), image_paths=data.get("images"))
             return msg
-        # ── Fold interstitial step-narration so restored turns don't wall ──
-        # A long agentic turn makes the model narrate every step in a short
-        # PROSE line before each tool call ("Searching models…", "Pushing to
-        # GitHub…"). Live, these interleave with tool/thought cards; but on
-        # restore ~13 of them stack into one prose wall that reads as leaked
-        # internal text (field report, verified against timeline_json:
-        # message had 14 such one-liners before the real answer).
-        #
-        # Rule, validated on the real data: prose that appears BEFORE the
-        # turn's last tool/diff action is step-narration, not the answer, so
-        # render it as a collapsed card (same as a thought) instead of open
-        # prose. Prose AFTER the last tool is the actual answer and is left
-        # untouched. A length cap keeps a genuinely long mid-turn explanation
-        # as prose; real step-narration is always a short single line.
-        # Copies: the display tweaks below (narration shown as a thought) must
-        # not rewrite the stored data, which the scroll-up queue and the
-        # next save still hold.
+        # Fold short prose before the last tool call: on restore ~13 such
+        # step-narration lines stacked into one wall (verified against
+        # timeline_json). Prose after the last tool is the answer, untouched.
+        # A length cap keeps genuine mid-turn explanations as prose. Work on
+        # copies so the next save does not overwrite the stored full text.
         _blocks = [dict(b) if isinstance(b, dict) else b for b in data.get("blocks", [])]
         _hidden_blocks = None
 
-        # Cap the WIDGETS one message may rebuild. Every block becomes its own
-        # widget here, and a prose block builds a QTextBrowser through
-        # make_body(), so a single long agentic turn can create dozens on its
-        # own. Message count is capped (MAX_RECOVER) and block SIZE is capped
-        # (6000 chars above), but block COUNT never was, which is the gap a
-        # startup hang fell through on 2026-09-05: restore reached
-        # "msg #11 chars=54324 blocks=[thoughts, tools, thoughts, tools, …]"
-        # and froze inside make_body, with the GUI thread blocked for 178s on
-        # a machine already at 93% RAM.
-        #
-        # The tail is kept because a turn ends with its answer; the trimmed
-        # head is narration and tool chatter, and the full text is still in
-        # the database.
+        # Cap widgets per message: block count was uncapped and one long turn
+        # froze restore for 178s in make_body. Keep the tail (the answer);
+        # trimmed narration remains in the database.
         _MAX_BLOCKS_ON_RESTORE = 40
         if _restoring and len(_blocks) > _MAX_BLOCKS_ON_RESTORE:
             _dropped = len(_blocks) - _MAX_BLOCKS_ON_RESTORE
@@ -6421,7 +6321,6 @@ class MessageWidget(QWidget):
                 except Exception:
                     _swallow("trim a saved repetition loop before restoring a thought")
                 # Cap a runaway thought before it reaches the widget.
-                #
                 # setPlainText lays out the whole string synchronously on the
                 # GUI thread. A corrupted history had a single thought of
                 # 4,106,683 characters, and restoring it froze startup for
@@ -6444,21 +6343,10 @@ class MessageWidget(QWidget):
                 except Exception:
                     _t_display = _t_content
                 if _restoring and hasattr(tb, '_lbl'):
-                    # Populate the body but do NOT lay it out yet. A restored
-                    # thought card is collapsed (its body is hidden, see
-                    # CollapsibleCard: setVisible(not collapsed)), so its height
-                    # is irrelevant until the user actually opens it, yet
-                    # _auto_resize_body forces a full synchronous document
-                    # relayout (doc.size()) on the GUI thread. On a long chat
-                    # that is dozens of hidden bodies laid out for nothing:
-                    # the field logs showed "SLOW batch ... 2505ms,
-                    # blocks=[thoughts,thoughts,tools,thoughts,...]" stacking
-                    # into multi-second (and, RAM-starved, multi-minute)
-                    # freezes. Block the contentsChanged->_auto_resize_body
-                    # signal so setPlainText does not trigger the layout, skip
-                    # the explicit fit, and let _on_expanded build it lazily the
-                    # first time the card is opened. The text still lives in
-                    # _lbl, so serialize() round-trips unchanged.
+                    # Restored thought cards start collapsed, so laying out
+                    # their hidden bodies is wasted GUI work (2505ms batches).
+                    # Block contentsChanged, fit lazily on first open; text
+                    # stays in _lbl so serialize() round-trips unchanged.
                     _doc = tb._lbl.document()
                     _doc.blockSignals(True)
                     tb._lbl.setPlainText(_t_display)
@@ -6594,20 +6482,11 @@ class MessageWidget(QWidget):
                                         f"falling back to one html body: {_seg_err}")
                     pb = msg.new_prose(streaming=False)
                     try:
-                        # table_normalized=True, or the text is normalized
-                        # TWICE: once here and again inside
-                        # _markdown_to_clean_html. Each pass blocks the GUI
-                        # thread in _done.wait() for up to a second (the
-                        # worker+timeout in normalize_table_markdown bounds
-                        # the freeze, it does not avoid it), so a 32-message
-                        # restore paid 64 of those waits instead of 32 and
-                        # the window sat in "Not Responding" part way through
-                        # the restore overlay. The streaming path at ~817
-                        # already passes this flag; only restore missed it.
-                        # Keep the default timeout. It was briefly set to
-                        # None here on the reading that the worker thread was
-                        # the cost; it was not, and that removed the only
-                        # escape from an infinite loop in split_inline_tables.
+                        # table_normalized=True avoids a second normalization
+                        # inside _markdown_to_clean_html: each pass waits up to
+                        # a second on the GUI thread (64 waits in a 32-message
+                        # restore). Keep the default timeout as the only escape
+                        # from an infinite loop in split_inline_tables.
                         _rendered = _markdown_to_clean_html(
                             normalize_table_markdown(_md_src), table_normalized=True)
                         _rendered = _fix_prose_tables(_rendered)
@@ -6735,18 +6614,13 @@ class MessageWidget(QWidget):
         return msg
 
 
-# ============================================================
 # 6c. INPUT AREA  (mode selector + model selector + Send/Stop)
-# ============================================================
 MODES = [("Agent", "Autonomous agent"), ("Ask", "Q&A"), ("Plan", "Planning")]
 
 from src.ai.model_registry import get_model_groups
 
 
-
-# ============================================================
 # 6c. PAINT AUDIT, counts repaints per widget during one turn
-# ============================================================
 class _PaintAudit(QObject):
     """Counts paint events per widget while one assistant turn streams.
 
@@ -6850,9 +6724,7 @@ class _RenderCostProbe(QObject):
         return False
 
 
-# ============================================================
 # 6d. STREAMING CURSOR, blinking bar during text streaming
-# ============================================================
 class StreamingCursor(QWidget):
     """Three dots in a travelling wave, parked right after the last character.
 
@@ -6990,12 +6862,9 @@ class StreamingCursor(QWidget):
         p.end()
 
 
-# ============================================================
 # SPELL-CHECK INPUT
-# ============================================================
 # Chip colours for skills:/mcp: tokens: (text, background). The background is
 # translucent so the same pair reads on the dark and the light theme.
-#
 # skills: wears the theme's accent. mcp: takes its own hue from the colour
 # theme's palette - the first of these that sits well away from the accent
 # on the colour wheel, so the two chips never look alike: violet next to
@@ -7486,7 +7355,7 @@ class InputArea(QWidget):
             f"  background:{T['bg_input']}; border:1px solid {T['input_border']}; border-radius:0px;"
             "}"
         )
-        # ── Two rows: input on top, controls underneath ───────────────────
+# Two rows: input on top, controls underneath
         # Everything used to sit on ONE row (mode | input | model | mic |
         # Send). Only the input had stretch, so every pixel the model name
         # needed came straight out of the typing area: "Qwen 3.8 Max" left it
@@ -7722,16 +7591,9 @@ class InputArea(QWidget):
         self._sync_voice_autosend()
         self.mic_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.mic_btn.customContextMenuRequested.connect(self._show_mic_menu)
-        # The first _refresh_voice_languages() runs further down, AFTER the
-        # chip is in the layout (see "bar.addWidget(self.voice_lang_btn)").
-        # It calls setVisible(True) on the chip, and a widget shown while it
-        # has no parent becomes its own top-level window: a 133x66 frame with
-        # the Cortex icon and minimize/maximize/close flashed on the desktop at
-        # every start (caught 2026-10-13 with a window-show hook, 2.9 s in,
-        # before the main window appeared).
-        # The account is re-read in the background after start-up and then
-        # at most every 30 minutes; look at the cached copy now and then so
-        # a list changed on the website appears without opening anything.
+        # Delay the first refresh until the chip is in the layout: showing a
+        # parentless widget made it a top-level window that flashed on the
+        # desktop at every start. Account is then refreshed every 30 minutes.
         self._voice_lang_timer = QTimer(self)
         self._voice_lang_timer.setInterval(60_000)
         self._voice_lang_timer.timeout.connect(self._refresh_voice_languages)
@@ -7757,7 +7619,7 @@ class InputArea(QWidget):
 
         outer.addWidget(self.panel)
 
-    # ── Voice input ────────────────────────────────────────────────────
+# Voice input
     _VOICE_AUTO = "auto"
     # The gap to the mic lives in the chip's own margin, so a hidden chip
     # (English only) leaves no stray spacing behind.
@@ -8033,7 +7895,6 @@ class InputArea(QWidget):
             self._voice_file = _os.path.join(
                 tempfile.gettempdir(), f"cortex_voice_{_os.getpid()}.wav")
             # Pick the input device explicitly and turn it up.
-            #
             # QAudioInput() with no argument leaves the choice to Qt, and on a
             # machine with more than one microphone it can settle on the one
             # nobody is speaking into. That is what happened here: a recording
@@ -8113,7 +7974,6 @@ class InputArea(QWidget):
                 return
 
             # Check the recording actually contains speech BEFORE sending it.
-            #
             # A silent file uploads fine and comes back with an empty
             # transcript, which looks like the service failing when the real
             # problem is that the microphone captured nothing. Measured on a
@@ -8219,7 +8079,6 @@ class InputArea(QWidget):
         """
         terms: List[str] = []
         # Off by default while the short-transcript problem is open.
-        #
         # Every attempt returns exactly 6 characters, including after the
         # level was corrected to rms 3427, so the audio is not the cause and
         # this list is the one variable never isolated. Up to 50 keywords
@@ -8332,7 +8191,6 @@ class InputArea(QWidget):
         for group_label, items, tier, group_provider in groups:
             # ONE rule: the switch in Settings > Models & Providers decides
             # what appears here. "auto" is smart routing and always shows.
-            #
             # There used to be a second rule - groups tagged "dyn_" skipped
             # the check - so a user's own provider could not be switched off
             # while a published one could, and the dropdown contradicted the
@@ -8344,7 +8202,7 @@ class InputArea(QWidget):
             # Section header on tier change
             if tier != _last_tier:
                 if tier == "subscription":
-                    # ═══ Subscription section, highlighted border ═══
+# Subscription section, highlighted border
                     section_frame = QFrame()
                     section_frame.setStyleSheet(
                         f"QFrame {{ background:rgba({_accent_primary[1:]},0.08);"
@@ -8370,7 +8228,7 @@ class InputArea(QWidget):
                     _current_section_frame = section_frame
                     _current_section_items_layout = _sub_layout
                 else:
-                    # ═══ BYOK section ═══
+# BYOK section
                     section_frame = QFrame()
                     section_frame.setStyleSheet(
                         f"QFrame {{ background:transparent;"
@@ -8576,11 +8434,11 @@ class InputArea(QWidget):
     # in the same row and only the input has stretch, so the button takes its
     # full sizeHint and the input keeps whatever is left. A long name like
     # "Nemotron 3 Ultra (Free)" squeezed the typing area into a narrow column
-    # while "Qwen 3.8 Max" left it comfortable. Cap the button instead, and
-    # elide what does not fit; the full name stays available as a tooltip.
-    # Generous now that the input has its own row: this cap no longer
-    # steals from the typing area, it only stops one very long name from
-    # pushing mic/Send off the right edge of the controls row.
+    # while "Qwen 3.8 Max" left it comfortable. Cap the button and elide what
+    # does not fit; the full name stays available as a tooltip.
+    # Generous now that the input has its own row: this cap no longer steals
+    # from the typing area, it only stops one very long name from pushing
+    # mic/Send off the right edge of the controls row.
     _MODEL_BTN_MAX_W = 280
 
     # Qt's own menu-indicator is switched off (it renders as a clipped arrow
@@ -8748,7 +8606,6 @@ class InputArea(QWidget):
         parts = []
 
         # 1. Every pasted block, in the order it was pasted.
-        #
         # Each chip carries its own content in chip["payload"]. This used to
         # read a single shared self._pasted_text (so only the LAST paste
         # survived) and then, separately, append each chip's LABEL wrapped in
@@ -8850,8 +8707,7 @@ class InputArea(QWidget):
         # Emit the signal with combined text
         self.send_requested.emit(full_text)
 
-    # ── Queued prompts (sent while the AI is working) ─────────────────────
-    #
+# Queued prompts (sent while the AI is working)
     # Was one "Queued: <text>" chip with a transparent ✕: a long or
     # multi-line prompt made the label wider than the panel and pushed the ✕
     # out of view, so only a pointing-hand cursor hinted that clicking
@@ -9165,7 +9021,7 @@ class InputArea(QWidget):
         finally:
             self._is_autogrowing = False
 
-    # ── Slash-command skill menu ────────────────────────────────────────
+# Slash command skill menu
     def _update_slash_popup(self):
         """Show/hide/refresh the slash menu as the user types."""
         from src.ui.slash_commands import parse_slash_query, menu_skills
@@ -9837,9 +9693,7 @@ class InputArea(QWidget):
             self._chip_row.setVisible(False)
 
 
-# ============================================================
 # 6c. EMPTY STATE, tagline only (ring removed)
-# ============================================================
 class EmptyState(QWidget):
     """Empty chat state: tagline only (no logo/ring)."""
 
@@ -9877,9 +9731,7 @@ class EmptyState(QWidget):
             _swallow("retheme the empty state")
 
 
-# ============================================================
 # 7. CHAT PANEL  +  timeline router (the core interleave logic)
-# ============================================================
 class BrandLogo(QWidget):
     """
     Cortex AI brand mark, two-part logotype with gradient text.
@@ -9908,7 +9760,7 @@ class BrandLogo(QWidget):
             w = self.width()
             h = self.height()
 
-            # ── "Cortex" ──────────────────────────────────────────
+# "Cortex"
             # Interface stack (bundled Inter). Geist was requested here but
             # never shipped, so this always fell back to Segoe UI.
             font_main = QFont()
@@ -9933,7 +9785,7 @@ class BrandLogo(QWidget):
                 text_main,
             )
 
-            # ── thin separator ────────────────────────────────────
+# thin separator
             sep_x = w_main + 7
             sep_h = h * 0.52
             sep_y = (h - sep_h) / 2
@@ -9943,7 +9795,7 @@ class BrandLogo(QWidget):
                 int(sep_x), int(sep_y + sep_h),
             )
 
-            # ── "AI" ──────────────────────────────────────────────
+# "AI"
             font_sub = QFont()
             font_sub.setFamilies(family_list(T['font_ui']))
             font_sub.setPointSize(11)
@@ -9970,9 +9822,7 @@ class BrandLogo(QWidget):
             p.end()
 
 
-# ============================================================
 # RESUME TASK CARD, shown when context window is exhausted
-# ============================================================
 class ResumeTaskCard(QFrame):
     """Card shown when the agent hits the turn limit with pending todos.
 
@@ -10214,7 +10064,7 @@ class ChatHistoryPopup(QFrame):
         v.addWidget(self._empty, 1)
         self.apply_theme()
 
-    # ---- look ----
+# look
     def apply_theme(self):
         self.setStyleSheet(
             f"QFrame#chatHistoryPopup {{ background:{T['bg_elevated']}; }}"
@@ -10266,7 +10116,7 @@ class ChatHistoryPopup(QFrame):
         path.addRoundedRect(QRectF(self.rect()), 8, 8)
         self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
-    # ---- content ----
+# content
     def set_items(self, items, current):
         """items: (conversation_id, title, updated_ms) newest first."""
         self._items = list(items or [])
@@ -10351,7 +10201,7 @@ class ChatHistoryPopup(QFrame):
         body = self._content_height() + 4 if not self._list.isHidden() else 64
         self.resize(self.width(), min(chrome + body, self._max_h))
 
-    # ---- open / pick ----
+# open / pick
     def open_under(self, button, panel):
         """Show under `button`, right-aligned inside `panel`, on screen."""
         avail = panel.width() - 16
@@ -10697,7 +10547,7 @@ class ChatPanel(QWidget):
         # reading the window, not on their first streamed answer.
         QTimer.singleShot(1500, self._prewarm_text_engine)
 
-    # ---- public: connect these to AgentSignals ----
+# public: connect these to AgentSignals
     def bind(self, sig: AgentSignals, bridge=None):
         """Bind agent signals to chat panel handlers.
         Optionally store bridge reference for permission responses."""
@@ -10713,7 +10563,7 @@ class ChatPanel(QWidget):
         sig.file_done.connect(self.on_file_done)
         sig.turn_done.connect(self.on_turn_done)
         sig.error.connect(self.on_chat_error)
-        # ---- Phase 8: secondary UI ----
+# Phase 8: secondary UI
         sig.permission_req.connect(self.on_permission_request)
         sig.file_edit_permission_req.connect(self.on_file_edit_permission_request)
         sig.project_access_req.connect(self.on_project_access_request)
@@ -10768,17 +10618,14 @@ class ChatPanel(QWidget):
 
     def begin_assistant_turn(self):
         # Re-assert the running state at the START of every assistant turn.
-        #
-        # set_generating(True) is issued once, in _on_send. on_turn_done()
-        # then clears it unconditionally, and turn_done fires per TURN, not
-        # per request: an agentic run continues through many turns, and
-        # native_chat_bridge also emits turn_done on a recoverable error. So
-        # any of those could flip the button back to "Send" while the agent
-        # was still thinking and calling tools, leaving it working silently
-        # with no way to stop it.
-        #
-        # Binding the state to the start of each turn makes it self-healing:
-        # whatever cleared it, the next turn puts the Stop button back.
+        # set_generating(True) is issued once, in _on_send. on_turn_done() then
+        # clears it unconditionally, and turn_done fires per TURN, not per
+        # request: an agentic run continues through many turns, and
+        # native_chat_bridge also emits turn_done on a recoverable error. Any
+        # of those could flip the button back to "Send" while the agent was
+        # still thinking and calling tools, leaving it working silently with no
+        # way to stop it. Binding the state to the start of each turn makes it
+        # self-healing: whatever cleared it, the next turn puts Stop back.
         try:
             if not getattr(self.input_area, '_generating', False):
                 log.info("[ChatPanel] agent turn began while UI showed idle, "
@@ -10811,7 +10658,7 @@ class ChatPanel(QWidget):
         # Use the persistent edit state (created in __init__)
         # No need to create a new one each turn
 
-    # ---- the interleave router: parts-based timeline ----
+# the interleave router: parts based timeline
     def _ensure(self, kind: str):
         if self._cur_msg is None:
             self.begin_assistant_turn()
@@ -10902,7 +10749,6 @@ class ChatPanel(QWidget):
             # ROOT CAUSE FIX: Removed updateGeometry(), it forces synchronous
             # layout during the freeze, which queues paint events that fire on
             # thaw as a dark flash. _render_frame handles layout naturally.
-            #
             # FIX 2026-06-24: Use _is_at_bottom() instead of _scroll_locked
             # for consistent scroll behavior with _flush_prose/_flush_think.
             was_at_bottom = self._is_at_bottom(200)
@@ -11089,45 +10935,21 @@ class ChatPanel(QWidget):
         except RuntimeError:
             _swallow("append thinking text to the open card")
 
-    # Seal the live prose block once its buffer exceeds this many chars.
-    # _flush_prose re-renders the ENTIRE live buffer (markdown → HTML →
-    # setHtml) every debounce tick, so an unbounded buffer makes long
-    # responses quadratically slower as they stream. Sealing bounds the
-    # per-tick work to at most ~this many chars.
-    #
-    # PERF 2026-08-16 — lowered 12000 → 2000 to fix "big answers render
-    # very slow".  The GUI-thread cost of every streaming tick is
-    # setHtml() + height-fit, BOTH O(live-buffer length).  At the old
-    # 12k threshold the buffer grew to 12000 chars before sealing, so each
-    # tick paid ~10ms of GUI work and prose_debounce_interval() backed the
-    # redraw rate off to 400ms (2.5 fps) — exactly when answers are longest
-    # is when the chat felt slowest/choppiest.  Sealing at 1400 keeps the
-    # live tail smaller still: in rendered-reveal mode EVERY frame rebuilds
-    # the tail via setHtml, and the rebuild cost is proportional to its
-    # size, so the tail length is directly the per-frame flash cost.  Seals
-    # land on paragraph / fence-close boundaries, so the split is invisible
-    # (reads as normal paragraph spacing).  Completed prefixes are frozen
-    # QTextBrowser widgets that are never re-rendered again while streaming,
-    # so total work stays LINEAR in answer length, not quadratic.
+    # Each render rebuilds the whole live buffer, so an unbounded tail makes
+    # long answers quadratic. 1400 (down from 12000) keeps work linear; seals
+    # land on paragraph/fence boundaries and frozen prefixes are never redrawn.
     _PROSE_SEAL_CHARS = 1400
     # Hard cap: if the buffer passes this with NO paragraph/fence-close
-    # boundary (one giant open code fence / table / mermaid — none contain
-    # "\n\n"), fall back to fence/table-aware splits so the live tail can
-    # NEVER grow unbounded.  Tail is kept ≤ _PROSE_TAIL_TARGET chars.
-    # Lowered with _PROSE_SEAL_CHARS so even the pathological single-giant-
-    # block case keeps a small, cheap live tail.
+    # boundary (one giant open code fence / table / mermaid, none of which
+    # contain "\n\n"), fall back to fence/table-aware splits so the live tail
+    # can NEVER grow unbounded. Tail is kept <= _PROSE_TAIL_TARGET chars.
     _PROSE_HARD_CAP = 6000
     _PROSE_TAIL_TARGET = 1800
 
     def on_text(self, chunk: str):
-        # ── Whitespace-only chunk arriving where it would OPEN a new prose
-        # block (right after a tool/thinking card, or as the first content of
-        # a block): defer it instead. Stream fidelity (bf812b1) forwards
-        # whitespace-only deltas so words never glue, but letting one CREATE
-        # a block produced empty prose blocks rendering as large blank gaps
-        # between cards. The held whitespace is prepended to the next real
-        # text chunk, so coalescing still reconstructs the exact original
-        # text ("port" [ws] [tool] "8083" → "port 8083", never "port8083").
+        # Defer whitespace that would OPEN a new prose block: it used to
+        # create empty blocks and blank gaps. Held text is prepended to the
+        # next chunk, so "port" + ws + "8083" still becomes "port 8083".
         _starting_new_block = self._open_kind != "prose" or not self._prose_buf
         if not chunk.strip() and _starting_new_block:
             self._pending_stream_ws = getattr(self, '_pending_stream_ws', '') + chunk
@@ -11166,20 +10988,10 @@ class ChatPanel(QWidget):
             # in _on_prose_render.  Sync _flush_prose() remains for turn
             # end / bridge callers that need immediate paint.
             self._prose_debounce.timeout.connect(self._flush_prose_async)
-        # ── Adaptive debounce, the fix for long Plan/Ask answers ──────────
-        # Every tick re-renders the WHOLE live buffer: markdown→HTML, then
-        # setHtml() (full QTextDocument re-parse), then fit() (full re-layout
-        # to measure height). Measured on this machine at a 12k buffer:
-        # ~13ms pipeline + ~4ms setHtml + ~6ms fit ≈ 23ms of GUI-thread work.
-        # At a flat 150ms tick that is ~15% of the GUI thread spent
-        # continuously re-drawing text the user has already read, and it is
-        # worst exactly when answers are longest (Plan/Ask explanations),
-        # which is when users reported the chat "struggling".
-        # Cost per tick grows with the buffer, so the tick interval grows
-        # with it too, keeping GUI utilisation roughly flat (~6%) instead of
-        # climbing. Short/early text keeps the original snappy 150ms, so
-        # normal replies feel identical; only long answers slow their REDRAW
-        # rate (still 2.5/s, fluid to read), never the text itself.
+        # Adaptive debounce: a tick re-renders the whole buffer (~23ms at
+        # 12k), so a flat 150ms tick spent ~15% of the GUI thread on text
+        # already read. The interval grows with the buffer to hold utilisation
+        # flat; short text keeps 150ms, so normal replies are unchanged.
         _interval = prose_debounce_interval(len(self._prose_buf))
         if self._prose_debounce.interval() != _interval:
             self._prose_debounce.setInterval(_interval)
@@ -11345,7 +11157,6 @@ class ChatPanel(QWidget):
         if old_block is not None:
             self._render_stream_html(old_block, prefix)
             # Fit the block we are leaving behind to the text it now holds.
-            #
             # The live block may only grow while the turn runs (see the height
             # rule in _apply_prose_render), which keeps the frontier from
             # jumping. But a block being SEALED is finished: nobody is reading
@@ -11380,91 +11191,31 @@ class ChatPanel(QWidget):
     # One GUI update per frame while the stream is hot: everything that
     # arrives inside this window is carried by a single insert + height fit.
     _STREAM_FRAME_MS = 33
-    # ── Paced reveal ──────────────────────────────────────────────────────
-    # Providers do not deliver text evenly: a chunk can carry one token or a
-    # whole paragraph, and arrival stalls and bursts with the network. Showing
-    # each frame's arrivals as-is copies that unevenness onto the screen, so
-    # the answer lands in lumps.
-    #
-    # The queue is therefore drained on a time constant instead of emptied:
-    # each frame releases a fraction of the backlog, so the reveal rate is a
-    # smoothed version of the arrival rate. Text flows at a steady frontier
-    # (the typewriter reveal every chat UI uses), a burst is spread over a
-    # few frames instead of appearing at once, and a stall does not stop the
-    # flow while there is anything left to show.
-    #
-    # It never becomes a throttle: the release is proportional to the
-    # backlog, so the further behind the display falls the faster it moves,
-    # settling ~1/8s behind a fast provider and catching up the moment the
-    # provider pauses. Nothing is delayed at the end of a turn, a block
-    # switch or a seal - each drains the queue in full first.
-    #
-    # Four frames, not more: a longer constant is smoother per frame but
-    # leaves a visible trickle at the end of a burst, since the release
-    # shrinks with the backlog it is draining.
+    # Paced reveal: providers deliver in lumps, so the queue is drained on a time
+    # constant (a fraction of the backlog per frame) instead of emptied. The
+    # release scales with the backlog, so it self-corrects toward a steady
+    # frontier and never throttles. Turn end, block switch and seal each drain
+    # the queue in full first, so nothing is left behind.
     _STREAM_SMOOTH_FRAMES = 4    # release ~1/4 of the backlog per frame (~130ms)
-    # Reveal SPEED, the reader-facing quantity. Declared per second, not per
-    # frame: the cadence now varies with block size (stream_frame_interval),
-    # and a per-frame floor would silently halve the speed whenever the
-    # cadence eased off. Derived into a per-frame floor at the cadence in
-    # force, so 33ms -> 5 chars and 66ms -> 10 chars both mean 140 chars/s.
-    #
-    # Raised from 90. 90 chars/s is roughly silent-reading speed, so a fast
-    # model's answer crawled onto the screen instead of flowing, which reads
-    # as the panel being slow rather than the model being fast. The budget for
-    # raising it is the render cost: with the live block monotonic and stepping
-    # two lines, a landed render measured 1.94ms against 1.98ms for one-line
-    # stepping and height relayouts dropped 31 -> 20 on the same answer, so
-    # there is GUI-thread headroom to reveal more per frame. 140 keeps the
-    # reveal under the point where a frame's delta is too big to read as
-    # motion (at 33ms that is 5 chars, about one word).
+    # Reveal speed in chars/second (reader-facing), converted to a per-frame
+    # floor at the active cadence so an eased cadence cannot halve it.
+    # Raised 90 to 140: 90 is roughly silent-reading speed, so a fast model
+    # crawled onto the screen and read as the panel being slow. Render cost had
+    # headroom (1.94ms vs 1.98ms per landed frame, relayouts 31 -> 20), and 140
+    # keeps a frame's delta under one word at 33ms.
     _STREAM_MIN_CHARS_PER_SEC = 140
-    # ── Jitter buffer ─────────────────────────────────────────────────────
-    # The floor above is a CATCH-UP rate, and treating it as a minimum for
-    # every provider is what made slow ones stutter. Measured
-    # (.cortex/experiments/smoothness_probe.py, gaps between landed renders,
-    # which is the only thing that puts text on screen in rendered-reveal
-    # mode): two providers delivering the SAME 55 chars/s differed only in
-    # how evenly they delivered, and the uneven one produced 17 gaps over
-    # 150ms against 1 for the even one, at 11.9 visible updates/s instead of
-    # 18.5. Revealing at a flat 140 chars/s drains a 55 chars/s provider
-    # 2.5x faster than it fills, so the queue sits empty and every network
-    # micro-stall reaches the screen as a visible freeze. The shipped
-    # harness never showed this because it replays at a flat ~1000 chars/s,
-    # where the queue is always deep.
-    #
-    # So the reveal rate is derived from the ARRIVAL rate instead of being a
-    # constant, and a small buffer is deliberately held back - the same
-    # trade a video player makes: a little latency buys continuous motion.
-    # How much text to keep in reserve, as a fraction of the arrival rate.
-    # The reserve has to be deeper than the gap it is meant to bridge, and
-    # 180ms was not: measured on a 55 chars/s provider whose gaps run to
-    # 220ms, a 180ms reserve is ~10 chars, so a 220ms stall still drained
-    # the queue and reached the screen. The same provider delivering EVENLY
-    # at the same rate showed a 51.7ms median gap against the uneven one's
-    # 92.2ms, i.e. the remaining stutter was exactly the unbridged stalls.
-    # 120ms holds ~7 chars at a 55 chars/s rate, which covers that provider's
-    # median gap (51.7ms even, 92ms uneven) without holding a fast model back.
-    # 300ms was the old reserve: it made a 1000 chars/s answer land 426ms late
-    # and, together with the 900 cap below, let a 2500 chars/s answer fall
-    # 1.9s behind the model. A reader reads that gap as the panel typing one
-    # character at a time. A turn end still drains the reserve at once
-    # (_drain_stream_now), so nothing is left behind.
+    # Jitter reserve: reveal from the ARRIVAL rate, not a flat floor, so a
+    # slow provider's network gaps do not reach the screen as freezes. 120ms
+    # covers the measured 51.7/92ms medians at 55 chars/s; 300ms made a fast
+    # answer land 426ms late. Turn end drains the reserve at once.
     _STREAM_TARGET_LATENCY_MS = 120
     # Proportional-controller time constant for converging on that reserve.
     # 250ms, not 400: the reserve is smaller now, so the controller has to
     # close the gap in fewer frames or a burst still trickles out.
     _STREAM_RATE_TAU_MS = 250
-    # Never crawl below this while text IS buffered, and never dump faster
-    # than this when catching up from a deep backlog.
-    #
-    # The ceiling is the reader-facing speed. 900 chars/s is about 180 words
-    # a second, which sounds fast until a model delivers 2000+: the display
-    # then falls further behind every second and the answer visibly crawls
-    # while the model has already finished. 4000 chars/s keeps up with a fast
-    # model (measured: a 2500 chars/s arrival reveals at 2428, lag 86ms) and
-    # is still well under the 1200-char dump threshold, so a paste still goes
-    # up in one paint rather than being animated.
+    # Reveal ceiling: 4000 chars/s keeps up with a 2500 chars/s model (lag
+    # 86ms); 900 fell behind and made finished answers look like they crawled.
+    # Still below the 1200-char instant-dump threshold.
     _STREAM_MIN_REVEAL_CPS = 40
     # The reserve grows to outlast the provider's own gap between chunks.
     _STREAM_GAP_MARGIN = 1.3
@@ -11488,112 +11239,41 @@ class ChatPanel(QWidget):
     # cost is what spaces the renders out (see _stepped_height). Safe only
     # because the block never gives the headroom back mid-turn.
     _STREAM_HEIGHT_STEP_LINES = 2
-    # ── Block-boundary sync ───────────────────────────────────────────────
-    # Raw text and rendered markdown disagree about STRUCTURE: a paragraph
-    # break is an empty line in raw text but a margin once rendered, and a
-    # heading is typed at body size and only enlarges when rendered. When a
-    # render landed on its own schedule it reconciled all of that at once,
-    # far above where the reader was looking. Measured on a fast stream:
-    # one repaint changed the look of 360 characters that were already on
-    # screen - 336 of them because a blank line became a margin and every
-    # line below it moved. That is the "whole answer jerks together" effect.
-    #
-    # So the reveal stops at the end of each block (a line break), asks for
-    # a render, and resumes only once that render has landed. The block is
-    # reconciled while it is still the frontier, with nothing below it yet
-    # to move. The pause is a render's latency, a few ms, and reads as the
-    # natural rhythm of text arriving line by line. Capped, so a slow render
-    # can never stall the stream. 120 ms held the next line for four frames
-    # after every line break, which is the stop a reader feels between
-    # sentences. One frame is enough for the render to land.
+    # Stop at each line break for a render: raw text and rendered markdown
+    # disagree on structure (blank line -> margin, heading grows), and a
+    # render landing late restyled 360 visible chars at once ("whole answer
+    # jerks"). Reconcile while the block is still the frontier. 40ms cap:
+    # 120ms held the next line four frames and read as a stall.
     _BOUNDARY_SYNC = True
     _BOUNDARY_HOLD_MS = 40
-    # ── Rendered reveal ───────────────────────────────────────────────────
-    # Every frame shows RENDERED markdown of the text revealed so far, never
-    # raw text. The raw layer above (type now, style later) cannot be made
-    # still: replaying a real DeepSeek-flash answer (4,477 chars, a table,
-    # three code blocks, two lists) through it measured 19 repaints that
-    # restyled already-visible text (591 chars) and 17 height jumps over
-    # 30px, the biggest +203px - bold snapping in, bullets indenting, table
-    # rows and code lines jumping into their boxes, all after being read.
-    # This is how VS Code and Claude stream: styled from the first frame, so
-    # nothing on screen ever changes look; only the frontier advances.
-    # The render runs on the background thread (1-5 ms); the GUI pays for
-    # one setHtml per frame. _stabilize_frontier keeps half-written markdown
-    # from rendering one way and then another.
+    # Show RENDERED markdown from the first frame, never raw text restyled
+    # later: a replay measured 19 repaints changing 591 visible chars and 17
+    # height jumps over 30px (max +203) from late styling. Render runs
+    # off-thread; _stabilize_frontier prevents half-written markdown flicker.
     _RENDERED_REVEAL = True
-    # ── Frontier fade ─────────────────────────────────────────────────────
-    # OFF by default. The intent was for revealed characters to arrive dim
-    # and settle to full contrast as more text passes them, so the text
-    # materialises instead of snapping on. In the running app that is two
-    # visible defects, both measured:
-    #
-    #   1. It re-colours its whole span EVERY frame. Each dim is a
-    #      mergeCharFormat, and Qt re-lays out the entire BLOCK for one.
-    #      Measured on a real document, the same 26-char span costs
-    #      0.109 ms in a 500-char block and 2.028 ms in a 12,000-char one.
-    #      Four spans a frame at 30 Hz is ~240 ms/s of GUI thread
-    #      re-laying out text the reader has already read, and every one
-    #      of those relayouts repaints the block on screen.
-    #   2. The dim band IS the blur. Characters held at 0.40 and 0.64
-    #      opacity read as out of focus, and because the band chases the
-    #      frontier it sweeps down the answer as it streams.
-    #
-    # The paced reveal below already gives the "being written" feel without
-    # either cost, and it never touches character formats. Kept behind this
-    # flag rather than deleted, so the effect can be re-enabled and
-    # re-measured if the relayout cost is ever removed.
+    # Frontier fade OFF: each dim mergeCharFormat relayout the whole block
+    # (2ms at 12k chars, ~240ms/s of GUI work) and the band read as blur.
+    # Paced reveal gives the same feel; flag kept for a future cheap impl.
     _STREAM_FADE = False
     # Bands are (characters back from the frontier, opacity against the
     # card), applied only to raw streamed text, never to rendered markdown,
     # whose own colours (links, code, headings) must not be flattened.
     # Only read while _STREAM_FADE is True.
     _FADE_BANDS = ((8, 0.40), (16, 0.64), (26, 0.84))
-    # ── Render coalescing (rendered reveal) ─────────────────────────────
-    # In rendered-reveal mode text becomes visible ONLY when a render
-    # lands, and every render is a full setHtml rebuild of the live block.
-    # Requesting one per 33ms frame repainted the whole tail ~30x/s; on a
-    # large stream that is the residual flash the paint audit measured
-    # (534 full block repaints in one turn). A frame is worth a rebuild
-    # once this many new characters have been revealed since the last
-    # request. 6 was about one word, so the frontier advanced in word-sized
-    # lumps with a visible stop between them. 2 keeps the coalescing (a
-    # one-character tick still waits for the next frame) without holding a
-    # finished word off screen.
+    # Coalesce renders: each is a full setHtml rebuild, and one per 33ms frame
+    # repainted the tail 30x/s (534 repaints in one turn). 6 held a finished
+    # word off screen; 2 keeps coalescing without the visible stop.
     _RENDER_MIN_CHARS = 2
-    # Even below the char threshold, never let styling lag longer than
-    # this: a slow trickle still gets its markdown resolved ~15x/s, and a
-    # burst's last frame is always rendered (nothing strands). 100 ms is
-    # a tenth of a second of a still frontier, which reads as the stream
-    # having stalled between words.
+    # Even below the char threshold, never let styling lag longer than this: a
+    # slow trickle still gets its markdown resolved ~15x/s, and a burst's last
+    # frame is always rendered (nothing strands). 100 ms of a still frontier
+    # reads as the stream having stalled between words.
     _RENDER_MAX_GAP_MS = 66
 
-    # Share of the GUI thread live-block rebuilds may take while streaming.
-    # A rebuild re-lays out the whole live block, and a table cannot be
-    # sealed mid-way, so a long table is rebuilt whole on every request.
-    # This budget spaces rebuild requests by the measured cost, so it also
-    # sets how OFTEN the visible frontier moves: in rendered-reveal mode a
-    # rebuild is the ONLY thing that puts text on screen, so a tight budget
-    # freezes the frontier between landings. Measured at 0.06 replaying a
-    # real answer (tests/manual/measure_stream.py + the smoothness harness):
-    # the screen updated only 3-5x/s in 125-char lumps and sat frozen 62% of
-    # the time - the "burst, pause, burst" (fast model) / "stuck" (slow
-    # model) feel. Raising it to 0.15 triples the visible rate (10.8/s), cuts
-    # the lump to 30 chars and the frozen fraction to 0% on a fast stream
-    # (6% on a slow one), and per-render cost DROPS (11.8 -> 7.6 ms) because
-    # frequent renders land small deltas while sparse ones dump the whole
-    # backlog at once. Restyle churn stays 0 (already-read text never changes
-    # look) and scroll never jerks over 30px - the two things the low budget
-    # was protecting - so 0.15 is smoother AND cheaper. Going to 0.25 buys
-    # little more smoothness (14.8/s) for many more live-block repaints.
-    #
-    # 0.15 is still the "stuck between words" the panel shows on a live
-    # answer. In rendered-reveal mode a rebuild is the ONLY thing that puts
-    # text on screen, and the gate below waits ``cost / budget`` after each
-    # one. A 7 ms rebuild at 0.15 holds the frontier for 47 ms, so a word
-    # lands and the next one waits. 0.35 lets that same rebuild be followed
-    # 20 ms later (about the frame cadence) while a genuinely expensive
-    # rebuild, a long table at 40 ms, still waits ~114 ms instead of stacking.
+    # GUI-thread budget for live-block rebuilds. 0.06 updated 3-5x/s and sat
+    # frozen 62% of the time; 0.15 raised it to 10.8/s with zero frozen time
+    # and lower per-render cost. 0.35 lets a word land about one frame later
+    # while a 40ms table rebuild still waits ~114ms instead of stacking.
     _RENDER_GUI_BUDGET = 0.35
 
     def _render_request_due(self) -> bool:
@@ -11617,15 +11297,13 @@ class ChatPanel(QWidget):
     def _stream_frame_interval(self) -> int:
         """Cadence for the block being written into right now."""
         if self._RENDERED_REVEAL:
-            # Rendered reveal: a frame only advances the frontier and asks
-            # for a rebuild - the rebuild itself is spaced by the render
-            # budget (_render_request_due), NOT by this cadence. The
-            # size-based easing in stream_frame_interval() exists for the
-            # raw-insert path, where every frame mutates and re-lays out
-            # the whole block. Keeping the flat cadence here means a long
-            # live tail (an open code fence, a big table) reveals in fine
-            # steps instead of 50-66ms lumps while the expensive rebuild
-            # stays cost-gated.
+            # Rendered reveal: a frame only advances the frontier and asks for
+            # a rebuild; the rebuild itself is spaced by the render budget
+            # (_render_request_due), NOT by this cadence. The size-based easing
+            # in stream_frame_interval() exists for the raw-insert path, where
+            # every frame mutates and re-lays out the whole block. A flat
+            # cadence here means a long live tail (open fence, big table)
+            # reveals in fine steps while the expensive rebuild stays cost-gated.
             return self._STREAM_FRAME_MS
         block = self._open_block
         n = 0
@@ -12293,17 +11971,10 @@ class ChatPanel(QWidget):
             if self._stream_pending:
                 self._arm_stream_timer()
             return
-        # One freeze for the whole frame. This path runs up to 30x/s under a
-        # fast provider, and with no freeze each of its mutations (insert,
-        # fade, height, scrollbar) repaints on its own; that burst of
-        # repaints is the flicker a fast stream shows.
-        #
-        # Scoped to the BLOCK, not the container. Freezing self.container
-        # here meant every thaw repainted the entire chat column 30x/s (Qt's
-        # setUpdatesEnabled(True) calls update()); only this one block
-        # changes, so only this one block is frozen and repainted. See
-        # _freeze_block. Scroll is read before the freeze and resolved
-        # after, so the position the reader had is the one restored.
+        # Freeze the whole frame in ONE block-scoped freeze: without it the
+        # 30x/s insert/fade/height/scroll mutations each repaint (the flicker).
+        # Freezing the container repainted the entire chat column on every
+        # thaw; only this block changes. Read scroll before, restore after.
         _saved_pos = None
         _was_bottom = False
         _froze_block = False
@@ -12347,7 +12018,6 @@ class ChatPanel(QWidget):
             # knows the real height of the styled text.
             import math as _math
             # Measure at the width the text is actually laid out to.
-            #
             # This used to read document().size().height() raw, unlike every
             # other path here (_fit, _render_stream_html, _prose_doc_width all
             # set the width first). A document whose textWidth is stale or
@@ -12817,7 +12487,6 @@ class ChatPanel(QWidget):
         # ── SINGLE FREEZE: batch ALL mutations (mermaid + render + height + scroll) ──
         # into ONE paint frame. Previously had two freeze/thaw cycles, the mid-function
         # thaw between mermaid check and render caused a visible flash/vibration at 20fps.
-        #
         # Scoped to the BLOCK, except when this frame adds a widget (the
         # mermaid card): that is a structural change to the card's layout and
         # still wants the container frozen as one unit. Freezing the
@@ -12866,22 +12535,11 @@ class ChatPanel(QWidget):
             _render_ms = (time.perf_counter() - _render_t0) * 1000
             # This repaint replaces every optimistically appended chunk.
             self._optimistic_chars = 0
-            # setHtml replaces the block wholesale, and this HTML was built
-            # from a snapshot of the revealed text - which the reveal has
-            # moved past while the render ran (off-thread for debounce
-            # ticks). Put those characters back, or the frontier would step
-            # backwards on every render and wait for the next one.
-            # Where the rendered content ends, measured on the document
-            # itself. NOT len(display_text): display_text is the markdown
-            # SOURCE, so once formatting resolves it is longer than what the
-            # reader sees ("**JavaScript**" renders as "JavaScript").
-            #
-            # Qt's HTML import also leaves a trailing space of its own past
-            # that content. Harmless at rest, but the reveal writes right
-            # after it, so the frontier would gain a stray space between a
-            # render and the next frame ("a versatile , high-level"). Trim
-            # it - spaces and tabs only, never a paragraph break, which
-            # would merge two blocks into one.
+            # setHtml replaced the block with an older snapshot: restore the
+            # chars the reveal advanced meanwhile, or the frontier steps back.
+            # Measure the end on the document, not the markdown source (which
+            # is longer than what renders). Trim Qt's trailing space, but not
+            # paragraph breaks, or two blocks would merge.
             _plain = self._open_block.document().toPlainText()
             _content_end = len(_plain.rstrip(' \t'))
             if len(_plain) > _content_end:
@@ -12930,16 +12588,9 @@ class ChatPanel(QWidget):
                     self._post_render_pos = _content_end + len(_catchup)
                     self._paint_frontier(self._open_block)
             self._prose_renders = getattr(self, '_prose_renders', 0) + 1
-            # ── Flicker trace (DEBUG) ────────────────────────────────────
-            # Flicker during streaming is layout movement the reader notices,
-            # and it cannot be measured where fonts are not installed - it
-            # needs the real machine. One line per render records what the
-            # renderer decided and how far the block moved, so a "it keeps
-            # flashing" report can be read back instead of guessed at:
-            # a structure that flips between renders (paragraph <-> code
-            # block, which four spaces of indent is enough to cause, so
-            # pretty-printed JSON does it) and a height that swings are the
-            # two signatures. DEBUG, so it costs nothing until asked for.
+            # Flicker trace: one INFO line when a render flips structure or
+            # moves height >40px, the two signatures readers see as flashing.
+            # Needs the real machine's fonts; quiet in the normal case.
             try:
                 _struct = ("code" if "<pre" in html or "<code" in html else "") + \
                           ("+table" if "<table" in html else "") + \
@@ -12949,12 +12600,7 @@ class ChatPanel(QWidget):
                 _h_now = self._open_block.minimumHeight()
                 _recl = bool(_prev_struct) and _prev_struct != _struct
                 _jump = isinstance(_prev_h, int) and abs(_h_now - _prev_h) > 40
-                # INFO, but only when something actually moved. A render that
-                # changes neither the structure nor the height by more than
-                # 40px is the normal case and says nothing, so it is not
-                # logged: this stays quiet until there is something to see.
-                # (DEBUG would be invisible here - the file handler is pinned
-                # at INFO, see utils/logger.py.)
+                # Log only when something moved; quiet on normal renders.
                 if _recl or _jump:
                     log.info(
                         "[RENDER TRACE] chars=%d struct=%s%s height=%s%s render=%.1fms",
@@ -12998,41 +12644,18 @@ class ChatPanel(QWidget):
                         _pdoc.setTextWidth(_pw)
                     _doc_h = _math.ceil(_pdoc.size().height()) + 6
                     _cur_h = self._open_block.minimumHeight()
-                    # While the answer is still being written the live block
-                    # is MONOTONIC: it may only GROW. A render replaces raw
-                    # text with styled text, which is shorter (the "**"
-                    # markers go) and can re-wrap to fewer lines - measured
-                    # shrinking the block by up to 28px mid-stream, which
-                    # yanks every line the reader is looking at upwards.
-                    # Growth is invisible by comparison: empty space below the
-                    # last line, inside the same card.
-                    #
-                    # EVERY shrink is held, not just small ones. The old rule
-                    # let a "big" shrink land mid-turn on the theory that it
-                    # corrects a wrong measurement. In practice the big
-                    # shrinks were the give-back of _stepped_height's own
-                    # headroom, i.e. self-inflicted, and letting them land is
-                    # exactly the mid-answer contraction that reads as
-                    # flicker (669 shrinks over 40px, 1144 direction flips in
-                    # one day of RENDER TRACE). A genuinely wrong measurement
-                    # is still prevented at the source: the textWidth guard
-                    # immediately above re-lays the document out at the real
-                    # width before it is measured, which is the only way this
-                    # code could produce a phantom height. Holding the rest
-                    # costs blank space inside a card that is still growing,
-                    # and the final render of the finished turn (not live)
-                    # applies the exact height in the same paint frame as its
-                    # own text, so the headroom goes away as the answer
-                    # settling rather than as a visible jump.
+                    # Live block is MONOTONIC while streaming: styled text is
+                    # shorter and used to shrink the card up to 28px mid-stream,
+                    # yanking lines the reader was looking at. Hold EVERY
+                    # shrink (old "big shrink" exceptions were self-inflicted
+                    # headroom give-backs; 1144 direction flips in one day).
+                    # The textWidth guard above prevents real mismeasurement;
+                    # the final render settles the exact height with its text.
                     if _doc_h < _cur_h and getattr(self, '_turn_active', False):
                         _doc_h = _cur_h
                     if _doc_h > 0 and abs(_doc_h - _cur_h) > 2:
-                        # Whole-line steps while the turn is live, so the card
-                        # and scroll-container layout runs about once per line
-                        # of text instead of once per frame (see
-                        # _stepped_height). The final render of a finished
-                        # turn is not live, so it applies the exact height and
-                        # the reserved headroom goes away.
+                        # Step by whole lines while live: layout runs once per
+                        # line, not per frame. Final render applies exact height.
                         if _doc_h > _cur_h and getattr(self, '_turn_active', False):
                             _doc_h = self._stepped_height(_cur_h, _doc_h)
                         self._open_block.setMinimumHeight(_doc_h)
@@ -13042,30 +12665,17 @@ class ChatPanel(QWidget):
                         if _doc_h < _cur_h:
                             self._open_block.updateGeometry()
                         else:
-                            # Growth reaches the layout only AFTER this
-                            # freeze/thaw cycle has painted, so the frame the
-                            # thaw releases still uses the old, shorter
-                            # geometry and the line just added is drawn cut
-                            # off part-way down. Nothing repaints it after:
-                            # _thaw_viewport deliberately issues no update().
-                            # Mid-stream the next tick covers it up, but the
-                            # final chunk has no next tick, so a finished
-                            # reply keeps its sliced last line on screen.
-                            # Repaint this one block on the next turn of the
-                            # event loop, once the height has been applied.
-                            # Scoped to the strip the growth exposed (see
-                            # _queue_block_repaint), so fixing the sliced
-                            # line no longer costs a second full-block flash
-                            # per growth on top of the render's own repaint.
+                            # Growth reaches layout only after this thaw paints,
+                            # so the new line is drawn cut off and nothing
+                            # repaints it (the last chunk has no next tick).
+                            # Queue a repaint of just the exposed strip.
                             self._queue_block_repaint(self._open_block,
                                                       _doc_h - _cur_h)
                 except RuntimeError:
                     _swallow("repaint the slice a prose render exposed")
 
-            # ── SCROLL: single pin-or-restore AFTER all mutations ──
-            # This is the ONLY scroll operation in the entire flush cycle.
-            # Previous code had 3+ scroll ops (insertHtml, _fit, bar.setValue)
-            # each seeing a different bar.maximum() = vertical jitter.
+            # Single scroll op after all mutations. 3+ ops each saw a
+            # different bar.maximum() and caused vertical jitter.
             if was_at_bottom:
                 try:
                     self._pin_bottom(bar)
@@ -13073,20 +12683,15 @@ class ChatPanel(QWidget):
                     _swallow("hold the view at the bottom across a prose render")
             else:
                 try:
-                    # Only touch the scrollbar when it actually moved. Growing
-                    # the live block changes bar.maximum(), and Qt can clamp or
-                    # shift the value in response, so this restore is needed -
-                    # but on most renders the value is already correct, and a
-                    # redundant setValue still costs a scrollContentsBy pass
-                    # over the whole viewport. Measured 129 scroll moves for 203
-                    # renders before this guard (ab_flicker.py, reader scrolled
-                    # up and locked).
+                    # Restore only when the value moved: a redundant setValue
+                    # costs a full-viewport scrollContentsBy pass (129 moves
+                    # for 203 renders before this guard).
                     if bar.value() != saved_pos:
                         bar.setValue(saved_pos)
                 except RuntimeError:
                     _swallow("restore the scroll offset after a prose render")
         finally:
-            # ── SINGLE THAW: release the freeze → ONE paint frame for ALL
+            # SINGLE THAW: release the freeze, ONE paint frame for ALL
             # mutations. Block-scoped, so that frame repaints this block and
             # not every card in the chat column.
             if _froze_block:
@@ -13187,27 +12792,15 @@ class ChatPanel(QWidget):
                     _swallow("note a tool end on the activity group")
             if self._open_kind == "tools" and self._open_block:
                 self._open_block.end_tool(tool_id, ok=(status == "ok"), result_data=result_data)
-                # Force new block on next text/thinking, but ONLY when a tool
-                # group is actually open. native_chat_bridge fires tool_end for
-                # stale tools inside _on_response_complete, AFTER the final
-                # answer has streamed as prose; unconditionally nulling
-                # _open_kind here orphaned the full prose buffer (open prose
-                # block no longer collected by _collect_last_prose_block), so
-                # the summary silently never rendered and the completion
-                # notification fired instantly.
+                # Only force a new block if a tool group is open: stale
+                # tool_end events arrive after the answer, and nulling here
+                # orphaned that prose buffer so the summary never rendered.
                 self._open_kind = None
             elif self._open_kind == "think":
-                # WALL FIX 2026-08-14: a tool completed while a Thought block is
-                # still open, meaning its tool_start never opened a "tools" block
-                # (upstream session-wide dedup in native_chat_bridge suppresses
-                # tool_start for a file re-touched later in the run, e.g. a
-                # re-Read during a verification sweep). Without this branch the
-                # thought stays open and EVERY subsequent reasoning burst merges
-                # into one giant "wall" Thought card. Invariant: a completed tool
-                # must end the current thought so the next reasoning burst starts
-                # a fresh card. Only null _open_kind (do NOT touch "prose": that
-                # orphans the final-answer buffer, see note above). _ensure()
-                # freezes the outgoing thought block on the next switch.
+                # A tool completing while a Thought is open (its tool_start
+                # was deduped upstream) must end that thought, otherwise every
+                # later reasoning burst merges into one giant wall card. Null
+                # only _open_kind; touching "prose" orphans the answer buffer.
                 self._open_kind = None
         self._place_tool_images()
         # Clear tool scroll guard
@@ -13220,7 +12813,7 @@ class ChatPanel(QWidget):
         if self._open_kind == "tools" and self._open_block:
             self._open_block.add_diff(tool_id, added, removed)
 
-    # ---- file edit lifecycle ----
+# file edit lifecycle
     def on_file_creating(self, file_id, filename):
         """Show animated Creating... card live inside the tool group."""
         with self._stabilize_scroll():
@@ -13636,18 +13229,10 @@ class ChatPanel(QWidget):
                 self._rendering_done_cb()
             return
 
-        # ── Coalesce fence-split blocks before rendering ──
-        # _ensure() pushes _prose_buf whenever the stream interleaves into
-        # thinking/tools (line ~6027), at an ARBITRARY character position,
-        # possibly inside or right at a ``` fence. Rendering such a slice on
-        # its own hands auto_fix_broken_code_fences a half-open fence: its
-        # balancer re-pairs everything downstream and prose gets swallowed
-        # into a code card while commands lose words/spaces (the "THREE card"
-        # bug, a card titled THREE containing prose + a mangled command).
-        # Fix: merge any block with an ODD fence count into the following
-        # block(s) until the fence count is even, so every rendered unit
-        # contains only complete fences. Interleave splits drop no characters,
-        # so plain concatenation reconstructs the original text exactly.
+        # Merge blocks with an odd fence count into the next ones before
+        # rendering: an interleave split can land inside a ``` fence, and the
+        # balancer then swallows prose into a code card ("THREE card" bug).
+        # Splits drop no characters, so concatenation is exact.
         def _fence_incomplete(_s: str) -> bool:
             # Odd number of complete ``` markers → a fence is still open.
             if _s.count("```") % 2 != 0:
@@ -13662,15 +13247,9 @@ class ChatPanel(QWidget):
             return 0 < _run < 3
 
         def _unsafe_boundary(_s: str) -> bool:
-            # SYSTEMATIC RULE: an interleave split (thinking/tool events land
-            # mid-stream at an ARBITRARY character position) is only safe to
-            # render as separate blocks when it falls on a real paragraph
-            # boundary ("\n\n"). Anything else, mid-word ("expe|cted"),
-            # mid-token ("port |8083"), mid-line, mid-fence, must be
-            # re-joined before rendering or words display split/merged.
-            # Interleave splits drop no characters, so plain concatenation
-            # reconstructs the original text exactly. Seal-path blocks keep
-            # their trailing "\n\n" (see _seal_prose_block), so they pass.
+            # Only an interleave split on a real "\n\n" boundary is safe to
+            # render separately; mid-word/token/fence splits must re-join or
+            # words display split. Seal-path blocks keep their trailing "\n\n".
             return _fence_incomplete(_s) or not _s.endswith("\n\n")
 
         _coalesced = []
@@ -13842,12 +13421,12 @@ class ChatPanel(QWidget):
                 _sc_layout, _sc_idx = None, -1
             self._mermaid_streaming_card = None
 
-        # ── Cross-segment fence search. A thinking block or tool card arriving
+        # Cross-segment fence search. A thinking block or tool card arriving
         # mid-diagram splits the prose stream into separate blocks (_ensure
         # pushes _prose_buf into _prose_blocks), so a fence spanning the split
         # never matches inside any single buffer, the diagram then leaked into
         # chat as escaped text fragments ("-&gt;&gt;"), and if the split landed
-        # inside the marker itself ("```m" | "ermaid…") the streaming card was
+        # inside the marker itself ("```m" | "ermaid...") the streaming card was
         # never even created. Search the JOINED text instead, then strip the
         # fence spans back out of each underlying segment buffer.
         _segs = [_b for (_tb, _b) in self._prose_blocks] + [self._prose_buf or ""]
@@ -13928,12 +13507,12 @@ class ChatPanel(QWidget):
 
     def _collect_last_prose_block(self):
         # Accept "tools" too: a tool_start sets _open_kind = "tools" but the
-        # prose browser stays as the open block (line ~12355 documents the
-        # same orphaning). Without this a turn that ends on a tool event left
-        # the final answer in _prose_buf, uncollected, so it was never handed
-        # to _render_single_prose: the message kept the streaming markup
-        # forever, meaning no CodeBlockWidget card and no Run button
-        # ("code block is not inside a card", second report 2026-10-29).
+        # prose browser stays as the open block (line ~12355 documents the same
+        # orphaning). Without this a turn ending on a tool event left the final
+        # answer in _prose_buf, uncollected, so it was never handed to
+        # _render_single_prose: the message kept streaming markup forever,
+        # meaning no CodeBlockWidget card and no Run button ("code block is not
+        # inside a card", second report 2026-10-29).
         # The setHtml check below still keeps ThoughtsBlock and tool groups
         # (which have no setHtml) out.
         if (self._open_kind in ("prose", None, "tools")
@@ -14009,7 +13588,7 @@ class ChatPanel(QWidget):
         _TABLE_HEADER_RE = r'^[ \t]*\|(?![\s\-:]+\|?\s*$).+[ \t]*\n'
         _TABLE_SEP_RE_CL = r'^[ \t]*\|[\s\-:]+(?:\|[\s\-:]+)*\|?[ \t]*\n'
         _TABLE_DAT_RE_CL = r'(?:^[ \t]*\|.+[ \t]*\n?\n?)+'
-        # Primary: table with separator (header + --- + data)
+# Primary: table with separator (header data)
         _TABLE_BLOCK_RE = re.compile(
             r'(?:' + _TABLE_HEADER_RE + r')+'
             + _TABLE_SEP_RE_CL + r'\n*'
@@ -14221,20 +13800,10 @@ class ChatPanel(QWidget):
         for m in re.finditer(r'```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n(.*?)```', cleaned, flags=re.DOTALL):
             code_ranges.append((m.start(), m.end()))
             all_matches.append(('code', m.start(), m.end(), m))
-        # Table detection: header row(s) + separator + data row(s)
-        # FIXED: old regex used \\ (double-backslash) breaking all cases
-        # FIXED 2026-07-13: header rows now exclude separator lines via
-        # negative lookahead (prevents greedy .+ from eating sep rows).
-        # Separator trailing-pipe made optional for tables like |---|---.
-        # FIXED T3: Improved lookahead to properly exclude separator lines
-        # by checking for lines that contain ONLY -, :, |, and whitespace
-        # FIXED T4: Allow blank lines between separator and data rows
-        # (common in LLM output).  \n* after _TABLE_SEP_RE consumes any
-        # blank lines so _TABLE_DAT_RE starts at the first data row.
-        # Data row \n\n? allows ONE blank line between data rows but
-        # stops at consecutive blanks to prevent bleeding into next section.
-        # \n? after [ \t]* makes the final newline optional so the last
-        # data row matches even without a trailing newline.
+        # Table regex: header rows exclude separator lines (negative lookahead
+        # stops greedy .+), separator's trailing pipe is optional, and blank
+        # lines between separator/data rows are consumed. Keep these fixes;
+        # each came from a real failure.
         _TABLE_ROW_RE = r'^[ \t]*\|(?![\s\-:]+\|?\s*$).+[ \t]*\n'
         _TABLE_SEP_RE = r'^[ \t]*\|?[\s\-:]+(?:\|[\s\-:]+)*\|?[ \t]*\n'
         _TABLE_DAT_RE = r'(?:^[ \t]*\|.+[ \t]*\n?\n?)+'
@@ -14347,7 +13916,7 @@ class ChatPanel(QWidget):
         # Emit signal to refresh editor in main_window
         self.edit_accepted.emit(full_path)
 
-    # ── Shared terminal handover (src/core/terminal_session.py) ────────
+# Shared terminal handover (src/core/terminal session.py)
     _TERM_INPUT_TEXT = {
         "secret": ("\U0001F512  Password needed in the terminal",
                    "Type it in the Cortex AI terminal. It goes straight to the "
@@ -14365,7 +13934,7 @@ class ChatPanel(QWidget):
                   "If it needs something, type it in the Cortex AI terminal."),
     }
 
-    # ── AI access to an SSH session the user opened ────────────────────
+# AI access to an SSH session the user opened
     def show_ssh_access_offer(self, dest: str, tab_name: str, token: str):
         """Card: the user logged into a server in a terminal; may the AI use it?"""
         card = QFrame()
@@ -14728,7 +14297,7 @@ class ChatPanel(QWidget):
         except Exception as e:
             log.warning(f"[ChatPanel] Failed to inject system message: {e}")
 
-    # ---- Phase 8: secondary UI handlers ----
+# Phase 8: secondary UI handlers
     def on_file_edit_permission_request(self):
         """Show a permission card when AI tries to edit a file.
         Only one card at a time, if a previous one is still pending, skip."""
@@ -14895,7 +14464,7 @@ class ChatPanel(QWidget):
         # system (_permission_event) that conflicts with the project_access_event
         # and file_edit_permission_event.
         
-        # --- ENFORCE USER CHOICE: on reject, inject visible STOP ---
+# ENFORCE USER CHOICE: on reject, inject visible STOP
         if decision == "rejected":
             self._inject_system_message(
                 "STOP: The user REJECTED the file edit. "
@@ -15232,7 +14801,7 @@ class ChatPanel(QWidget):
         """Update the token budget bar with real-time usage data."""
         self.context_bar.update_budget(used, budget, provider)
 
-    # ---- helpers ----
+# helpers
     def show_subscription_notice(self, feature: str, desc: str):
         """Drop a subscription-required card into the chat.
 
@@ -15529,15 +15098,14 @@ class ChatPanel(QWidget):
     # bottom edge at the fastest measured stream (~900 px/s of code).
     _FOLLOW_EASE = 0.35
     # Finish the glide in one move once this close to the target.
-    #
     # Every scroll step repaints the scrolled widget, and measuring a real
     # 4,917-character replay put the glide at ~71% of ALL container repaints
-    # during a stream (1017 paints, against 298 with the glide disabled and
-    # 9 with the render path disabled too). The tail was the expensive part:
-    # easing at 0.35 with a floor of 1px spends one 16 ms tick per remaining
-    # pixel, so the last few pixels of every line cost three or four repaints
-    # of the whole chat column to move a distance the eye does not track as
-    # motion. Snapping them removes those paints and looks identical.
+    # during a stream (1017 paints, against 298 with the glide disabled and 9
+    # with the render path disabled too). The tail was the expensive part:
+    # easing at 0.35 with a 1px floor spends one 16ms tick per remaining pixel,
+    # so the last few pixels of every line cost three or four repaints of the
+    # whole chat column to move a distance the eye does not track as motion.
+    # Snapping them removes those paints and looks identical.
     _FOLLOW_SNAP_PX = 6
 
     def _follow_bottom(self) -> None:
@@ -15677,24 +15245,11 @@ class ChatPanel(QWidget):
             self.container.setUpdatesEnabled(True)
             log.debug(f"[ChatRestore] Viewport THAWED (depth={self._freeze_depth})")
 
-    # ── Block-scoped paint freeze (streaming hot path) ──────────────────
-    # _freeze_viewport() freezes self.container, the widget holding EVERY
-    # card in the chat. Qt's setUpdatesEnabled(True) does not merely undo
-    # the False: when the widget is visible it also calls update() on it.
-    # So each thaw marked the whole chat column - every earlier message,
-    # every tool card, every thought card - for repainting. The streaming
-    # paths run that pair up to 30x/s, which is a full-column repaint 30
-    # times a second while only ONE block actually changed. On Windows,
-    # with QWebEngineViews composited in the same window, that is the
-    # flicker the handoff (Docs/CHAT_STREAM_FLICKER_HANDOFF.md, H1) ranks
-    # first.
-    #
-    # These helpers freeze the single block being written into instead.
-    # The implicit update() on thaw then repaints that block's own
-    # viewport, which is the only thing that changed. _freeze_viewport is
-    # untouched and still correct for STRUCTURAL changes (adding a card,
-    # sealing a block, ending a turn), where the container really does
-    # need to relayout as one unit.
+# Block scoped paint freeze (streaming hot path)
+    # Freeze the single block being written, not the whole container: Qt's
+    # thaw calls update(), so freezing the container repainted every card 30x/s
+    # while one block changed (the top-ranked streaming flicker). Keep
+    # _freeze_viewport for structural changes that relayout the whole column.
     def _freeze_block(self, block) -> bool:
         """Freeze paint on one block. Returns True if THIS call took it."""
         if block is None:
@@ -16076,17 +15631,10 @@ class ChatPanel(QWidget):
         # Real agent is connected via main_window wiring (send_requested → _on_ai_chat_message)
 
     def _on_stop(self):
-        # Take a queued prompt OUT before clearing the generating state.
-        #
-        # set_generating(False) auto-sends whatever is queued, and the same
-        # Stop press also reaches main_window._on_ai_stop_requested, which
-        # stops the agent. So a prompt typed while the UI said "running" was
-        # sent and then cancelled by the very press meant to unstick things:
-        #   2026-09-10 12:39:17 process_message ... same second: stop_generation
-        #   2026-09-10 12:39:20 [WORKER] Chat task cancelled
-        # and it had to be sent again at 12:39:47. Stop means stop: hand the
-        # prompt back in the input box, unsent. This holds whichever of the two
-        # Stop slots Qt runs first, since the other one only stops the agent.
+        # Take queued prompts OUT before set_generating(False), which auto-sends
+        # them: a Stop press then cancelled the very prompt it was meant to free
+        # (it reached main_window's Stop slot too). Stop means stop: hand them
+        # back unsent, whichever slot Qt runs first.
         ia = self.input_area
         # Every queued prompt comes back, in order (there can be several).
         queued, queued_images = ia._take_all_queued()
@@ -16236,7 +15784,7 @@ class ChatPanel(QWidget):
 
         _refit_batch(0)
 
-    # ---- persistence: load / clear ----
+# persistence: load / clear
     def load_chat(self, conversation_id: str):
         """Rebuild the chat transcript from saved timeline data.
 
@@ -16285,9 +15833,7 @@ class ChatPanel(QWidget):
         # Rebuild from timeline, batched, non-blocking
         self._rebuild_turns_batched(turns)
 
-    # ------------------------------------------------------------------
     # Batched chat rebuild (shared by load_chat + load_older)
-    # ------------------------------------------------------------------
     # Turns per event-loop tick. 6, not 24: each batch runs inside one
     # viewport freeze, so a large batch blocks paint/input for its whole
     # duration, on slow machines a 24-turn batch froze the UI for seconds
@@ -16319,14 +15865,14 @@ class ChatPanel(QWidget):
         self._restore_active_epoch = _epoch
 
         def _process_batch(start: int):
-            # A `global` in the ENCLOSING function does not reach into a
-            # nested one. Without this line the `_RESTORING_ACTIVE = False`
-            # below binds a local that dies with the call, the module flag
-            # stays True for the rest of the process, and every later crash
-            # save is skipped: 47 "[CrashSave] SKIPPED" against 1 "EXECUTING"
-            # in one day's log, each reporting the giveaway pair
-            # `_RESTORING_ACTIVE=True, self._restoring=False` - the attribute
-            # resets because it is an attribute, the global never does.
+            # A `global` in the ENCLOSING function does not reach into a nested
+            # one. Without this line the `_RESTORING_ACTIVE = False` below binds
+            # a local that dies with the call, the module flag stays True for
+            # the rest of the process, and every later crash save is skipped:
+            # 47 "[CrashSave] SKIPPED" against 1 "EXECUTING" in one day's log,
+            # each reporting the giveaway pair `_RESTORING_ACTIVE=True,
+            # self._restoring=False`, the attribute resets because it is an
+            # attribute, the global never does.
             global _RESTORING_ACTIVE
             if self._restore_superseded(_epoch, "Turn rebuild"):
                 return
@@ -16551,15 +16097,14 @@ class ChatPanel(QWidget):
                         m.set_created_ts(msg.get("ts") or msg.get("timestamp"))
                         pb = m.new_prose(streaming=False)
                         # Render the markdown, do not dump it.
-                        #
                         # crash_recovery_log stores what the MODEL wrote, which
                         # is markdown; the timeline stores a rendered prose
                         # block. This path used setPlainText on it, so every
-                        # recovered answer came back as literal "### Summary",
-                        # "```js" and "| Step | Result |" - reported
-                        # 2026-09-21 after a force-quit, and the reason it only
-                        # ever shows up after a crash: the normal restore at
-                        # ~5366 renders the same text through this pipeline.
+                        # recovered answer came back as literal " Summary",
+                        # "```js" and "| Step | Result |", reported 2026-09-21
+                        # after a force-quit, and the reason it only ever shows
+                        # up after a crash: the normal restore at ~5366 renders
+                        # the same text through this pipeline.
                         _md_src = content
                         if len(_md_src) > 6000:
                             _md_src = _md_src[:6000] + (
@@ -16731,17 +16276,10 @@ class ChatPanel(QWidget):
             item = self.col.takeAt(0)
             w = item.widget() if item else None
             if w:
-                # takeAt() only removes the widget from the LAYOUT's bookkeeping -
-                # it does NOT hide it. deleteLater() only frees it on the next
-                # event-loop tick. Between those two moments the widget is still
-                # a visible child sitting at its last painted position, no longer
-                # layout-managed. If anything (e.g. a stray signal from a turn
-                # that should have been cancelled, see project-switch fix in
-                # main_window.py) adds new widgets to this same column in that
-                # window, the old orphaned widget renders BEHIND/THROUGH the new
-                # ones, the overlapping/superimposed text seen when switching
-                # projects. hide() closes that visible window to zero regardless
-                # of when deleteLater() actually runs.
+                # takeAt() un-manages the widget but does not hide it, and
+                # deleteLater() waits a tick. In between, a stray signal adding
+                # widgets left the orphan painted through the new ones (the
+                # overlapping text on project switch). hide() closes that gap.
                 w.hide()
                 w.deleteLater()
         self._cur_msg = None
@@ -16773,7 +16311,7 @@ class ChatPanel(QWidget):
         self._insert(lbl)
         self._autoscroll()
 
-    # ---- conversation persistence ----
+# conversation persistence
     def get_timeline(self) -> dict:
         """Serialize current chat state to a JSON-friendly dict.
         Returns a dict with conversation_id, messages list, and metadata."""
@@ -16820,27 +16358,11 @@ class ChatPanel(QWidget):
             except RuntimeError:
                 _swallow("serialise one timeline widget")
                 continue
-        # Messages that were never built into widgets still belong to the
-        # conversation.
-        #
-        # A long chat restores only its tail (see the lazy split in
-        # load_timeline_async); the older prefix waits in _pending_messages
-        # for the scroll-up loader. This method reads the WIDGET TREE, so
-        # without the prefix it reports only what happens to be loaded - and
-        # the caller writes that straight over the stored timeline.
-        #
-        # 2026-09-21, cortex.log, conversation 73c22633:
-        #     18:25:55  [ChatPersist] Saved 32 messages
-        #     18:25:58  session killed
-        #     18:26:16  [ChatRestore] Lazy load: 12 msgs of 32, 20 pending
-        #     18:26:20  [ChatPersist] Saved 15 messages   <- 20 destroyed
-        # It is not crash-specific: any restart of a long chat followed by a
-        # save truncated the stored history to whatever was on screen, so a
-        # conversation lost a chunk every time it was reopened.
-        #
-        # _pending_messages holds the ORIGINAL serialized dicts and shrinks as
-        # the loader consumes them, so prepending is exact and cannot double
-        # up a message that has since become a widget.
+        # Include messages not yet built into widgets: a long chat restores
+        # only its tail, and serializing the widget tree alone once truncated
+        # a 32-message conversation to 15 on the next save. _pending_messages
+        # holds the original dicts and shrinks as the loader consumes them, so
+        # prepending is exact and cannot duplicate loaded messages.
         pending = getattr(self, '_pending_messages', None) or []
         if pending:
             messages = list(pending) + messages
@@ -16899,7 +16421,7 @@ class ChatPanel(QWidget):
         QTimer.singleShot(0, lambda: self._refit_all_bodies(all_bodies))
         self._restore_scroll_position()
 
-    # ── Scroll Position Save/Restore ─────────────────────────────────────
+# Scroll Position Save/Restore
 
     def _save_scroll_position(self):
         """Save current scroll position for the active conversation."""
@@ -16930,11 +16452,11 @@ class ChatPanel(QWidget):
         # We deliberately do NOT honor a "saved" scroll position here: on a
         # fresh startup the panel is empty when the pre-restore
         # _save_scroll_position() runs, so it stores (0, 0) under this
-        # conversation id, and "restoring" that lands the view at position
-        # 0 (the TOP / oldest message), the exact bug this method exists to
-        # prevent. _scroll_positions is in-memory only (never persisted
-        # across restarts), so there is no genuine cross-session position to
-        # honor anyway. Bottom = where the user left off.
+        # conversation id, and "restoring" that lands the view at position 0
+        # (the TOP / oldest message), the exact bug this method exists to
+        # prevent. _scroll_positions is in-memory only (never persisted across
+        # restarts), so there is no genuine cross-session position to honor
+        # anyway. Bottom = where the user left off.
         bar.setValue(bar.maximum())
         if tries < 6:
             QTimer.singleShot(120, lambda: self._finalize_restore_scroll(tries + 1))
@@ -16991,7 +16513,7 @@ class ChatPanel(QWidget):
         except RuntimeError:
             _swallow("restore the saved scroll position after a switch")
 
-    # ── Lazy Loading Helpers (scroll-up pagination) ──────────────────────
+# Lazy Loading Helpers (scroll up pagination)
 
     def _show_load_more_indicator(self):
         """Show a 'Load older messages' label at the top of the chat."""
@@ -17037,14 +16559,14 @@ class ChatPanel(QWidget):
         if value > 100:
             return
 
-        # ── HARD CEILING on live message widgets ──
+        # HARD CEILING on live message widgets.
         # Evidence (cortex.log 2026-07-27/28): sessions reached 129-139 live
-        # messages, each is 4-6 QTextBrowser widgets, so 600-800 rich-text
-        # widgets in one column. EVERYTHING then scales with that count:
-        # every streamed chunk relayouts the column, every restyle repolishes
-        # every widget, restore batches hit 1.5-2.8s ("SLOW batch"), on a
-        # machine already at 84-94% RAM. This is the "aggressive freeze"
-        # signature, the loader added 30 more forever and nothing evicted.
+        # messages, each 4-6 QTextBrowser widgets, so 600-800 rich-text widgets
+        # in one column. EVERYTHING then scales with that count: every streamed
+        # chunk relayouts the column, every restyle repolishes every widget,
+        # restore batches hit 1.5-2.8s ("SLOW batch"), on a machine already at
+        # 84-94% RAM. This is the "aggressive freeze" signature, the loader
+        # added 30 more forever and nothing evicted.
         MAX_LIVE_MESSAGES = 80
         live = len(getattr(self, '_message_widgets', []) or []) or \
             self.col.count()
@@ -17239,14 +16761,14 @@ class ChatPanel(QWidget):
                 return
 
             total = len(valid_msgs)
-            # Every message here becomes ~4-6 live QTextBrowser widgets
-            # (user bubble + thinking + prose + one per tool card), and
-            # QApplication.setStyleSheet() on theme switch must re-polish
-            # EVERY one of them synchronously. Measured: 34 messages -> 209
-            # widgets -> a single setStyleSheet() call took 75+ SECONDS on
-            # this machine (RAM-starved, swap-bound). 50 was too high to
-            # ever trim a normal-sized conversation. Older messages are not
-            # lost, they lazy-load via _pending_messages on scroll-up.
+            # Every message here becomes ~4-6 live QTextBrowser widgets (user
+            # bubble + thinking + prose + one per tool card), and
+            # QApplication.setStyleSheet() on theme switch must re-polish EVERY
+            # one synchronously. Measured: 34 messages -> 209 widgets -> a
+            # single setStyleSheet() call took 75+ SECONDS on this machine
+            # (RAM-starved, swap-bound). 50 was too high to ever trim a
+            # normal-sized conversation. Older messages are not lost, they
+            # lazy-load via _pending_messages on scroll-up.
             INITIAL_LOAD = 12  # Load last 12 messages initially (~6 turns)
 
             # Full list for lazy loading on scroll-up. Kept in locals and
@@ -17335,15 +16857,14 @@ class ChatPanel(QWidget):
             self._restore_active_epoch = _epoch
 
             # Small batches ON PURPOSE. Each message widget is a full
-            # markdown→HTML render (agent messages can carry entire code
+            # markdown->HTML render (agent messages can carry entire code
             # files) costing 100ms-1s+ on a memory-pressured machine. At
-            # BATCH_SIZE=24 a typical 13-message restore ran as ONE
-            # synchronous block: 39s GUI freeze that starved the startup
-            # overlay's 15s safety timer, the warmup flush timer (fired at
-            # 42s instead of 5s) and sidebar Chromium load events, the
-            # whole IDE looked hung on startup. 2 per batch keeps every
-            # freeze window short and lets the event loop breathe between
-            # batches (singleShot(0) chain below).
+            # BATCH_SIZE=24 a typical 13-message restore ran as ONE synchronous
+            # block: 39s GUI freeze that starved the startup overlay's 15s
+            # safety timer, the warmup flush timer (fired at 42s instead of 5s)
+            # and sidebar Chromium load events, so the whole IDE looked hung.
+            # 2 per batch keeps every freeze window short and lets the event
+            # loop breathe between batches (singleShot(0) chain below).
             _hidden_for_restore = False
             try:
                 if self.container.isVisible():
@@ -17393,16 +16914,10 @@ class ChatPanel(QWidget):
                         try:
                             m = initial_msgs[i]
 
-                            # Announce the message BEFORE building it. Every
-                            # other line here reports after the work finishes,
-                            # so a message that never finishes is invisible:
-                            # a startup hang on 2026-09-05 blocked the GUI
-                            # thread for 178s inside this loop and the log
-                            # showed "Starting restore" followed by nothing at
-                            # all, because the batch timing and the SLOW-batch
-                            # warning are both computed once the batch is
-                            # already done. The last line written now names
-                            # the message that hung.
+                            # Log BEFORE building: other lines here report
+                            # after the work, so a message that hangs leaves
+                            # no trace of which one it was (a 178s freeze
+                            # once showed only "Starting restore").
                             try:
                                 _pre_blocks = m.get("blocks") or []
                                 _pre_size = len(m.get("content", "") or "") + sum(
@@ -17475,14 +16990,14 @@ class ChatPanel(QWidget):
                     self._restoring = False
                     self._refit_all_bodies(_restored_bodies)
                     self._spinner_overlay.hide_overlay()
-                    # Land on the MOST RECENT messages, where the user left
-                    # off, not the oldest at the top. This
-                    # is deferred + re-asserted (see _finalize_restore_scroll)
-                    # because refit is async: scrolling to the bottom before
-                    # widget heights settle lands near the TOP of the final,
-                    # much-taller content, which then auto-tripped the
-                    # scroll-up loader into fetching ALL old history (measured
-                    # 87s background load nobody asked for). The scroll-up
+                    # Land on the MOST RECENT messages, where the user left off,
+                    # not the oldest at the top. This is deferred and re-asserted
+                    # (see _finalize_restore_scroll) because refit is async:
+                    # scrolling to the bottom before widget heights settle lands
+                    # near the TOP of the final, much-taller content, which then
+                    # auto-tripped the scroll-up loader into fetching ALL old
+                    # history (measured 87s background load nobody asked for).
+                    # The scroll-up
                     # loader is armed ONLY after we've settled at the bottom.
                     self._lazy_load_armed = False
                     self._finalize_restore_scroll()
@@ -17536,7 +17051,7 @@ class ChatPanel(QWidget):
     def conversation_id(self) -> str | None:
         return self._conversation_id
 
-    # ---- stubs for methods called by main_window.py ----
+# stubs for methods called by main window.py
     def clear_chat(self):
         self.clear_messages()
 
@@ -17773,17 +17288,9 @@ class ChatPanel(QWidget):
         except RuntimeError:
             _browsers = []
 
-        # Phase 3 targets: tool cards (Grep/Bash rows + their group frames).
-        # Construction-styled like everything else, without a retheme they
-        # kept the old theme's frame and ghost-colored header text after a
-        # live switch. ThoughtsBlock is excluded (richer _apply_theme_styles
-        # already runs in the blocks phase).
-        #
-        # ToolCardBase (tool_cards.py) is a SEPARATE, richer card system
-        # (GrepCard, TerminalCard/"Bash", ReadCard, ...) used via make_card()
-        #, a completely different class from the simple ToolRow above, and
-        # was missed entirely by the first pass. This was the actual
-        # solid-light-box-stuck-in-dark-mode widget in the bug report.
+        # Retheme tool rows and ToolCardBase cards (a separate, richer card
+        # system that was the actual light-box-stuck-in-dark widget).
+        # ThoughtsBlock has its own _apply_theme_styles in the blocks phase.
         try:
             from src.ui.tool_cards import ToolCardBase
             _cards = [c for c in self.findChildren(CollapsibleCard)
@@ -17821,17 +17328,9 @@ class ChatPanel(QWidget):
                 log.info(f"[THEME-AUDIT] chat_panel  cards-retheme DONE  n={len(_cards)}")
                 self._emit_theme_settled()
 
-        # ── Visible-first ordering ──────────────────────────────────────
-        # The work below is unavoidable (every widget carries construction-time
-        # colors), but its ORDER decides what the user experiences. Measured on
-        # a real session (37 blocks + 113 browsers + cards at 94% RAM) the full
-        # pass takes ~2s; processing in creation order means the messages on
-        # screen are rethemed somewhere in the middle of that, so the user
-        # watches the visible area sit in the OLD theme and change late, which
-        # reads as "the UI froze".
-        # Sorting by "is it in the viewport right now" puts every pixel the user
-        # can actually see in the FIRST batch; the rest completes off-screen and
-        # is already correct by the time they scroll to it.
+        # Retheme visible widgets first: the full pass takes ~2s, so creation
+        # order left the on-screen area in the old theme until the middle and
+        # read as a freeze. Off-screen widgets finish before the user scrolls.
         def _visible_first(widgets):
             try:
                 vp = self.scroll.viewport()
@@ -17869,27 +17368,14 @@ class ChatPanel(QWidget):
                 tb = _browsers[i]
                 try:
                     # User bubbles: their WIDGET stylesheet (bg_card bg + text
-                    # color) is construction-time, re-apply from live tokens
-                    # or the bubble stays dark-on-light after a live switch.
+                    # color) is construction-time, re-apply from live tokens or
+                    # the bubble stays dark-on-light after a live switch.
                     if tb.objectName() == "userBubble":
                         tb.setStyleSheet(_user_bubble_qss())
-                    # The document DEFAULT stylesheet carries the creation-time
-                    # theme (headings, tables, blockquotes, etc. via
-                    # build_markdown_css()), plain prose/table text has no
-                    # inline color and renders with THIS.
-                    #
-                    # Bug history: this used to string-REMAP the old CSS text
-                    # via _adapt_restored_html_to_theme, which only replaces
-                    # EXACT current-token values. A message rendered under an
-                    # EARLIER palette generation (e.g. an old purple md_heading
-                    # from before it was changed to white) has a color that
-                    # matches NEITHER current DARK nor LIGHT, the remap
-                    # silently skips it, leaving table headers/headings stuck
-                    # at a stale, low-contrast color forever on a live switch.
-                    # Every defaultStyleSheet in this codebase comes from
-                    # build_markdown_css() (new_prose's only two call sites),
-                    # so there's no need to detect/patch old colors at all -
-                    # just regenerate it fresh from CURRENT tokens.
+                    # Regenerate the document default stylesheet from current
+                    # tokens. The old string-remap only matched exact current
+                    # colors, so headings rendered under an earlier palette
+                    # stayed stuck at stale low-contrast colors forever.
                     doc = tb.document()
                     default_changed = False
                     old_css = doc.defaultStyleSheet()

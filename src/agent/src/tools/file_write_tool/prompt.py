@@ -1,8 +1,4 @@
-# ------------------------------------------------------------
-# prompt.py
-#
 # FileWriteTool prompt template and description generator.
-# ------------------------------------------------------------
 
 try:
     from ..file_read_tool.prompt import FILE_READ_TOOL_NAME
@@ -11,17 +7,13 @@ except ImportError:
     FILE_READ_TOOL_NAME = "Read"
 
 
-# ============================================================
 # TOOL CONSTANTS
-# ============================================================
 
 FILE_WRITE_TOOL_NAME = "Write"
 DESCRIPTION = "Write a file to disk, replacing whatever was there."
 
 
-# ============================================================
 # PRE-READ INSTRUCTION
-# ============================================================
 
 def get_pre_read_instruction() -> str:
     """
@@ -36,9 +28,7 @@ def get_pre_read_instruction() -> str:
     )
 
 
-# ============================================================
 # WRITE TOOL DESCRIPTION
-# ============================================================
 
 def get_write_tool_description() -> str:
     """
@@ -55,9 +45,7 @@ def get_write_tool_description() -> str:
 - No emojis unless the user asks for them."""
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "FILE_WRITE_TOOL_NAME",

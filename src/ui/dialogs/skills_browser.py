@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 
-# ── Cost of what is switched on (pure, unit-tested) ─────────────────────
+# Cost of what is switched on (pure, unit tested)
 # An enabled skill is not "available", its whole body is pasted into every
 # single request. 27 enabled skills measured 184,682 chars, ~46k tokens on
 # EVERY message, which is invisible in a list of toggles. The banner makes
@@ -62,7 +62,7 @@ def format_cost_banner(skills: List[dict]) -> tuple:
     return (base + ".", sev)
 
 
-# ── Skill viewing/editing (pure logic) ────────────────────
+# Skill viewing/editing (pure logic)
 # Users can OPEN any skill, read the full SKILL.md (rendered or raw), and
 # EDIT it. Editing follows the precedence contract that already ships:
 # ~/.cortex/skills/<name>/SKILL.md overrides a bundled skill by name, so
@@ -136,7 +136,7 @@ def prepare_edit(skill: Dict, user_dir: Optional[str] = None) -> str:
             f"(override by name). Delete this folder to restore the "
             f"original. -->\n")
     # The note goes AFTER the frontmatter, never before it. The parser
-    # requires "---" first; a leading comment made every edited copy parse
+# requires " " first; a leading comment made every edited copy parse
     # as a nameless "Skill" card that SHADOWED the real skill (field
     # screenshot: algorithmic-art listed as "Skill").
     if body.startswith("---"):
@@ -153,7 +153,7 @@ def prepare_edit(skill: Dict, user_dir: Optional[str] = None) -> str:
     return target
 
 
-# ── Palette ─────────────────────────────────────────────────────────────
+# Palette
 def _palette(is_dark: bool) -> Dict[str, str]:
     if is_dark:
         return dict(
@@ -172,7 +172,7 @@ def _palette(is_dark: bool) -> Dict[str, str]:
     )
 
 
-# ── iOS-style toggle switch ─────────────────────────────────────────────
+# iOS style toggle switch
 class ToggleSwitch(QWidget):
     """A painted on/off switch with a sliding knob. Emits toggled(bool)."""
     toggled = pyqtSignal(bool)
@@ -249,7 +249,7 @@ class ToggleSwitch(QWidget):
         p.end()
 
 
-# ── A label that truncates its text to the available width ──────────────
+# A label that truncates its text to the available width
 class ElidingLabel(QLabel):
     """QLabel that shows an ellipsis instead of forcing its row wider than
     the panel. Without this, a long description pushed the toggle switch off
@@ -278,7 +278,7 @@ class ElidingLabel(QLabel):
         super().setText(fm.elidedText(self._full, Qt.TextElideMode.ElideRight, avail))
 
 
-# ── One skill row ───────────────────────────────────────────────────────
+# One skill row
 class SkillCard(QFrame):
     selected = pyqtSignal(str)
     toggled = pyqtSignal(str, bool)
@@ -322,7 +322,7 @@ class SkillCard(QFrame):
         super().mousePressEvent(a0)
 
 
-# ── Dialog ──────────────────────────────────────────────────────────────
+# Dialog
 class SkillsBrowserDialog(QDialog):
     def __init__(self, list_skills_fn: Callable[[], List[dict]],
                  toggle_skill_fn: Callable[[str], Optional[bool]],
@@ -498,7 +498,7 @@ class SkillsBrowserDialog(QDialog):
         self._update_count()
         self._show_detail(name)
 
-    # ── Skill body viewer / editor ──────────────────────────────────────
+# Skill body viewer / editor
     def _load_body(self):
         """Fill the viewer with the selected skill's SKILL.md."""
         s = self._by_name.get(self._current_name or "") or {}

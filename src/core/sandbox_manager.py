@@ -31,9 +31,7 @@ except ImportError:
 log = get_logger("sandbox_manager")
 
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 # Commands that are always allowed in AUTO sandbox mode
 SAFE_COMMANDS: Set[str] = {
@@ -99,9 +97,7 @@ class SandboxResult:
     error: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
 # SandboxManager
-# ---------------------------------------------------------------------------
 
 
 class SandboxManager:
@@ -128,9 +124,7 @@ class SandboxManager:
             f"backend={self._backend.value if self._backend else 'none'})"
         )
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
 
     def is_enabled(self) -> bool:
         """Check whether sandboxing is globally enabled."""
@@ -221,9 +215,7 @@ class SandboxManager:
             "timeout": self._config.timeout,
         }
 
-    # ------------------------------------------------------------------
     # Internal
-    # ------------------------------------------------------------------
 
     def _detect_backend(self) -> None:
         """Detect the best available sandbox backend."""
@@ -348,9 +340,7 @@ class SandboxManager:
                 backend_used="restricted_subprocess",
             )
 
-# ---------------------------------------------------------------------------
 # Global singleton
-# ---------------------------------------------------------------------------
 
 _sandbox_manager: Optional[SandboxManager] = None
 _sandbox_manager_lock = threading.Lock()
@@ -364,6 +354,3 @@ def get_sandbox_manager(config: Optional[SandboxConfig] = None) -> SandboxManage
             if _sandbox_manager is None:
                 _sandbox_manager = SandboxManager(config or SandboxConfig())
     return _sandbox_manager
-
-
-

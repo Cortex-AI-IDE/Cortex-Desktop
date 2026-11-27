@@ -28,7 +28,7 @@ def parseFrontmatter(content: str, file_path: str = '') -> Dict[str, Any]:
     if not content or not content.startswith('---'):
         return {'frontmatter': {}}
 
-    # Find the closing ---
+# Find the closing
     end_match = re.search(r'\n---', content[3:])
     if not end_match:
         return {'frontmatter': {}}

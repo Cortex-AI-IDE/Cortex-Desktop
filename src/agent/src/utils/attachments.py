@@ -1,10 +1,6 @@
-# ------------------------------------------------------------
-# attachments.py
-#
 # Attachment message creation and retrieval stubs.
 # IDE selection context, memory attachment and skill discovery are
 # not implemented yet.
-# ------------------------------------------------------------
 
 from typing import (
     Any,

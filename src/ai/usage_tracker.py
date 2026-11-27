@@ -36,7 +36,7 @@ class UsageTracker:
         except Exception:
             pass  # silent-ok: cleaning stale rows at startup is best effort
 
-    # ── JSON Helpers ──────────────────────────────────────────────
+# JSON Helpers
 
     @staticmethod
     def _load_json(path: Path, default: dict) -> dict:
@@ -122,7 +122,7 @@ class UsageTracker:
     def _save_profile(self):
         self._save_json(self.profile_file, self._profile)
 
-    # ── Defaults ──────────────────────────────────────────────────
+# Defaults
 
     @staticmethod
     def _default_usage() -> dict:
@@ -202,7 +202,7 @@ class UsageTracker:
             },
         }
 
-    # ── Profile Methods ───────────────────────────────────────────
+# Profile Methods
 
     def get_profile(self) -> dict:
         """Return full profile.json contents."""
@@ -218,7 +218,7 @@ class UsageTracker:
         self._save_profile()
         return True
 
-    # ── Usage Tracking Methods ────────────────────────────────────
+# Usage Tracking Methods
 
     @staticmethod
     def _is_valid_model(model: str) -> bool:
@@ -376,7 +376,7 @@ class UsageTracker:
             # Sync to server
             self._sync_to_server()
 
-    # ── Query Methods ─────────────────────────────────────────────
+# Query Methods
 
     def get_usage_stats(self) -> dict:
         """Return usage.json contents plus the derived token breakdown.
@@ -584,7 +584,7 @@ class UsageTracker:
         if changed:
             self._save_usage()
 
-    # ── Internal Helpers ──────────────────────────────────────────
+# Internal Helpers
 
     def _ensure_period(self):
         """Make sure current_period has valid dates."""
@@ -632,7 +632,7 @@ class UsageTracker:
         if streaks.get("streak_start_date") is None:
             streaks["streak_start_date"] = today_str
 
-    # ── Profile ────────────────────────────────────────────────────
+# Profile
 
     def update_profile_bulk(self, data: Dict[str, Any]) -> bool:
         """Update multiple profile fields at once from a dict.
@@ -655,9 +655,7 @@ class UsageTracker:
         return updated
 
 
-# ════════════════════════════════════════════════════════════════
 # Singleton, one instance shared across the application
-# ════════════════════════════════════════════════════════════════
 
 _USAGE_TRACKER_SINGLETON: Optional[UsageTracker] = None
 

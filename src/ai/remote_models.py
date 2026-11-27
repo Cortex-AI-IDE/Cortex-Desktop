@@ -80,7 +80,7 @@ _state: Dict[str, Any] = {
 }
 
 
-# ─────────────────────────── validation ────────────────────────────
+# validation
 
 def _clean_entry(raw: Any) -> Optional[Tuple[str, str, str, str]]:
     """Validate one model dict into the 4-tuple the dropdown expects."""
@@ -224,7 +224,7 @@ def _parse_payload(data: Any) -> Optional[Dict[str, Any]]:
     if not groups:
         return None
 
-    # ── Provider directory ────────────────────────────────────────────────
+# Provider directory
     # Published alongside the models so the Settings panel renders built-in
     # providers through the same code path as server-published and
     # user-created ones. Optional: an older server that only sends "groups"
@@ -268,7 +268,7 @@ def _parse_payload(data: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-# ─────────────────────────── disk cache ────────────────────────────
+# disk cache
 
 def _write_cache(payload: Dict[str, Any]) -> None:
     try:
@@ -344,7 +344,7 @@ def _apply(parsed: Dict[str, Any], *, from_disk: bool = False, source: str = "")
         _state["source"] = source or ("disk" if from_disk else "server")
 
 
-# ─────────────────────────── public API ────────────────────────────
+# public API
 
 def load_cached() -> bool:
     """Load the disk cache from the last successful fetch, if there is one.
@@ -491,7 +491,6 @@ def remote_supports_vision(model_id: str) -> Optional[bool]:
         return needle in {v.lower() for v in (_state.get("vision") or set())}
 
 
-
 def get_remote_alias(name: str) -> Optional[str]:
     """Server-published alias -> canonical model id, or None if unknown.
 
@@ -575,9 +574,6 @@ def get_default_enabled_providers() -> List[str]:
     _ensure_base()
     with _lock:
         return list(_state.get("default_enabled") or [])
-
-
-
 
 
 def status() -> Dict[str, Any]:

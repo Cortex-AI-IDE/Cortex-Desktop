@@ -64,21 +64,19 @@ def _token_plan_unsupported(url: str, status: int, body: str, model: str):
 class MimoProvider(BaseProvider):
     """Xiaomi MiMo API provider (OpenAI-compatible) with full agentic support."""
 
-    # ─── Host routing ─────────────────────────────────────────────────────
+# Host routing
     # MiMo has TWO API endpoints depending on key type:
     #   tp-* (Token Plan)  → https://token-plan-sgp.xiaomimimo.com/v1
     #   sk-* (Pay-as-you-go) → https://api.xiaomimimo.com/v1
-    #
     # The provider auto-detects the correct endpoint from MIMO_API_KEY prefix.
     # If the primary endpoint fails (auth errors, timeouts, connection errors),
     # the provider falls back to the OTHER endpoint and retries.
-    #
     # Set MIMO_API_HOST to force a specific endpoint (disables fallback).
 
     _API_HOST_SK = "https://api.xiaomimimo.com/v1"             # sk-* pay-as-you-go
     _API_HOST_TP = "https://token-plan-sgp.xiaomimimo.com/v1"  # tp-* token plan
 
-    # ─── Instance host state ─────────────────────────────────────────────────
+# Instance host state
 
     _current_host: str = ""
     _primary_host: str = ""
@@ -192,7 +190,7 @@ class MimoProvider(BaseProvider):
         except Exception as e:
             log.warning(f"[MiMo] __init__ error: {e}")
 
-    # ─── env helpers ──────────────────────────────────────────────────────────
+# env helpers
 
     @staticmethod
     def _get_int_env(name: str, default: int, minimum: int = 1, maximum: int = 10) -> int:
@@ -220,7 +218,7 @@ class MimoProvider(BaseProvider):
             return max(self._read_timeout, self._tool_read_timeout)
         return self._read_timeout
 
-    # ─── model registry ───────────────────────────────────────────────────────
+# model registry
 
     @property
     def available_models(self) -> List[ModelInfo]:
@@ -257,7 +255,7 @@ class MimoProvider(BaseProvider):
             log.error(f"[MiMo] available_models error: {e}")
             return []
 
-    # ─── auth ─────────────────────────────────────────────────────────────────
+# auth
 
     def validate_api_key(self) -> bool:
         """Validate that a Mimo API key works, zero tokens consumed."""
@@ -314,7 +312,7 @@ class MimoProvider(BaseProvider):
         except Exception as e:
             log.error(f"[MiMo] set_api_key error: {e}")
 
-    # ─── message formatting (MiMo-specific) ────────────────────────────────
+# message formatting (MiMo specific)
 
     def _format_messages_for_provider(self, messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         """Format messages for MiMo API with vision support."""
@@ -408,7 +406,7 @@ class MimoProvider(BaseProvider):
             log.error(f"[MiMo] _format_messages_for_provider error: {e}")
             return []
 
-    # ─── chat (non-streaming) ─────────────────────────────────────────────────
+# chat (non streaming)
 
     def chat(self,
              messages: List[ChatMessage],
@@ -628,7 +626,7 @@ class MimoProvider(BaseProvider):
             duration_ms=(time.time() - start_time) * 1000,
         )
 
-    # ─── chat_stream (SSE) ────────────────────────────────────────────────────
+# chat stream (SSE)
 
     def chat_stream(self,
                     messages: List[ChatMessage],
@@ -715,7 +713,7 @@ class MimoProvider(BaseProvider):
                 _seen_tool_call_deltas = False
                 _last_tool_call_had_name = False
 
-                # ── Stream telemetry ────────────────────────────────────
+# Stream telemetry
                 # Field report: MiMo sometimes appears to not stream at all -
                 # silence, then the whole answer lands at once. The log could
                 # not say whether Xiaomi buffered (server side) or Cortex did
@@ -776,7 +774,7 @@ class MimoProvider(BaseProvider):
                     content = delta.get("content", "")
                     tool_calls = delta.get("tool_calls", [])
 
-                    # ── MiMo reasoning_content fix ─────────────────────
+# MiMo reasoning content fix
                     # MiMo v2.5 sends the FULL visible response in
                     # reasoning_content even when thinking is disabled.
                     # The __REASONING_DELTA__ path swallows it (routed to
@@ -1011,7 +1009,7 @@ class MimoProvider(BaseProvider):
         log.error(f"Mimo API stream failed after all retries: {last_error}")
         raise RuntimeError(f"MiMo stream failed after all retries: {last_error}")
 
-    # ─── web search (MiMo native built-in tool) ───────────────────────────────
+# web search (MiMo native built in tool)
 
     def web_search(self,
                    query: str,
@@ -1139,7 +1137,7 @@ class MimoProvider(BaseProvider):
 
         return []
 
-    # ─── usage ────────────────────────────────────────────────────────────────
+# usage
 
     def get_usage_stats(self) -> Dict[str, Any]:
         """Return current session token usage."""
@@ -1161,7 +1159,7 @@ class MimoProvider(BaseProvider):
             log.error(f"[MiMo] reset_usage error: {e}")
 
 
-# ─── singleton ────────────────────────────────────────────────────────────────
+# singleton
 
 _mimo_provider: Optional[MimoProvider] = None
 

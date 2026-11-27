@@ -94,7 +94,6 @@ function global:prompt {
 # by a PowerShell prompt. zsh runs `preexec` just before a command and `precmd`
 # just before the prompt; bash has neither, so a DEBUG trap stands in for
 # preexec and PROMPT_COMMAND for precmd.
-#
 # Our hooks are installed AFTER the user's own rc file has run, so their prompt,
 # aliases and theme are already in place and the markers land beside the prompt
 # that is actually drawn. Sourcing the user's file from ours is what makes
@@ -531,7 +530,7 @@ class TerminalSession:
         self.on_input_done: Optional[Callable[[str], None]] = None
         self.on_remote_changed: Optional[Callable[[str], None]] = None
 
-    # ── the user's own terminal, lent to the AI ──────────────────────
+# the user's own terminal, lent to the AI
     @classmethod
     def adopt(cls, pty, name: str, remote: str, history: str = "") -> "TerminalSession":
         """Wrap a user's terminal tab that is logged into a server over SSH,
@@ -595,7 +594,7 @@ class TerminalSession:
         log.info("[AI-TERM] session %d: SSH session ended", self.id)
         _safe(self.on_remote_changed, "")
 
-    # ── lifecycle ─────────────────────────────────────────────────────
+# lifecycle
     def start(self) -> bool:
         if not _PTY_AVAILABLE:
             return False
@@ -712,7 +711,7 @@ class TerminalSession:
                 )
             log.info("[AI-TERM] session %d closed", self.id)
 
-    # ── output ────────────────────────────────────────────────────────
+# output
     def _reader(self):
         pty = self.pty
         while pty is not None:
@@ -841,7 +840,7 @@ class TerminalSession:
                 # is already in the wanted state.
                 pass
 
-    # ── input ─────────────────────────────────────────────────────────
+# input
     def write(self, data: str, user: bool = False) -> bool:
         """Write to the shell. `user` input is never logged or captured.
 
@@ -941,7 +940,7 @@ class TerminalSession:
                 self.id, type(exc).__name__,
             )
 
-    # ── handover ──────────────────────────────────────────────────────
+# handover
     def _set_awaiting(self, kind: str, prompt: str, on_wait):
         """Caller holds the lock."""
         self._awaiting = (kind, prompt)
@@ -1050,7 +1049,7 @@ class TerminalSession:
             self._set_awaiting(kind, prompt, on_wait)
         return False
 
-    # ── background commands ───────────────────────────────────────────
+# background commands
     def _take_bg_locked(self) -> Optional[RunResult]:
         """New output of the background command. Caller holds the lock."""
         if self._bg is None:
@@ -1085,7 +1084,7 @@ class TerminalSession:
             self._cond.wait_for(lambda: self._cap_done or not self._alive, 5)
         return self.read_background()
 
-    # ── AI commands ───────────────────────────────────────────────────
+# AI commands
     def wait_ready(self, timeout: float = _READY_TIMEOUT) -> bool:
         with self._cond:
             self._cond.wait_for(lambda: self._ready or not self._alive, timeout)

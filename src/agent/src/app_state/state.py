@@ -28,7 +28,7 @@ class _AppState:
 STATE = _AppState()
 
 
-# ── Session ID ───────────────────────────────────────────────────────────────
+# Session ID
 
 def getSessionId() -> str:
     """
@@ -72,7 +72,7 @@ def getParentSessionId() -> Optional[str]:
     return STATE.parent_session_id
 
 
-# ── Project Root ─────────────────────────────────────────────────────────────
+# Project Root
 
 def get_project_root() -> str:
     """
@@ -94,7 +94,7 @@ def set_project_root(path: str) -> None:
     STATE.project_root = os.path.abspath(path)
 
 
-# ── Original CWD ─────────────────────────────────────────────────────────────
+# Original CWD
 
 def get_original_cwd() -> str:
     """
@@ -116,7 +116,7 @@ def set_original_cwd(cwd: str) -> None:
     STATE.original_cwd = os.path.abspath(cwd)
 
 
-# ── Additional Directories ───────────────────────────────────────────────────
+# Additional Directories
 
 def getAdditionalDirectoriesForCortexMd() -> List[str]:
     """
@@ -130,10 +130,8 @@ def getAdditionalDirectoriesForCortexMd() -> List[str]:
     return STATE.additional_directories_for_cortex_md
 
 
-# ============================================================
 # Compatibility aliases (snake_case + camelCase)
 # Some modules still import the original camelCase names.
-# ============================================================
 
 # Extra feature flags used by some tools (default: off)
 if not hasattr(STATE, 'kairos_active'):

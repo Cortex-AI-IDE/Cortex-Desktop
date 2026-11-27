@@ -26,7 +26,7 @@ def _pen(p: QPainter, color: str, width: float = 1.8):
     p.setBrush(Qt.BrushStyle.NoBrush)
 
 
-# ── Individual icon drawers ───────────────────────────────────────────────────
+# Individual icon drawers
 
 def _draw_folder(p: QPainter, s: int, color: str):
     """Solid folder icon."""
@@ -342,7 +342,7 @@ def _draw_sun(p: QPainter, s: int, color: str):
         p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
 
-# ── Language Icons ───────────────────────────────────────────────────────────
+# Language Icons
 
 def _draw_python(p: QPainter, s: int, color: str):
     """Official Python logo, Multicolor Blue/Yellow snakes."""
@@ -596,7 +596,7 @@ def _draw_go(p: QPainter, s: int, color: str):
     p.drawText(QRectF(0, 0, s, s), Qt.AlignmentFlag.AlignCenter, "Go")
 
 
-# ── SVG-based Language Icons ──────────────────────────────────
+# SVG based Language Icons
 
 def _svg_icon(svg_data: str, size: int) -> QPixmap:
     """Render SVG data to a QPixmap."""
@@ -774,12 +774,10 @@ _SVG_ICONS = {
 }
 
 
-# ── High-Quality UI SVG Templates (Codicon/Lucide style, color-aware) ────────
+# High Quality UI SVG Templates (Codicon/Lucide style, color aware)
 # These use {color} placeholder for theme-aware monochrome rendering
 _UI_SVG_TEMPLATES = {
-    # ═══════════════════════════════════════════════════════════════════════════
     # Activity Bar Icons
-    # ═══════════════════════════════════════════════════════════════════════════
 
     # Explorer: Two overlapping document pages
     "explorer": '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
@@ -828,9 +826,7 @@ _UI_SVG_TEMPLATES = {
         <circle cx="12" cy="15" r="3" fill="{color}"/>
     </svg>''',
 
-    # ═══════════════════════════════════════════════════════════════════════════
     # Explorer Toolbar Icons
-    # ═══════════════════════════════════════════════════════════════════════════
 
     # New File: Document outline with plus sign
     "new-file": '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -867,9 +863,7 @@ _UI_SVG_TEMPLATES = {
         <polyline points="6 20 12 15 18 20"/>
     </svg>''',
 
-    # ═══════════════════════════════════════════════════════════════════════════
     # Additional UI Icons
-    # ═══════════════════════════════════════════════════════════════════════════
 
     # Close/X icon
     "close-icon": '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round">
@@ -912,10 +906,8 @@ _UI_SVG_TEMPLATES = {
         <path d="M7 15h10"/>
     </svg>''',
 
-    # ═══════════════════════════════════════════════════════════════════════════
     # Panel Toggle Icons, 4 buttons, one per panel group
     # Each icon switches between visible (panel shown) ↔ hidden (panel collapsed)
-    # ═══════════════════════════════════════════════════════════════════════════
 
     # ── 1. Left Sidebar: Layout with left pane ──
     "panel-left-sidebar-visible": '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
@@ -995,9 +987,7 @@ _UI_SVG_TEMPLATES = {
         <line x1="15" y1="9" x2="9" y2="15" stroke-width="2"/>
     </svg>''',
 
-    # ═══════════════════════════════════════════════════════════════════════════
     # Chat List Action Icons, Pencil (rename) & Trash (delete)
-    # ═══════════════════════════════════════════════════════════════════════════
 
     # Pencil icon, clean edit/rename icon (gold/amber color expected)
     "chat-pencil": '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1015,7 +1005,7 @@ _UI_SVG_TEMPLATES = {
 }
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# Public API
 
 _DRAWERS = {
     "folder":   _draw_folder,
@@ -1059,7 +1049,7 @@ _DRAWERS = {
 _ICON_CACHE: dict[tuple[str, str, int], QIcon] = {}
 
 
-# ── High-quality SVG rendering ────────────────────────────────────────────
+# High quality SVG rendering
 # Renders an SVG string to a QPixmap at the display's device pixel ratio,
 # used by make_icon() for the colour-aware UI templates.
 
@@ -1085,7 +1075,7 @@ def _svg_icon_hq(svg_data: str, size: int) -> QPixmap:
     phys_render = int(size * dpr * oversample)
     phys_target = int(size * dpr)
 
-    # ── Render at high resolution ──────────────────────────────────────────
+# Render at high resolution
     big = QPixmap(phys_render, phys_render)
     big.fill(Qt.GlobalColor.transparent)
 
@@ -1102,7 +1092,7 @@ def _svg_icon_hq(svg_data: str, size: int) -> QPixmap:
     renderer.render(painter)
     painter.end()
 
-    # ── Downsample to physical target size ────────────────────────────────
+# Downsample to physical target size
     out = big.scaled(phys_target, phys_target,
                      Qt.AspectRatioMode.KeepAspectRatio,
                      Qt.TransformationMode.SmoothTransformation)

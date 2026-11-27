@@ -28,9 +28,7 @@ def _tint(hexcol: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-# ============================================================
 # PERMISSION CARD  (Allow once / Allow always / Reject)
-# ============================================================
 class PermissionCard(QFrame):
     """
     Gates the agent loop, user must Allow once, Allow always, or Reject.
@@ -175,9 +173,7 @@ class PermissionCard(QFrame):
         l.setStyleSheet(f"color:{color};font-size:12px;")
         self._v.addWidget(l)
 
-# ============================================================
 # QUESTION CARD
-# ============================================================
 class _OptionRow(QFrame):
     """One answer: numbered title plus the option's description under it.
 
@@ -308,9 +304,7 @@ class QuestionCard(QFrame):
                 row_w.set_enabled(False)
 
 
-# ============================================================
 # TODO SECTION  (Flat design, spinner for in_progress, breathing space)
-# ============================================================
 class TodoSection(QFrame):
     """Displays task progress as a collapsible section above input.
     Flat design: no border radius, no card border, 8px outer padding.
@@ -570,9 +564,7 @@ class TodoSection(QFrame):
             QTimer.singleShot(0, self._sync_cap)
 
 
-# ============================================================
 # CONTEXT BAR / TOKEN BUDGET
-# ============================================================
 class UpdatePill(QWidget):
     """The small "Update available" row above the chat box.
 

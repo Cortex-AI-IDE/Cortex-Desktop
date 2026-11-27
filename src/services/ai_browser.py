@@ -50,7 +50,7 @@ _CONNECTION_FLAGS = ("--autoConnect", "--auto-connect", "--browserUrl", "--brows
                      "--executable-path", "-e", "--headless")
 
 
-# ── mode ────────────────────────────────────────────────────────────────
+# mode
 def mode() -> str:
     try:
         from src.config.settings import get_settings
@@ -108,7 +108,7 @@ def launch_args(command: str, args: List[str]) -> List[str]:
     return ["--autoConnect"]
 
 
-# ── is the user's Chrome ready? ─────────────────────────────────────────
+# is the user's Chrome ready?
 def _chrome_user_data_dir() -> str:
     if sys.platform == "win32":
         return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
@@ -140,7 +140,7 @@ def chrome_status() -> Dict[str, object]:
             "ready": running and debugging, "setup_url": REMOTE_DEBUGGING_URL}
 
 
-# ── what page is the browser on? ────────────────────────────────────────
+# what page is the browser on?
 _SNAPSHOT_MARKERS = ("## Latest page snapshot", "- Page Snapshot:", "### Page state", "## Pages")
 _URL_RES = (re.compile(r'RootWebArea "[^"\n]*" url="([^"\n]+)"'),
             re.compile(r"^\s*\d+: (\S+) \[selected\]", re.M),
@@ -203,7 +203,7 @@ def is_connection_error(text: str) -> bool:
             or "remote-debugging" in low and "chrome" in low)
 
 
-# ── the handover the agent waits on ─────────────────────────────────────
+# the handover the agent waits on
 KIND_TEXT = {
     "challenge": ("\U0001F6E1  Security check in Chrome",
                   "The site wants to check that a person is there. Complete the check in "

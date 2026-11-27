@@ -70,7 +70,6 @@ class ToolCircuitBreaker:
     # from then on every compileall/pytest verification silently did nothing
     # while the model kept believing its gates had passed. Worse, the cap's
     # message told it to "stop searching", which is not what it was doing.
-    #
     # Dropping the volume cap here does not remove loop protection, which
     # never depended on it:
     #   - 3 consecutive FAILURES still trip the breaker (record_call below);
@@ -101,7 +100,7 @@ class ToolCircuitBreaker:
         self._disabled_at: Dict[str, float] = {}   # tool -> monotonic time it tripped
         self._half_open: Set[str] = set()          # tools running a probe call
 
-    # ── Query ──────────────────────────────────────────────────────
+# Query
 
     def is_disabled(self, tool_name: str) -> bool:
         """Return True if the tool is currently disabled by the breaker."""
@@ -112,8 +111,7 @@ class ToolCircuitBreaker:
         return self._fail_counts.get(tool_name, 0)
 
 
-
-    # ── Recording ──────────────────────────────────────────────────
+# Recording
 
     def record_call(
         self,
@@ -241,7 +239,7 @@ class ToolCircuitBreaker:
 
         return None
 
-    # ── Helpers ────────────────────────────────────────────────────
+# Helpers
 
     def _is_expected_error(self, content: str) -> bool:
         """Return True if the error is a user-side issue, not a tool failure."""
@@ -266,7 +264,7 @@ class ToolCircuitBreaker:
         )
         return _expected
 
-    # ── Reset ──────────────────────────────────────────────────────
+# Reset
 
     def reset(self, tool_name: Optional[str] = None) -> None:
         """

@@ -14,9 +14,7 @@ Supports all Cortex IDE providers:
 
 from typing import Dict, Literal, Optional, TypedDict
 
-# ---------------------------------------------------------------------------
 # Type definitions
-# ---------------------------------------------------------------------------
 
 APIProvider = Literal[
     'anthropic', 'openai', 'google', 'deepseek',
@@ -39,13 +37,11 @@ class NotDeprecatedInfo(TypedDict):
 DeprecationInfo = DeprecatedModelInfo | NotDeprecatedInfo
 
 
-# ---------------------------------------------------------------------------
 # Deprecated models registry
 # Keys are substrings to match in model IDs (case-insensitive)
-# ---------------------------------------------------------------------------
 
 DEPRECATED_MODELS: Dict[str, Dict] = {
-    # ── Anthropic (Claude) ─────────────────────────────────────────────────
+# Anthropic (Claude)
     'claude-3-opus': {
         'modelName': 'Claude 3 Opus',
         'retirementDates': {
@@ -74,7 +70,7 @@ DEPRECATED_MODELS: Dict[str, Dict] = {
         },
     },
 
-    # ── OpenAI ─────────────────────────────────────────────────────────────
+# OpenAI
     'gpt-3.5-turbo': {
         'modelName': 'GPT-3.5 Turbo',
         'retirementDates': {
@@ -105,7 +101,7 @@ DEPRECATED_MODELS: Dict[str, Dict] = {
         },
     },
 
-    # ── Google Gemini ──────────────────────────────────────────────────────
+# Google Gemini
     'gemini-1.0-pro': {
         'modelName': 'Gemini 1.0 Pro',
         'retirementDates': {
@@ -120,7 +116,7 @@ DEPRECATED_MODELS: Dict[str, Dict] = {
         },
     },
 
-    # ── DeepSeek ───────────────────────────────────────────────────────────
+# DeepSeek
     'deepseek-v2': {
         'modelName': 'DeepSeek V2',
         'retirementDates': {
@@ -130,9 +126,7 @@ DEPRECATED_MODELS: Dict[str, Dict] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------------
 
 def getDeprecatedModelInfo(
     modelId: str,
@@ -295,9 +289,7 @@ def isModelDeprecated(modelId: str) -> bool:
     return info['isDeprecated']
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 __all__ = [
     'APIProvider',

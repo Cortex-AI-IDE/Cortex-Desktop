@@ -20,7 +20,7 @@ from typing import List, Dict, Any, Optional, Set, Callable
 log = logging.getLogger("agent_tools")
 
 
-# ==================== AGENT TYPES ====================
+# AGENT TYPES
 
 class AgentType(Enum):
     """Types of agents in the multi-agent system."""
@@ -42,7 +42,7 @@ class AgentStatus(Enum):
     STOPPED = "stopped"
 
 
-# ==================== TOOL FILTERING ====================
+# TOOL FILTERING
 
 # Tools available to each agent type
 
@@ -129,7 +129,7 @@ def get_tools_description_for_agent(agent_type: AgentType) -> str:
     return "\n".join(lines)
 
 
-# ==================== AGENT LIFECYCLE ====================
+# AGENT LIFECYCLE
 
 @dataclass
 class AgentTask:
@@ -256,7 +256,7 @@ class AgentLifecycleManager:
         log.info(f"[Lifecycle] Cleaned up {len(to_remove)} tasks")
 
 
-# ==================== WORKER PROMPT BUILDER ====================
+# WORKER PROMPT BUILDER
 
 def build_worker_system_prompt(agent_type: AgentType, project_path: str = None) -> str:
     """Build system prompt for a worker agent based on type.
@@ -336,7 +336,7 @@ def build_worker_system_prompt(agent_type: AgentType, project_path: str = None) 
     return prompt
 
 
-# ==================== COORDINATOR DECISION HELPERS ====================
+# COORDINATOR DECISION HELPERS
 
 def should_use_parallel(
     has_images: bool,

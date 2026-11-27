@@ -147,7 +147,7 @@ class KeyManager:
         except OSError as e:
             log.warning(f"[Security] Could not restrict permissions on {path}: {e}")
 
-    # ─── Secret Service backend ───────────────────────────────────────────
+# Secret Service backend
 
     def _keyring_backend(self):
         """Resolve the `keyring` library once. Returns the module, or None
@@ -533,7 +533,7 @@ class KeyManager:
             hashlib.sha256
         ).hexdigest()
     
-    # ─── Public API ──────────────────────────────────────────────────────
+# Public API
     
     def store_key(self, provider: str, api_key: str, 
                   storage_backend: str = "auto") -> bool:
@@ -831,10 +831,9 @@ class KeyManager:
         self._cache.clear()
         self._cache_ttl.clear()
     
-    # ─── Recovery & Migration ──────────────────────────────
+# Recovery & Migration
     
 
-    
     def import_credentials(self, import_path: str) -> bool:
         """Import encrypted credentials from JSON file."""
         try:
@@ -925,7 +924,6 @@ class KeyManager:
             return False
     
 
-    
     def get_security_info(self) -> Dict[str, Any]:
         """Get security configuration information."""
         return {

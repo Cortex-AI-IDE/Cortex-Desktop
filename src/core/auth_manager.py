@@ -369,7 +369,7 @@ class AuthManager:
     def refresh(self) -> bool:
         return self.api_client._try_refresh()
 
-    # ── Internal ───────────────────────────────────────────────────────
+# Internal
 
     def _start_callback_server(self):
         try:
@@ -447,7 +447,7 @@ class AuthManager:
             self._stop_callback_server()
 
 
-# ── Singleton ──────────────────────────────────────────────────────────
+# Singleton
 
 _auth_manager: Optional[AuthManager] = None
 

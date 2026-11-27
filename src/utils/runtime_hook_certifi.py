@@ -53,14 +53,12 @@ def _configure_certifi():
             return
 
     # Last resort: build a bundle from the Windows certificate store.
-    #
     # This branch used to create an ssl context, discard it, and fall through
     # to `pass`, so it configured nothing at all. requests then asked certifi
     # itself, got the path that does not exist, and raised
     #   Could not find a suitable TLS CA certificate bundle, invalid path: ...
     # on every single request. A fallback that silently does nothing is worse
     # than no fallback, because it reads like the case is handled.
-    #
     # requests wants a file, so write the roots Windows already trusts into
     # one and point at that. It only runs when the bundled pem is genuinely
     # missing, which now also means the build is broken and should be fixed

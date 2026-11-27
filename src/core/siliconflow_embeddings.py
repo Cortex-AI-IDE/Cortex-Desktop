@@ -147,7 +147,7 @@ class SiliconFlowEmbeddings:
         model_info = self.MODELS.get(self.model_name, {})
         return int(model_info.get("dimensions", self.FALLBACK_DIMENSIONS))
     
-    # ── Local TF-IDF vocabulary for offline embeddings ──────────
+# Local TF IDF vocabulary for offline embeddings
     # 384 hand-picked code/semantic concepts. Each concept maps to
     # a dimension index.  The embedding value = log-normalized TF.
     # Similar code → similar vectors (unlike SHA256 hash garbage).

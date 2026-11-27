@@ -59,13 +59,11 @@ class UiStallDetector:
         self._timer.start()
 
         # Heartbeat + watchdog thread.
-        #
         # The QTimer above runs ON the GUI thread, so when that thread is
         # blocked the timer cannot fire and can only report the stall AFTER
         # it clears, never say what caused it. Every hang in the log is a
         # duration with no stack, which is why "why did it hang" has been a
         # guess every time.
-        #
         # The GUI thread stamps _last_beat each tick. A daemon thread, which
         # keeps running while the GUI is frozen, watches that stamp and, when
         # it goes stale, dumps the GUI thread's stack. That dump is the

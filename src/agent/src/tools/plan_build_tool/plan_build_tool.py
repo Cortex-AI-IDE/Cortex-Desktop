@@ -39,9 +39,7 @@ except ImportError:
     def getPlanBuildToolPrompt():
         return 'Creates a structured implementation plan with steps, saved as .md file.'
 
-# ---------------------------------------------------------------------------
 # Schemas
-# ---------------------------------------------------------------------------
 
 class PlanStep(TypedDict):
     title: str
@@ -73,9 +71,7 @@ class Output(TypedDict):
     message: str
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _escape_yaml_value(value: str) -> str:
     """Escape a string for YAML value, quote if it contains special chars."""
@@ -158,9 +154,7 @@ def _create_output(plan_data: Dict[str, Any], plan_id: str, file_path: str) -> O
     )
 
 
-# ---------------------------------------------------------------------------
 # Tool implementation
-# ---------------------------------------------------------------------------
 
 def isEnabled() -> bool:
     """PlanBuild is always enabled when EnterPlanMode is available."""

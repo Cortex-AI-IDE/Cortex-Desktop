@@ -17,45 +17,43 @@ references survived the deletion, so the purge removed a reachable module.
 
 from typing import Dict, Optional, Tuple
 
-# ---------------------------------------------------------------------------
 # Short aliases -> canonical model IDs
-# ---------------------------------------------------------------------------
 
 ALIAS_MAP: Dict[str, str] = {
-    # -- DeepSeek ------------------------------------------------------
+# DeepSeek
     'deepseek':     'deepseek-v4-pro',
     'deepseekv4':   'deepseek-v4-pro',
     'deepseekvision': 'deepseek-v4-flash-vision-exp',
     'dsvision':     'deepseek-v4-flash-vision-exp',
 
-    # -- OpenAI --------------------------------------------------------
+# OpenAI
     'gpt54':        'gpt-5.4',
     'gpt55':        'gpt-5.5',
     'gpt':          'gpt-5.4',
 
-    # -- Anthropic (via OpenRouter) ------------------------------------
+# Anthropic (via OpenRouter)
     'claude':       'anthropic/claude-opus-4.8',
     'opus':         'anthropic/claude-opus-4.8',
 
-    # -- Google Gemini (via OpenRouter) --------------------------------
+# Google Gemini (via OpenRouter)
     'gemini':       'google/gemini-2.5-pro',
     'geminipro':    'google/gemini-2.5-pro',
     'geminiflash':  'google/gemini-2.5-flash',
 
-    # -- Alibaba Qwen --------------------------------------------------
+# Alibaba Qwen
     'qwen':         'qwen3.7-plus',
     'qwenmax':      'qwen3.8-max',
     'qwencoder':    'qwen3-coder-plus',
 
-    # -- MiMo ----------------------------------------------------------
+# MiMo
     # Target moved v2.5 -> v2.6; the v2.5 id is no longer published.
     'mimo':         'mimo-v2.6-pro',
     'mimopro':      'mimo-v2.6-pro',
 
-    # -- SiliconFlow (vision) ------------------------------------------
+# SiliconFlow (vision)
     'siliconflow':  'Qwen/Qwen3-VL-32B-Instruct',
 
-    # -- Smart aliases -------------------------------------------------
+# Smart aliases
     'best':         'anthropic/claude-opus-4.8',
     'fast':         'qwen3.7-plus',
     'code':         'deepseek-v4-pro',
@@ -67,18 +65,14 @@ MODEL_ALIASES: Tuple[str, ...] = tuple(ALIAS_MAP.keys())
 # Type alias
 ModelAlias = str
 
-# ---------------------------------------------------------------------------
 # Family aliases - bare wildcards for allowlists
-# ---------------------------------------------------------------------------
 
 MODEL_FAMILY_ALIASES: Tuple[str, ...] = (
     'deepseek', 'qwen', 'gemini',
     'claude', 'opus', 'mimo',
 )
 
-# ---------------------------------------------------------------------------
 # Functions
-# ---------------------------------------------------------------------------
 
 
 def isModelAlias(modelInput: str) -> bool:
@@ -167,9 +161,7 @@ def resolveOrPassthrough(modelInput: str) -> str:
     return ALIAS_MAP.get(modelInput, modelInput)
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 __all__ = [
     'ALIAS_MAP',

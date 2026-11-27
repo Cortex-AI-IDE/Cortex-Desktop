@@ -1,11 +1,7 @@
-# ------------------------------------------------------------
-# prompt.py
 # SementicSearchTool prompt template and description generator.
-#
 # Provides the LLM-facing description and auto-search hint
 # that teaches the AI when and how to use semantic search
 # instead of (or in addition to) traditional grep.
-# ------------------------------------------------------------
 
 from typing import Any
 
@@ -26,9 +22,7 @@ except ImportError:
     GLOB_TOOL_NAME = "Glob"
 
 
-# ============================================================
 # TOOL CONSTANTS
-# ============================================================
 
 SEMANTIC_SEARCH_TOOL_NAME = "SementicSearch"
 
@@ -36,9 +30,7 @@ SEMANTIC_SEARCH_TOOL_NAME = "SementicSearch"
 LARGE_CODEBASE_THRESHOLD_FILES = 500
 
 
-# ============================================================
 # SEMANTIC SEARCH TOOL DESCRIPTION
-# ============================================================
 
 
 def get_description() -> str:
@@ -139,9 +131,7 @@ Use semantic search for understanding tasks where grep/regex fails:
 """
 
 
-# ============================================================
 # AUTO-SEARCH HINT, triggers when the LLM should prefer this tool
-# ============================================================
 
 def get_auto_search_hint(project_file_count: int = 0) -> str:
     """
@@ -161,9 +151,7 @@ def get_auto_search_hint(project_file_count: int = 0) -> str:
     )
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "SEMANTIC_SEARCH_TOOL_NAME",

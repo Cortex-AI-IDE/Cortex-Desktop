@@ -29,7 +29,7 @@ from src.ui.tokens import CHAT_TOKENS as T
 # diagram code (chat console: UnknownDiagramError, 2026-10-22).
 
 
-# ── Live ▶ Run payloads ───────────────────────────────────────────────────
+# Live ▶ Run payloads
 # The streaming card is HTML inside a QTextBrowser, so it cannot host a Qt
 # button. Its ▶ Run is an <a href="cortex-run:ID"> and the code behind that ID
 # lives in this registry, read when chat_panel's anchor handler fires.

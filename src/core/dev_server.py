@@ -202,7 +202,7 @@ class DevServer:
         self._error: Optional[str] = None
         self._drainers: List[threading.Thread] = []
 
-    # ── state ────────────────────────────────────────────────────────────
+# state
 
     @property
     def url(self) -> Optional[str]:
@@ -225,7 +225,7 @@ class DevServer:
             lines = list(self._lines)[-tail:]
         return "\n".join(lines)
 
-    # ── lifecycle ────────────────────────────────────────────────────────
+# lifecycle
 
     def start(self) -> None:
         """Spawn the server. Raises ``OSError``/``ValueError`` on failure."""
@@ -324,7 +324,7 @@ class DevServer:
                 self._lines.clear()
             log.info("[DevServer] stopped")
 
-    # ── internals ────────────────────────────────────────────────────────
+# internals
 
     def _drain(self, proc: subprocess.Popen) -> None:
         """Read the child's combined output into the bounded buffer."""

@@ -20,9 +20,7 @@ from src.utils.logger import get_logger
 log = get_logger("autonomy_manager")
 
 
-# ---------------------------------------------------------------------------
 # Autonomy Level
-# ---------------------------------------------------------------------------
 
 
 class AutonomyLevel(enum.Enum):
@@ -32,9 +30,7 @@ class AutonomyLevel(enum.Enum):
     PLAN = "plan"         # Autonomous within approved plan scope
 
 
-# ---------------------------------------------------------------------------
 # Tool Categories
-# ---------------------------------------------------------------------------
 
 
 class ToolCategory(enum.Enum):
@@ -47,9 +43,7 @@ class ToolCategory(enum.Enum):
     PLAN_ONLY = "plan_only"      # Task/todo management tools
 
 
-# ---------------------------------------------------------------------------
 # Tool classification
-# ---------------------------------------------------------------------------
 
 # Map tool names to categories
 TOOL_CATEGORIES: Dict[str, ToolCategory] = {
@@ -119,9 +113,7 @@ DANGEROUS_COMMAND_PATTERNS: List[str] = [
 ]
 
 
-# ---------------------------------------------------------------------------
 # Autonomy Decision
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -145,9 +137,7 @@ class AutonomyDecision:
     approved_in_plan: bool = False
 
 
-# ---------------------------------------------------------------------------
 # AutonomyManager
-# ---------------------------------------------------------------------------
 
 
 class AutonomyManager:
@@ -182,9 +172,7 @@ class AutonomyManager:
 
         log.info(f"[AUTONOMY] Initialized with level={initial_level.value}")
 
-    # ------------------------------------------------------------------
     # Level management
-    # ------------------------------------------------------------------
 
     def get_level(self) -> AutonomyLevel:
         """Return the current autonomy level."""
@@ -199,9 +187,7 @@ class AutonomyManager:
         if level != AutonomyLevel.PLAN:
             self._clear_plan()
 
-    # ------------------------------------------------------------------
     # Plan management
-    # ------------------------------------------------------------------
 
     def _clear_plan(self) -> None:
         """Clear the current plan approvals."""
@@ -212,9 +198,7 @@ class AutonomyManager:
         """Check if there's an active plan."""
         return bool(self._plan_description)
 
-    # ------------------------------------------------------------------
     # Core decision logic
-    # ------------------------------------------------------------------
 
     def check_action(
         self,
@@ -350,9 +334,7 @@ class AutonomyManager:
             reason="Default safety: permission required",
         )
 
-    # ------------------------------------------------------------------
     # Learning (user preference tracking)
-    # ------------------------------------------------------------------
 
     def get_stats(self) -> Dict[str, Any]:
         """Return usage statistics."""
@@ -365,9 +347,7 @@ class AutonomyManager:
                 "user_denied_count": len(self._user_denied_patterns),
             }
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _is_plan_approved(self, tool_name: str, _command: str) -> bool:
         """Check if a tool is pre-approved by the current plan."""
@@ -385,9 +365,7 @@ class AutonomyManager:
                 return True
         return False
 
-# ---------------------------------------------------------------------------
 # Global singleton
-# ---------------------------------------------------------------------------
 
 _autonomy_manager: Optional[AutonomyManager] = None
 _autonomy_manager_lock = threading.Lock()
@@ -403,6 +381,3 @@ def get_autonomy_manager(initial_level: Optional[AutonomyLevel] = None) -> Auton
                     initial_level or AutonomyLevel.ASK
                 )
     return _autonomy_manager
-
-
-

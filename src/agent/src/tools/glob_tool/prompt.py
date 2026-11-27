@@ -1,19 +1,11 @@
-# ------------------------------------------------------------
-# prompt.py
-#
 # GlobTool prompt template and description.
-# ------------------------------------------------------------
 
-# ============================================================
 # TOOL CONSTANTS
-# ============================================================
 
 GLOB_TOOL_NAME = "Glob"
 
 
-# ============================================================
 # GLOB TOOL DESCRIPTION
-# ============================================================
 
 DESCRIPTION = """- Finds files by name pattern, and stays fast on a large tree
 - Glob patterns work as expected: `**/*.js`, `src/**/*.ts`
@@ -34,9 +26,7 @@ Patterns worth starting from:
 The useful order: Glob to learn the shape, Grep to find the logic, Read to understand it."""
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "GLOB_TOOL_NAME",

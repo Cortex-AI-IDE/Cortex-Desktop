@@ -21,7 +21,7 @@ import math
 
 log = logging.getLogger("cortex.timeout_strategy")
 
-# ── Base timeouts (in seconds) ──────────────────────────────────────────────
+# Base timeouts (in seconds)
 
 # Absolute minimum the AI gets for any operation, never starve it
 MIN_TIMEOUT = 120.0
@@ -29,7 +29,7 @@ MIN_TIMEOUT = 120.0
 # Maximum reasonable timeout, cap so failures eventually surface
 MAX_TIMEOUT = 1800.0  # 30 minutes for extremely complex tasks
 
-# ── Per-tool scaling factors ────────────────────────────────────────────────
+# Per tool scaling factors
 
 # Each tool call (read, edit, write, grep, etc.) adds this many seconds
 SECONDS_PER_TOOL_CALL = 15.0
@@ -40,7 +40,7 @@ SECONDS_PER_COMMAND = 30.0
 # Each file written/edited adds this many extra seconds
 SECONDS_PER_FILE_WRITE = 20.0
 
-# ── Context-budget scaling ──────────────────────────────────────────────────
+# Context budget scaling
 
 # Models with larger context windows need more processing time per token
 # Base scaling factor for "small" context models (< 32K)
@@ -138,9 +138,6 @@ def get_timeout(ctx: TimeoutContext = None, **kwargs) -> float:
 
     log.debug("get_timeout(%s) = %.1fs", ctx, timeout)
     return timeout
-
-
-
 
 
 def get_collect_timeout(command_count: int = 0, file_write_count: int = 0) -> float:

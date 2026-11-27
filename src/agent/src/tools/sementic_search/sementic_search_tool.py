@@ -1,12 +1,8 @@
-# ------------------------------------------------------------
-# sementic_search_tool.py
 # Semantic code search tool for Cortex IDE, handles large codebases
 # where traditional grep/regex search struggles.
-#
 # Uses the existing Cortex SemanticSearch infrastructure 
 # (src/core/semantic_search.py) with SiliconFlow Qwen embeddings
 # as primary backend, falling back to local sentence-transformers.
-# ------------------------------------------------------------
 
 import os
 import asyncio
@@ -14,9 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, Tuple, TypedDict
 
-# ============================================================
 # LOCAL IMPORTS
-# ============================================================
 
 try:
     from .prompt import SEMANTIC_SEARCH_TOOL_NAME, get_description
@@ -26,9 +20,7 @@ except ImportError:
         return "Search codebase using natural language with semantic understanding."
 
 
-# ============================================================
 # TYPE DEFINITIONS
-# ============================================================
 
 OutputMode = Literal['files_with_matches', 'content', 'ranked']
 
@@ -58,9 +50,7 @@ class SemanticSearchOutput(TypedDict, total=False):
     searchTimeMs: Optional[float]
 
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 
 # Large codebase threshold, if a project has more files than this,
 # semantic search is strongly preferred over grep for understanding tasks.
@@ -76,7 +66,6 @@ MAX_RESULT_SIZE_CHARS = 12_000
 DEFAULT_CONTEXT_LINES = 3
 
 # How much indexing one search call may do before it answers.
-#
 # Both paths used to be unbounded (or unboundable) and both were a trap:
 # a heal of 350 stale entries held one tool call for 19 minutes, and a cold
 # index of this repo meant ~1,225 files at ~3.3s each, about 67 minutes.
@@ -84,7 +73,6 @@ DEFAULT_CONTEXT_LINES = 3
 # file count alone is not a bound either: 25 files on a bad connection is
 # still 82s. Time is the cap that actually holds, the count keeps a fast
 # connection from over-spending.
-#
 # The index is saved as the loop goes and a capped run stops where it is,
 # so the next search continues instead of starting over.
 COLD_INDEX_BUDGET = 12
@@ -93,9 +81,7 @@ STALE_HEAL_BUDGET = 6
 STALE_HEAL_SECONDS = 20.0
 
 
-# ============================================================
 # UTILITY FUNCTIONS
-# ============================================================
 
 def get_cwd() -> str:
     """Get current working directory, prefers project root."""
@@ -312,9 +298,7 @@ def _format_results_for_llm(
     return '\n'.join(lines)
 
 
-# ============================================================
 # SEMANTIC SEARCH TOOL CLASS
-# ============================================================
 
 class SementicSearchTool:
     """
@@ -335,9 +319,7 @@ class SementicSearchTool:
     max_result_size_chars = MAX_RESULT_SIZE_CHARS
     strict = True
     
-    # ------------------------------------------------------------------
     # Public metadata helpers
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def description() -> str:
@@ -347,9 +329,7 @@ class SementicSearchTool:
     def user_facing_name() -> str:
         return "Semantic Search"
     
-    # ------------------------------------------------------------------
     # Input / output schemas
-    # ------------------------------------------------------------------
     
     @staticmethod
     def input_schema() -> type:
@@ -359,9 +339,7 @@ class SementicSearchTool:
     def output_schema() -> type:
         return SemanticSearchOutput
     
-    # ------------------------------------------------------------------
     # Concurrency and access mode
-    # ------------------------------------------------------------------
     
     @staticmethod
     def is_concurrency_safe() -> bool:
@@ -371,9 +349,7 @@ class SementicSearchTool:
     def is_read_only() -> bool:
         return True
     
-    # ------------------------------------------------------------------
     # Auto-classification (for LLM routing)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def to_auto_classifier_input(inp: Dict) -> str:
@@ -381,25 +357,19 @@ class SementicSearchTool:
         path = inp.get("path", "")
         return f"semantic: {query} in {path}" if path else f"semantic: {query}"
     
-    # ------------------------------------------------------------------
     # Search/read command classification
-    # ------------------------------------------------------------------
     
     @staticmethod
     def is_search_or_read_command() -> Dict[str, bool]:
         return {"isSearch": True, "isRead": False}
     
-    # ------------------------------------------------------------------
     # Path handling
-    # ------------------------------------------------------------------
     
     @staticmethod
     def get_path(inp: Dict) -> str:
         return inp.get("path") or get_cwd()
     
-    # ------------------------------------------------------------------
     # Validation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def validate_input(inp: Dict) -> Dict[str, Any]:
@@ -427,9 +397,7 @@ class SementicSearchTool:
         
         return {"result": True}
     
-    # ------------------------------------------------------------------
     # Permission check
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def check_permissions(inp: Dict, context: Any) -> bool:
@@ -453,9 +421,7 @@ class SementicSearchTool:
         
         return True  # Allow by default
     
-    # ------------------------------------------------------------------
     # Core semantic search operation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def call(
@@ -526,7 +492,6 @@ class SementicSearchTool:
             # now (incremental: only those are re-embedded). Their vectors
             # cannot be scored against this query, so skipping this left
             # them unfindable.
-            #
             # Every branch is bounded, including the cold one. A cold index is
             # the caller's first search, so it gets the larger of the two
             # budgets, but "the caller asked for it" is not a reason to hold a
@@ -645,9 +610,7 @@ class SementicSearchTool:
         
         return {"data": output}
     
-    # ------------------------------------------------------------------
     # Map tool result to LLM-compatible block format
-    # ------------------------------------------------------------------
     
     @staticmethod
     def map_tool_result_to_block(data: Dict, tool_use_id: str) -> Dict[str, Any]:
@@ -677,9 +640,7 @@ class SementicSearchTool:
             "content": content,
         }
     
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "SementicSearchTool",

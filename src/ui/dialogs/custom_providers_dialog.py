@@ -54,7 +54,7 @@ class CustomProvidersDialog(QDialog):
         self._reload_list()
         self._bg(dyn.list_mine, self._on_mine_loaded, quiet=True)
 
-    # ── threading helper ──────────────────────────────────────────────
+# threading helper
     def _bg(self, fn: Callable, on_done: Callable, *args, quiet: bool = False):
         self._status.setText("Working…")
 
@@ -75,7 +75,7 @@ class CustomProvidersDialog(QDialog):
             return
         cb(result)
 
-    # ── layout ────────────────────────────────────────────────────────
+# layout
     def _build(self):
         root = QVBoxLayout(self)
         split = QSplitter(Qt.Orientation.Horizontal)
@@ -166,7 +166,7 @@ class CustomProvidersDialog(QDialog):
         split.setSizes([280, 580])
         self._set_mode(None)
 
-    # ── list ──────────────────────────────────────────────────────────
+# list
     def _reload_list(self, select: Optional[str] = None):
         self._list.blockSignals(True)
         self._list.clear()
@@ -197,7 +197,7 @@ class CustomProvidersDialog(QDialog):
         dyn.refresh_async(force=True)
         self._bg(dyn.list_mine, self._on_mine_loaded, quiet=True)
 
-    # ── selection / modes ─────────────────────────────────────────────
+# selection / modes
     def _set_mode(self, mode: Optional[str]):
         """None = nothing selected, 'global', 'private', 'new'."""
         editable = mode in ("private", "new")
@@ -253,7 +253,7 @@ class CustomProvidersDialog(QDialog):
         self._models_lbl.setText("")
         self._set_mode("new")
 
-    # ── actions ───────────────────────────────────────────────────────
+# actions
     def _slug(self) -> str:
         return (self._f_slug.text() or "").strip().lower()
 

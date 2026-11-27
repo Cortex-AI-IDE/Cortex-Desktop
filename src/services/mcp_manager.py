@@ -760,7 +760,7 @@ class MCPManager:
         self._config_checked_at = 0.0
         self._sync_lock = threading.Lock()
 
-    # ── event-loop thread ────────────────────────────────────────────────
+# event loop thread
 
     def _ensure_loop(self) -> asyncio.AbstractEventLoop:
         with self._lock:
@@ -783,7 +783,7 @@ class MCPManager:
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         return fut.result(timeout=timeout)
 
-    # ── config ───────────────────────────────────────────────────────────
+# config
 
     def _project_config_path(self) -> Optional[Path]:
         if not self._project_root:
@@ -863,7 +863,7 @@ class MCPManager:
         if self._project_config_path():
             self._write_scope("project", configs)
 
-    # ── lifecycle ────────────────────────────────────────────────────────
+# lifecycle
 
     def set_project_root(self, root: Optional[str]) -> None:
         changed = root != self._project_root
@@ -871,8 +871,7 @@ class MCPManager:
         if changed:
             self._notify_roots_changed()
 
-    # ── MCP roots ────────────────────────────────────────────────────────
-    #
+# MCP roots
     # Servers that read or write files (chrome-devtools: screenshots,
     # snapshots, scripts with filePath) only accept paths inside the roots
     # the CLIENT declares. Cortex declared none, so chrome-devtools refused
@@ -1157,7 +1156,7 @@ class MCPManager:
         self._states[name] = state
         self._launch(state)
 
-    # ── agent-facing API ─────────────────────────────────────────────────
+# agent facing API
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """OpenAI-style schemas for every tool of every CONNECTED server."""
@@ -1247,7 +1246,6 @@ class MCPManager:
             state.warning = ""
 
 
-
     def call_tool_full(self, qualified_name: str, args: Dict[str, Any],
                        timeout: float = CALL_TIMEOUT
                        ) -> Tuple[bool, str, List[Tuple[str, str]]]:
@@ -1320,7 +1318,7 @@ class MCPManager:
             return False, text or "(the MCP server reported an error with no message)", images
         return True, text, images
 
-    # ── settings-UI API ──────────────────────────────────────────────────
+# settings UI API
 
     def get_status(self) -> List[Dict[str, Any]]:
         self.sync()
@@ -1427,7 +1425,7 @@ class MCPManager:
         configs.pop(name, None)
         self._write_scope(cfg.scope, configs)
 
-    # ── full removal (Settings ✕) ─────────────────────────────────────────
+# full removal (Settings ✕)
 
     def _config_sources(self) -> List[Tuple[Path, str, str]]:
         """Every config file Cortex reads, as (path, scope, source)."""
@@ -1547,7 +1545,6 @@ class MCPManager:
         if cfg.source != "cortex":
             # Inherited from another tool: we must not edit their file, so
             # write a cortex-owned copy instead, at the SAME scope.
-            #
             # This used to force scope="global" on the belief that ours is
             # always applied last. It is not: load_configs() reads foreign
             # global, then cortex global, then foreign PROJECT, then cortex

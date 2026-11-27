@@ -7,13 +7,9 @@ import math
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 
-# ============================================================
 # PHASE 1: Core Types, Imports & Constants
-# ============================================================
 
-# ---------------------------------------------------------------------------
 # Defensive imports
-# ---------------------------------------------------------------------------
 
 try:
     from ...utils.feature_flags import feature
@@ -147,9 +143,7 @@ except ImportError:
             return None
 
 
-# ---------------------------------------------------------------------------
 # Type Definitions
-# ---------------------------------------------------------------------------
 
 class AutoCompactTrackingState:
     """Tracking state for auto-compaction"""
@@ -189,9 +183,7 @@ class RecompactionInfo:
         self.querySource = querySource
 
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 # Reserve this many tokens for output during compaction
 # Based on p99.99 of compact summary output being 17,387 tokens.
@@ -209,9 +201,7 @@ MANUAL_COMPACT_BUFFER_TOKENS = 3_000
 MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 
 
-# ============================================================
 # PHASE 2: Context Window & Threshold Calculations
-# ============================================================
 
 def getEffectiveContextWindowSize(model: str) -> int:
     """
@@ -322,9 +312,7 @@ def calculateTokenWarningState(
     }
 
 
-# ============================================================
 # PHASE 3: Auto-Compact Enablement Check
-# ============================================================
 
 def isAutoCompactEnabled() -> bool:
     """
@@ -347,9 +335,7 @@ def isAutoCompactEnabled() -> bool:
     return getattr(userConfig, 'autoCompactEnabled', True)
 
 
-# ============================================================
 # PHASE 4: shouldAutoCompact Decision Logic
-# ============================================================
 
 async def shouldAutoCompact(
     messages: List[Dict],
@@ -402,7 +388,6 @@ async def shouldAutoCompact(
     # than in isAutoCompactEnabled() keeps reactiveCompact alive as the 413
     # fallback (it consults isAutoCompactEnabled directly) and leaves
     # sessionMemory + manual /compact working.
-    #
     # Consult isContextCollapseEnabled (not the raw gate) so the
     # CORTEX_CONTEXT_COLLAPSE env override is honored here too. require()
     # inside the block breaks the init-time cycle (this file exports
@@ -436,9 +421,7 @@ async def shouldAutoCompact(
     return warningState['isAboveAutoCompactThreshold']
 
 
-# ============================================================
 # PHASE 5: autoCompactIfNeeded Main Function
-# ============================================================
 
 async def autoCompactIfNeeded(
     messages: List[Dict],
@@ -568,9 +551,7 @@ async def autoCompactIfNeeded(
         }
 
 
-# ============================================================
 # PHASE 6: Module Interface & Exports
-# ============================================================
 
 __all__ = [
     # Constants

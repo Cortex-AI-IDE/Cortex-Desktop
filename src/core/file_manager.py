@@ -306,13 +306,12 @@ class FileManager(QObject):
             return None
     
 
-
     def write(self, filepath: str, content: str) -> bool:
         """Write content to file with cache update."""
         try:
             resolved_path = str(Path(filepath).resolve())
 
-            # ── SAVE-SIZE GUARD ──────────────────────────────────────────
+# SAVE SIZE GUARD
             # A code-editor buffer is never legitimately >50MB. A crashed or
             # looping webview once flushed gigabytes of duplicated junk into
             # a source file, refuse and keep the on-disk copy intact.
@@ -321,7 +320,7 @@ class FileManager(QObject):
                           f"to {filepath}, buffer exceeds 50MB sanity cap")
                 return False
 
-            # ── EMPTY CONTENT GUARD ──────────────────────────────────────
+# EMPTY CONTENT GUARD
             # Prevent accidental file wiping. If the file already exists on
             # disk with content but we're being asked to write empty/whitespace
             # content, REFUSE and log a warning. This catches the race

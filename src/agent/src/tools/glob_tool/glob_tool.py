@@ -1,8 +1,4 @@
-# ------------------------------------------------------------
-# glob_tool.py
-# 
 # A tool for finding files by name pattern using glob matching.
-# ------------------------------------------------------------
 
 import os
 import re
@@ -11,9 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 import asyncio
 
-# ============================================================
 # LOCAL IMPORTS
-# ============================================================
 
 try:
     from .prompt import GLOB_TOOL_NAME, DESCRIPTION
@@ -37,16 +31,13 @@ except ImportError:
             return p
 
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 
 DEFAULT_GLOB_LIMIT = 100  # Default limit for glob results
 
 # Directories that are never project source. Kept in step with grep_tool's
 # _SKIP_DIRS, because both tools answer the same "where is this" question and
 # must agree on what the project is.
-#
 # Why this exists: on Linux a project root routinely holds a multi-gigabyte
 # `dist`, a Python `venv`, a `build` folder and a `.git` with thousands of
 # packed objects. Without pruning, `**/*.py` at the root answered with vendored
@@ -122,10 +113,7 @@ def _literal_directories(pattern: str) -> frozenset:
     return frozenset(names)
 
 
-
-# ============================================================
 # UTILITY FUNCTIONS
-# ============================================================
 
 def get_cwd() -> str:
     """Get current working directory."""
@@ -362,9 +350,7 @@ async def glob(
         raise RuntimeError(f"Glob search failed: {str(e)}")
 
 
-# ============================================================
 # TYPE DEFINITIONS
-# ============================================================
 
 class GlobInput(TypedDict, total=False):
     """Glob tool input type."""
@@ -380,9 +366,7 @@ class GlobOutput(TypedDict):
     truncated: bool
 
 
-# ============================================================
 # GLOB TOOL CLASS
-# ============================================================
 
 class GlobTool:
     """Fast file pattern matching tool."""
@@ -392,9 +376,7 @@ class GlobTool:
     max_result_size_chars = 100_000
     strict = True
     
-    # ------------------------------------------------------------------
     # Public metadata helpers
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def description() -> str:
@@ -410,9 +392,7 @@ class GlobTool:
         except ImportError:
             return "Find Files"
     
-    # ------------------------------------------------------------------
     # Input / output schemas (used by the surrounding framework)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def input_schema() -> type:
@@ -422,9 +402,7 @@ class GlobTool:
     def output_schema() -> type:
         return GlobOutput
     
-    # ------------------------------------------------------------------
     # Concurrency and access mode
-    # ------------------------------------------------------------------
     
     @staticmethod
     def is_concurrency_safe() -> bool:
@@ -436,25 +414,19 @@ class GlobTool:
         """Check if tool is read-only."""
         return True
     
-    # ------------------------------------------------------------------
     # Helper for auto-classification (used by the LLM routing layer)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def to_auto_classifier_input(inp: Dict) -> str:
         return inp.get("pattern", "")
     
-    # ------------------------------------------------------------------
     # Search/read command classification
-    # ------------------------------------------------------------------
     
     @staticmethod
     def is_search_or_read_command() -> Dict[str, bool]:
         return {"isSearch": True, "isRead": False}
     
-    # ------------------------------------------------------------------
     # Path handling
-    # ------------------------------------------------------------------
     
     @staticmethod
     def get_path(inp: Dict) -> str:
@@ -462,9 +434,7 @@ class GlobTool:
         path = inp.get("path")
         return expand_path(path) if path else get_cwd()
     
-    # ------------------------------------------------------------------
     # Permission matcher
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def prepare_permission_matcher(pattern: str):
@@ -473,9 +443,7 @@ class GlobTool:
             return match_wildcard_pattern(rule_pattern, pattern)
         return match_rule
     
-    # ------------------------------------------------------------------
     # Core validation logic
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def validate_input(inp: Dict) -> Dict[str, Any]:
@@ -517,9 +485,7 @@ class GlobTool:
         
         return {"result": True}
     
-    # ------------------------------------------------------------------
     # Permission validation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def check_permissions(inp: Dict, context: Any) -> bool:
@@ -529,9 +495,7 @@ class GlobTool:
             GlobTool.name, inp, app_state.tool_permission_context
         )
     
-    # ------------------------------------------------------------------
     # Core glob operation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def call(
@@ -584,9 +548,7 @@ class GlobTool:
         
         return {"data": output}
     
-    # ------------------------------------------------------------------
     # Mapping to the LLM-compatible block format
-    # ------------------------------------------------------------------
     
     @staticmethod
     def map_tool_result_to_block(output: GlobOutput, tool_use_id: str) -> Dict[str, Any]:
@@ -612,9 +574,7 @@ class GlobTool:
         }
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "GlobTool",

@@ -15,9 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Type, Union
 
 
-# ---------------------------------------------------------------------------
 # ToolDef, universal container for a tool's metadata + implementation
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ToolDef:
@@ -36,9 +34,7 @@ class ToolDef:
     strict: bool = False
 
 
-# ---------------------------------------------------------------------------
 # ToolProtocol, the callable contract all tools must satisfy
-# ---------------------------------------------------------------------------
 
 class ToolProtocol(Protocol):
     """Minimal interface a tool class/module must expose."""
@@ -59,9 +55,7 @@ class ToolProtocol(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
 # buildTool, factory for creating ToolDef instances
-# ---------------------------------------------------------------------------
 
 def buildTool(
     name: str,
@@ -106,9 +100,7 @@ def _resolve_bool(
     return bool(value)
 
 
-# ---------------------------------------------------------------------------
 # find_tool_by_name, locate a tool in a list by its .name attribute
-# ---------------------------------------------------------------------------
 
 def find_tool_by_name(
     tools: List[Any],
@@ -122,9 +114,7 @@ def find_tool_by_name(
     return None
 
 
-# ---------------------------------------------------------------------------
 # validate_tool_input, the dispatch hook for a tool's validate_input()
-# ---------------------------------------------------------------------------
 
 _log = logging.getLogger("cortex.tool")
 
@@ -176,9 +166,7 @@ async def validate_tool_input(
     return None
 
 
-# ---------------------------------------------------------------------------
 # ToolResult, structured result wrapper
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ToolResult:
@@ -191,9 +179,7 @@ class ToolResult:
         return self.error is not None
 
 
-# ---------------------------------------------------------------------------
 # Re-export names used by existing tool modules
-# ---------------------------------------------------------------------------
 
 ToolUseContext = Dict[str, Any]
 Tools = List[Any]

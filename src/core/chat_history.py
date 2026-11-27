@@ -276,9 +276,7 @@ class ChatHistoryManager:
             log.warning(f"Corrupted timeline JSON for {conversation_id}")
             return []
 
-    # =========================================================================
     # CHAT PARTS, Per-part storage (Section 14 architecture)
-    # =========================================================================
 
     def add_part(self, conversation_id: str, message_id: int,
                  part_type: str, status: str = 'pending',

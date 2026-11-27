@@ -26,9 +26,7 @@ from typing import Any, Dict, Literal, Optional
 log = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Constants / type aliases
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Alphabet used for task IDs: digits + lowercase letters.
 _TASK_ID_ALPHABET: str = string.digits + string.ascii_lowercase
@@ -36,9 +34,7 @@ _TASK_ID_ALPHABET: str = string.digits + string.ascii_lowercase
 TaskStatus = Literal["running", "completed", "failed", "stopped"]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Task ID generation
-# ─────────────────────────────────────────────────────────────────────────────
 
 def generate_session_task_id() -> str:
     """
@@ -50,9 +46,7 @@ def generate_session_task_id() -> str:
     return "s" + "".join(secrets.choice(_TASK_ID_ALPHABET) for _ in range(8))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # StopTaskError
-# ─────────────────────────────────────────────────────────────────────────────
 
 class StopTaskError(Exception):
     """
@@ -70,9 +64,7 @@ class StopTaskError(Exception):
         self.code = code
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # SessionTaskState
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class SessionTaskState:
@@ -101,9 +93,7 @@ class SessionTaskState:
     notified: bool = False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # SessionTaskRegistry
-# ─────────────────────────────────────────────────────────────────────────────
 
 class SessionTaskRegistry:
     """
@@ -118,7 +108,7 @@ class SessionTaskRegistry:
         self._tasks: Dict[str, SessionTaskState] = {}
         self._active_task_id: Optional[str] = None
 
-    # ── Registration ───────────────────────────────────────────
+# Registration
 
     def register(self, state: SessionTaskState) -> None:
         """
@@ -131,7 +121,7 @@ class SessionTaskRegistry:
             f"{state.description[:60]}"
         )
 
-    # ── Lookup ─────────────────────────────────────────────────
+# Lookup
 
     def get(self, task_id: str) -> Optional[SessionTaskState]:
         """Return task by ID, or None if not found."""
@@ -143,7 +133,7 @@ class SessionTaskRegistry:
             return self._tasks.get(self._active_task_id)
         return None
 
-    # ── Status update ──────────────────────────────────────────
+# Status update
 
     def update_status(self, task_id: str, status: TaskStatus) -> None:
         """Update task status (running → completed/failed/stopped)."""
@@ -152,7 +142,7 @@ class SessionTaskRegistry:
             task.status = status
             log.info(f"[TASK_REGISTRY] Task {task_id!r} → status={status!r}")
 
-    # ── Removal ────────────────────────────────────────────────
+# Removal
 
     def remove(self, task_id: str) -> None:
         """Remove a completed/stopped task from the registry."""
@@ -162,9 +152,7 @@ class SessionTaskRegistry:
         log.debug(f"[TASK_REGISTRY] Removed task {task_id!r}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # stop_session_task
-# ─────────────────────────────────────────────────────────────────────────────
 
 def stop_session_task(
     task_id: str,
@@ -204,7 +192,7 @@ def stop_session_task(
             "not_running",
         )
 
-    # ── 1. Cancel the asyncio.Task ───────────────────────────────────────────
+# 1. Cancel the asyncio.Task
     # asyncio.Task.cancel() is thread-safe, it schedules a CancelledError to
     # be injected at the next `await` inside _handle_chat → _call_llm →
     # _execute_single_tool, regardless of which await is currently suspended.
@@ -217,7 +205,7 @@ def stop_session_task(
             "(may not have started yet, stop flag will catch it)"
         )
 
-    # ── 2. Abort tool-level work via AbortController ─────────────────────────
+# 2. Abort tool level work via AbortController
     # GrepTool extracts `signal = getattr(abort_controller, "signal", None)`
     # and passes it to ripgrep(). Calling abort() terminates the subprocess.
     if task.abort_controller is not None:
@@ -232,15 +220,13 @@ def stop_session_task(
                 f"{task_id!r}: {exc}"
             )
 
-    # ── 3. Mark task as stopped ──────────────────────────────────────────────
+# 3. Mark task as stopped
     registry.update_status(task_id, "stopped")
 
     return {"task_id": task_id, "description": task.description}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Public API
-# ─────────────────────────────────────────────────────────────────────────────
 
 __all__ = [
     "StopTaskError",

@@ -136,7 +136,7 @@ def check_test_integrity(
     renamed_paths: Dict[str, str] = {}   # new_path -> old_path, for high-similarity renames
     modified_paths: List[str] = []
 
-    # ---- STEP 1: name-status diff, with rename detection ----
+# STEP 1: name status diff, with rename detection
     name_status = _git(["diff", "--name-status", "-M", f"{prev_ref}..{curr_ref}"], project_root)
     for line in name_status.stdout.splitlines():
         if not line.strip():
@@ -179,7 +179,7 @@ def check_test_integrity(
             if _matches_glob_path(path, spec.test_path_globs):
                 modified_paths.append(path)
 
-    # ---- STEP 2: assertion count, modified + high-similarity-renamed files ----
+# STEP 2: assertion count, modified high similarity renamed files
     for new_path, old_path in renamed_paths.items():
         old_text = _blob(project_root, prev_ref, old_path)
         new_text = _blob(project_root, curr_ref, new_path)
@@ -200,7 +200,7 @@ def check_test_integrity(
                 f"Assertion count dropped {old_n} -> {new_n}.",
             ))
 
-    # ---- STEP 3: skip markers on added lines ----
+# STEP 3: skip markers on added lines
     if not spec.allow_skip_markers:
         full_diff = _git(["diff", "-M", f"{prev_ref}..{curr_ref}", "--"] + spec.test_path_globs, project_root)
         current_file = ""
@@ -215,7 +215,7 @@ def check_test_integrity(
                         f"A skip marker was added: {line.strip()[:120]}",
                     ))
 
-    # ---- STEP 4: numstat, lines removed without a corresponding rename ----
+# STEP 4: numstat, lines removed without a corresponding rename
     numstat = _git(["diff", "--numstat", "-M", f"{prev_ref}..{curr_ref}", "--"] + spec.test_path_globs, project_root)
     already_flagged = {v.file for v in violations}
     for line in numstat.stdout.splitlines():

@@ -20,7 +20,7 @@ import re
 from typing import Dict, List, Optional
 
 
-# ── Pure logic ──────────────────────────────────────────────────────────
+# Pure logic
 def parse_at_query(text: str, cursor_pos: Optional[int] = None) -> Optional[str]:
     """Return the MCP query being typed AT THE CURSOR, or None.
 

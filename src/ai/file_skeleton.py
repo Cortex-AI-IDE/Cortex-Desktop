@@ -94,9 +94,7 @@ def generate_skeleton(file_path: str, max_lines: int = 300) -> Optional[str]:
     return header + "\n" + hint + "\n\n" + "\n".join(skeleton_lines)
 
 
-# ---------------------------------------------------------------------------
 # Python skeleton
-# ---------------------------------------------------------------------------
 
 _PY_IMPORT    = re.compile(r'^(import |from \S+ import )')
 _PY_CLASS     = re.compile(r'^(\s*)class\s+(\w+)')
@@ -183,9 +181,7 @@ def _skeleton_python(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # JavaScript / TypeScript skeleton
-# ---------------------------------------------------------------------------
 
 _JS_IMPORT   = re.compile(r'^(import |const .+ = require\()')
 _JS_EXPORT   = re.compile(r'^export\s+(default\s+)?(class|function|const|let|interface|type|enum)\s+(\w+)')
@@ -257,9 +253,7 @@ def _skeleton_javascript(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # Java skeleton
-# ---------------------------------------------------------------------------
 
 _JAVA_IMPORT  = re.compile(r'^import\s+')
 _JAVA_CLASS   = re.compile(r'^(\s*)(public|private|protected)?\s*(abstract\s+)?(class|interface|enum)\s+(\w+)')
@@ -309,9 +303,7 @@ def _skeleton_java(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # C / C++ skeleton
-# ---------------------------------------------------------------------------
 
 _C_INCLUDE  = re.compile(r'^#include\s+')
 _C_DEFINE   = re.compile(r'^#define\s+(\w+)')
@@ -355,9 +347,7 @@ def _skeleton_c_cpp(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # Go skeleton
-# ---------------------------------------------------------------------------
 
 _GO_IMPORT  = re.compile(r'^import\s+')
 _GO_FUNC    = re.compile(r'^func\s+')
@@ -394,9 +384,7 @@ def _skeleton_go(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # Rust skeleton
-# ---------------------------------------------------------------------------
 
 _RS_USE    = re.compile(r'^use\s+')
 _RS_FN     = re.compile(r'^(\s*)(pub\s+)?(async\s+)?fn\s+(\w+)')
@@ -447,9 +435,7 @@ def _skeleton_rust(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # HTML skeleton
-# ---------------------------------------------------------------------------
 
 _HTML_TAG = re.compile(r'<(/?)(\w[\w-]*)([\s\S]*?)(/?)>', re.DOTALL)
 _HTML_ID    = re.compile(r'\bid="([^"]+)"')
@@ -495,13 +481,13 @@ def _skeleton_html(lines):
                 in_skip = True
                 skip_tag = tag_name
 
-            # --- CLOSING TAG ---
+# CLOSING TAG
             if is_close:
                 if stack and stack[-1] == tag_name:
                     stack.pop()
                 continue
 
-            # --- OPENING TAG ---
+# OPENING TAG
             indent = '  ' * len(stack)
             parts = [f"L{ln}: {indent}<{tag_name}"]
 
@@ -543,9 +529,7 @@ def _skeleton_html(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # CSS skeleton
-# ---------------------------------------------------------------------------
 
 _CSS_SELECTOR  = re.compile(r'^([^{}]+?)\s*\{', re.DOTALL)
 _CSS_MEDIA     = re.compile(r'^\s*@media\s+(.+?)\s*\{')
@@ -614,9 +598,7 @@ def _skeleton_css(lines):
     return result
 
 
-# ---------------------------------------------------------------------------
 # Generic fallback (unknown file types)
-# ---------------------------------------------------------------------------
 
 def _skeleton_generic(lines):
     """For unknown file types, return first 20 + last 10 lines."""

@@ -11,9 +11,7 @@ try:
 except ImportError:
     from modelAllowlist import isModelAllowed
 
-# ---------------------------------------------------------------------------
 # Type definitions
-# ---------------------------------------------------------------------------
 
 
 class ModelOption(TypedDict):
@@ -24,9 +22,7 @@ class ModelOption(TypedDict):
     category: str  # 'recommended', 'coding', 'budget', 'local'
 
 
-# ---------------------------------------------------------------------------
 # Model option generators
-# ---------------------------------------------------------------------------
 
 def getDeepSeekV4ProOption() -> ModelOption:
     """Get DeepSeek V4 Pro option."""
@@ -58,9 +54,7 @@ def getGPT55Option() -> ModelOption:
     }
 
 
-# ---------------------------------------------------------------------------
 # Main option generator
-# ---------------------------------------------------------------------------
 
 def getModelOptions(
     availableModels: Optional[List[str]] = None,
@@ -177,9 +171,7 @@ def getCategoryOptions(
     return getModelOptions(availableModels, categories=[category])
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 __all__ = [
     'ModelOption',

@@ -53,19 +53,17 @@ except ImportError:
         log.warning("[CortexAPI] No HTTP client available (install httpx or requests)")
 
 
-# ── Secret-file permissions ────────────────────────────────────────────────
+# Secret file permissions
 # ~/.cortex holds live 30-day bearer tokens (auth.json), the encrypted
 # provider-key vault (keys.enc) and cortex.db. auth.json used to be written
 # with Path.write_text(), which creates it 0664 under the common umask 0002,
 # so every other local user on a shared machine could read the token and
 # impersonate the account for its full lifetime. keys.enc already got this
 # right (key_manager._restrict_perms); auth.json was the one secret left out.
-#
 # os.open(mode=0o600) creates the file already owner-only -- chmod *after*
 # write_text() would leave a window where the tokens sit world-readable --
 # and the follow-up chmod heals files an older build left at 0664, because
 # O_CREAT's mode is ignored when the file already exists.
-#
 # On Windows os.chmod only toggles the read-only bit and grants no real ACL
 # protection, but it is harmless: each user's profile directory is already
 # isolated by NTFS ACLs, so the exposure closed here is POSIX-specific.
@@ -140,7 +138,7 @@ def _write_secret_text(path: Path, text: str) -> None:
     _restrict_existing(path)
 
 
-# ── This install's device id, and the "you were signed out" note ───────────
+# This install's device id, and the "you were signed out" note
 # An account may be signed in on 2 Cortex desktops at once (server side:
 # api/devices.py). The server tells them apart by a random id this install
 # makes once and keeps. It is random, not read from the hardware, so it says
@@ -258,7 +256,7 @@ class CortexAPIClient:
         self._subscription_cache: Optional[Dict] = None
         self._subscription_cache_at: float = 0.0
 
-    # ── Token persistence ──────────────────────────────────────────────
+# Token persistence
 
     def _load_tokens(self):
         """Load tokens from disk."""
@@ -323,7 +321,7 @@ class CortexAPIClient:
         except Exception:
             pass  # silent-ok: a token file that cannot be removed is overwritten on the next sign-in
 
-    # ── HTTP helpers ───────────────────────────────────────────────────
+# HTTP helpers
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -457,7 +455,7 @@ class CortexAPIClient:
 
         return False
 
-    # ── Signed out by the server ───────────────────────────────────────
+# Signed out by the server
 
     # Reasons the user caused themselves on this device need no message.
     _QUIET_REVOKE_REASONS = ("signed_out", "same_device")
@@ -505,7 +503,7 @@ class CortexAPIClient:
             except Exception as e:
                 log.warning(f"[CortexAPI] signed-out listener failed: {e}")
 
-    # ── Auth endpoints ─────────────────────────────────────────────────
+# Auth endpoints
 
     def is_logged_in(self) -> bool:
         """Check if user is logged in."""
@@ -597,7 +595,7 @@ class CortexAPIClient:
         """Get current user info from server."""
         return self._request("GET", "/api/v1/auth/me/")
 
-    # ── Profile endpoints ──────────────────────────────────────────────
+# Profile endpoints
 
     def get_profile(self) -> Optional[Dict]:
         """Get user profile from server."""
@@ -607,7 +605,7 @@ class CortexAPIClient:
         """Update user profile on server."""
         return self._request("PATCH", "/api/v1/profile/", json_data=data)
 
-    # ── Usage endpoints ────────────────────────────────────────────────
+# Usage endpoints
 
     def get_usage_summary(self) -> Optional[Dict]:
         """Get usage summary from server."""
@@ -626,7 +624,7 @@ class CortexAPIClient:
             "service_usage": service_usage,
         })
 
-    # ── Model config endpoints ────────────────────────────────────────
+# Model config endpoints
 
     def get_model_config(
         self, cached_version: str = "", ide_version: str = ""
@@ -672,7 +670,7 @@ class CortexAPIClient:
             log.debug(f"[CortexAPI] Model config fetch failed: {e}")
             return self._cached_config
 
-    # ── Billing endpoints ──────────────────────────────────────────────
+# Billing endpoints
 
     # proxy_service() calls get_subscription() once per embedding purely to
     # read the license_key, so indexing a 1659-file project fired ~1659 extra
@@ -701,10 +699,7 @@ class CortexAPIClient:
         return result
 
 
-
-
-
-    # ── Proxy chat endpoint ───────────────────────────────────────────
+# Proxy chat endpoint
 
     def proxy_chat(self, model: str, messages: list, license_key: str,
                    temperature: float = 0.7, max_tokens: int = None,
@@ -878,7 +873,7 @@ class CortexAPIClient:
     # now reads has_subscription(): a lapsed plan locks them together, and a
     # renewal unlocks them together. Do not add a second verdict here.
 
-    # ── Lifecycle ─────────────────────────────────────────────────────
+# Lifecycle
 
     def close(self):
         """Close the HTTP client and release resources.
@@ -897,7 +892,7 @@ class CortexAPIClient:
                     pass  # silent-ok: the client is dropped on the next line either way
                 self._http_client = None
 
-    # ── Helpers ────────────────────────────────────────────────────────
+# Helpers
 
     def _get_device_info(self) -> Dict:
         """Get device info for auth.
@@ -927,7 +922,7 @@ class CortexAPIClient:
         return info
 
 
-# ── Singleton ──────────────────────────────────────────────────────────
+# Singleton
 
 _api_client: Optional[CortexAPIClient] = None
 

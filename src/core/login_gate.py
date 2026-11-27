@@ -122,14 +122,13 @@ def evaluate(session: dict | None = None, now: float | None = None) -> GateResul
     return GateResult(True, "signed in", False, user)
 
 
-# ── "Skip for now" ─────────────────────────────────────────────────────────
+# "Skip for now"
 # Owner request 2026-11-05: the sign-in screen offers "Skip for now". Cortex
 # then works without an account (editor, terminal, AI with the user's own API
 # keys); only the subscription features need one: Cortex models, web search,
 # OCR, voice, cloud semantic search, Telegram. They already check
 # CortexAPIClient.has_subscription(), which is False without an account, and
 # ask the user to sign in from Settings > Profile.
-#
 # The choice is remembered: once skipped, startup never shows the sign-in
 # screen again. It is forgotten when the user signs in, so a later sign-out or
 # a sign-out by the server shows the screen once more, with Skip on it.

@@ -99,7 +99,6 @@ PLANS = (
 )
 
 
-
 def offer_decision(subscribed: bool, shown_this_session: bool,
                    force: bool = False) -> bool:
     """Whether the offer card should appear right now. Qt-free on purpose:
@@ -118,9 +117,6 @@ def offer_decision(subscribed: bool, shown_this_session: bool,
 # Once per launch. Module-level because the decision outlives any single
 # dialog instance: Skip closes the widget, the flag remembers the choice.
 _shown_this_session = False
-
-
-
 
 
 def maybe_show_offer(parent: QWidget | None = None, force: bool = False) -> bool:
@@ -236,7 +232,7 @@ class SubscriptionOfferDialog(QDialog):
 
         self.setStyleSheet(self._stylesheet())
 
-    # ── construction ────────────────────────────────────────────────────
+# construction
 
     def _build_header(self) -> QVBoxLayout:
         # Stacked, not side-by-side: beside the 22px title the value prop
@@ -415,7 +411,7 @@ class SubscriptionOfferDialog(QDialog):
         QPushButton#skip:hover {{ color: {INK}; }}
         """
 
-    # ── behaviour ─────────────────────────────────────────────────────────
+# behaviour
 
     def _apply_fonts(self) -> None:
         """Type sizes/tracking, set in code: QSS font rules would fight the
@@ -485,7 +481,7 @@ class SubscriptionOfferDialog(QDialog):
         else:
             self._set_status(self.NOT_FOUND, INK_MUTED)
 
-    # ── frameless window plumbing ─────────────────────────────────────────
+# frameless window plumbing
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

@@ -557,7 +557,6 @@ class SidebarWidget(QWidget):
                 # rename_selected_item(). Keeping this branch means F2 still
                 # works if that shortcut is ever unregistered, and both routes
                 # end in the same method so they cannot drift apart.
-                #
                 # This used to push {type:'rename'} into
                 # window._pendingNativeModals instead. Nothing drains that queue
                 # once the QWebChannel is up: _on_bridge_connected() stops

@@ -18,7 +18,6 @@ import re
 # ── Color tokens, theme-aware ──
 # Two palettes; _sync_palette() points the module-level C_* names at the
 # ACTIVE theme's palette before each highlight run.
-#
 # Bug history: only the OC-2 DARK palette existed, comments were
 # rgba(255,255,255,0.42) white-translucent, variables near-white, types pale
 # yellow. Rendered on the LIGHT warm background those spans were invisible
@@ -99,12 +98,6 @@ def _wrap(color: str, text: str, extra_style: str = "") -> str:
     if extra_style:
         style += ";" + extra_style
     return f'<span style="{style}">{text}</span>'
-
-
-
-
-
-
 
 
 # ── Language-specific patterns ──
@@ -629,9 +622,7 @@ def highlight_code(code: str, lang: str = "") -> str:
     # Every "&...;" in the escaped text is an HTML entity, and no token may be
     # emitted from its interior. A bash operator match on the trailing ";" of
     # "&lt;" used to cut the entity in half, so a heredoc printed literally::
-    #
     #     ssh root@host &lt<span style="color:#abb2bf">;</span>&lt<span ...>;</span>
-    #
     # Qt shows that as the text "&lt;&lt;EOF" instead of "<<EOF". Only a token
     # that sits ENTIRELY inside an entity is rejected, so a string containing
     # "<<x" is still highlighted as a string.
@@ -795,9 +786,6 @@ def highlight_code(code: str, lang: str = "") -> str:
         result.append(code[pos:])
 
     return ''.join(result)
-
-
-
 
 
 def guess_language_from_filename(filename: str) -> str:

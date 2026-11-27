@@ -212,11 +212,9 @@ class CrashStore:
                     # timeline_json, so stamping one integer rewrites the whole
                     # multi-megabyte row. This call runs on the GUI thread
                     # straight off the Enter key:
-                    #
                     #   chat_panel.py:6850 eventFilter -> _emit_send -> _on_send
                     #     crash_persistence.py:206 save_user_message
                     #       cursor.execute            <- GUI frozen 1.7s
-                    #
                     # Crash safety is unchanged: the message INSERT above and
                     # the recovery-log INSERT below both still run before this
                     # returns.
@@ -291,7 +289,6 @@ class CrashStore:
                     )
 
                     # updated_at is deliberately NOT stamped here.
-                    #
                     # The conversations table also holds timeline_json, the
                     # whole serialized chat, and SQLite cannot update part of a
                     # row: setting one integer rewrites the entire row and its
@@ -300,20 +297,17 @@ class CrashStore:
                     # rows while every other column totalled 0.00 MB, and the
                     # live row was 5.97 MB. So this stamped a timestamp at a
                     # cost of ~6 MB of I/O, and it grows with the conversation.
-                    #
                     # It is also redundant: database.set_conversation_timeline
                     # writes `timeline_json = ?, updated_at = ?` together on
                     # every turn, so the timestamp stays current without this.
                     # What is lost is a few seconds of staleness between the
                     # send and the turn finishing, which only affects ordering
                     # in a conversation list.
-                    #
                     # This path matters more than it looks: it was effectively
                     # dead until the _RESTORING_ACTIVE scope bug in chat_panel
                     # was fixed the same day (47 "[CrashSave] SKIPPED" against 1
                     # "EXECUTING" in a day's log). Re-enabling crash save would
                     # otherwise have added a ~6 MB write per turn.
-                    #
                     # Crash safety is unchanged: the response INSERT above and
                     # the recovery-log INSERT below both still run before this
                     # returns.

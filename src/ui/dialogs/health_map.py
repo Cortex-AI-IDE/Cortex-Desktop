@@ -96,7 +96,7 @@ class HealthMapBridge(QObject):
         self._scanning = False
         self._last_payload: str = ""
 
-    # -- python-side helpers ------------------------------------------------
+# python side helpers
 
     @property
     def project_root(self) -> str:
@@ -182,7 +182,7 @@ class HealthMapBridge(QObject):
         except Exception as exc:
             log.debug(f"[HealthMap] invalidate skipped: {exc}")
 
-    # -- JS slots -----------------------------------------------------------
+# JS slots
 
     @pyqtSlot(result=str)
     def loadInitialData(self) -> str:
@@ -298,7 +298,7 @@ class HealthMapDialog(QDialog):
 
         self._build_ui()
 
-    # -- construction -------------------------------------------------------
+# construction
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -406,7 +406,7 @@ class HealthMapDialog(QDialog):
         except Exception as exc:
             log.warning(f"[HealthMap] failed to bind web channel: {exc}")
 
-    # -- load lifecycle -----------------------------------------------------
+# load lifecycle
 
     def _on_load_progress(self, progress: int):
         self._load_progress = progress
@@ -535,7 +535,7 @@ class HealthMapDialog(QDialog):
         except RuntimeError as exc:
             log.debug(f"[HealthMap] JS call skipped (view gone): {exc}")
 
-    # -- signals out to the IDE ---------------------------------------------
+# signals out to the IDE
 
     def _show_toast(self, level: str, message: str):
         if not self._page_loaded:
@@ -583,7 +583,7 @@ class HealthMapDialog(QDialog):
             pass  # silent-ok: no main window found by walking up; the direct parent is used
         return self.parent()
 
-    # -- public API ---------------------------------------------------------
+# public API
 
     def refresh(self) -> None:
         """Force a rescan (used after the agent edits files)."""

@@ -113,7 +113,6 @@ def transcribe_async(
     """
     # Hand the result back to the GUI thread through a signal, NOT
     # QTimer.singleShot.
-    #
     # This was the whole bug. QTimer.singleShot posts to the CURRENT
     # thread's event loop, and the worker thread below has none, so the
     # timer never fired: the server transcribed the audio correctly and the

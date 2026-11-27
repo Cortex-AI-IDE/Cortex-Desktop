@@ -18,9 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Data Models
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -45,9 +43,7 @@ class Rule:
         )
 
 
-# ---------------------------------------------------------------------------
 # AGENTS.md Parser
-# ---------------------------------------------------------------------------
 
 
 def parse_agents_md(file_path: str) -> List[Rule]:
@@ -70,7 +66,7 @@ def parse_agents_md(file_path: str) -> List[Rule]:
         return []
 
     rules: List[Rule] = []
-    # Split on --- markers to find frontmatter sections
+# Split on markers to find frontmatter sections
     parts = content.split('---')
     i = 0
     while i < len(parts) - 1:
@@ -142,9 +138,7 @@ def determine_scope(file_path: str) -> str:
     return 'global'
 
 
-# ---------------------------------------------------------------------------
 # RulesManager
-# ---------------------------------------------------------------------------
 
 
 class RulesManager:
@@ -163,9 +157,7 @@ class RulesManager:
         self._rules: Dict[str, Rule] = {}
         self._load_rules()
 
-    # -----------------------------------------------------------------------
     # Public API
-    # -----------------------------------------------------------------------
 
     def list_rules(self) -> List[Rule]:
         """Return all loaded rules, sorted by priority descending."""
@@ -229,9 +221,7 @@ class RulesManager:
     def rule_count(self) -> int:
         return len(self._rules)
 
-    # -----------------------------------------------------------------------
     # Internal
-    # -----------------------------------------------------------------------
 
     def _load_rules(self) -> None:
         """Load rules from standard locations."""
@@ -261,9 +251,7 @@ class RulesManager:
         logger.info(f"Loaded {len(self._rules)} rules")
 
 
-# ---------------------------------------------------------------------------
 # Module-level singleton
-# ---------------------------------------------------------------------------
 
 _rules_manager: Optional[RulesManager] = None
 # The open project, set by the agent bridge when a project is opened. Same

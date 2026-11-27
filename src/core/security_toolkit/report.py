@@ -85,8 +85,6 @@ class Engagement:
     notes: str = ""
 
 
-
-
 @dataclass
 class ReportBundle:
     """Everything merged from one or more ScanReports, ready to render."""
@@ -221,7 +219,7 @@ def write_report(
     return path
 
 
-# --------------------------------------------------------------------- markdown
+# markdown
 
 
 def _fence(text: str) -> str:
@@ -275,7 +273,7 @@ def render_markdown(bundle: ReportBundle, engagement: Optional[Engagement] = Non
     lines += _md_table(meta, ("Field", "Value"))
     lines.append("")
 
-    # ---------------------------------------------------------- exec summary
+# exec summary
     lines += ["## Executive summary", ""]
     if bundle.actionable():
         lines += [
@@ -310,7 +308,7 @@ def render_markdown(bundle: ReportBundle, engagement: Optional[Engagement] = Non
             )
         lines.append("")
 
-    # ----------------------------------------------------- scope and method
+# scope and method
     lines += ["## Scope and authorization", ""]
     if eng.authorization:
         lines += [
@@ -330,7 +328,7 @@ def render_markdown(bundle: ReportBundle, engagement: Optional[Engagement] = Non
             "",
         ]
 
-    # ------------------------------------------------------------- findings
+# findings
     lines += ["## Findings", ""]
     groups = bundle.by_severity()
     if not groups:
@@ -348,7 +346,7 @@ def render_markdown(bundle: ReportBundle, engagement: Optional[Engagement] = Non
             "",
         ]
 
-    # --------------------------------------------------- method and limits
+# method and limits
     lines += ["## Method and limitations", ""]
     lines += [
         "- Checks are **non-destructive detection**. A probe proves that an "
@@ -365,7 +363,7 @@ def render_markdown(bundle: ReportBundle, engagement: Optional[Engagement] = Non
         "",
     ]
 
-    # -------------------------------------------------------------- appendix
+# appendix
     if bundle.scanned:
         lines += ["## Appendix A: what was tested", ""]
         lines += [f"- `{item}`" for item in bundle.scanned[:400]]
@@ -409,7 +407,7 @@ def _finding_markdown(finding: Finding, index: int) -> List[str]:
     return out
 
 
-# ------------------------------------------------------------------------- html
+# html
 
 def _e(text: Any) -> str:
     return html.escape(str(text if text is not None else ""), quote=True)

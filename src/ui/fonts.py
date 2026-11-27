@@ -103,8 +103,7 @@ def register_qt_fonts() -> list:
     return families
 
 
-# ── Editor (Monaco) font: Settings -> Editor -> Font family / Font size ──────
-#
+# Editor (Monaco) font: Settings > Editor > Font family / Font size
 # Those two controls were saved to settings.json but never reached Monaco,
 # whose font was hard-coded in editor.html - they only ever applied to an
 # older Qt editor. The editor panel now reads them when Monaco is ready and

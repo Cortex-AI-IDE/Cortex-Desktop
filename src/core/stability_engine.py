@@ -243,7 +243,6 @@ class StabilityEngine:
             ram_total = mem.total / (1024 * 1024)
 
             # Determine pressure level.
-            #
             # CRITICAL is RAM-only. A pegged CPU (all cores busy during a
             # PyInstaller build, a FAISS index rebuild, or a semantic-search
             # embedding batch) means the machine is computing hard, not that it

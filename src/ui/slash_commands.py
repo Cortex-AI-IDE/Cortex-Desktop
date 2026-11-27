@@ -16,7 +16,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QListWidget, QListWidgetItem, QLabel
 
 
-# ── Pure logic (unit-tested) ────────────────────────────────────────────
+# Pure logic (unit tested)
 def parse_slash_query(text: str, cursor_pos: Optional[int] = None) -> Optional[str]:
     """Return the skill query being typed AT THE CURSOR, or None.
 
@@ -151,9 +151,6 @@ def filter_skills(skills: List[Dict], query: str, limit: int = 50) -> List[Dict]
     return search(skills, query, limit=limit)
 
 
-
-
-
 def enabled_skills(skills: List[Dict]) -> List[Dict]:
     """The subset the "/" menu offers: only skills the user toggled ON.
 
@@ -184,10 +181,7 @@ def menu_skills(skills: List[Dict], query: str, limit: int = 50) -> List[Dict]:
              "label": s.get("token") or s["name"]} for s in rows]
 
 
-
-
-
-# ── Popup widget (child, not top-level) ─────────────────────────────────
+# Popup widget (child, not top level)
 class SlashCommandPopup(QFrame):
     """A themed list of skills shown above the input while typing a slash
     command. Emits chosen(name) when the user commits a selection."""

@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cortex-desktop"
+version = "3.0.81"
+description = "Cortex AI IDE - an agentic desktop IDE written in Python and PyQt6"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+# ---------------------------------------------------------------------------
+# Ruff: linter and formatter.
+#
+# Rule selection is deliberately conservative. The goal is to catch real
+# defects (unused names, undefined names, bugbear traps) without burying the
+# signal under thousands of style complaints in a 167k-line codebase.
+#
+# `D` (pydocstyle) is intentionally NOT enabled. There are ~2454 functions
+# without return annotations and the docstring surface is uneven; turning D on
+# now would emit tens of thousands of findings and make the tool unusable.
+# It gets enabled later, on new files only, once the tree is quieter.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+indent-width = 4
+# The project virtualenv runs CPython 3.14 and the build targets it. The floor
+# is 3.12, not 3.11: agent_bridge.py uses backslashes inside f-string
+# expressions, which is a 3.12+ feature. Targeting 3.11 made ruff report a
+# false `invalid-syntax` on valid code.
+target-version = "py312"
+
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "node_modules",
+    "installer_output",
+    "msix_output",
+    "mcp-server-microsoft-paint",
+    "Docs",
+    "tools",
+]
+
+[tool.ruff.lint]
+# Enforced set: real defects only.
+#
+# `UP` (pyupgrade) is deliberately NOT selected yet. A trial run reported 3254
+# of its findings (UP006 + UP045 alone), which is 71% of the whole output and
+# would bury the 35 undefined-name and 35 bare-except findings that actually
+# matter. It becomes a Phase 4 pass, applied per-file with review.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes: unused imports, undefined names
+    "I",   # isort: import ordering
+    "B",   # flake8-bugbear: likely bugs
+]
+
+# E501 (line length) is reported by the formatter, not the linter. Enforcing it
+# in lint would flag thousands of untouched lines that the formatter cannot
+# safely reflow inside strings and comments.
+ignore = [
+    "E501",
+    "E402",  # module-level import not at top of file (deliberate in entry points)
+]
+
+fixable = ["ALL"]
+unfixable = ["B"]  # bugbear findings need human judgement, never auto-apply
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # re-exports are intentional
+"src/main.py" = ["E402"]  # runtime hooks must precede other imports
+"tests/*" = ["B011"]      # assert False is used in a few guards
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

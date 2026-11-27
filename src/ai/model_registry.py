@@ -26,9 +26,7 @@ from src.utils.logger import get_logger
 log = get_logger("model_registry")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Provider directory
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _directory() -> list:
     """The published built-in provider rows, in display order.
@@ -84,9 +82,7 @@ def default_enabled_providers() -> list:
         return []
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Activation state (persisted in settings)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _sanitise(raw) -> list | None:
     """The saved provider list, cleaned. None when nothing usable was stored.
@@ -196,9 +192,7 @@ def set_provider_enabled(provider: str, enabled: bool) -> list:
     return current
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Dropdown composition
-# ─────────────────────────────────────────────────────────────────────────────
 
 def get_model_groups() -> list:
     """The model list the dropdown should render.

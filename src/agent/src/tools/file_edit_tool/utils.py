@@ -1,18 +1,12 @@
-# ------------------------------------------------------------
-# utils.py
-# 
 # FileEditTool utility functions for string matching, quote handling,
 # diff generation, and edit application.
-# ------------------------------------------------------------
 
 import re
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 from pathlib import Path
 
 
-# ============================================================
 # IMPORTS - Replace with actual imports when dependencies exist
-# ============================================================
 
 try:
     from ...utils.diff import (
@@ -74,9 +68,7 @@ except ImportError:
         replace_all: bool
 
 
-# ============================================================
 # CURLY QUOTE CONSTANTS
-# ============================================================
 
 # Models don't reliably emit curly quotes, so we define them as constants here.
 # We normalize curly quotes to straight quotes when applying edits.
@@ -87,9 +79,7 @@ LEFT_DOUBLE_CURLY_QUOTE = '“'
 RIGHT_DOUBLE_CURLY_QUOTE = '”'
 
 
-# ============================================================
 # QUOTE NORMALIZATION
-# ============================================================
 
 def normalize_quotes(s: str) -> str:
     """
@@ -162,9 +152,7 @@ def find_actual_string(file_content: str, search_string: str) -> Optional[str]:
     return None
 
 
-# ============================================================
 # QUOTE STYLE PRESERVATION
-# ============================================================
 
 def preserve_quote_style(old_string: str, actual_old_string: str, new_string: str) -> str:
     """
@@ -277,9 +265,7 @@ def _apply_curly_single_quotes(s: str) -> str:
     return ''.join(result)
 
 
-# ============================================================
 # EDIT APPLICATION
-# ============================================================
 
 def apply_edit_to_file(
     original_content: str,
@@ -449,9 +435,7 @@ def get_patch_for_edits(
     return {"patch": patch, "updatedFile": updated_file}
 
 
-# ============================================================
 # DIFF SNIPPET UTILITIES
-# ============================================================
 
 # Cap on edited_text_file attachment snippets
 DIFF_SNIPPET_MAX_BYTES = 8192
@@ -672,9 +656,7 @@ def get_edits_for_patch(patch: List[StructuredPatchHunk]) -> List[FileEdit]:
     return edits
 
 
-# ============================================================
 # DESANITIZATION
-# ============================================================
 
 # Contains replacements to de-sanitize strings from the model
 # Since models can't see any of these strings (sanitized in the API)
@@ -812,9 +794,7 @@ def normalize_file_edit_input(
     return {"file_path": file_path, "edits": edits}
 
 
-# ============================================================
 # EDIT EQUIVALENCE CHECKING
-# ============================================================
 
 def are_file_edits_equivalent(
     edits1: List[FileEdit],
@@ -934,9 +914,7 @@ def are_file_edits_inputs_equivalent(
     return are_file_edits_equivalent(edits1, edits2, file_content)
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     # Quote constants

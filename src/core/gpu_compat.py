@@ -77,12 +77,7 @@ def current_reason() -> str:
     return _current_reason
 
 
-
-
-
-# ──────────────────────────────────────────────────────────────────────────
 # Registry enumeration
-# ──────────────────────────────────────────────────────────────────────────
 
 def _query_str(dev_key, name: str) -> str:
     """Read a string-ish registry value, tolerating REG_DWORD oddities."""
@@ -171,9 +166,7 @@ def parse_driver_date(raw) -> Optional[_dt.datetime]:
     return None
 
 
-# ──────────────────────────────────────────────────────────────────────────
 # Classification
-# ──────────────────────────────────────────────────────────────────────────
 
 def _is_basic_adapter(gpu: Dict) -> bool:
     desc = gpu.get("desc", "").lower()
@@ -254,14 +247,9 @@ def gpu_inventory_summary(gpus: Optional[List[Dict]] = None) -> str:
     return " | ".join(parts)
 
 
-# ──────────────────────────────────────────────────────────────────────────
 # Resolution
-# ──────────────────────────────────────────────────────────────────────────
 
-# ──────────────────────────────────────────────────────────────────────────
 # Crash-driven fallback
-# ──────────────────────────────────────────────────────────────────────────
-#
 # Qt WebEngine runs Chromium's GPU code on a thread INSIDE Cortex.exe
 # ("Chrome_InProcGpuThread"), whatever flags we pass. In Chrome a graphics
 # driver crash only kills the GPU process; here it kills the whole app.
@@ -269,7 +257,6 @@ def gpu_inventory_summary(gpus: Optional[List[Dict]] = None) -> str:
 # violation on Chrome_InProcGpuThread, Qt6WebEngineCore -> d3d11 ->
 # nvwgf2umx.dll. crash.log, 3.0.78, 2026-11-21: two access violations four
 # minutes apart, both on a thread that was not Python's.
-#
 # faulthandler marks the crashing thread "Current thread" when it is a
 # Python thread. A fatal native exception with NO "Current thread" in the
 # dump happened on a native thread, which in this process means Chromium,

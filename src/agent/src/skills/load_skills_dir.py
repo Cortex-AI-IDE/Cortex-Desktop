@@ -1,17 +1,12 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportRedeclaration=false, reportAssignmentType=false
-# ------------------------------------------------------------
-# load_skills_dir.py
-#
 # Loads skills from /skills/ and legacy /commands/ directories,
 # handles dynamic skill discovery, conditional skills, and MCP integration.
-#
 # CONVERSION PHASES:
 #   Phase 1: Core imports, types, utility functions
 #   Phase 2: Frontmatter parsing and skill command creation
 #   Phase 3: Skills directory loader (/skills/ format)
 #   Phase 4: Legacy /commands/ loader + main getSkillDirCommands
 #   Phase 5: Dynamic/conditional skills + MCP registration
-# ------------------------------------------------------------
 
 from __future__ import annotations
 
@@ -21,9 +16,7 @@ import platform
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set
 
-# ============================================================
 # PHASE 1: Core imports, type definitions, utility functions
-# ============================================================
 
 # Zod-like Result type for schema validation
 @dataclass
@@ -114,15 +107,12 @@ except ImportError:
         return Signal()
 
 
-# ---------------------------------------------------------------------------
 # Names that have no real implementation anywhere in this tree.
-#
 # These used to be defined only inside the ``except ImportError`` handler above,
 # on the assumption that the ``try`` block imported the real ones. It does not:
 # no module in the project defines them. So whenever the imports succeeded, which
 # is the normal case, the names were never bound and every call site raised
 # NameError.
-#
 # That was not theoretical. ``addSkillDirectories`` opens by calling
 # ``isSettingSourceEnabled``, and ``file_write_tool`` schedules it with
 # ``asyncio.create_task`` on every write. The task is never awaited, so the
@@ -130,14 +120,11 @@ except ImportError:
 # ``src/utils/logger.py`` redirects into a pipe nothing reads. Dynamic skill
 # discovery has therefore been silently dead. Reproduced before the fix:
 # ``NameError: name 'isSettingSourceEnabled' is not defined``.
-#
 # They are bound unconditionally here instead. The bodies are the ones the
 # fallback block already used, so the import-failure path behaves as before.
-#
 # ``isEnvTruthy`` does have a real implementation at ``..utils.env_utils``. It is
 # left as the stub here because its only caller, ``getSkillDirCommands``, has no
 # callers of its own. Import the real one before wiring that function up.
-# ---------------------------------------------------------------------------
 
 EFFORT_LEVELS = ['minimal', 'medium', 'high']
 
@@ -252,9 +239,7 @@ def parseSkillPaths(frontmatter: FrontmatterData) -> Optional[List[str]]:
     return patterns
 
 
-# ============================================================
 # PHASE 2: Frontmatter parsing and skill command creation
-# ============================================================
 
 def parseSkillFrontmatterFields(
     frontmatter: FrontmatterData,
@@ -437,9 +422,7 @@ def createSkillCommand(
     }
 
 
-# ============================================================
 # PHASE 3: Skills directory loader (/skills/ format)
-# ============================================================
 
 async def loadSkillsFromSkillsDir(
     base_path: str,
@@ -523,9 +506,7 @@ async def loadSkillsFromSkillsDir(
     return results
 
 
-# ============================================================
 # PHASE 4: Legacy /commands/ loader + main getSkillDirCommands
-# ============================================================
 
 def isSkillFile(file_path: str) -> bool:
     """Check if a file is named SKILL.md (case-insensitive)"""
@@ -864,9 +845,7 @@ async def getSkillDirCommands(cwd: str) -> List[Command]:
     return unconditional_skills
 
 
-# ============================================================
 # PHASE 5: Dynamic/conditional skills + MCP registration
-# ============================================================
 
 # State for dynamically discovered skills
 dynamic_skill_dirs: Set[str] = set()

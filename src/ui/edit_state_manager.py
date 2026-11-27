@@ -120,7 +120,7 @@ class EditStateManager(QObject):
         if len(lines) < 10:
             return False, ""
 
-        # --- Size-based guard: detect massive content multiplication ---
+# Size based guard: detect massive content multiplication
         # If preview is >2x original size, it's almost certainly content duplication,
         # even if no single heading repeats. The AI agent sometimes regenerates
         # entire file sections, causing ballooning without triggering heading checks.
@@ -235,7 +235,7 @@ class EditStateManager(QObject):
             log.info(f"[EDIT-STATE] accept: filename '{filename}' already {entry['status']}")
             return False
 
-        # --- Duplication guard: preview-apply hunks and check for multiplied content ---
+# Duplication guard: preview apply hunks and check for multiplied content
         preview, original_content = self._preview_hunks(filename)
         if preview is not None:
             is_dup, dup_msg = self._detect_content_duplication(preview, original_content)
@@ -305,11 +305,6 @@ class EditStateManager(QObject):
         return count
 
 
-
     @property
     def file_count(self) -> int:
         return len(self._files)
-
-
-
-

@@ -1,8 +1,4 @@
-# ------------------------------------------------------------
-# tool_search_tool.py
-# 
 # A tool for searching and loading deferred tool schemas.
-# ------------------------------------------------------------
 
 import logging
 import re
@@ -71,9 +67,7 @@ def is_tool_search_enabled_optimistic() -> bool:
     return True
 
 
-# ============================================================
 # TYPE DEFINITIONS
-# ============================================================
 
 class ToolSearchInput(TypedDict):
     """Input schema for ToolSearchTool."""
@@ -89,9 +83,7 @@ class ToolSearchOutput(TypedDict):
     pending_mcp_servers: Optional[List[str]]
 
 
-# ============================================================
 # CACHE MANAGEMENT  (thread-safe, no lru_cache on async)
-# ============================================================
 
 # Manual dict cache, lru_cache doesn't work with async functions,
 # and tools:List is unhashable anyway.
@@ -175,9 +167,7 @@ def clear_tool_search_description_cache() -> None:
         _cached_deferred_key = None
 
 
-# ============================================================
 # SEARCH UTILITY FUNCTIONS
-# ============================================================
 
 def build_search_result(
     matches: List[str],
@@ -373,9 +363,7 @@ async def _score_tool(
     return {"name": tool.name, "score": score}
 
 
-# ============================================================
 # TOOL SEARCH TOOL CLASS
-# ============================================================
 
 class ToolSearchTool:
     """Discovers and loads deferred tools by keyword or regex."""
@@ -521,9 +509,7 @@ class ToolSearchTool:
         }
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "ToolSearchTool",

@@ -1,4 +1,3 @@
-# constants.py
 """
 Constants for AgentTool module.
 

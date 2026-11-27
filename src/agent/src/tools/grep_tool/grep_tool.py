@@ -1,8 +1,4 @@
-# ------------------------------------------------------------
-# grep_tool.py
-# 
 # A tool for searching file contents with regex using ripgrep.
-# ------------------------------------------------------------
 
 import os
 import glob
@@ -16,9 +12,7 @@ import subprocess
 
 logger = logging.getLogger("cortex.agent")
 
-# ============================================================
 # LOCAL IMPORTS
-# ============================================================
 
 try:
     from .prompt import GREP_TOOL_NAME, get_description
@@ -28,9 +22,7 @@ except ImportError:
         return "Search for text patterns in files using ripgrep."
 
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 
 # Version control system directories to exclude from searches
 VCS_DIRECTORIES_TO_EXCLUDE = [
@@ -86,9 +78,7 @@ _RESULT_PREFIX_RE = re.compile(r'^(?P<path>.*?)(?P<sep>[:-])(?P<line>\d+)(?P=sep
 _OMITTED_LINE_MARKER = '[Omitted long matching line]'
 
 
-# ============================================================
 # UTILITY FUNCTIONS
-# ============================================================
 
 def get_cwd() -> str:
     """Get current working directory, prefers project root over raw os.getcwd()."""
@@ -953,9 +943,7 @@ def prewarm_ripgrep():
     threading.Thread(target=_warm, daemon=True).start()
 
 
-# ============================================================
 # TYPE DEFINITIONS
-# ============================================================
 
 OutputMode = Literal['content', 'files_with_matches', 'count']
 
@@ -990,9 +978,7 @@ class GrepOutput(TypedDict, total=False):
     appliedOffset: Optional[int]
 
 
-# ============================================================
 # HELPER FUNCTIONS
-# ============================================================
 
 def apply_head_limit(
     items: List[Any],
@@ -1046,9 +1032,7 @@ def format_limit_info(applied_limit: Optional[int], applied_offset: Optional[int
     return ', '.join(parts)
 
 
-# ============================================================
 # GREP TOOL CLASS
-# ============================================================
 
 class GrepTool:
     """Content search tool (ripgrep with Python fallback)."""
@@ -1058,9 +1042,7 @@ class GrepTool:
     max_result_size_chars = 12_000  # 12K chars - max result returned to LLM
     strict = True
     
-    # ------------------------------------------------------------------
     # Public metadata helpers
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def description() -> str:
@@ -1070,9 +1052,7 @@ class GrepTool:
     def user_facing_name() -> str:
         return "Search"
     
-    # ------------------------------------------------------------------
     # Input / output schemas (used by the surrounding framework)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def input_schema() -> type:
@@ -1082,9 +1062,7 @@ class GrepTool:
     def output_schema() -> type:
         return GrepOutput
     
-    # ------------------------------------------------------------------
     # Concurrency and access mode
-    # ------------------------------------------------------------------
     
     @staticmethod
     def is_concurrency_safe() -> bool:
@@ -1096,9 +1074,7 @@ class GrepTool:
         """Check if tool is read-only."""
         return True
     
-    # ------------------------------------------------------------------
     # Helper for auto-classification (used by the LLM routing layer)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def to_auto_classifier_input(inp: Dict) -> str:
@@ -1106,25 +1082,19 @@ class GrepTool:
         pattern = inp.get("pattern", "")
         return f"{pattern} in {path}" if path else pattern
     
-    # ------------------------------------------------------------------
     # Search/read command classification
-    # ------------------------------------------------------------------
     
     @staticmethod
     def is_search_or_read_command() -> Dict[str, bool]:
         return {"isSearch": True, "isRead": False}
     
-    # ------------------------------------------------------------------
     # Path handling
-    # ------------------------------------------------------------------
     
     @staticmethod
     def get_path(inp: Dict) -> str:
         return inp.get("path") or get_cwd()
     
-    # ------------------------------------------------------------------
     # Permission matcher
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def prepare_permission_matcher(pattern: str):
@@ -1133,9 +1103,7 @@ class GrepTool:
             return match_wildcard_pattern(rule_pattern, pattern)
         return match_rule
     
-    # ------------------------------------------------------------------
     # Core validation logic
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def validate_input(inp: Dict) -> Dict[str, Any]:
@@ -1168,9 +1136,7 @@ class GrepTool:
         
         return {"result": True}
     
-    # ------------------------------------------------------------------
     # Permission validation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def check_permissions(inp: Dict, context: Any) -> bool:
@@ -1180,9 +1146,7 @@ class GrepTool:
             GrepTool.name, inp, app_state.tool_permission_context
         )
     
-    # ------------------------------------------------------------------
     # Core grep operation
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _to_relative(abs_path: str, cwd: str) -> str:
@@ -1325,9 +1289,7 @@ class GrepTool:
             absolute_path = os.path.dirname(absolute_path)
         args = ['--hidden']
         
-        # --------------------------------------------------------------
         # Exclude VCS directories to avoid noise
-        # --------------------------------------------------------------
         for dir_name in VCS_DIRECTORIES_TO_EXCLUDE:
             args.extend(['--glob', f'!{dir_name}'])
         _asked_for = f"{inp.get('glob') or ''} {inp.get('path') or ''}".replace('\\', '/')
@@ -1335,9 +1297,7 @@ class GrepTool:
             if dir_name not in _asked_for.split('/') and f"{dir_name}/" not in _asked_for:
                 args.extend(['--glob', f'!{dir_name}'])
         
-        # --------------------------------------------------------------
         # Line length: the window trimmer decides, not ripgrep
-        # --------------------------------------------------------------
         # `--max-columns 2000` made ripgrep swap the whole line for
         # "[Omitted long matching line]", so a match inside a minified bundle
         # reported a location and hid the token the search was actually about.
@@ -1349,35 +1309,25 @@ class GrepTool:
         # GrepTool._clip_long_lines() windows the line around the match.
         args.extend(['--max-columns', str(PATHOLOGICAL_LINE_CHARS)])
         
-        # --------------------------------------------------------------
         # Apply multiline flags only when explicitly requested
-        # --------------------------------------------------------------
         if multiline:
             args.extend(['-U', '--multiline-dotall'])
         
-        # --------------------------------------------------------------
         # Add optional flags
-        # --------------------------------------------------------------
         if case_insensitive:
             args.append('-i')
         
-        # --------------------------------------------------------------
         # Add output mode flags
-        # --------------------------------------------------------------
         if output_mode == 'files_with_matches':
             args.append('-l')
         elif output_mode == 'count':
             args.append('-c')
         
-        # --------------------------------------------------------------
         # Add line numbers if requested
-        # --------------------------------------------------------------
         if show_line_numbers and output_mode == 'content':
             args.append('-n')
         
-        # --------------------------------------------------------------
         # Add context flags (-C/context takes precedence)
-        # --------------------------------------------------------------
         if output_mode == 'content':
             if context_lines is not None:
                 args.extend(['-C', str(context_lines)])
@@ -1389,23 +1339,17 @@ class GrepTool:
                 if context_after is not None:
                     args.extend(['-A', str(context_after)])
         
-        # --------------------------------------------------------------
         # Handle patterns starting with dash
-        # --------------------------------------------------------------
         if pattern.startswith('-'):
             args.extend(['-e', pattern])
         else:
             args.append(pattern)
         
-        # --------------------------------------------------------------
         # Add type filter if specified
-        # --------------------------------------------------------------
         if file_type:
             args.extend(['--type', file_type])
         
-        # --------------------------------------------------------------
         # Add glob patterns
-        # --------------------------------------------------------------
         if glob_pattern:
             # Split on commas and spaces, preserve brace patterns
             glob_patterns = []
@@ -1420,9 +1364,7 @@ class GrepTool:
             for gp in filter(None, glob_patterns):
                 args.extend(['--glob', gp])
         
-        # --------------------------------------------------------------
         # Add ignore patterns
-        # --------------------------------------------------------------
         app_state = context.get_app_state()
         ignore_patterns = normalize_patterns_to_path(
             get_file_read_ignore_patterns(app_state.tool_permission_context),
@@ -1432,15 +1374,11 @@ class GrepTool:
             rg_ignore = f"!{ignore_pattern}" if ignore_pattern.startswith('/') else f"!**/{ignore_pattern}"
             args.extend(['--glob', rg_ignore])
 
-        # --------------------------------------------------------------
         # Exclude orphaned plugin version directories
-        # --------------------------------------------------------------
         for exclusion in await get_glob_exclusions_for_plugin_cache(absolute_path):
             args.extend(['--glob', exclusion])
         
-        # --------------------------------------------------------------
         # Execute ripgrep
-        # --------------------------------------------------------------
         # WSL has severe performance penalty for file reads
         # Timeout handled by ripgrep function itself
         abort_controller = getattr(context, "abort_controller", None)
@@ -1480,9 +1418,7 @@ class GrepTool:
         # files_with_matches as a filename and the UI drew it as a match.
         engine_notice = getattr(results, "notice", None)
         
-        # --------------------------------------------------------------
         # Process results based on output mode
-        # --------------------------------------------------------------
         if output_mode == 'content':
             # Apply head_limit first
             limited_result = apply_head_limit(results, head_limit, offset)
@@ -1617,9 +1553,7 @@ class GrepTool:
             
             return {"data": output}
     
-    # ------------------------------------------------------------------
     # Mapping to the LLM-compatible block format
-    # ------------------------------------------------------------------
     
     @staticmethod
     def map_tool_result_to_block(data: Dict, tool_use_id: str) -> Dict[str, Any]:
@@ -1697,9 +1631,7 @@ class GrepTool:
             }
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "GrepTool",

@@ -61,7 +61,7 @@ class FormulaError(Exception):
     """Raised when the mini evaluator cannot compute a formula."""
 
 
-# ── column letter helpers ────────────────────────────────────────────────
+# column letter helpers
 
 def col_to_index(letters: str) -> int:
     """'A'->0, 'Z'->25, 'AA'->26 ..."""
@@ -71,9 +71,6 @@ def col_to_index(letters: str) -> int:
     return n - 1
 
 
-
-
-
 def parse_ref(token: str):
     m = _REF_RE.match(token.strip())
     if not m:
@@ -81,7 +78,7 @@ def parse_ref(token: str):
     return int(m.group(2)) - 1, col_to_index(m.group(1))   # (row0, col0)
 
 
-# ── value formatting ─────────────────────────────────────────────────────
+# value formatting
 
 def format_value(v) -> str:
     if v is None:
@@ -129,7 +126,7 @@ def _text(v):
     return str(v)
 
 
-# ── safe mini formula evaluator ──────────────────────────────────────────
+# safe mini formula evaluator
 # AST-walk only: no exec/eval of user code. Unknown syntax raises
 # FormulaError and the caller falls back to showing the formula text.
 
@@ -154,7 +151,7 @@ class FormulaEvaluator:
         self._memo: dict = {}
         self._busy: set = set()
 
-    # public ------------------------------------------------------------
+# public
     def eval_formula(self, formula: str):
         expr = formula.strip()
         if expr.startswith("="):
@@ -190,7 +187,7 @@ class FormulaEvaluator:
         self._memo[key] = val
         return val
 
-    # AST walk ----------------------------------------------------------
+# AST walk
     def _node(self, n, depth):
         if depth > self._MAX_DEPTH:
             raise FormulaError("too deep")
@@ -384,7 +381,7 @@ def _loose_eq(a, b):
     return _num(a) == _num(b)
 
 
-# ── style extraction (openpyxl) ──────────────────────────────────────────
+# style extraction (openpyxl)
 
 def _rgb_hex(color) -> str | None:
     """Return '#RRGGBB' for concrete rgb colors, else None (theme colors
@@ -454,7 +451,7 @@ def _cell_style(cell) -> dict:
     return st
 
 
-# ── model builders per format ────────────────────────────────────────────
+# model builders per format
 
 def _build_xlsx(filepath: str) -> dict:
     import openpyxl

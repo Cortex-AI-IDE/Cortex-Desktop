@@ -6,16 +6,12 @@ from pathlib import Path
 
 
 LANGUAGE_MAP = {
-    # ============================================
     # Python
-    # ============================================
     ".py":      "python",
     ".pyw":     "python",
     ".pyi":     "python",
     
-    # ============================================
     # Web - HTML, CSS, Preprocessors
-    # ============================================
     ".html":    "html",       # auto handles embedded JS + CSS
     ".htm":     "html",
     ".css":     "css",
@@ -23,9 +19,7 @@ LANGUAGE_MAP = {
     ".sass":    "scss",
     ".less":    "less",
     
-    # ============================================
     # JavaScript / TypeScript
-    # ============================================
     ".js":      "javascript",
     ".jsx":     "javascript",  # React JSX — Monaco colors tags
     ".ts":      "typescript",
@@ -33,10 +27,8 @@ LANGUAGE_MAP = {
     ".mjs":     "javascript",
     ".cjs":     "javascript",
     
-    # ============================================
     # Frameworks & Template Engines
     # (html mode covers template syntax well enough)
-    # ============================================
     ".vue":     "html",        # Vue SFC
     ".svelte":  "html",        # Svelte
     ".astro":   "html",        # Astro
@@ -47,9 +39,7 @@ LANGUAGE_MAP = {
     ".blade":   "html",        # Laravel Blade
     ".erb":     "html",        # Ruby ERB
     
-    # ============================================
     # Data / Config
-    # ============================================
     ".json":    "json",
     ".jsonc":   "json",
     ".json5":   "json",
@@ -60,9 +50,7 @@ LANGUAGE_MAP = {
     ".ini":     "ini",
     ".cfg":     "ini",
     
-    # ============================================
     # Markup / Docs
-    # ============================================
     ".md":      "markdown",
     ".mdx":     "markdown",
     ".rst":     "markdown",
@@ -70,9 +58,7 @@ LANGUAGE_MAP = {
     ".svg":     "xml",
     ".xaml":    "xml",
     
-    # ============================================
     # Systems Programming
-    # ============================================
     ".go":      "go",
     ".rs":      "rust",
     ".rb":      "ruby",
@@ -90,9 +76,7 @@ LANGUAGE_MAP = {
     ".dart":    "dart",
     ".r":       "r",
     
-    # ============================================
     # Shell / DevOps
-    # ============================================
     ".sh":      "shell",
     ".bash":    "shell",
     ".zsh":     "shell",
@@ -101,16 +85,12 @@ LANGUAGE_MAP = {
     ".bat":     "batch",
     ".cmd":     "batch",
     
-    # ============================================
     # Database / Query
-    # ============================================
     ".sql":     "sql",
     ".graphql": "graphql",
     ".gql":     "graphql",
     
-    # ============================================
     # Other
-    # ============================================
     ".tf":      "hcl",         # Terraform
     ".proto":   "proto",       # Protobuf
     ".tex":     "latex",       # LaTeX
@@ -169,9 +149,6 @@ def detect_language(filepath: str) -> str:
     
     ext = Path(filepath).suffix.lower()
     return LANGUAGE_MAP.get(ext, "plaintext")
-
-
-
 
 
 def shorten_path(path: str, max_len: int = 50) -> str:

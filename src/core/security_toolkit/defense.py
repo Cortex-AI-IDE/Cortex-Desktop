@@ -70,9 +70,7 @@ MAX_FILE_BYTES = 2_000_000
 MAX_FILES = 4000
 
 
-# --------------------------------------------------------------------------
 # Secret scanning
-# --------------------------------------------------------------------------
 
 # (name, regex, severity, remediation). Ordered most-specific first.
 SECRET_PATTERNS: List[Tuple[str, re.Pattern, Severity, str]] = [
@@ -320,9 +318,7 @@ def _rel(path: Path, base: Path) -> str:
         return str(path)
 
 
-# --------------------------------------------------------------------------
 # Hardening checks
-# --------------------------------------------------------------------------
 
 # (name, regex, severity, description, remediation)
 HARDENING_RULES: List[Tuple[str, re.Pattern, Severity, str, str]] = [
@@ -504,9 +500,7 @@ def check_gitignore(root: str) -> ScanReport:
     return report
 
 
-# --------------------------------------------------------------------------
 # Dependency audit
-# --------------------------------------------------------------------------
 
 
 def _run(cmd: List[str], cwd: str, timeout: int = 180) -> Tuple[int, str, str]:
@@ -664,9 +658,7 @@ def _severity_from_label(label: str) -> Severity:
     }.get(str(label).lower(), Severity.MEDIUM)
 
 
-# --------------------------------------------------------------------------
 # Local SAST tools
-# --------------------------------------------------------------------------
 
 SAST_TOOLS: List[Tuple[str, List[str], str]] = [
     ("bandit", [sys.executable, "-m", "bandit", "-r", ".", "-f", "json", "-q"], "Python"),
@@ -765,9 +757,7 @@ def _strip_root(path: Optional[str]) -> str:
     return str(path).lstrip("./")
 
 
-# --------------------------------------------------------------------------
 # Orchestrator
-# --------------------------------------------------------------------------
 
 
 def scan_project(
