@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QImageReader, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView,
-    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from src.core.chat_images import is_chat_image
@@ -18,6 +18,34 @@ _RADIUS = 8
 _ZOOM_STEP = 1.25
 _MAX_ZOOM = 8.0
 _BACKDROP = "#111214"
+_HEADER = "#1b1d21"
+_MIN_VIEWER = QSize(260, 200)
+_MAX_SCREEN_FRACTION = 0.85
+# A bar above the picture for the close button. Floating the button over the
+# image put it at the frameless window's raw corner, with nothing behind it.
+HEADER_H = 40
+
+
+def _viewer_rect(image_size: QSize, parent_rect: QRect, screen_rect: QRect) -> QRect:
+    """Where the viewer opens: the picture's own size, centred on the window.
+
+    Copying the window's geometry opened the picture over the whole app and
+    pushed the close button past the screen edge. A dialog sized to the
+    picture stays focused, and a huge screenshot is clamped to most of the
+    screen instead of filling it.
+    """
+    limit_w = max(1, int(screen_rect.width() * _MAX_SCREEN_FRACTION))
+    limit_h = max(1, int(screen_rect.height() * _MAX_SCREEN_FRACTION))
+    width = max(1, image_size.width())
+    height = max(1, image_size.height())
+    scale = min(limit_w / width, limit_h / height, 1.0)
+    width = max(int(width * scale), min(_MIN_VIEWER.width(), limit_w))
+    height = max(int(height * scale), min(_MIN_VIEWER.height(), limit_h))
+    x = parent_rect.x() + (parent_rect.width() - width) // 2
+    y = parent_rect.y() + (parent_rect.height() - height) // 2
+    x = max(screen_rect.x(), min(x, screen_rect.x() + screen_rect.width() - width))
+    y = max(screen_rect.y(), min(y, screen_rect.y() + screen_rect.height() - height))
+    return QRect(x, y, width, height)
 
 
 def _thumbnail(path: str, ratio: float, box: QSize = _THUMB) -> Optional[QPixmap]:
@@ -157,11 +185,33 @@ class ImageViewer(QDialog):
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle("Image")
         self.setStyleSheet(f"QDialog {{ background:{_BACKDROP}; }}")
-        if parent is not None:
-            self.setGeometry(self._on_screen(parent.geometry(), parent))
+        pixmap = QPixmap(path) if is_chat_image(path) else QPixmap()
+        self.setGeometry(self._dialog_rect(pixmap.size(), parent))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        pixmap = QPixmap(path) if is_chat_image(path) else QPixmap()
+        layout.setSpacing(0)
+        # The ✕ belongs in a real bar above the picture. Floating it over a
+        # frameless dialog parked it at the raw window corner, on top of the
+        # image with nothing behind it, which read as a misplaced button.
+        self._close = QPushButton("✕")
+        self._close.setFixedSize(32, 32)
+        self._close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close.setToolTip("Close (Esc)")
+        self._close.setStyleSheet(
+            "QPushButton { color:#eee;background:rgba(255,255,255,0.12);border:none;"
+            "border-radius:16px;font-size:14px; }"
+            "QPushButton:hover { background:rgba(255,255,255,0.24); }")
+        self._close.clicked.connect(self.accept)
+        header = QWidget(self)
+        header.setObjectName("viewerHeader")
+        header.setFixedHeight(HEADER_H)
+        header.setStyleSheet(f"#viewerHeader {{ background:{_HEADER}; }}")
+        bar = QHBoxLayout(header)
+        bar.setContentsMargins(0, 4, 8, 4)
+        bar.setSpacing(0)
+        bar.addStretch(1)
+        bar.addWidget(self._close)
+        layout.addWidget(header)
         if pixmap.isNull():
             self.view = None
             missing = QLabel("Image no longer available")
@@ -172,46 +222,35 @@ class ImageViewer(QDialog):
             self.view = _ImageView(pixmap, self)
             self.view.dismissed.connect(self.accept)
             layout.addWidget(self.view)
-        self._close = QPushButton("✕", self)
-        self._close.setFixedSize(32, 32)
-        self._close.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._close.setToolTip("Close (Esc)")
-        self._close.setStyleSheet(
-            "QPushButton { color:#eee;background:rgba(255,255,255,0.12);border:none;"
-            "border-radius:16px;font-size:14px; }"
-            "QPushButton:hover { background:rgba(255,255,255,0.24); }")
-        self._close.clicked.connect(self.accept)
 
     @staticmethod
-    def _on_screen(rect, widget):
-        """``rect`` cut to the visible part of the screen it is on.
+    def _dialog_rect(image_size, parent):
+        """The opening rectangle for a picture of ``image_size``.
 
-        A maximized window's geometry can reach past the screen edge (its
-        invisible resize frame, or rounding at fractional display scaling).
-        The viewer copied it, so the ✕ at its right edge sat half off-screen.
+        The result is the picture's box plus the header bar, and the picture
+        is fitted to what is left of the screen allowance so the bar never
+        pushes the dialog past it.
         """
-        screen = widget.screen() if widget is not None else None
+        screen = parent.screen() if parent is not None else None
         if screen is None:
             from PyQt6.QtWidgets import QApplication
             screen = QApplication.primaryScreen()
-        if screen is None:
-            return rect
-        visible = rect.intersected(screen.availableGeometry())
-        return visible if visible.isValid() and not visible.isEmpty() else rect
+        screen_rect = screen.availableGeometry() if screen is not None else QRect(0, 0, 1024, 768)
+        window = parent.frameGeometry() if parent is not None else screen_rect
+        room = QRect(screen_rect.x(), screen_rect.y(), screen_rect.width(),
+                     max(1, screen_rect.height() - HEADER_H))
+        body = _viewer_rect(image_size, window, room)
+        height = body.height() + HEADER_H
+        # Centre the whole dialog, not just the picture, then keep it on screen.
+        x = max(screen_rect.x(), min(body.x(), screen_rect.x() + screen_rect.width() - body.width()))
+        y = max(screen_rect.y(),
+                min(body.y() - HEADER_H // 2, screen_rect.y() + screen_rect.height() - height))
+        return QRect(x, y, body.width(), height)
 
-    def _place_close(self):
-        """Top-right corner of the part of the viewer that is on screen."""
-        visible = self._on_screen(self.geometry(), self)
-        right = min(self.width(), visible.right() - self.x() + 1)
-        top = max(0, visible.top() - self.y())
-        self._close.move(max(0, right - 44), top + 12)
-        self._close.raise_()
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.accept()
+            return
+        super().keyPressEvent(event)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._place_close()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        # The window manager can move or resize the dialog while showing it.
-        self._place_close()
