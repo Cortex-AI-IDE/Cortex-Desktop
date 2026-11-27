@@ -138,9 +138,7 @@ def _count_assertions(project_root: str, ref: str, path: str) -> int:
     return len(_ASSERTION_PATTERNS.findall(content))
 
 
-# ---------------------------------------------------------------------------
 # Hard-coded auto-rejects, run before any model call
-# ---------------------------------------------------------------------------
 
 def run_auto_rejects(project_root: str, spec: LoopSpec, base_commit: str) -> Optional[ReviewResult]:
     """Returns a ReviewResult if a hard rule rejects the diff, else None."""
@@ -234,9 +232,7 @@ def _cat_file_exists(project_root: str, ref: str, path: str) -> bool:
     return proc.returncode == 0
 
 
-# ---------------------------------------------------------------------------
 # Model selection, strongest configured model, distinct from the actor
-# ---------------------------------------------------------------------------
 
 def pick_reviewer_model(actor_model: Optional[str] = None) -> Optional[Tuple[str, str]]:
     """Returns (provider_type_value, model_id) for the strongest configured
@@ -358,9 +354,7 @@ def _parse_review_json(raw: str, reviewer_model: str) -> ReviewResult:
     )
 
 
-# ---------------------------------------------------------------------------
 # Entry point used by LoopOrchestrator
-# ---------------------------------------------------------------------------
 
 def run_review(
     project_root: str,

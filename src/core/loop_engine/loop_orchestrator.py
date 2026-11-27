@@ -81,9 +81,7 @@ class LoopOrchestrator:
         self.project_root = project_root
         self.store = LoopStateStore(project_root)
 
-    # ------------------------------------------------------------------
     # start(), IDLE -> DISCOVER
-    # ------------------------------------------------------------------
 
     def start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         goal = (args.get("goal") or "").strip()
@@ -178,9 +176,7 @@ class LoopOrchestrator:
             ),
         }
 
-    # ------------------------------------------------------------------
     # verify(), hard stops FIRST, then VERIFY + REVISE
-    # ------------------------------------------------------------------
 
     def verify(self, loop_id: str, approach: Optional[str] = None,
                files_touched: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -194,14 +190,14 @@ class LoopOrchestrator:
         if spec is None:
             return {"ok": False, "error": f"Loop {loop_id!r} is missing its spec file, cannot verify."}
 
-        # ---- hard stop conditions checked FIRST, before running anything ----
+# hard stop conditions checked FIRST, before running anything
         budget_status = BudgetTracker.check(state, spec.budget)
         if budget_status.exceeded:
             return self._halt(state, spec, f"halt_{budget_status.reason.replace('-', '_')}")
 
         state.iteration += 1
 
-        # ---- §4.4 Test-Integrity Check, step 0, before results are interpreted ----
+# §4.4 Test Integrity Check, step 0, before results are interpreted
         # Commit first (so there's something to diff), THEN check, THEN decide
         # whether this commit is allowed to stand. This is deliberately ahead
         # of running the test suite: a violation means the "green" result
@@ -364,9 +360,7 @@ class LoopOrchestrator:
             ),
         }
 
-    # ------------------------------------------------------------------
     # status(), read-only
-    # ------------------------------------------------------------------
 
     def status(self, loop_id: str) -> Dict[str, Any]:
         state = self.store.load(loop_id)
@@ -374,9 +368,7 @@ class LoopOrchestrator:
             return {"ok": False, "error": f"No loop found with id {loop_id!r}."}
         return {"ok": True, "loop_id": loop_id, "state": state.to_dict()}
 
-    # ------------------------------------------------------------------
     # stop(), HALT_USER or explicit finalize
-    # ------------------------------------------------------------------
 
     def stop(self, loop_id: str, outcome: str = "user-abort") -> Dict[str, Any]:
         state = self.store.load(loop_id)
@@ -388,9 +380,7 @@ class LoopOrchestrator:
         report_path = self._write_report(state, spec, final=True) if spec else ""
         return {"ok": True, "loop_id": loop_id, "status": state.status, "report": report_path}
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _revert_to(self, ref: str) -> bool:
         """§4.4.4 step 1: revert an integrity-violating commit immediately.

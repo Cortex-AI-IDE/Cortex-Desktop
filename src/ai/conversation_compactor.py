@@ -12,7 +12,7 @@ from typing import Any, List, Optional, Set, Tuple
 
 log = logging.getLogger("cortex.conversation_compactor")
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# Constants
 
 # Tools whose results can be cleared by micro-compact
 COMPACTABLE_TOOLS: Set[str] = {
@@ -39,7 +39,7 @@ AUTOCOMPACT_THRESHOLD_PCT_LARGE = 0.90
 MAX_CONSECUTIVE_FAILURES = 5
 
 
-# ── Micro-compact ────────────────────────────────────────────────────────────
+# Micro compact
 
 def microcompact_messages(
     messages: List[Any],
@@ -143,7 +143,7 @@ def _collect_compactable_tool_ids(messages: List[Any]) -> List[str]:
     return ids
 
 
-# ── Auto-compact (token threshold check) ────────────────────────────────────
+# Auto compact (token threshold check)
 
 class AutoCompactState:
     """
@@ -188,10 +188,7 @@ def should_auto_compact(
     return estimated_tokens >= threshold
 
 
-
-
-
-# ── Combined compaction pass ─────────────────────────────────────────────────
+# Combined compaction pass
 
 def compact_if_needed(
     messages: List[Any],

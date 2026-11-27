@@ -150,7 +150,7 @@ class LivePreviewPanel(QWidget):
         self._bar = bar
         self.set_theme(is_dark=True)  # sane default before main_window applies real theme
 
-    # ── Public API ───────────────────────────────────────────────────
+# Public API
 
     def load_file(self, path: str) -> None:
         """Display `path` (must be a local file). Starts watching it."""
@@ -240,7 +240,7 @@ class LivePreviewPanel(QWidget):
         """True when something is loaded, either a file or a server URL."""
         return bool(self._current_path or self._current_url)
 
-    # ── Dev server (W7) ──────────────────────────────────────────────────
+# Dev server (W7)
 
     def start_dev_server(self, command: str, cwd: str = "", port=None):
         """Start a dev server and return it. Caller owns `cwd`.
@@ -287,7 +287,7 @@ class LivePreviewPanel(QWidget):
         except Exception:
             return ""
 
-    # ── Screenshot (W8) ──────────────────────────────────────────────────
+# Screenshot (W8)
 
     def capture_screenshot(self, max_width: int = 1280, quality: int = 70):
         """Capture the rendered page as JPEG bytes for the model to look at.
@@ -352,7 +352,6 @@ class LivePreviewPanel(QWidget):
         return self._current_path
 
 
-
     def get_console_messages(self) -> list:
         """Console output (log/warn/error) captured since the last load.
         Read by the agent's LivePreview tool to test the rendered page."""
@@ -382,7 +381,7 @@ class LivePreviewPanel(QWidget):
         self._refresh_btn.setStyleSheet(btn_qss)
         self._close_btn.setStyleSheet(btn_qss)
 
-    # ── Internal ─────────────────────────────────────────────────────
+# Internal
 
     def _on_file_changed(self, _path: str) -> None:
         # Coalesce rapid-fire change events (many tools write in multiple

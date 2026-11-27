@@ -98,7 +98,7 @@ class AlibabaProvider(BaseProvider):
         except Exception as e:
             log.warning(f"[Alibaba] __init__ error: {e}")
 
-    # ── env helpers ──────────────────────────────────────────────────────
+# env helpers
     @staticmethod
     def _get_int_env(name: str, default: int, minimum: int = 1, maximum: int = 10) -> int:
         raw = os.getenv(name, "").strip()
@@ -492,7 +492,7 @@ class AlibabaProvider(BaseProvider):
                 )
                 response.raise_for_status()
 
-                # ── Socket-level chunk timeout ──────────────────────────
+# Socket level chunk timeout
                 # Set a per-chunk socket read timeout so that if the
                 # server stalls mid-stream, we detect it quickly.
                 _saved_sock_timeout = None
@@ -838,5 +838,3 @@ class AlibabaProvider(BaseProvider):
 
 
 # Singleton instance
-
-

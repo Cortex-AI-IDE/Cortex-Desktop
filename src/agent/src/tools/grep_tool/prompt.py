@@ -1,8 +1,4 @@
-# ------------------------------------------------------------
-# prompt.py
-#
 # GrepTool prompt template and description generator.
-# ------------------------------------------------------------
 
 try:
     from ..agent_tool.constants import AGENT_TOOL_NAME
@@ -17,16 +13,12 @@ except ImportError:
     BASH_TOOL_NAME = "Bash"
 
 
-# ============================================================
 # TOOL CONSTANTS
-# ============================================================
 
 GREP_TOOL_NAME = "Grep"
 
 
-# ============================================================
 # GREP TOOL DESCRIPTION
-# ============================================================
 
 def get_description() -> str:
     """
@@ -62,9 +54,7 @@ Expected depth:
 The shape that works: search, narrow to the real matches, read several files, understand, then change something. The shape that fails: one search, three hits, one file, act."""
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "GREP_TOOL_NAME",

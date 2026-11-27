@@ -183,14 +183,12 @@ THEMES = {
     },
 }
 
-# ── Accessibility themes ────────────────────────────────────────────────────
+# Accessibility themes
 # For users with low vision or colour-vision deficiency. Same structure as
 # the themes above, so they reach every part of Cortex the same way.
-#
 # High Contrast: text and every syntax colour at least 7:1 on the background
 # (WCAG AAA), strong borders, and Monaco's own hc-black / hc-light editor
 # bases, which outline the current line, focus and selections.
-#
 # Distinct Colors: built on the Okabe-Ito palette, whose colours stay
 # distinguishable for every type of colour vision (including protanopia,
 # deuteranopia and tritanopia). Meanings that other themes carry in red vs
@@ -265,7 +263,7 @@ _active_at_start = DEFAULT_COLOR_THEME     # the theme the native palettes hold 
 _web_installed = False
 
 
-# ── settings ────────────────────────────────────────────────────────────────
+# settings
 
 def color_theme() -> str:
     """The saved colour theme id; anything unknown is "cortex"."""
@@ -287,7 +285,7 @@ def active_at_start() -> str:
     return _active_at_start
 
 
-# ── colour helpers ──────────────────────────────────────────────────────────
+# colour helpers
 
 def _rgb(hexcol: str) -> tuple:
     h = hexcol.lstrip("#")
@@ -299,7 +297,7 @@ def _rgba(hexcol: str, a: float) -> str:
     return f"rgba({r},{g},{b},{a})"
 
 
-# ── native Qt palettes (tokens.py), applied at startup ─────────────────────
+# native Qt palettes (tokens.py), applied at startup
 
 def token_overrides(tid: str) -> tuple:
     """(base-palette overrides, chat-palette overrides) for theme `tid`."""
@@ -502,7 +500,7 @@ def apply_at_startup() -> str:
     return tid
 
 
-# ── web pages ───────────────────────────────────────────────────────────────
+# web pages
 
 def diff_vars(tid: str) -> list:
     """(--diff-* variable, colour) pairs for the editor's read-only diff.
@@ -685,7 +683,7 @@ def install_web_theme() -> bool:
         return False
 
 
-# ── terminal ────────────────────────────────────────────────────────────────
+# terminal
 
 def terminal_theme(tid: str | None = None):
     """xterm theme object for `tid`, or None for Cortex's own colours."""
@@ -708,7 +706,7 @@ def terminal_theme_js() -> str:
             f"window.__cortexSetTerminalTheme({json.dumps(terminal_theme())});")
 
 
-# ── live change ─────────────────────────────────────────────────────────────
+# live change
 
 def on_color_theme_changed(callback) -> None:
     if callback not in _listeners:

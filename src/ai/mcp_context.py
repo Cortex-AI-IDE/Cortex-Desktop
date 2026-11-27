@@ -26,7 +26,7 @@ from typing import Iterable, Tuple
 
 # Where a page snapshot starts in an MCP tool result.
 #   chrome-devtools-mcp: "## Latest page snapshot"
-#   @playwright/mcp:     "- Page Snapshot:" (inside "### Page state")
+# @playwright/mcp: " Page Snapshot:" (inside " Page state")
 SNAPSHOT_MARKERS = ("## Latest page snapshot", "- Page Snapshot:", "### Page state")
 
 STALE_NOTE = ("[older page snapshot removed ({n:,} chars): the page has changed since. "

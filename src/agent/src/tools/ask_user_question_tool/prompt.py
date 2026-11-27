@@ -1,4 +1,3 @@
-# prompt.py
 """
 Constants for AskUserQuestionTool.
 

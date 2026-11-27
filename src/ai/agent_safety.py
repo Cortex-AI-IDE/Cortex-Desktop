@@ -21,9 +21,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
-# ============================================================
 # Constants
-# ============================================================
 
 DOOM_LOOP_FINGERPRINT_SIZE = 20   # P1: Last N tool calls to fingerprint
 DOOM_LOOP_REPEAT_LIMIT = 3        # P1: Same fingerprint → warning
@@ -72,9 +70,7 @@ READ_TOOL_NAMES: Set[str] = {
     "Read", "read_file", "readFile",
 }
 
-# ============================================================
 # Persistent Directives (P0), survive compaction
-# ============================================================
 
 PERSISTENT_DIRECTIVES = """
 ═══════════════════════════════════════════════════════════════
@@ -111,9 +107,7 @@ SAFETY DIRECTIVES (these NEVER get compacted):
 """.strip()
 
 
-# ============================================================
 # Data classes
-# ============================================================
 
 @dataclass
 class ToolFingerprint:
@@ -161,9 +155,7 @@ class SafetyState:
     has_been_warned_about_iterations: bool = False
 
 
-# ============================================================
 # AgentSafetyGuard, the main class
-# ============================================================
 
 class AgentSafetyGuard:
     """
@@ -179,14 +171,14 @@ class AgentSafetyGuard:
         self._files_read: Dict[str, FileReadRecord] = {}
         self._consecutive_errors: int = 0
 
-    # ── Reset methods ──────────────────────────────────────────
+# Reset methods
 
     def reset_turn(self) -> None:
         """Reset per-turn state. Call at the start of each new user message."""
         self._state = SafetyState()
         self._consecutive_errors = 0
 
-    # ── P1: Doom-loop detection ────────────────────────────────
+# P1: Doom loop detection
 
     def _fingerprint_args(self, args: Any) -> str:
         """Create an MD5 fingerprint of tool call arguments."""
@@ -234,7 +226,7 @@ class AgentSafetyGuard:
             )
         return None
 
-    # ── P2: Max iteration limit ────────────────────────────────
+# P2: Max iteration limit
 
     def check_max_iterations(self) -> Optional[str]:
         """
@@ -260,7 +252,7 @@ class AgentSafetyGuard:
 
         return None
 
-    # ── P3: Read-before-edit enforcement ───────────────────────
+# P3: Read before edit enforcement
 
     @staticmethod
     def _hash_file(abs_path: str) -> Optional[str]:
@@ -331,8 +323,7 @@ class AgentSafetyGuard:
         return None
 
 
-
-    # ── P5: Search-before-edit enforcement ──────────────────────
+# P5: Search before edit enforcement
 
     LARGE_FILE_THRESHOLD = 500  # lines, files above this need search before edit
 
@@ -406,7 +397,7 @@ class AgentSafetyGuard:
 
         return None
 
-    # ── P4: Stale-read detection ───────────────────────────────
+# P4: Stale read detection
 
     def check_stale_read(self, file_path: str) -> Optional[str]:
         """
@@ -443,7 +434,7 @@ class AgentSafetyGuard:
             pass  # silent-ok: the guard could not run; the caller proceeds without a finding
         return None
 
-    # ── P8: Error recovery budget ──────────────────────────────
+# P8: Error recovery budget
 
     def check_error_recovery(self, error_text: str) -> Optional[str]:
         """
@@ -474,7 +465,7 @@ class AgentSafetyGuard:
         # Compare first 100 chars of error
         return error_text[:100] == self._state.last_error_text[:100]
 
-    # ── P6: Search exclusion ───────────────────────────────────
+# P6: Search exclusion
 
     @staticmethod
     def should_exclude_path(path: str) -> bool:
@@ -502,7 +493,7 @@ class AgentSafetyGuard:
         """Filter a list of file paths, removing excluded patterns."""
         return [p for p in paths if not AgentSafetyGuard.should_exclude_path(p)]
 
-    # ── Full check for tool dispatch ───────────────────────────
+# Full check for tool dispatch
 
     def check_tool_call(
         self,
@@ -579,7 +570,7 @@ class AgentSafetyGuard:
 
         return should_proceed, warnings
 
-    # ── Register tool results ──────────────────────────────────
+# Register tool results
 
     def register_tool_result(self, tool_name: str, args: Any, result: Any = None) -> None:
         """Register a SUCCESSFUL tool call. Called from the bridge funnel.
@@ -618,7 +609,7 @@ class AgentSafetyGuard:
                 file_path = args.get("path", args.get("file_path", None))
             self.register_search(tool_name, query, file_path)
 
-    # ── Helpers ────────────────────────────────────────────────
+# Helpers
 
     @staticmethod
     def _extract_file_path(args: Any) -> Optional[str]:
@@ -643,8 +634,6 @@ class AgentSafetyGuard:
         return None
 
     # ── State serialization (for persistence across compaction) ─
-
-
 
 
 # Need json for fingerprinting

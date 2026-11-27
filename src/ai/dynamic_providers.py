@@ -69,9 +69,7 @@ _state: Dict[str, Any] = {
 _listeners: List[Callable[[], None]] = []
 
 
-# ─────────────────────────────────────────────────────────────────────
 # Ids and keys
-# ─────────────────────────────────────────────────────────────────────
 
 def is_dynamic_id(model_id: Optional[str]) -> bool:
     return bool(model_id) and model_id.lower().startswith(PREFIX)
@@ -129,9 +127,7 @@ def is_ready(slug: str) -> bool:
     return spec.get("auth_style") == "none" or bool(get_key(slug))
 
 
-# ─────────────────────────────────────────────────────────────────────
 # Parsing / cache
-# ─────────────────────────────────────────────────────────────────────
 
 def _int(v, default):
     try:
@@ -257,9 +253,7 @@ def _write_cache(payload: Dict[str, Any]) -> None:
         log.debug(f"[dynamic] cache write failed: {e}")
 
 
-# ─────────────────────────────────────────────────────────────────────
 # Server calls
-# ─────────────────────────────────────────────────────────────────────
 
 def _api_call(method: str, path: str, body: Optional[dict] = None,
               extra_headers: Optional[dict] = None) -> Tuple[int, Any, Dict[str, str]]:
@@ -331,7 +325,7 @@ def _notify() -> None:
             log.debug(f"[dynamic] listener failed: {e}")
 
 
-# ── the signed-in user's own providers ───────────────────────────────
+# the signed in user's own providers
 
 class ProviderApiError(Exception):
     pass
@@ -401,9 +395,7 @@ def fetch_upstream_models(base_url: str, api_key: str = "", auth_style: str = "b
     return sorted(i.strip() for i in ids if isinstance(i, str) and i.strip())
 
 
-# ─────────────────────────────────────────────────────────────────────
 # Lookups used by routing, limits, vision, thinking, pricing, dropdown
-# ─────────────────────────────────────────────────────────────────────
 
 def get_provider_spec(slug: str) -> Optional[Dict[str, Any]]:
     with _lock:

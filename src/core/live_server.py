@@ -31,9 +31,7 @@ from src.utils.logger import get_logger
 
 log = get_logger("live_server")
 
-# ---------------------------------------------------------------------------
 # Live-reload JS injected into every HTML response
-# ---------------------------------------------------------------------------
 _RELOAD_SCRIPT = """
 <script data-cortex-live-reload>
 (function(){
@@ -75,9 +73,7 @@ class LiveServer:
         self._watched: set[str] = set()
         self._lock = threading.Lock()
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
 
     def start(self) -> int:
         """Start HTTP server and file watcher. Returns the port number."""
@@ -148,9 +144,7 @@ class LiveServer:
     def port(self) -> Optional[int]:
         return self._port
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _find_free_port(self) -> Optional[int]:
         for port in self.PORT_RANGE:
@@ -234,9 +228,7 @@ class LiveServer:
                 log.debug("File change detected, browser will reload")
 
 
-# ---------------------------------------------------------------------------
 # HTTP Request Handler
-# ---------------------------------------------------------------------------
 
 class CortexLiveRequestHandler(BaseHTTPRequestHandler):
     """Serves files from the project root; injects live-reload script into HTML."""
@@ -264,7 +256,7 @@ class CortexLiveRequestHandler(BaseHTTPRequestHandler):
         parsed  = urlparse(self.path)
         url_path = parsed.path
 
-        # -- live-reload polling endpoint ----------------------------------
+# live reload polling endpoint
         if url_path == LiveServer.RELOAD_ENDPOINT:
             mtime = self._live_server._latest_mtime
             body  = json.dumps({"mtime": mtime}).encode("utf-8")
@@ -277,7 +269,7 @@ class CortexLiveRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        # -- regular file serving ------------------------------------------
+# regular file serving
         # Strip leading slash, decode percent-encoding
         rel_path = unquote(url_path.lstrip("/"))
         if not rel_path:

@@ -32,9 +32,7 @@ from ..utils.ide import (
 from ..utils.log import log_error
 
 
-# ============================================================
 # Missing utilities (stubs/implementations for Cortex context)
-# ============================================================
 
 def expand_path(p: str) -> str:
     """Expand ~ and resolve to absolute path."""
@@ -70,9 +68,7 @@ def get_patch_from_contents(params: Dict) -> List[Dict]:
     return [{'diff': ''.join(diff_lines), 'file_path': file_path}]
 
 
-# ============================================================
 # CortexDiffBridge, replaces MCP/RPC for built-in IDE
-# ============================================================
 
 class _CortexDiffBridge:
     """
@@ -330,7 +326,7 @@ class DiffInIDEService:
             if not is_enoent(e):
                 raise
 
-        # ── Cortex built-in path ──────────────────────────────────────────
+# Cortex built in path
         cortex_bridge = _CortexDiffBridge.instance()
         if cortex_bridge.is_registered:
             from ..tools.file_edit_tool.utils import get_patch_for_edits
@@ -368,7 +364,7 @@ class DiffInIDEService:
                 return DiffInIDEResult(old_content=old_content,
                                        new_content=old_content)
 
-        # ── External IDE path (MCP RPC) ─────────────
+# External IDE path (MCP RPC)
         is_cleaned_up = False
 
         async def cleanup():

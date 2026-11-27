@@ -173,7 +173,6 @@ class DeepSeekProvider(BaseProvider):
             return []
     
 
-    
     def _get_category(self, model_id: str) -> str:
         """Get model category"""
         if "pro" in model_id:
@@ -409,7 +408,7 @@ class DeepSeekProvider(BaseProvider):
                             log.error("[DeepSeek] API error: %s", response.text[:1000])
                     response.raise_for_status()
 
-                    # ── Socket-level chunk timeout ──────────────────────────
+# Socket level chunk timeout
                     # Set a per-chunk socket read timeout so that if the
                     # server stalls mid-stream, we detect it quickly instead
                     # of blocking forever in iter_lines().
@@ -432,7 +431,7 @@ class DeepSeekProvider(BaseProvider):
                     # hours of silence and aborted two healthy requests.
                     _last_event_ts = time.monotonic()
                     try:
-                        # ── Event-level stall watchdog ──────────────────────
+# Event level stall watchdog
                         # The connect/read/socket timeouts reset on EVERY byte,
                         # so SSE keep-alive comments (': ping') defeat all of
                         # them: the stream stays byte-alive while delivering
@@ -792,6 +791,3 @@ class DeepSeekProvider(BaseProvider):
 
 
 # Singleton instance
-
-
-

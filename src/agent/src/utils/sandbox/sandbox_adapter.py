@@ -43,17 +43,13 @@ class SandboxManager:
 
     _settings: Dict[str, Any] = {"enabled": False}
 
-    # ------------------------------------------------------------------
     # Settings / policy
-    # ------------------------------------------------------------------
 
     @staticmethod
     def is_sandbox_enabled_in_settings() -> bool:
         return bool(SandboxManager._settings.get("enabled", False))
 
-    # ------------------------------------------------------------------
     # Sandbox availability
-    # ------------------------------------------------------------------
 
     @staticmethod
     def is_sandboxing_enabled() -> bool:
@@ -74,6 +70,5 @@ class SandboxManager:
             return "Sandbox runtime backend is unavailable on this build."
         return None
 
-    # ------------------------------------------------------------------
 
 __all__ = ["SandboxManager"]

@@ -17,9 +17,7 @@ Multi-LLM support for all Cortex IDE providers:
 
 from typing import List, Optional, Set
 
-# ---------------------------------------------------------------------------
 # Type definitions
-# ---------------------------------------------------------------------------
 
 # Family-level aliases for multi-LLM providers
 MODEL_FAMILIES: Set[str] = {
@@ -36,9 +34,7 @@ MODEL_FAMILIES: Set[str] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------------
 
 def isModelFamilyAlias(model: str) -> bool:
     """
@@ -233,7 +229,7 @@ def isModelAllowed(
     normalizedModel = resolvedModel.strip().lower()
     normalizedAllowlist = [m.strip().lower() for m in availableModels]
 
-    # ── TIER 1: Direct match ─────────────────────────────────────────────
+# TIER 1: Direct match
     # Skip family aliases that have been narrowed by specific entries
     if normalizedModel in normalizedAllowlist:
         if (
@@ -242,7 +238,7 @@ def isModelAllowed(
         ):
             return True
 
-    # ── TIER 2: Family wildcard matching ─────────────────────────────────
+# TIER 2: Family wildcard matching
     # Family-level aliases in the allowlist match any model in that family,
     # but only if no more specific entries exist for that family.
     for entry in normalizedAllowlist:
@@ -253,7 +249,7 @@ def isModelAllowed(
         ):
             return True
 
-    # ── TIER 3: Version-prefix matching ──────────────────────────────────
+# TIER 3: Version prefix matching
     # "opus-4-5" or "cortex-opus-4-5" matches "cortex-opus-4-5-20251101"
     for entry in normalizedAllowlist:
         if not isModelFamilyAlias(entry):
@@ -263,9 +259,7 @@ def isModelAllowed(
     return False
 
 
-# ---------------------------------------------------------------------------
 # Convenience functions
-# ---------------------------------------------------------------------------
 
 def getAllowedModelsFromConfig(
     availableModels: Optional[List[str]] = None,
@@ -339,9 +333,7 @@ def validateAllowlist(allowlist: List[str]) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 __all__ = [
     'MODEL_FAMILIES',

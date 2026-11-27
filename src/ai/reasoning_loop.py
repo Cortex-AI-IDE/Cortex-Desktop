@@ -49,7 +49,7 @@ class ReasoningLoopDetector:
 
     def _add(self, raw: str) -> bool:
         key = _key(raw)
-        # Blank and punctuation-only lines ("}", "---") say nothing about a loop.
+# Blank and punctuation only lines ("}", " ") say nothing about a loop.
         # They also must not break a run: a loop that prints a blank line
         # between copies of its line is still the same loop.
         if not key or not any(c.isalnum() for c in key):

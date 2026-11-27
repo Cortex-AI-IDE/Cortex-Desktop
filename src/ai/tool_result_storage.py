@@ -16,7 +16,7 @@ from typing import Optional, Dict, Set, Tuple, List, Any
 
 log = logging.getLogger("cortex.tool_result_storage")
 
-# ── Constants (adapted for 128K context) ────────────────────────────
+# Constants (adapted for 128K context)
 
 # Per-tool: results larger than this get persisted to disk
 DEFAULT_MAX_RESULT_SIZE_CHARS = 30_000
@@ -35,7 +35,7 @@ PERSISTED_OUTPUT_CLOSING_TAG = "</persisted-output>"
 TOOL_RESULTS_SUBDIR = "tool-results"
 
 
-# ── Preview generation ──────────────────────────────────────────────────────
+# Preview generation
 
 def generate_preview(content: str, max_chars: int = PREVIEW_SIZE_CHARS) -> Tuple[str, bool]:
     """
@@ -53,7 +53,7 @@ def generate_preview(content: str, max_chars: int = PREVIEW_SIZE_CHARS) -> Tuple
     return content[:cut_point], True
 
 
-# ── Persistence to disk ─────────────────────────────────────────────────────
+# Persistence to disk
 
 def cortex_cache_root() -> str:
     """Root folder for Cortex's tool-output cache.
@@ -183,7 +183,7 @@ def maybe_persist_large_result(
     return message
 
 
-# ── Per-message aggregate budget ────────────────────────────────────────────
+# Per message aggregate budget
 
 class ContentReplacementState:
     """

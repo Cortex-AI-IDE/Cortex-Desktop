@@ -29,7 +29,6 @@ from src.ui.tokens import TOKENS as T
 # Above this many characters a file is handed to the webview as a file:// URI
 # instead of being embedded in a runJavaScript string. Qt's IPC channel and
 # V8's main thread both stall on multi-megabyte inline payloads.
-#
 # Module level because two code paths need it and only one used to have it:
 # it lived inside _open_file_js, so _flush_pending_switch had no guard and
 # re-shipped the whole file on every switch back to that tab.
@@ -40,7 +39,6 @@ _LARGE_CHAR_THRESHOLD = 200_000
 # with json.dumps() and pushed through runJavaScript() as one string literal.
 # V8 could not allocate it -> SIGTRAP (exit 133) -> the shared Chromium render
 # process died, taking editor + sidebar + terminal with it.
-#
 # The old 200 KB guard only ran on the BACKGROUND branch of _run_open_now; a
 # user click took the activate=True branch that returned before the guard, so
 # nothing capped the click path. Every path now routes through
@@ -173,7 +171,7 @@ class _EditorBridge(QObject):
         webbrowser.open(url)
         log.info(f"[WebviewPanel] External link opened in browser: {url}")
 
-    # ---- LSP Bridge Slots (called from JS) ----
+# LSP Bridge Slots (called from JS)
 
     @pyqtSlot(str, int)
     def onContentDelivered(self, file_path: str, content_length: int):
@@ -478,9 +476,9 @@ class WebviewPanel(QWidget):
         self._load_safety_timer.timeout.connect(self._force_hide_loading_overlay)
         self._load_safety_timer.start(60000)  # 60s, Chromium cold start under RAM pressure
 
-    # ---- Page lifecycle ---------------------------------------------------
+# Page lifecycle
 
-    # ---- Event filter for Ctrl+S shortcut --------------------------------
+# Event filter for Ctrl S shortcut
 
     def eventFilter(self, obj, event):
         """Intercept events on the QWebEngineView.
@@ -727,7 +725,7 @@ class WebviewPanel(QWidget):
         except Exception as e:
             log.warning(f"[WebviewPanel] Crash recovery reload failed: {e}")
 
-    # ---- Public API -------------------------------------------------------
+# Public API
 
     def _deliver_large_file_fallback(self, file_path: str, language: str = ""):
         """Re-deliver a large file after JS XHR timeout/failure.
@@ -816,7 +814,7 @@ class WebviewPanel(QWidget):
         except Exception as e:
             log.debug(f"[WebviewPanel] runJavaScript scheduling failed: {e}")
 
-    # ---- Public API -------------------------------------------------------
+# Public API
 
     def open_file(self, file_path: str, content: str, language: str = "plaintext", *, priority: bool = True):
         """Open a file in the editor (creates/switches to tab).
@@ -826,7 +824,7 @@ class WebviewPanel(QWidget):
         """
         log.info(f"[WebviewPanel] open_file: {file_path} (lang={language}, len={len(content)}, page_loaded={self._page_loaded})")
 
-        # ── Oversized-file gate ──────────────────────────────────────────
+# Oversized file gate
         # Anything above the ceiling is refused before it can reach the
         # renderer. We keep only the size (not the buffer) so a 20MB+ string is
         # never retained in Python nor shipped over IPC. The editor shows a
@@ -1138,7 +1136,6 @@ class WebviewPanel(QWidget):
             # The JS ACK (bridge.onContentDelivered) is the reliable signal.
             # Premature marking caused "empty editor" bugs when the JS call
             # was throttled or the page hadn't loaded yet.
-            #
             # ALL paths (user click, background restore) now go through
             # _deliver_to_editor, the single choke point that enforces the size
             # ceiling. Previously this function had its own inline logic and a
@@ -1217,7 +1214,6 @@ class WebviewPanel(QWidget):
             # Use a QTimer for ALL files, including the first.
             # The first file fires at 0ms (next event-loop iteration),
             # subsequent files are spaced by _delay_ms (10s warmup / 1.5s normal).
-            #
             # CRITICAL: Using a timer (even 0ms) instead of calling _flush_one()
             # synchronously ensures _open_timer remains set during batch opens
             # (e.g. _process_pending loop). Without this, each _open_file_js()
@@ -1346,7 +1342,7 @@ class WebviewPanel(QWidget):
             return
 
         def _safe_callback(content: str):
-            # ── EMPTY CONTENT FALLBACK ──────────────────────────────────
+# EMPTY CONTENT FALLBACK
             # If Monaco returns empty/None, fall back to Python cache or
             # disk content to prevent accidental file wiping.
             # FIX: Only fall back to disk when content is None (JS bridge
@@ -1573,7 +1569,7 @@ class WebviewPanel(QWidget):
                 callback(result.get("line", 1), result.get("column", 1))
         self._safe_run_js("getCursorPosition();", _handle_result)
 
-    # ---- JS → Python signal handlers --------------------------------------
+# JS → Python signal handlers
 
     def _on_js_content_changed(self, file_path: str, content: str):
         """JS notified us that file content changed (debounced)."""
@@ -1611,9 +1607,4 @@ class WebviewPanel(QWidget):
         self.active_file_changed.emit(file_path)
         self.cursor_position_changed.emit(line, column)
 
-    # ---- LSP Integration --------------------------------------------------
-
-    
-
-
-
+# LSP Integration

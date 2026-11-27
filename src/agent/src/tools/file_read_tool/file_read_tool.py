@@ -1,5 +1,3 @@
-# file_read_tool.py
-# 
 # Core file reading tool for Cortex IDE.
 # Handles text files, images, PDFs, and Jupyter notebooks.
 
@@ -24,9 +22,7 @@ from typing import (
 
 log = logging.getLogger(__name__)
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 
 # Device files that would hang the process: infinite output or blocking input.
 # Checked by path only (no I/O). Safe devices like /dev/null are intentionally omitted.
@@ -80,9 +76,7 @@ FILE_UNCHANGED_STUB = (
 )
 
 
-# ============================================================
 # HELPER FUNCTIONS
-# ============================================================
 
 def is_blocked_device_path(file_path: str) -> bool:
     """Check if path is a blocked device file."""
@@ -263,9 +257,7 @@ def detect_session_file_type(file_path: str) -> Optional[Literal['session_memory
     return None
 
 
-# ============================================================
 # EXCEPTIONS
-# ============================================================
 
 class MaxFileReadTokenExceededError(Exception):
     """Raised when file content exceeds maximum allowed tokens."""
@@ -285,9 +277,7 @@ class ImageResizeError(Exception):
     pass
 
 
-# ============================================================
 # DATA CLASSES
-# ============================================================
 
 @dataclass
 class ImageDimensions:
@@ -394,9 +384,7 @@ except ImportError:
         targeted_range_nudge: bool = False
 
 
-# ============================================================
 # FILE READ LISTENERS
-# ============================================================
 
 FileReadListener = Callable[[str, str], None]
 _file_read_listeners: List[FileReadListener] = []
@@ -426,9 +414,7 @@ def _notify_file_read_listeners(file_path: str, content: str) -> None:
             pass  # silent-ok: one bad listener must not stop the others
 
 
-# ============================================================
 # MEMORY FILE MTIMES (WeakMap equivalent)
-# ============================================================
 
 # Side-channel from call() to map_tool_result_to_tool_result_block_param:
 # mtime of auto-memory files, keyed by the data object identity.
@@ -475,9 +461,7 @@ def _memory_freshness_note(mtime_ms: float) -> str:
         return f'<system-reminder>This memory was last modified {days} day(s) ago.</system-reminder>\n'
 
 
-# ============================================================
 # IMAGE PROCESSING
-# ============================================================
 
 def _detect_image_format_from_buffer(buffer: bytes) -> str:
     """Detect image format from buffer magic bytes."""
@@ -575,9 +559,7 @@ async def read_image_with_token_budget(
     return result
 
 
-# ============================================================
 # NOTEBOOK READING
-# ============================================================
 
 async def read_notebook(file_path: str) -> List[Dict[str, Any]]:
     """Read a Jupyter notebook and return cells."""
@@ -596,9 +578,7 @@ def map_notebook_cells_to_tool_result(cells: List[Any], tool_use_id: str) -> Dic
     }
 
 
-# ============================================================
 # PDF READING
-# ============================================================
 
 # Use is_pdf_supported from prompt.py
 def _is_pdf_supported() -> bool:
@@ -664,9 +644,7 @@ async def extract_pdf_pages(
     }
 
 
-# ============================================================
 # TOKEN VALIDATION
-# ============================================================
 
 def rough_token_count_estimation_for_file_type(content: str, ext: str) -> int:
     """Estimate token count for content based on file type."""
@@ -740,9 +718,7 @@ async def fit_content_within_token_limit(
     }
 
 
-# ============================================================
 # FILE READING LIMITS
-# ============================================================
 
 def _get_default_file_reading_limits():
     """Get default file reading limits from limits.py module."""
@@ -750,9 +726,7 @@ def _get_default_file_reading_limits():
     return get_default_file_reading_limits()
 
 
-# ============================================================
 # ANALYTICS LOGGING
-# ============================================================
 
 def log_event(event_name: str, properties: Optional[Dict[str, Any]] = None) -> None:
     """Log an analytics event."""
@@ -777,9 +751,7 @@ def get_file_extension_for_analytics(file_path: str) -> Optional[str]:
     return ext.lstrip('.') if ext else None
 
 
-# ============================================================
 # PERMISSION CHECKING
-# ============================================================
 
 def check_read_permission_for_tool(
     tool: Any,
@@ -871,9 +843,7 @@ def match_wildcard_pattern(pattern: str, value: str) -> bool:
     return fnmatch.fnmatch(value, pattern)
 
 
-# ============================================================
 # FILE OPERATIONS
-# ============================================================
 
 async def get_file_modification_time_async(file_path: str) -> float:
     """Get file modification time in milliseconds."""
@@ -1052,9 +1022,7 @@ async def read_file_in_range(
     }
 
 
-# ============================================================
 # SKILL DISCOVERY
-# ============================================================
 
 async def discover_skill_dirs_for_paths(paths: List[str], cwd: str) -> List[str]:
     """Discover skill directories for given paths."""
@@ -1074,9 +1042,7 @@ def activate_conditional_skills_for_paths(paths: List[str], cwd: str) -> None:
     pass
 
 
-# ============================================================
 # MODEL UTILITIES
-# ============================================================
 
 def get_main_loop_model() -> str:
     """Get the main loop model name."""
@@ -1089,9 +1055,7 @@ def get_canonical_name(model: str) -> str:
     return model.split('/')[-1] if '/' in model else model
 
 
-# ============================================================
 # MESSAGES
-# ============================================================
 
 def create_user_message(content: Any, is_meta: bool = False) -> Dict[str, Any]:
     """Create a user message."""
@@ -1102,9 +1066,7 @@ def create_user_message(content: Any, is_meta: bool = False) -> Dict[str, Any]:
     }
 
 
-# ============================================================
 # FEATURE FLAGS
-# ============================================================
 
 def get_feature_value_cached_may_be_stale(feature_name: str, default: Any) -> Any:
     """Get a feature flag value."""
@@ -1112,9 +1074,7 @@ def get_feature_value_cached_may_be_stale(feature_name: str, default: Any) -> An
     return default
 
 
-# ============================================================
 # FILE READ TOOL
-# ============================================================
 
 class FileReadTool:
     """
@@ -1669,7 +1629,7 @@ class FileReadTool:
     ) -> Dict[str, Any]:
         """Inner implementation of call, separated to allow ENOENT handling."""
         
-        # --- Notebook ---
+# Notebook
         if ext == 'ipynb':
             cells = await read_notebook(resolved_file_path)
             cells_json = json.dumps(cells)
@@ -1714,7 +1674,7 @@ class FileReadTool:
             
             return {'data': data}
         
-        # --- Image ---
+# Image
         if ext in IMAGE_EXTENSIONS:
             data = await read_image_with_token_budget(resolved_file_path, max_tokens)
             if context and hasattr(context, 'nested_memory_attachment_triggers'):
@@ -1736,7 +1696,7 @@ class FileReadTool:
                 **({'new_messages': [create_user_message(content=metadata_text, is_meta=True)]} if metadata_text else {}),
             }
         
-        # --- PDF ---
+# PDF
         if is_pdf_extension(ext):
             if pages:
                 parsed_range = parse_pdf_page_range(pages)
@@ -1823,7 +1783,7 @@ class FileReadTool:
                 ],
             }
         
-        # --- Text file ---
+# Text file
         line_offset = max(0, offset - 1) if offset else 0
         result = await read_file_in_range(
             resolved_file_path,
@@ -1997,9 +1957,7 @@ class FileReadTool:
         }
 
 
-# ============================================================
 # BUILD TOOL FUNCTION
-# ============================================================
 
 def build_file_read_tool() -> FileReadTool:
     """Build and return a FileReadTool instance."""
@@ -2010,9 +1968,7 @@ def build_file_read_tool() -> FileReadTool:
 FileReadToolInstance = FileReadTool()
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     # Main tool

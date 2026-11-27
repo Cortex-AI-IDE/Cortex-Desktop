@@ -59,7 +59,6 @@ class TaskNode:
         return self.status in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
 
 
-
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -106,7 +105,7 @@ class TaskGraph:
     def __init__(self) -> None:
         self._nodes: Dict[str, TaskNode] = {}
 
-    # ── Node Management ──────────────────────────────────────────────
+# Node Management
 
     def add_node(self, node: TaskNode) -> None:
         """Add a task node to the graph.
@@ -152,7 +151,7 @@ class TaskGraph:
         log.debug(f"[TASK_GRAPH] Removed node {task_id}")
         return True
 
-    # ── Hierarchy Queries ────────────────────────────────────────────
+# Hierarchy Queries
 
     def get_direct_children(self, parent_id: str) -> List[TaskNode]:
         """Get direct children of a task, in insertion order."""
@@ -183,7 +182,7 @@ class TaskGraph:
         """Get all tasks with no parent."""
         return [n for n in self._nodes.values() if n.parent_id is None]
 
-    # ── Dependency Queries ───────────────────────────────────────────
+# Dependency Queries
 
     def get_blocked_tasks(self) -> List[TaskNode]:
         """Get all tasks that are currently blocked by incomplete dependencies."""
@@ -198,7 +197,7 @@ class TaskGraph:
                     break
         return blocked
 
-    # ── Status Rollup ────────────────────────────────────────────────
+# Status Rollup
 
     def is_completed(self, task_id: str) -> bool:
         """A task is completed if all its descendants are completed/cancelled (or it has none)."""
@@ -216,7 +215,7 @@ class TaskGraph:
         descendants = self.get_all_descendants(task_id)
         return all(d.is_completed for d in descendants) if descendants else node.is_completed
 
-    # ── Critical Path ────────────────────────────────────────────────
+# Critical Path
 
     def get_critical_path(self) -> List[TaskNode]:
         """Find the longest chain of dependent pending tasks (critical path)."""
@@ -261,11 +260,10 @@ class TaskGraph:
 
         return [self._nodes[nid] for nid in longest if nid in self._nodes]
 
-    # ── Circular Dependency Detection ────────────────────────────────
+# Circular Dependency Detection
 
 
-
-    # ── Serialization ────────────────────────────────────────────────
+# Serialization
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -282,7 +280,7 @@ class TaskGraph:
     def get_task_count(self) -> int:
         return len(self._nodes)
 
-    # ── Summary for Prompt Injection ─────────────────────────────────
+# Summary for Prompt Injection
 
     def build_prompt_section(self) -> str:
         """Build a Markdown summary of the task graph for LLM prompt injection.

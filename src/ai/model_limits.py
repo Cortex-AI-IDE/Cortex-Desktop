@@ -23,9 +23,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Dict
 import os
 
-# ---------------------------------------------------------------------------
 # Data model
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ModelLimits:
@@ -74,17 +72,17 @@ class ModelLimits:
         )
         self.context_budget = budget_tokens
 
-        # --- Tool result cap -------------------------------------------------
+# Tool result cap
         tool_share_tokens = int(budget_tokens * 0.30)
         raw_tool_chars    = (tool_share_tokens // 6) * CHARS_PER_TOKEN
         self.max_tool_result_chars = max(8_000, min(raw_tool_chars, 120_000))
 
-        # --- History message cap ---------------------------------------------
+# History message cap
         hist_share_tokens = int(budget_tokens * 0.40)
         raw_hist_chars    = (hist_share_tokens // 10) * CHARS_PER_TOKEN
         self.max_hist_chars = max(6_000, min(raw_hist_chars, 80_000))
 
-        # --- File read cap (CRITICAL for context overflow prevention) --------
+# File read cap (CRITICAL for context overflow prevention)
         # Single file should never exceed 15% of budget
         # This prevents reading a 100KB file that blows up context
         file_share_tokens = int(budget_tokens * 0.15)
@@ -93,7 +91,7 @@ class ModelLimits:
         self.max_file_read_chars = max(8_000, min(raw_file_chars, 200_000))
         self.max_file_read_bytes = self.max_file_read_chars * CHARS_PER_TOKEN
 
-        # --- Agentic turn limit ----------------------------------------------
+# Agentic turn limit
         # Larger context → agent can afford more tool-call round-trips
         # BUT we cap it to prevent analysis paralysis (especially for DeepSeek)
         if self.context_window >= 500_000:
@@ -116,15 +114,12 @@ class ModelLimits:
             f"turns={self.max_turns})"
         )
 
-# ---------------------------------------------------------------------------
 # Model registry
 # Each entry: (substring_pattern, context_window_tokens, max_output_tokens)
 # Patterns are tested in order; first match wins.
-#
 # OpenRouter models are identified by their "provider/model-name" format.
 # The patterns below match both the full OpenRouter ID (e.g. "anthropic/claude-opus-4.8")
 # and short names so direct-API and OpenRouter routing share the same limits.
-# ---------------------------------------------------------------------------
 
 # fmt: off
 _REGISTRY: List[Tuple[str, int, int]] = [
@@ -132,7 +127,7 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     # them claims this id by substring match.
     ("openrouter/auto",      1_000_000,  32_768),
 
-    # -- Meta via OpenRouter -------------------------------------------
+# Meta via OpenRouter
     # Verified against openrouter.ai/api/v1/models: context_length is
     # 1048576 exactly, so the exact figure is used rather than a rounded
     # 1_000_000. top_provider.max_completion_tokens is null there, so the
@@ -141,7 +136,7 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("meta/muse-spark-1.1",  1_048_576,  32_768),
 
     # -- Google Gemini, native AI Studio ids (bare patterns also cover
-    #    the google/... OpenRouter slugs via substring matching) --------
+# the google/... OpenRouter slugs via substring matching)
     ("gemini-pro-latest",    1_048_576,  65_536),   # rolling newest-Pro alias
     ("gemini-3.6-flash",     1_048_576,  65_536),
     ("gemini-3.5-flash-lite",1_048_576,  65_536),
@@ -149,7 +144,7 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("gemini-2.5-pro",       1_048_576,  65_536),
     ("gemini",               1_048_576,  65_536),   # catch-all future Gemini
 
-    # ── DeepSeek (native provider: deepseek-v4-pro) ──────────────────────────
+# DeepSeek (native provider: deepseek v4 pro)
     # The vision model must be listed BEFORE the bare "deepseek" catch-all,
     # or the prefix match hands it the catch-all's 131K output instead of the
     # 64K chosen for it.
@@ -157,7 +152,7 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("deepseek-v4-pro",     1_000_000, 131_072),
     ("deepseek",            1_000_000, 131_072),   # catch-all
 
-    # ── OpenAI (native provider: gpt-5.4, gpt-5.5) ─────────────────────────
+# OpenAI (native provider: gpt 5.4, gpt 5.5)
     ("gpt-5.6",            1_000_000,  64_000),   # all 5.6 variants (luna/terra/sol, pro) via OpenRouter
     ("gpt-5.5",            1_050_000, 128_000),
     ("gpt-5.4",            1_050_000, 128_000),
@@ -184,7 +179,7 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("claude-haiku-4-5",     1_000_000,  64_000),
     ("claude",                 200_000,  16_384),   # catch-all
 
-    # ── Qwen / Alibaba DashScope ─────────────────────────────────────────────
+# Qwen / Alibaba DashScope
     ("qwen3.8-max",        1_000_000, 131_072),   # vision, flagship
     # qwen3.8-flash was missing here and fell through to the bare "qwen"
     # catch-all below: a 1M-context model budgeted at 32,000 tokens. The log
@@ -196,35 +191,35 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("qwen3.7-plus",       1_000_000,  32_768),   # vision, agentic
     ("qwen",                  32_000,   8_192),   # catch-all
 
-    # ── Google Gemini (OpenRouter) ───────────────────────────────────────────
+# Google Gemini (OpenRouter)
     ("google/gemini-3.5-pro",   1_000_000,  65_536),
     ("google/gemini-3.5-flash", 1_000_000,  65_536),
     ("google/gemini-2.5-pro",   1_000_000,  65_536),
     ("google/gemini-2.5-flash", 1_000_000,  32_768),
     ("gemini",                  1_000_000,  65_536),   # catch-all
 
-    # -- MiniMax (OpenRouter) ----------------------------------------
+# MiniMax (OpenRouter)
     ("minimax/minimax-m3",     1_000_000, 128_000),   # 1M ctx, 128K output (native) / 512K via OpenRouter
 
-    # -- Moonshot Kimi K3 (OpenRouter) -------------------------------
+# Moonshot Kimi K3 (OpenRouter)
     ("moonshotai/kimi-k3",     1_000_000,  64_000),   # 2.8T MoE, 1M ctx, open weights, native vision
     ("moonshotai",             1_000_000,  64_000),   # catch-all for future Moonshot models
 
-    # ── Z.ai / Zhipu GLM (OpenRouter) ──────────────────────────────────────────────
+# Z.ai / Zhipu GLM (OpenRouter)
     ("z-ai/glm-5.2",                1_000_000,  65_536),   # 744B MoE, coding-first, 1M ctx
     ("z-ai/glm",                    1_000_000,  65_536),   # catch-all for future Z.ai models
 
-    # ── Xiaomi MiMo V2.5 ────────────────────────────────────────────────────
+# Xiaomi MiMo V2.5
     ("mimo-v2.5-pro",           1_048_576, 131_072),
     ("mimo-v2.5",               1_048_576, 131_072),
     ("mimo",                    1_048_576,  65_536),   # catch-all
 
-    # ── SiliconFlow Embeddings (semantic search) ─────────────────────────────
+# SiliconFlow Embeddings (semantic search)
     ("Qwen/Qwen3-Embedding-4B",    32_768,   4_096),   # default (2,048 dims)
     ("Qwen/Qwen3-Embedding-0.6B",  32_768,   1_024),   # fast (1,024 dims)
     ("Qwen/Qwen3-Embedding-8B",    32_768,   4_096),   # best (4,096 dims)
 
-    # ── xAI Grok (OpenRouter) ────────────────────────────────────────────────
+# xAI Grok (OpenRouter)
     ("x-ai/grok-4.6",              500_000,  65_536),
     ("x-ai/grok-4.5",              500_000,  32_768),
     ("x-ai/grok-4.3",            1_000_000,  65_536),
@@ -232,9 +227,7 @@ _REGISTRY: List[Tuple[str, int, int]] = [
 ]
 # fmt: on
 
-# ---------------------------------------------------------------------------
 # Safe default for unknown models
-# ---------------------------------------------------------------------------
 
 _DEFAULT_LIMITS = ModelLimits(
     model_id="unknown",
@@ -242,9 +235,7 @@ _DEFAULT_LIMITS = ModelLimits(
     max_output_tokens=8_192,
 )
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 def get_model_limits(model_id: str) -> ModelLimits:
     """
@@ -305,9 +296,7 @@ def get_model_limits(model_id: str) -> ModelLimits:
         max_output_tokens=_DEFAULT_LIMITS.max_output_tokens,
     )
 
-# ---------------------------------------------------------------------------
 # Dynamic output cap escalation, auto-raises caps during auto-continue
-# ---------------------------------------------------------------------------
 
 # Escalation tiers per model (levels: 0=default, 1=moderate, 2=full)
 _ESCALATION_TABLE: Dict[str, Tuple[int, int, int]] = {
@@ -382,9 +371,7 @@ def get_escalated_max_output_tokens(model_id: str, escalation_level: int = 0) ->
 
     return get_model_limits(model_id).max_output_tokens
 
-# ---------------------------------------------------------------------------
 # Convenience helper, useful for logging / diagnostics
-# ---------------------------------------------------------------------------
 
 def describe_model_limits(model_id: str) -> str:
     """Return a one-line human-readable summary of the model's limits."""

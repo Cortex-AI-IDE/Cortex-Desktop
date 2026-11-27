@@ -47,7 +47,7 @@ class DynamicProvider(OpenRouterProvider):
         self.DEFAULT_MODEL = (spec.get("models") or [{}])[0].get("model_id", "")
         super().__init__()
 
-    # ── key ────────────────────────────────────────────────────────────
+# key
     def _load_api_key(self):
         """Replaces BaseProvider's enum-keyed lookup with the per-slug key."""
         if self.spec.get("auth_style") == "none":
@@ -65,7 +65,7 @@ class DynamicProvider(OpenRouterProvider):
     def validate_api_key(self) -> bool:
         return self.spec.get("auth_style") == "none" or bool(self.api_key)
 
-    # ── request shaping (hooks added to OpenRouterProvider) ─────────────
+# request shaping (hooks added to OpenRouterProvider)
     def _build_headers(self) -> Dict[str, str]:
         headers = super()._build_headers()
         for h in _OPENROUTER_ONLY_HEADERS:
@@ -94,7 +94,7 @@ class DynamicProvider(OpenRouterProvider):
                 break
         return body
 
-    # ── model ids ───────────────────────────────────────────────────────
+# model ids
     def _upstream(self, model: str) -> str:
         parsed = dyn.parse_model_id(model or "")
         if parsed and parsed[0] == self.slug:
@@ -118,7 +118,7 @@ class DynamicProvider(OpenRouterProvider):
         self._require_key()
         return super().chat_stream(messages, self._upstream(model), *args, **kwargs)
 
-    # ── catalog ─────────────────────────────────────────────────────────
+# catalog
     @property
     def available_models(self) -> List[ModelInfo]:
         return [

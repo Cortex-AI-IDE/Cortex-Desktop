@@ -62,12 +62,7 @@ DEFAULT_TIMEOUT = 2.0
 DEFAULT_WORKERS = 64
 
 
-
-
-
-# --------------------------------------------------------------------------
 # Port scanning
-# --------------------------------------------------------------------------
 
 
 def parse_ports(spec: Any) -> List[int]:
@@ -275,9 +270,7 @@ def _findings_for_open_ports(
             break
 
 
-# --------------------------------------------------------------------------
 # DNS
-# --------------------------------------------------------------------------
 
 
 def resolve_dns(host: str, project_root: Optional[str] = None) -> ScanReport:
@@ -316,9 +309,7 @@ def resolve_dns(host: str, project_root: Optional[str] = None) -> ScanReport:
     return report
 
 
-# --------------------------------------------------------------------------
 # TLS
-# --------------------------------------------------------------------------
 
 
 def inspect_tls(
@@ -427,9 +418,7 @@ def _name_from_cert(cert: Optional[Dict[str, Any]], field: str) -> str:
     return ", ".join(parts)
 
 
-# --------------------------------------------------------------------------
 # HTTP security headers
-# --------------------------------------------------------------------------
 
 
 SECURITY_HEADERS: List[Tuple[str, Severity, str, str]] = [

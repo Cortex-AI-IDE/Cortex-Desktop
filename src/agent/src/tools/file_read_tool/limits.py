@@ -1,4 +1,3 @@
-# limits.py
 # Read tool output limits
 
 import os

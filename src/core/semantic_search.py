@@ -281,8 +281,7 @@ class SemanticSearch:
             log.error(f"Error indexing {file_path}: {e}")
             return False
     
-    # ── Embedding spaces ─────────────────────────────────────────────────
-    #
+# Embedding spaces
     # Vectors from two models cannot be compared: the score is noise. The
     # index never said which model produced an entry, and a cloud call that
     # failed mid-index fell back to local TF-IDF without a word, so the
@@ -410,7 +409,6 @@ class SemanticSearch:
         
         # Find all source files in ONE tree walk, pruning excluded
         # directories in-place so we never descend into them at all.
-        #
         # PERFORMANCE: the old code called Path.rglob() once PER extension
         # (11 calls), each one a FULL recursive walk of the entire project,
         # including venv/, node_modules/, .git/, etc., and only filtered
@@ -739,7 +737,7 @@ class SemanticSearch:
         lines = content.split('\n')
         meaningful: list[str] = []
 
-        # ── Python ──────────────────────────────────────────────
+# Python
         if ext == '.py':
             in_docstring = False
             docstring_quote = ''
@@ -813,12 +811,12 @@ class SemanticSearch:
                 if stripped.startswith(('"', "'")):
                     meaningful.append(line)
 
-        # ── Markdown ────────────────────────────────────────────
+# Markdown
         elif ext in ('.md', '.mdx', '.rst', '.txt'):
             # Markdown/text IS the semantic content — keep it all (capped)
             meaningful = lines
 
-        # ── Web / JS / TS ───────────────────────────────────────
+# Web / JS / TS
         elif ext in ('.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'):
             for line in lines:
                 stripped = line.strip()
@@ -844,7 +842,7 @@ class SemanticSearch:
                 if len(stripped) > 60:
                     meaningful.append(line)
 
-        # ── HTML ────────────────────────────────────────────────
+# HTML
         elif ext in ('.html', '.htm', '.xml', '.svg'):
             for line in lines:
                 stripped = line.strip()
@@ -854,7 +852,7 @@ class SemanticSearch:
                 if stripped.startswith('<') or len(stripped) > 40:
                     meaningful.append(line)
 
-        # ── CSS ─────────────────────────────────────────────────
+# CSS
         elif ext in ('.css', '.scss', '.less', '.sass'):
             for line in lines:
                 stripped = line.strip()
@@ -869,11 +867,11 @@ class SemanticSearch:
                 elif len(stripped) > 40:
                     meaningful.append(line)
 
-        # ── Config files (JSON, YAML, TOML, INI) ────────────────
+# Config files (JSON, YAML, TOML, INI)
         elif ext in ('.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.env'):
             meaningful = lines  # keep all — config files are small & meaningful
 
-        # ── Shell / batch / make ────────────────────────────────
+# Shell / batch / make
         elif ext in ('.sh', '.bash', '.ps1', '.bat', '.cmd', '.Makefile', ''):
             for line in lines:
                 stripped = line.strip()
@@ -882,7 +880,7 @@ class SemanticSearch:
                 elif len(stripped) > 10:
                     meaningful.append(line)
 
-        # ── Generic fallback ────────────────────────────────────
+# Generic fallback
         else:
             for line in lines:
                 stripped = line.strip()
@@ -905,7 +903,7 @@ class SemanticSearch:
                             'security', 'permission', 'check', 'validate'))):
                     meaningful.append(line)
 
-        # ── Cap total length ────────────────────────────────────
+# Cap total length
         result = '\n'.join(meaningful[:400])
         return result.strip() if result.strip() else content[:1000]
     

@@ -52,7 +52,6 @@ _SCREEN_ENOUGH_COLOURS = 64   # plenty to say a panel painted; stop reading
 # compatibility-mode dialog.
 _failures: List[str] = []
 
-# ──────────────────────────────────────────────────────────────────────────
 # Silent-failure probe. The failure this module was written for does NOT
 # fire renderProcessTerminated or loadFinished(False): on the affected
 # machines (older AMD-chipset Windows 10/11 PCs are the classic case) the
@@ -62,7 +61,6 @@ _failures: List[str] = []
 # create one: a WebGL context needs exactly the GPU context compositing
 # needs. Two or more core surfaces reporting "no WebGL" while we are in
 # GPU mode is that silent signature, and the fix is offered.
-# ──────────────────────────────────────────────────────────────────────────
 GPU_PROBE_JS = """(function(){
   try {
     var out = {webgl: false, renderer: ''};
@@ -118,9 +116,6 @@ def record_render_failure(source: str, reason: str) -> None:
     entry = f"{source}: {reason}"
     _failures.append(entry)
     log.error("[RenderHealth] render failure reported, %s", entry)
-
-
-
 
 
 def probe_page(page, source: str) -> None:
@@ -440,7 +435,6 @@ def check_and_offer_fix(parent, widgets: Iterable) -> bool:
         return False           # already on; nothing to offer
 
     # Chromium must have ACTUALLY reported a failure before we do anything.
-    #
     # The pixel sample is NOT run in the healthy case any more. widget.grab()
     # on a QWebEngineView forces a synchronous surface read on the GUI thread,
     # and the watchdog caught it freezing startup for 10.7s:

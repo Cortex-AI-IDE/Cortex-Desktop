@@ -379,7 +379,7 @@ class _NoiseFilter(logging.Filter):
         return True
 
 
-# ── Shared handlers (process-wide singletons) ──────────────────────────────
+# Shared handlers (process wide singletons)
 # Every named logger MUST share ONE file handler. Previously each get_logger()
 # name created its own _HourlyRotatingFileHandler on the same cortex.log -
 # at each hour boundary every handler instance independently detected the
@@ -433,7 +433,6 @@ def _get_shared_handlers():
             # (the installed build shares ~/.cortex), an antivirus scan of
             # the file just rotated. Take a per-process name in the SAME
             # directory rather than leaving the user's log behind.
-            #
             # The old fallback used tempfile.gettempdir()/Cortex/logs, and
             # when TEMP pointed somewhere unexpected that wrote a Cortex\logs
             # folder into whatever directory the app was started from (seen

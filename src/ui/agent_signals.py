@@ -31,26 +31,26 @@ class AgentSignals(QObject):
         turn_limit_hit(pending_todos: list[dict], checkpoint: str)
     """
 
-    # ---- streaming content ----
+# streaming content
     thinking_delta = pyqtSignal(str)
     text_delta     = pyqtSignal(str)
 
-    # ---- tool lifecycle ----
+# tool lifecycle
     tool_start     = pyqtSignal(str, str, object)
     tool_end       = pyqtSignal(str, str, object)  # tool_id, status, result_data (or None)
     tool_diff      = pyqtSignal(str, str, str)
     tool_image     = pyqtSignal(str)              # image the agent chose to show
 
-    # ---- file edit lifecycle ----
+# file edit lifecycle
     file_creating  = pyqtSignal(str, str)
     file_diff      = pyqtSignal(str, str, list)
     file_done      = pyqtSignal(str, int, int)
 
-    # ---- turn lifecycle ----
+# turn lifecycle
     turn_done      = pyqtSignal()
     error          = pyqtSignal(str)
 
-    # ---- secondary UI ----
+# secondary UI
     permission_req           = pyqtSignal(str, str, str, str)
     file_edit_permission_req = pyqtSignal()
     project_access_req       = pyqtSignal()

@@ -396,14 +396,13 @@ class _TokenProxy:
 TOKENS = _TokenProxy()
 
 
-# ── Chat panel palette ────────────────────────────────────────────────────
+# Chat panel palette
 # The chat panel's own look, layered over the active theme. Only
 # src/ui/chat_panel.py reads it (through CHAT_TOKENS / chat_theme()), so the
 # sidebar, settings, menus and tool cards keep their colours: ~30 of the
 # tokens the chat uses (accent, bg, border, green, orange, ...) are shared
 # with those modules, and changing the shared values would restyle the whole
 # app.
-#
 # One accent - the Cortex brand lime from cortex-ide.app - marks what is live
 # (spinners, running, streaming cursor, links, focus). Everything else is
 # neutral; emphasis comes from weight, not colour: bold, italic, inline code,
@@ -411,7 +410,6 @@ TOKENS = _TokenProxy()
 # green, white and purple). Tool rows are neutral: the icon says the kind,
 # the state says what is happening. Diff and syntax colours are unchanged -
 # they carry meaning.
-#
 # Dark keeps the editor's own background so the chat sits flush with the
 # code. Light is white with cool greys; the cream + terracotta it replaces
 # measured 3.1:1 (accent) and 3.0:1 (muted) on its own background, under the
@@ -970,7 +968,3 @@ def build_qss(t: dict | None = None, mode: str | None = None) -> str:
         width: 20px;
     }}
     """
-
-
-
-

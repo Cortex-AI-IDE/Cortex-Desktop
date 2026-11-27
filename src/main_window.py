@@ -47,9 +47,6 @@ import logging as _logging
 _log = _logging.getLogger(__name__)
 
 
-
-
-
 class CodeAnalyzer:
     """Simple prompt builder for AI code actions."""
 
@@ -178,7 +175,6 @@ except ImportError:
     log.debug("Syntax highlighting module not available")
 
 
-
 def _resource_path(relative_path: str) -> str:
     """Get absolute path to a bundled resource, works for dev and PyInstaller .exe.
 
@@ -305,7 +301,7 @@ class CleanTabBar(QTabBar):
             # Tab label
             text = self.tabText(i)
             
-            # ── Premium Tab Icon ───────────────────────────────────────────────
+# Premium Tab Icon
             icon_x = rect.x() + 10
             icon_size = 14
             
@@ -423,7 +419,6 @@ class CleanTabBar(QTabBar):
                     self.tabCloseRequested.emit(i)
                     return
         super().mousePressEvent(event)
-
 
 
 class EditorTabWidget(QTabWidget):
@@ -664,9 +659,7 @@ class EditorTabWidget(QTabWidget):
                 w.set_theme(is_dark)
 
 
-# ═══════════════════════════════════════════════════════════════
 # NOTIFICATION SUMMARY EXTRACTOR (module-level helper)
-# ═══════════════════════════════════════════════════════════════
 
 def _extract_notification_summary(text: str) -> str:
     """Extract a clean, minimal task summary from AI response text.
@@ -721,8 +714,6 @@ def _extract_notification_summary(text: str) -> str:
         if len(s_clean) >= 20:
             return s_clean[:100]
     return ""
-
-
 
 
 from src.ui.components.sidebar import SidebarWidget
@@ -864,7 +855,7 @@ class CortexMainWindow(QMainWindow):
         log.info("MainWindow: Applying initial theme...")
         self._apply_initial_theme()
 
-        # ══════ STARTUP PERFORMANCE: Show window FIRST, restore session AFTER ══════
+# STARTUP PERFORMANCE: Show window FIRST, restore session AFTER
         # Previously _restore_session() blocked for 9s (DB init + 20 messages + ChatPersist)
         # before the window appeared. Now we show the window immediately and restore
         # in a deferred QTimer so the user sees the UI in ~2s instead of ~12s.
@@ -1784,7 +1775,7 @@ class CortexMainWindow(QMainWindow):
         self._central = central
         self.setCentralWidget(central)
 
-        # === FOCUS FRAME SUPPRESSION (theme-neutral, applied at widget level) ===
+# FOCUS FRAME SUPPRESSION (theme neutral, applied at widget level)
         # NOTE: All QMenuBar/QMenu/QDialog color styles are now in dark.qss / light.qss
         # theme files loaded via ThemeManager.apply(). This widget-level stylesheet
         # previously contained hardcoded dark colors that conflicted with global QSS
@@ -1800,11 +1791,11 @@ class CortexMainWindow(QMainWindow):
             }
         """)
 
-        # === STATE MANAGEMENT ===
+# STATE MANAGEMENT
         # Always show 4-panel layout with chat ready
         self._chat_started = True
 
-        # === AI-FIRST LAYOUT WITH SPLITTERS ===
+# AI FIRST LAYOUT WITH SPLITTERS
         main_splitter = CursorSplitter(Qt.Orientation.Horizontal)
         main_splitter.setChildrenCollapsible(False)
         main_splitter.setHandleWidth(6)
@@ -1968,9 +1959,7 @@ class CortexMainWindow(QMainWindow):
         self._find_replace_dialog.replace_requested.connect(self._on_replace_requested)
         self._find_replace_dialog.replace_all_requested.connect(self._on_replace_all_requested)
 
-        # ════════════════════════════════════════════════════════════════
         # STARTUP OVERLAY, child widget covering the main window
-        # ════════════════════════════════════════════════════════════════
         # Bug history: this was a TOP-LEVEL frameless always-on-top window
         # sized to the ENTIRE SCREEN. In compiled builds it appeared as a
         # separate black "app" before the Cortex window existed, and it
@@ -2044,9 +2033,7 @@ class CortexMainWindow(QMainWindow):
         if app:
             app.installEventFilter(self)
 
-    # ------------------------------------------------------------------
     # AI-First 4-Panel Layout Methods
-    # ------------------------------------------------------------------
 
     def _create_chat_panel(self) -> QWidget:
         """Create Chat Panel (flexible) - Main AI conversation."""
@@ -2110,9 +2097,7 @@ class CortexMainWindow(QMainWindow):
         """Handle chat panel visibility change."""
 
 
-    # ------------------------------------------------------------------
     # Menu
-    # ------------------------------------------------------------------
     def _build_menu(self):
         mb = self.menuBar()
 
@@ -2285,9 +2270,7 @@ class CortexMainWindow(QMainWindow):
         help_menu.addSeparator()
         self._add_action(help_menu, "About Cortex", self._show_about, "")
 
-        # ═══════════════════════════════════════════════════════════════════════
         # Panel Toggle Button Group, right corner of menu bar
-        # ═══════════════════════════════════════════════════════════════════════
         self._panel_toggle_bar = self._build_panel_toggle_bar()
 
         # QMenuBar doesn't support custom widgets in the same way, so we add
@@ -2309,16 +2292,12 @@ class CortexMainWindow(QMainWindow):
         menu.addAction(action)
         return action
 
-    # ------------------------------------------------------------------
     # Toolbar
-    # ------------------------------------------------------------------
     # Toolbar removed in AI-first mode - replaced by TopNavBar component
     # def _build_toolbar(self):
 
 
-    # ------------------------------------------------------------------
     # Panel Toggle Buttons
-    # ------------------------------------------------------------------
     def _panel_toggle_bar_qss(self, is_dark: bool) -> str:
         """Stylesheet for the panel-toggle bar, hover tints must match the
         theme (white tint is invisible-to-wrong on a light background)."""
@@ -2469,9 +2448,7 @@ class CortexMainWindow(QMainWindow):
 
         return bar
 
-    # ------------------------------------------------------------------
     # Status Bar
-    # ------------------------------------------------------------------
     def _restyle_status_bar(self, is_dark: bool):
         """Apply theme colors to the status bar.
 
@@ -2598,7 +2575,7 @@ class CortexMainWindow(QMainWindow):
         self._restyle_status_bar(self._theme_manager.is_dark)
         self._update_status_cursor(1, 1)
 
-    # ── Skill indicator ────────────────────────────────────────────────
+# Skill indicator
     def _on_skill_in_use(self, name: str, already_active: bool):
         """Show which skill the agent loaded for the current task.
 
@@ -2637,7 +2614,7 @@ class CortexMainWindow(QMainWindow):
         lbl.setToolTip("")
         lbl.setVisible(False)
 
-    # ── MCP indicator ─────────────────────────────────────────────────────
+# MCP indicator
     def _on_mcp_in_use(self, server: str):
         """Show which MCP server the agent reached by itself.
 
@@ -2960,9 +2937,7 @@ class CortexMainWindow(QMainWindow):
         except Exception as e:
             log.warning(f"Error applying syntax highlighting fonts: {e}")
     
-    # ------------------------------------------------------------------
     # Signal Connections
-    # ------------------------------------------------------------------
     def _connect_signals(self):
         # Sidebar signals
         self._sidebar.file_opened.connect(self._open_file)
@@ -3169,7 +3144,7 @@ class CortexMainWindow(QMainWindow):
         # user_question_requested is handled by native_chat_bridge → signals.question → chat_panel.on_question
         # Do NOT also connect to _on_ai_question_requested, that creates duplicate question cards.
 
-        # ========== CortexDiffBridge: wire accept/reject signals ==========
+# CortexDiffBridge: wire accept/reject signals
         # This connects useDiffInIDE.py's CortexDiffBridge to Cortex's FEC card
         # accept/reject signals so the agent can await user confirmation of edits.
         if not getattr(self, '_is_native_chat', False):
@@ -3296,14 +3271,12 @@ class CortexMainWindow(QMainWindow):
         except Exception as _sr_err:
             log.warning(f"[AUTH] signed-out notice wiring failed: {_sr_err}")
 
-        # ========== PERMISSION SYSTEM CONNECTION (NEW) ==========
+# PERMISSION SYSTEM CONNECTION (NEW)
         # Connect AI agent to UI for permission dialogs
         self._ai_agent.set_ui_parent(self)
         log.info("Permission system initialized and connected to main window")
 
-    # ------------------------------------------------------------------
     # Actions
-    # ------------------------------------------------------------------
     def _open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open File",
                                                str(self._project_manager.root or Path.home()))
@@ -3579,7 +3552,7 @@ class CortexMainWindow(QMainWindow):
             self._notify_search_of_open_files()
             return
 
-        # ── Startup warmup guard: queue BULK opens only ──────────────────
+# Startup warmup guard: queue BULK opens only
         # Bulk session-restore opens (priority=False) crash Chromium on
         # Windows 25H2 if sent through QWebChannel during startup. Single
         # user-initiated clicks (priority=True) are safe and pass through.
@@ -3637,7 +3610,7 @@ class CortexMainWindow(QMainWindow):
             self._open_office_file(filepath)
             return
 
-        # ── Oversized-file gate (before reading a single byte) ──────────
+# Oversized file gate (before reading a single byte)
         # A 40 MB JSON file read + json.dumps()'d into one runJavaScript
         # string crashed the shared Chromium renderer (SIGTRAP/133). Refuse
         # here so the file is never even loaded into Python memory; the panel
@@ -3850,7 +3823,6 @@ class CortexMainWindow(QMainWindow):
         import json as _json
 
         # One render at a time, and never the same file twice.
-        #
         # 2026-09-21 15:23: one click on a 161 MB / 28-page PDF logged
         # "Opening file" TWICE two seconds apart, so two pdf-render threads
         # rasterized it at once. The engine then in use (PyMuPDF) did NOT
@@ -3860,7 +3832,6 @@ class CortexMainWindow(QMainWindow):
         # and two of them starved it outright. The window went Not Responding
         # for 11.1 s and the stall stack landed inside Thread.start(), which
         # only blocks waiting for the GIL.
-        #
         # The engine is now pypdfium2, which DOES release the GIL for the
         # render itself, but the single-flight guard stays: rasterising the
         # same 161 MB file twice is still pure waste, and the JPEG encode
@@ -3959,7 +3930,6 @@ class CortexMainWindow(QMainWindow):
 
         _MAX_PAGES = 50
         # Hand the GIL to the GUI thread between pages.
-        #
         # PDFium releases the GIL for the render itself (ctypes call), so it
         # is already far gentler than PyMuPDF was, but to_pil() and the JPEG
         # encode run in Python and hold it. Back-to-back pages can therefore
@@ -4017,7 +3987,7 @@ class CortexMainWindow(QMainWindow):
                         f"style='max-width:100%;border-radius:4px;"
                         f"box-shadow:0 2px 8px rgba(0,0,0,0.3)'>")
 
-            # --- First batch: render quickly and emit ---
+# First batch: render quickly and emit
             first_end = min(_FIRST_BATCH, shown)
             parts = [header, container_open]
             for i in range(first_end):
@@ -4037,7 +4007,7 @@ class CortexMainWindow(QMainWindow):
             # Emit first batch (container left open for appending)
             bridge.pages_ready.emit(filepath, "".join(parts), True)
 
-            # --- Remaining batches ---
+# Remaining batches
             for batch_start in range(first_end, shown, _BATCH_SIZE):
                 batch_end = min(batch_start + _BATCH_SIZE, shown)
                 batch_parts = []
@@ -4375,8 +4345,15 @@ class CortexMainWindow(QMainWindow):
         prefix = root if root.endswith(os.sep) else root + os.sep
         return path.startswith(prefix)
 
-    def _git_baseline_content(self, file_path: str):
+    def _git_baseline_content(self, file_path: str, allow_blocking: bool = False):
         """Return git HEAD content for a tracked file.
+
+        Args:
+          allow_blocking: run git inline even on the GUI thread. Set this for
+            a single explicit user action (one CHANGES row click). The
+            deferral below exists to protect the bulk path, which resolves
+            every row on every AI edit; a click is one file, and returning
+            None there painted the whole file green until the next click.
 
         Returns:
           - str content from HEAD when the file is tracked
@@ -4412,7 +4389,6 @@ class CortexMainWindow(QMainWindow):
                 offline.append(file_path)
                 return None
             # A cache miss must never run git on the GUI thread.
-            #
             # Project open already defers (the branch above), but a LIVE AI
             # edit came straight here and waited for `git show` inside
             # _push_changes_to_sidebar. Measured 2026-09-29 on E:\game with
@@ -4425,7 +4401,7 @@ class CortexMainWindow(QMainWindow):
             # signal there is nothing to repaint the row later, so answering
             # inline is still the right call (this is also how a bare
             # _git_baseline_content call in a test behaves).
-            if _is_gui_thread() and hasattr(self, "_changes_prefetched"):
+            if _is_gui_thread() and hasattr(self, "_changes_prefetched") and not allow_blocking:
                 self._queue_git_baseline(file_path)
                 return None
             result = self._git_baseline_from_git(root, rel, file_path)
@@ -4719,15 +4695,19 @@ class CortexMainWindow(QMainWindow):
             )
         return fallback if fallback is not None else ""
 
-    def _resolve_changes_pair(self, file_path: str, store_original: str = "", store_modified: str = ""):
+    def _resolve_changes_pair(self, file_path: str, store_original: str = "",
+                              store_modified: str = "", allow_blocking: bool = False):
         """Resolve (original, modified) the way Source Control does.
 
         Evidence (2026-09-08): AI-edit cache kept disk-at-first-edit as original,
         so git showed main_window +228/-33 while CHANGES only showed +8/-0.
         For tracked files the true baseline is git HEAD; modified is worktree.
+
+        allow_blocking is forwarded to _git_baseline_content: True only for a
+        single explicit click, never for the per-row bulk path.
         """
         modified = self._read_worktree_content(file_path, store_modified or "")
-        git_base = self._git_baseline_content(file_path)
+        git_base = self._git_baseline_content(file_path, allow_blocking=allow_blocking)
         if git_base is not None:
             original = git_base
         else:
@@ -5025,9 +5005,7 @@ class CortexMainWindow(QMainWindow):
         context["diff"] = (original, new_content)
         editor.show_inline_diff(diff_text)
 
-    # ============================================================
     # CHANGES PANEL (sidebar) — edited-file list + read-only diff
-    # ============================================================
 
     def _build_inline_diff_hunks(self, original: str, modified: str, context: int = 4):
         """Build unified diff rows (hunks only) for editor.html.
@@ -5369,7 +5347,6 @@ class CortexMainWindow(QMainWindow):
         if pruned:
             self._forget_changes(pruned)
         # Cost of this rebuild, reported only when it is worth reporting.
-        #
         # This runs on the GUI thread on every AI edit, so whatever it costs
         # is time the chat is not painting. It used to re-read and re-diff
         # every row each time (67-271 ms on a 30-row list here); the caches
@@ -5440,13 +5417,20 @@ class CortexMainWindow(QMainWindow):
                 modified = entry.get("modified", "")
         # Industry baseline: git HEAD vs worktree (same span as Source Control).
         # Falls back to the AI-edit chain when git is unavailable.
+        # allow_blocking=True: this is one explicit click on one file, so the
+        # git read must happen now. Without it _git_baseline_content returned
+        # None on the GUI thread (it defers to a worker for the bulk path),
+        # original stayed "" and the first click painted the whole file green.
+        # The second click only looked right because the worker had warmed the
+        # cache by then. Log evidence 2026-11-27 19:26 and 19:30: same file,
+        # +1951/-0 then +4/-122, and +1193/-0 then +6/-11.
         try:
             if not os.path.exists(file_path) and not self._has_deferred_edit(file_path):
-                original = self._git_baseline_content(file_path) or original
+                original = self._git_baseline_content(file_path, allow_blocking=True) or original
                 modified = ""
             else:
                 original, modified = self._resolve_changes_pair(
-                    file_path, original, modified
+                    file_path, original, modified, allow_blocking=True
                 )
         except Exception as _re:
             _log.debug(f"[Diff] resolve pair on click failed: {_re}")
@@ -5472,7 +5456,6 @@ class CortexMainWindow(QMainWindow):
         # Hunk-only payload: never ship the full file to JS. The broken
         # Monaco tokenize path used to multiply each line; the renderer now
         # only paints these precomputed rows (one source line = one row).
-        #
         # One diff pass, not three: the rows are built once and the header
         # counts come out of them. This method used to run
         # _compute_diff_counts (a whole-file SequenceMatcher) and then
@@ -5631,9 +5614,7 @@ class CortexMainWindow(QMainWindow):
         except Exception as _pce:
             log.debug(f"[Diff] Failed to push changes to sidebar: {_pce}")
 
-    # ============================================================
     # FILE OPERATION CARDS (Create/Edit with animation)
-    # ============================================================
     
     def _on_file_creating_started(self, file_path: str):
         """Show 'Creating file...' card with pulse animation."""
@@ -5665,7 +5646,7 @@ class CortexMainWindow(QMainWindow):
     def _on_file_operation_completed(self, _unused_card_id: str, file_path: str, content: str, op_type: str):
         """Transform operation card to show completed file."""
         try:
-            # Use the card_id stored when the card was first created (from show_file_*_card)
+# Use the card id stored when the card was first created (from show file card)
             # The card_id from agent_bridge is different, it was generated before the JS card was made.
             real_card_id = getattr(self, '_file_op_cards', {}).get(file_path)
             if not real_card_id:
@@ -6148,7 +6129,7 @@ class CortexMainWindow(QMainWindow):
             except Exception as e:
                 log.warning(f"[NewChat] background summary failed to start: {e}")
 
-    # ── History: reopen a previous chat ─────────────────────────────────
+# History: reopen a previous chat
     # The first user message, read from the START of a timeline's JSON
     # (ChatPanel.get_timeline writes {"role": "user", "content": ...} in that
     # order). The tail may be cut off at the head boundary, hence no closing
@@ -6358,7 +6339,7 @@ class CortexMainWindow(QMainWindow):
         if saver is not None:
             saver("recovery")
 
-    # ── Chat progress saves during a run ──────────────────────────────
+# Chat progress saves during a run
     # The timeline used to be written only when a reply finished, so a crash
     # mid-task lost the prompt being worked on and every tool card of that
     # run. Now the chat is also saved while the AI works: shortly after the
@@ -6399,7 +6380,7 @@ class CortexMainWindow(QMainWindow):
             log.info(f"[ChatPersist] Progress save took {self._last_chat_serialize_ms:.0f}ms, "
                      f"saving every {self._chat_progress_interval // 1000}s during runs now")
 
-    # ── Resume a run that Cortex closed in the middle of ──────────────
+# Resume a run that Cortex closed in the middle of
     def _show_interrupted_run_card(self):
         """Offer Resume for a run a crash or quit cut off. Waits for the chat
         restore and any crash recovery first, or the card is buried under
@@ -7024,9 +7005,7 @@ class CortexMainWindow(QMainWindow):
                 "handleSmartPasteResult({isMatch: false});"
             )
 
-    # ============================================================================
     # NEW: Enhancement Integration Handlers
-    # ============================================================================
     
     def _on_intent_classified(self, message: str, intent: str, confidence: float):
         """Handle intent classification from AI Integration Layer."""
@@ -7136,7 +7115,7 @@ class CortexMainWindow(QMainWindow):
         # Reset UI - show send button again
         self._view.page().runJavaScript("if(window._onGenerationComplete) window._onGenerationComplete();")
 
-    # ========== TESTING WORKFLOW HANDLERS (NEW) ==========
+# TESTING WORKFLOW HANDLERS (NEW)
     
     def _on_testing_decision(self, decision: str, priority: str, trigger: str):
         """Handle testing decision signal."""
@@ -7218,7 +7197,7 @@ class CortexMainWindow(QMainWindow):
             log.info(f"[Save] _save_current early return, no active file")
             return
 
-        # ── Race guard: set BEFORE the async get_current_content call ──────
+# Race guard: set BEFORE the async get current content call
         # The debounced onContentChanged (300ms) can fire before the async
         # callback sets _saved_content, causing the white dot to reappear
         # after save. _saving_files blocks _on_webview_content_changed
@@ -8130,7 +8109,6 @@ class CortexMainWindow(QMainWindow):
             # decision (user feedback on the 60/40 split): "browser fully
             # display it; if user needs code, close it". The code stays
             # open in Monaco underneath and reappears on close.
-            #
             # The editor widget must be HIDDEN, not just sized to 0: this
             # splitter has setChildrenCollapsible(False), so setSizes([0,
             # total]) is silently clamped to the child's minimum width -
@@ -8782,9 +8760,7 @@ class CortexMainWindow(QMainWindow):
             if hasattr(editor, action):
                 getattr(editor, action)()
 
-    # ------------------------------------------------------------------
     # Keyboard Shortcuts
-    # ------------------------------------------------------------------
     def _show_find(self):
         """Show Find widget, Monaco native (Ctrl+F) or legacy dialog."""
         # Monaco handles Ctrl+F natively, this is for menu-click fallback
@@ -8963,7 +8939,7 @@ class CortexMainWindow(QMainWindow):
         norm_path = os.path.normpath(path)
         norm_path_case = os.path.normcase(norm_path)
 
-        # ── Run once per path, not once per delivery route ────────────────
+# Run once per path, not once per delivery route
         # Three callers reach this for a SINGLE deletion, by design:
         #   sidebar.file_deleted            -> _on_sidebar_file_deleted
         #   bridge.file_deleted (a "direct  -> _on_sidebar_file_deleted
@@ -9226,9 +9202,7 @@ class CortexMainWindow(QMainWindow):
         if count > 0:
             self._editor_tabs.setCurrentIndex((current - 1) % count)
 
-    # ------------------------------------------------------------------
     # Find/Replace Handlers
-    # ------------------------------------------------------------------
     def _on_find_requested(self, text: str, options: dict):
         """Handle find request from dialog."""
         editor = self._editor_tabs.current_editor()
@@ -9366,9 +9340,7 @@ class CortexMainWindow(QMainWindow):
         cursor.setPosition(original_position)
         editor.setTextCursor(cursor)
 
-    # ------------------------------------------------------------------
     # AI Actions
-    # ------------------------------------------------------------------
     def _on_ai_run_command(self, command: str):
         """Execute command from AI in active terminal."""
         self._terminal_tabs.setVisible(True)
@@ -9752,7 +9724,7 @@ class CortexMainWindow(QMainWindow):
         new_state = not current_enabled
         self._ai_agent.enable_autogen(new_state)
 
-        # ── Sync performance mode with autogen toggle ────────────
+# Sync performance mode with autogen toggle
         # performance_mode drives the multi-agent path; "auto" means the
         # user's last picked model runs single-agent.
         try:
@@ -9844,9 +9816,7 @@ class CortexMainWindow(QMainWindow):
         """Alias for _get_selected_code to satisfy WebAIChatWidget callback."""
         return self._get_selected_code()
 
-    # ------------------------------------------------------------------
     # Project & Events
-    # ------------------------------------------------------------------
 
     def _cleanup_old_project(self):
         """Clean up all state from the old project before opening a new one."""
@@ -9937,7 +9907,6 @@ class CortexMainWindow(QMainWindow):
         # If the AI is actively streaming or running tool calls, switching
         # projects mid-turn can cause tool calls to execute against the
         # wrong project root. Cancel pending work first.
-        #
         # BUG FIX: this checked '_is_generating' and called '.cancel()' -
         # neither exists on CortexAgentBridge (the real flag is
         # '_agentic_turn_active', the real stop method is '.stop()', which
@@ -9964,7 +9933,7 @@ class CortexMainWindow(QMainWindow):
 
         self._do_project_switch(folder_path)
 
-    # ── Workspace trust ───────────────────────────────────────────────
+# Workspace trust
     def _apply_workspace_trust(self, folder: str, ask: bool = True) -> bool:
         """Look up (or ask about) trust for `folder`. True when restricted."""
         from src.core import workspace_trust as wt
@@ -10023,7 +9992,7 @@ class CortexMainWindow(QMainWindow):
                 _apply()
         self._refresh_always_allow_button()
 
-    # ── "Allow always", per project ───────────────────────────────────
+# "Allow always", per project
     def _refresh_always_allow_button(self):
         btn = getattr(self, '_status_always_btn', None)
         if btn is None:
@@ -10551,7 +10520,7 @@ class CortexMainWindow(QMainWindow):
             self._saving_files.add(file_path)
             # Log save for debugging empty content issue
             log.info(f"[Save] Saving {file_path} ({len(content) if content else 0} chars, content={repr(content[:50]) if content else 'None'})")
-            # ── Lost-update guard ────────────────────────────────────────
+# Lost update guard
             # Monaco holds the text as it looked when the tab was loaded. If
             # the agent wrote this same file since then, saving that buffer
             # replaces the agent's work with a stale copy, and the user
@@ -10628,7 +10597,6 @@ class CortexMainWindow(QMainWindow):
         # shows wrong/empty content due to single-model editor architecture.
         # Files open on demand when clicked in the sidebar.
         log.info("Session restore: skipping file restoration (open on demand).")
-
 
 
     @property
@@ -11247,8 +11215,7 @@ class CortexMainWindow(QMainWindow):
             log.warning(f"[SHUTDOWN] DB flush error: {db_exc}")
 
 
-
-    # ── Unsaved changes on close ───────────────────────────────────────
+# Unsaved changes on close
     _UNSAVED_JS = (
         "(function(){try{var out=[];"
         "for(var p in openFiles){var f=openFiles[p];"
@@ -11395,12 +11362,10 @@ class CortexMainWindow(QMainWindow):
             self._write_diff_cache()  # the delayed save must not be lost
         except Exception as e:
             log.debug(f'[MainWindow] Suppressed error: {e}')
-        # ════════════════════════════════════════════════════════════════
         # INSTANT HIDE, Prevent the "frozen/dark window" glitch during
         # close. The heavy shutdown work (file saves, agent stop, DB flush)
         # can take 2-5 seconds. Without hiding first, the user sees the
         # window freeze and go dark during that time.
-        # ════════════════════════════════════════════════════════════════
         self.hide()
         QApplication.processEvents()
 
@@ -11549,7 +11514,7 @@ class CortexMainWindow(QMainWindow):
                 event.acceptProposedAction()
                 return
 
-    # ── Custom title bar: maximize toggle ─────────────────────────────
+# Custom title bar: maximize toggle
 
     def _toggle_maximize(self):
         """Toggle between maximized and normal window state.
@@ -12207,7 +12172,6 @@ class CortexMainWindow(QMainWindow):
                 _sb._ai_active = False
                 # Catch up when the watcher SAW something, or whenever the
                 # agent actually wrote to disk.
-                #
                 # Gating this on _pending_tree_refresh alone missed the case
                 # users hit most: QFileSystemWatcher is not recursive, so a
                 # tree the agent scaffolds (plan/, plan/src/, plan/src/app.py)

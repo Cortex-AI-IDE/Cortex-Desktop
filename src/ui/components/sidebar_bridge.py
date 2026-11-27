@@ -172,9 +172,7 @@ class _GitStatusWorker(QThread):
             self.error_occurred.emit(str(e))
 
 
-# ---------------------------------------------------------------------------
 # Watch-directory scan, off the GUI thread
-# ---------------------------------------------------------------------------
 
 def _walk_watch_dirs(root: str, exclude: set, cap: int) -> List[str]:
     """Every directory under `root` worth watching, recursively.
@@ -255,7 +253,7 @@ class SidebarBridge(QObject):
     All public slots are callable from JS via QWebChannel.
     """
 
-    # ── Signals emitted to main_window.py ──────────────────────────────
+# Signals emitted to main window.py
     file_opened = pyqtSignal(str)
     live_preview_requested = pyqtSignal(str)  # "Open Live Preview" context menu (path)
     open_folder_requested = pyqtSignal()      # "Open Folder" button on the empty state (same as Ctrl+O)
@@ -309,7 +307,7 @@ class SidebarBridge(QObject):
         # Folders the watcher reported as changed since the last refresh.
         self._changed_dirs = set()
 
-    # ── JS call throttling to prevent WebEngine access violations ───────
+# JS call throttling to prevent WebEngine access violations
     _js_throttle_timer = None
     _js_pending_calls: List[str] = []
     _js_throttle_ms = 50  # Batch JS calls within 50ms windows
@@ -442,8 +440,7 @@ class SidebarBridge(QObject):
         except Exception as e:
             log.warning(f"[SidebarBridge] Could not connect agent bridge signal: {e}")
 
-    # ══════════════════════════════════════════════════════════════════
-    # ─── Logging from JS → Python terminal ────────────────────
+# Logging from JS → Python terminal
     @pyqtSlot(str)
     def nativeModal(self, request_json: str):
         """Dialog request from the page, called directly instead of being
@@ -468,7 +465,6 @@ class SidebarBridge(QObject):
         log.error(f"[JS] {message}")
 
     # PROJECT MANAGEMENT
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(result=str)
     def getProjectPath(self) -> str:
@@ -502,9 +498,7 @@ class SidebarBridge(QObject):
         # Start file watcher for automatic sidebar updates
         self._start_file_watcher(path)
 
-    # ══════════════════════════════════════════════════════════════════
     # FILE WATCHER, automatic sidebar updates on file changes
-    # ══════════════════════════════════════════════════════════════════
 
     # Directories never worth watching, heavy, machine-generated, or locked.
     # 'build'/'dist' are PyInstaller outputs: locked/access-denied during and
@@ -723,9 +717,7 @@ class SidebarBridge(QObject):
             # Unknown or huge change set: refresh in place from the root.
             self.loadDirectoryTree(self._project_path)
 
-    # ══════════════════════════════════════════════════════════════════
     # FILE EXPLORER OPERATIONS
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(str, result=str)
     def listDirectory(self, dir_path: str) -> str:
@@ -926,9 +918,7 @@ class SidebarBridge(QObject):
             log.error(f"copyFile error: {e}")
             return ""
 
-    # ══════════════════════════════════════════════════════════════════
     # OS CLIPBOARD INTEGRATION (CF_HDROP), cross-app copy/paste
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(str, result=bool)
     def copyToOSClipboard(self, paths_json: str) -> bool:
@@ -1080,9 +1070,7 @@ class SidebarBridge(QObject):
             log.error(f"getFileStats error: {e}")
             return json.dumps({})
 
-    # ══════════════════════════════════════════════════════════════════
     # SEARCH OPERATIONS
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(str, str)
     def searchFileNames(self, query: str, root_path: str = ""):
@@ -1122,9 +1110,7 @@ class SidebarBridge(QObject):
         worker.finished.connect(lambda: self._search_workers.remove(worker) if worker in self._search_workers else None)
         worker.start()
 
-    # ══════════════════════════════════════════════════════════════════
     # GIT OPERATIONS
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(result=str)
     def getGitStatus(self) -> str:
@@ -1373,9 +1359,7 @@ class SidebarBridge(QObject):
             log.error(f"gitRevertFile error: {e}")
             return False
 
-    # ══════════════════════════════════════════════════════════════════
     # AI TOOLS OPERATIONS
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(str)
     def requestAIAction(self, action: str):
@@ -1400,9 +1384,7 @@ class SidebarBridge(QObject):
         # This will be handled by the main window
         pass
 
-    # ══════════════════════════════════════════════════════════════════
     # CHAT HISTORY OPERATIONS
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(str)
     def selectChat(self, conversation_id: str):
@@ -1411,9 +1393,7 @@ class SidebarBridge(QObject):
         log.info(f"[SidebarBridge] selectChat: {conversation_id}")
         self.chat_selected.emit(conversation_id)
 
-    # ══════════════════════════════════════════════════════════════════
     # FILE DIALOGS (native OS dialogs)
-    # ══════════════════════════════════════════════════════════════════
 
     def _dialog_parent(self):
         """CAPSULE-FIX-R11: Return a valid QWidget parent for native dialogs.
@@ -1431,9 +1411,7 @@ class SidebarBridge(QObject):
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    # ══════════════════════════════════════════════════════════════════
     # SYSTEM OPERATIONS
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot(str)
     def openInSystemExplorer(self, path: str):
@@ -1463,9 +1441,7 @@ class SidebarBridge(QObject):
             log.error(f"readFile error: {e}")
             return ""
 
-    # ══════════════════════════════════════════════════════════════════
     # REFRESH / SYNC
-    # ══════════════════════════════════════════════════════════════════
 
     @pyqtSlot()
     def refreshFileTree(self):
@@ -1499,7 +1475,7 @@ class SidebarBridge(QObject):
         if not self._project_path:
             self._call_js('updateGitFiles({"branch":"","files":[],"error":"No project"})')
             return
-        # ── Coalesce instead of stacking workers ──────────────────────────
+# Coalesce instead of stacking workers
         # This used to disconnect the previous worker and immediately start a
         # NEW QThread, without stopping the old one. Each worker runs 7-8 git
         # subprocesses, and the file watcher fires per changed file, so a
@@ -1579,9 +1555,7 @@ class SidebarBridge(QObject):
         # This will be called from main_window with the actual data
         pass
 
-    # ═══════════════════════════════════════════════════════════════
     # ADAPTER SLOTS, match JS callBridge('onXxx', ...) names
-    # ═══════════════════════════════════════════════════════════════
 
     @pyqtSlot(int)
     def onPanelSwitched(self, index: int):
@@ -1595,7 +1569,7 @@ class SidebarBridge(QObject):
         """
         self.current_panel = index
 
-    # ── CHANGES panel: list + diff ───────────────────────────────────────────
+# CHANGES panel: list diff
     def updateChangesList(self, json_data: str):
         """Push the CHANGES list to sidebar.html (called from main_window).
 
@@ -1872,7 +1846,7 @@ class SidebarBridge(QObject):
         except Exception as e:
             log.error(f"onGitAcceptAll error: {e}")
 
-    # ── Git Review methods ──────────────────────────────────────────
+# Git Review methods
 
     @pyqtSlot(str, result=str)
     def getGitStatus(self, project_path: str) -> str:
@@ -2026,5 +2000,3 @@ class SidebarBridge(QObject):
             self.refreshGitStatus()
         except Exception as e:
             log.debug(f"[SidebarBridge] Git refresh on tree refresh failed: {e}")
-
-

@@ -311,7 +311,7 @@ class OpenRouterProvider(BaseProvider):
         except Exception as e:
             log.warning(f"[{self.DISPLAY_NAME}] __init__ error: {e}")
 
-    # ── Env helpers ────────────────────────────────────────────────────────────
+# Env helpers
 
     @staticmethod
     def _get_int_env(name: str, default: int, minimum: int = 1, maximum: int = 10) -> int:
@@ -333,7 +333,7 @@ class OpenRouterProvider(BaseProvider):
         except Exception:
             return default
 
-    # ── Timeout resolution ─────────────────────────────────────────────────────
+# Timeout resolution
 
     def _resolve_read_timeout(self, stream: bool, tools: Optional[List[Dict[str, Any]]]) -> float:
         if stream and tools:
@@ -358,7 +358,7 @@ class OpenRouterProvider(BaseProvider):
             cleaned.append(tc)
         return cleaned
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+# Public API
 
     def validate_api_key(self) -> bool:
         try:
@@ -430,7 +430,7 @@ class OpenRouterProvider(BaseProvider):
         except Exception as e:
             log.error(f"[{self.DISPLAY_NAME}] reset_usage error: {e}")
 
-    # ── Category helper ────────────────────────────────────────────────────────
+# Category helper
 
     @staticmethod
     def _get_category(model_id: str) -> str:
@@ -448,7 +448,7 @@ class OpenRouterProvider(BaseProvider):
             return "Coding"
         return "General"
 
-    # ── Message / tool sanitization ────────────────────────────────────────────
+# Message / tool sanitization
 
     def _sanitize_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Normalize messages into strict OpenAI-compatible shape."""
@@ -606,7 +606,7 @@ class OpenRouterProvider(BaseProvider):
             log.error(f"[{self.DISPLAY_NAME}] _sanitize_tools error: {e}")
             return None
 
-    # ── Request hooks (overridden by DynamicProvider) ──────────────────────────
+# Request hooks (overridden by DynamicProvider)
 
     def _build_headers(self) -> Dict[str, str]:
         """HTTP headers for a chat request. Subclasses change auth/extra headers."""
@@ -622,7 +622,7 @@ class OpenRouterProvider(BaseProvider):
         """Body defaults for a request to ``model``. Never overrides keys already set."""
         return {}
 
-    # ── Core streaming request ─────────────────────────────────────────────────
+# Core streaming request
 
     def _chat_raw(
         self,
@@ -694,7 +694,6 @@ class OpenRouterProvider(BaseProvider):
             "stream":   stream,
         }
         # Models that reject sampling parameters.
-        #
         # This used to test only the "anthropic/" PREFIX, which is an
         # OpenRouter naming convention. Gateways that use BARE upstream ids
         # never matched it: a gateway sending BARE ids (gpt-5.6-terra,
@@ -1018,7 +1017,7 @@ class OpenRouterProvider(BaseProvider):
                     yield result["choices"][0]["message"]["content"]
                     return
 
-            # ── Error handling (mirrors DeepSeek provider) ─────────────────────
+# Error handling (mirrors DeepSeek provider)
 
             except RuntimeError as _rt_err:
                 _msg = str(_rt_err)
@@ -1071,7 +1070,7 @@ class OpenRouterProvider(BaseProvider):
                     except Exception:
                         pass  # silent-ok: the error body is only used for quota detection
 
-                # ── Quota / credits exhausted, smart handling ────────────────────
+# Quota / credits exhausted, smart handling
                 _is_quota = any(kw in _resp_body.lower() for kw in (
                     "insufficient_quota", "quota exceeded", "insufficient balance",
                     "insufficient credits", "requires more credits",
@@ -1190,7 +1189,7 @@ class OpenRouterProvider(BaseProvider):
 
         raise last_error or Exception("OpenRouter API call failed after all retries")
 
-    # ── BaseProvider abstract method implementations ───────────────────────────
+# BaseProvider abstract method implementations
 
     def chat(
         self,
@@ -1315,8 +1314,4 @@ class OpenRouterProvider(BaseProvider):
             yield f"[{self.DISPLAY_NAME} Error] {e}"
 
 
-# ── Singleton ──────────────────────────────────────────────────────────────────
-
-
-
-
+# Singleton

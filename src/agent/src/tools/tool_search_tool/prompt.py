@@ -9,11 +9,11 @@ Provides:
 
 from typing import Any
 
-# ── Constants ──────────────────────────────────────────────
+# Constants
 
 TOOL_SEARCH_TOOL_NAME = "ToolSearch"
 
-# ── Public API ─────────────────────────────────────────────
+# Public API
 
 
 def is_deferred_tool(tool: Any) -> bool:

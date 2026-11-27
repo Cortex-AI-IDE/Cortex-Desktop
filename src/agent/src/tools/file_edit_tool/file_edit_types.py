@@ -1,23 +1,15 @@
-# ------------------------------------------------------------
-# file_edit_types.py
-# 
 # FileEditTool type definitions and schemas.
-# ------------------------------------------------------------
 
 from typing import Any, Dict, List, Optional, TypedDict
 from typing_extensions import NotRequired
 
 
-# ============================================================
 # NOTES
-# ============================================================
 
 # Types are TypedDicts, with optional runtime validation functions.
 
 
-# ============================================================
 # INPUT TYPES
-# ============================================================
 
 class FileEditInput(TypedDict, total=False):
     """
@@ -54,9 +46,7 @@ class FileEdit(TypedDict):
     replace_all: bool
 
 
-# ============================================================
 # GIT DIFF TYPES
-# ============================================================
 
 class Hunk(TypedDict):
     """
@@ -86,9 +76,7 @@ class GitDiff(TypedDict, total=False):
     repository: Optional[str]  # GitHub owner/repo when available
 
 
-# ============================================================
 # OUTPUT TYPE
-# ============================================================
 
 class FileEditOutput(TypedDict, total=False):
     """
@@ -107,9 +95,7 @@ class FileEditOutput(TypedDict, total=False):
     gitDiff: Optional[GitDiff]
 
 
-# ============================================================
 # SCHEMA VALIDATION FUNCTIONS
-# ============================================================
 # These provide runtime validation similar to Zod schemas.
 
 def validate_file_edit_input(data: Dict[str, Any]) -> FileEditInput:
@@ -260,9 +246,7 @@ def validate_file_edit_output(data: Dict[str, Any]) -> FileEditOutput:
     return result
 
 
-# ============================================================
 # SCHEMA EXPORTS (Lazy Evaluation Pattern)
-# ============================================================
 # These functions provide lazy schema evaluation similar to TypeScript's lazySchema.
 
 def input_schema() -> type:
@@ -295,9 +279,7 @@ def git_diff_schema() -> type:
     return GitDiff
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     # Types

@@ -99,7 +99,7 @@ class CortexDatabase:
         self._write_timer.timeout.connect(self._flush_write_queue)
         self._write_interval = 100  # ms debounce (was 500ms, reduced to prevent data loss)
 
-        # ── Dedicated writer thread ──────────────────────────────────
+# Dedicated writer thread
         # The debounce QTimer above fires on the GUI thread. Executing the
         # flush there means SQLite I/O ON THE GUI THREAD. On machines where
         # a third-party antivirus (Bitdefender etc.) intercepts and scans
@@ -401,9 +401,7 @@ class CortexDatabase:
 
             log.info(f"Database indexes created (optimized for {self.db_path})")
     
-    # =========================================================================
     # CHAT HISTORY OPERATIONS
-    # =========================================================================
     
     def create_conversation(self, conversation_id: str, project_path: str, title: str = None) -> str:
         """Create a new conversation, or refresh an existing row's title.
@@ -507,7 +505,6 @@ class CortexDatabase:
 
         # Drop an immediate repeat of the message already at the end of this
         # conversation.
-        #
         # Six different places write here (agent_bridge x2, chat_history x2,
         # crash_persistence x3 raw INSERTs, and this method), and nothing
         # coordinates them, so the same turn was being stored more than once:
@@ -515,7 +512,6 @@ class CortexDatabase:
         # of 41 rows. Every reader inherits that, which is why a checkpoint
         # digest listed each line twice; the digest was correct and its input
         # was not.
-        #
         # Guarding here rather than at each caller means no writer can
         # reintroduce it, the same reason the settings redaction sits at the
         # serialiser. Only the LAST row is compared, so a genuine repeat later
@@ -768,9 +764,7 @@ class CortexDatabase:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM chat_messages WHERE conversation_id = ?", (conversation_id,))
 
-    # ═════════════════════════════════════════════════════
     #  Conversation timeline and part pagination
-    # ═════════════════════════════════════════════════════
 
     def set_conversation_timeline(self, conversation_id: str, timeline_json: str):
         """Store the dynamic timeline JSON for a conversation."""
@@ -794,9 +788,7 @@ class CortexDatabase:
                 return row['timeline_json']
             return "[]"
 
-    # =========================================================================
     # CHAT PARTS, Per-part storage with cursor pagination (Section 14)
-    # =========================================================================
 
     # Valid part types (mapped from JS buildTimelineEntry)
     VALID_PART_TYPES = {
@@ -1105,9 +1097,7 @@ class CortexDatabase:
             # Don't re-queue to prevent infinite failure loops
             # Data loss is logged for diagnostics
     
-    # =========================================================================
     # SESSION-BASED MESSAGE STORAGE (new timeline-based schema)
-    # =========================================================================
 
     def create_session(self, session_id: str, project_id: str,
                        parent_session_id: Optional[str] = None) -> str:

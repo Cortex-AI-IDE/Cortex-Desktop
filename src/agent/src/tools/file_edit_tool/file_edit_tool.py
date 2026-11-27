@@ -1,8 +1,4 @@
-# ------------------------------------------------------------
-# file_edit_tool.py
-# 
 # A tool for editing files by replacing strings in place.
-# ------------------------------------------------------------
 
 import logging
 import os
@@ -12,9 +8,7 @@ import asyncio
 
 log = logging.getLogger("cortex.agent")
 
-# ============================================================
 # LOCAL IMPORTS
-# ============================================================
 
 from .constants import (
     FILE_EDIT_TOOL_NAME,
@@ -40,9 +34,7 @@ except ImportError:
 # Types - will be defined inline or imported when types.py exists
 # from .types import FileEditInput, FileEditOutput
 
-# ============================================================
 # UTILITY FUNCTIONS - Enhanced implementations
-# ============================================================
 
 def log_event(name: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """Analytics event logging."""
@@ -550,17 +542,13 @@ def log_error(exc: Exception) -> None:
     """Log error."""
     pass
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 
 # Missing constant - add to constants.py or define here
 NOTEBOOK_EDIT_TOOL_NAME = "NotebookEdit"
 FILE_NOT_FOUND_CWD_NOTE = "Make sure the file path is correct."
 
-# ============================================================
 # FILE EDIT TOOL CLASS
-# ============================================================
 
 class FileEditTool:
     """Applies exact string replacements to an existing file."""
@@ -570,9 +558,7 @@ class FileEditTool:
     max_result_size_chars = 100_000
     strict = True
     
-    # ------------------------------------------------------------------
     # Public metadata helpers
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def description() -> str:
@@ -584,9 +570,7 @@ class FileEditTool:
         # Replace with the actual description if needed
         return "Edit a file by replacing an old string with a new string."
     
-    # ------------------------------------------------------------------
     # Input / output schemas (used by the surrounding framework)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def input_schema() -> Any:
@@ -598,17 +582,13 @@ class FileEditTool:
         # Return FileEditOutput when types.py exists
         return dict
     
-    # ------------------------------------------------------------------
     # Helper for auto-classification (used by the LLM routing layer)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def to_auto_classifier_input(inp: Dict) -> str:
         return f"{inp.get('file_path', '')}: {inp.get('new_string', '')}"
     
-    # ------------------------------------------------------------------
     # Path handling - resolves and backfills the file path
-    # ------------------------------------------------------------------
     
     @staticmethod
     def get_path(inp: Dict) -> str:
@@ -620,9 +600,7 @@ class FileEditTool:
         if isinstance(inp.get("file_path"), str):
             inp["file_path"] = expand_path(inp["file_path"])
     
-    # ------------------------------------------------------------------
     # Permission matcher (used by the framework to evaluate wildcard rules)
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def prepare_permission_matcher(file_path: str):
@@ -633,9 +611,7 @@ class FileEditTool:
             return re.fullmatch(regex_pattern, file_path) is not None
         return match_pattern
     
-    # ------------------------------------------------------------------
     # Permission validation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def check_permissions(inp: Dict, context: Any) -> bool:
@@ -645,9 +621,7 @@ class FileEditTool:
             FileEditTool.name, inp, app_state.tool_permission_context
         )
     
-    # ------------------------------------------------------------------
     # Core validation logic
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def validate_input(inp: Dict, tool_use_context: Any) -> Dict[str, Any]:
@@ -836,9 +810,7 @@ class FileEditTool:
         
         return {"result": True, "meta": {"actualOldString": actual_old}}
     
-    # ------------------------------------------------------------------
     # Equality check for caching
-    # ------------------------------------------------------------------
     
     @staticmethod
     def inputs_equivalent(inp1: Dict, inp2: Dict) -> bool:
@@ -865,9 +837,7 @@ class FileEditTool:
         }
         return are_file_edits_inputs_equivalent(edit1, edit2)
     
-    # ------------------------------------------------------------------
     # Core edit operation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def call(
@@ -889,27 +859,19 @@ class FileEditTool:
         fs = get_fs_implementation()
         absolute_file_path = expand_path(inp.get("file_path", ""))
         
-        # --------------------------------------------------------------
         # Skill discovery (fire-and-forget, non-blocking)
-        # --------------------------------------------------------------
         cwd = get_cwd()
         if not is_env_truthy("CORTEX_CODE_SIMPLE"):
             # Placeholder - replace with real skill discovery if needed
             pass
         
-        # --------------------------------------------------------------
         # LSP diagnostics - notify before the edit
-        # --------------------------------------------------------------
         diagnostic_tracker_before_file_edited(absolute_file_path)
         
-        # --------------------------------------------------------------
         # Ensure parent directory exists (outside the critical section)
-        # --------------------------------------------------------------
         await fs.mkdir(os.path.dirname(absolute_file_path))
         
-        # --------------------------------------------------------------
         # Optional file-history backup (if enabled)
-        # --------------------------------------------------------------
         file_history_enabled = getattr(context, "file_history_enabled", lambda: False)
         if file_history_enabled():
             await context.file_history_track_edit(
@@ -917,9 +879,7 @@ class FileEditTool:
                 getattr(assistant_message, "uuid", None) if assistant_message else None,
             )
         
-        # --------------------------------------------------------------
         # Read current file state (atomic read)
-        # --------------------------------------------------------------
         try:
             meta = read_file_sync_with_metadata(absolute_file_path)
             original_contents = meta["content"]
@@ -935,9 +895,7 @@ class FileEditTool:
             else:
                 raise
         
-        # --------------------------------------------------------------
         # Staleness check - abort if the file changed since the last read
-        # --------------------------------------------------------------
         last_write = get_file_modification_time(absolute_file_path)
         read_file_state = getattr(context, "read_file_state", {})
         last_read = read_file_state.get(absolute_file_path)
@@ -952,9 +910,7 @@ class FileEditTool:
             if not content_unchanged:
                 raise RuntimeError(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
         
-        # --------------------------------------------------------------
         # Normalize the old string (quote handling) and preserve quote style
-        # --------------------------------------------------------------
         actual_old = find_actual_string(original_contents, inp.get("old_string", "")) or inp.get("old_string", "")
         actual_new = preserve_quote_style(
             inp.get("old_string", ""),
@@ -962,9 +918,7 @@ class FileEditTool:
             inp.get("new_string", ""),
         )
         
-        # --------------------------------------------------------------
         # Generate patch and updated file content
-        # --------------------------------------------------------------
         patch_info = get_patch_for_edit(
             file_path=absolute_file_path,
             file_contents=original_contents,
@@ -975,12 +929,10 @@ class FileEditTool:
         patch = patch_info["patch"]
         updated_file = patch_info["updatedFile"]
         
-        # --------------------------------------------------------------
         # SIZE GUARD: prevent content multiplication
         # If the new content would more than double the file or add 500+ lines,
         # reject the edit. This catches the AI accidentally appending the same
         # file content to itself repeatedly.
-        # --------------------------------------------------------------
         if original_contents:
             old_lines = original_contents.split('\n')
             new_lines = updated_file.split('\n')
@@ -1000,16 +952,11 @@ class FileEditTool:
                     ),
                     "errorCode": 4,
                 }
-        # --------------------------------------------------------------
         
-        # --------------------------------------------------------------
         # Write the new content atomically
-        # --------------------------------------------------------------
         write_text_content(absolute_file_path, updated_file, encoding, line_endings)
         
-        # --------------------------------------------------------------
         # LSP server notifications (didChange / didSave)
-        # --------------------------------------------------------------
         lsp_manager = get_lsp_server_manager()
         if lsp_manager:
             uri = f"file://{absolute_file_path}"
@@ -1029,14 +976,10 @@ class FileEditTool:
                 )
                 log_error(exc)
         
-        # --------------------------------------------------------------
         # Connected-IDE diff view notification
-        # --------------------------------------------------------------
         notify_vscode_file_updated(absolute_file_path, original_contents, updated_file)
         
-        # --------------------------------------------------------------
         # Update read-file state so subsequent edits see the fresh timestamp
-        # --------------------------------------------------------------
         read_file_state[absolute_file_path] = {
             "content": updated_file,
             "timestamp": get_file_modification_time(absolute_file_path),
@@ -1044,9 +987,7 @@ class FileEditTool:
             "limit": None,
         }
         
-        # --------------------------------------------------------------
         # Analytics & logging
-        # --------------------------------------------------------------
         if absolute_file_path.endswith(os.sep + "CORTEX.md"):
             log_event("cortex_write_cortexmd", {})
         
@@ -1061,9 +1002,7 @@ class FileEditTool:
             },
         )
         
-        # --------------------------------------------------------------
         # Optional remote git diff (only when the feature flag is on)
-        # --------------------------------------------------------------
         git_diff: Optional[Dict[str, Any]] = None
         if (
             is_env_truthy("CORTEX_CODE_REMOTE")
@@ -1084,9 +1023,7 @@ class FileEditTool:
                 },
             )
         
-        # --------------------------------------------------------------
         # Build and return the result payload
-        # --------------------------------------------------------------
         result = {
             "filePath": inp.get("file_path"),
             "oldString": actual_old,
@@ -1101,9 +1038,7 @@ class FileEditTool:
         
         return {"data": result}
     
-    # ------------------------------------------------------------------
     # Mapping to the LLM-compatible block format
-    # ------------------------------------------------------------------
     
     @staticmethod
     def map_tool_result_to_block(data: Dict, tool_use_id: str) -> Dict[str, Any]:
@@ -1129,9 +1064,7 @@ class FileEditTool:
         }
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "FileEditTool",

@@ -63,7 +63,7 @@ class ToolExecutionEngine:
         self._recent_search_sigs: Dict[str, str] = {}  # signature -> tool_name
         self._MAX_DEDUP_CACHE = 50
 
-    # ── Main entry ─────────────────────────────────────────────────
+# Main entry
 
     async def execute_turn(
         self,
@@ -90,7 +90,7 @@ class ToolExecutionEngine:
         nudges: List[str] = []
         tool_messages = []
 
-        # ── Track tool usage (no forcing, AI decides workflow) ──────
+# Track tool usage (no forcing, AI decides workflow)
         _turn_tool_names: Set[str] = set(t[0] for t in parsed_calls)
         if len(_turn_tool_names) == 1:
             _single_name = next(iter(_turn_tool_names))
@@ -107,7 +107,7 @@ class ToolExecutionEngine:
             self._last_tool_name = None
             self._consecutive_same_tool = 0
 
-        # ── Dedup identical search calls ───────────────────────────
+# Dedup identical search calls
         deduped_calls: List[ParsedToolCall] = []
         for t_name, t_id, t_args in parsed_calls:
             sig = _tool_call_signature(t_name, t_args)
@@ -128,17 +128,17 @@ class ToolExecutionEngine:
                     del self._recent_search_sigs[oldest]
             deduped_calls.append((t_name, t_id, t_args))
 
-        # ── Build execution batches ────────────────────────────────
+# Build execution batches
         batches = self._build_batches(deduped_calls)
 
         for batch in batches:
-            # ── Circuit breaker: filter disabled tools ───────────
+# Circuit breaker: filter disabled tools
             filtered_batch = self._filter_batch(batch, messages, PCM)
 
             if not filtered_batch:
                 continue
 
-            # ── Execute batch ────────────────────────────────────
+# Execute batch
             if len(filtered_batch) == 1:
                 t_name, t_id, t_args = filtered_batch[0]
                 result_msg = await execute_fn(t_name, t_id, t_args, messages, PCM, limits)
@@ -160,7 +160,7 @@ class ToolExecutionEngine:
 
         return nudges
 
-    # ── Batch building ─────────────────────────────────────────────
+# Batch building
 
     def _build_batches(self, parsed_calls: List[ParsedToolCall]) -> List[List[ParsedToolCall]]:
         """
@@ -186,7 +186,7 @@ class ToolExecutionEngine:
 
         return batches
 
-    # ── Circuit breaker filtering ──────────────────────────────────
+# Circuit breaker filtering
 
     def _filter_batch(
         self,
@@ -219,8 +219,7 @@ class ToolExecutionEngine:
 
         return filtered
 
-    # ── Helpers ────────────────────────────────────────────────────
-
+# Helpers
 
 
     @staticmethod

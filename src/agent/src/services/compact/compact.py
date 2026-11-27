@@ -8,13 +8,9 @@ from typing import Optional, Dict, Any, List, Set, Tuple
 from dataclasses import dataclass, field
 from copy import deepcopy
 
-# ============================================================
 # PHASE 1: Core Imports, Types & Constants
-# ============================================================
 
-# ---------------------------------------------------------------------------
 # Conditional import: session transcript (feature-gated)
-# ---------------------------------------------------------------------------
 
 try:
     from ...utils.feature_flags import feature
@@ -31,9 +27,7 @@ if feature('KAIROS'):
     except ImportError:
         _sessionTranscriptModule = None
 
-# ---------------------------------------------------------------------------
 # Defensive imports
-# ---------------------------------------------------------------------------
 
 class APIUserAbortError(Exception):
     """Raised when a provider aborts a request mid-stream."""
@@ -403,9 +397,7 @@ except ImportError:
             return f'Please summarize the conversation ({direction}).'
 
 
-# ---------------------------------------------------------------------------
 # Type Definitions
-# ---------------------------------------------------------------------------
 
 class CompactionResult:
     """Result from conversation compaction"""
@@ -451,9 +443,7 @@ class RecompactionInfo:
         self.querySource = querySource
 
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 POST_COMPACT_MAX_FILES_TO_RESTORE = 5
 POST_COMPACT_TOKEN_BUDGET = 50_000
@@ -475,9 +465,7 @@ ERROR_MESSAGE_USER_ABORT = 'API Error: Request was aborted.'
 ERROR_MESSAGE_INCOMPLETE_RESPONSE = 'Compaction interrupted · This may be due to network issues, please try again.'
 
 
-# ============================================================
 # PHASE 2: Message Preprocessing Functions
-# ============================================================
 
 def stripImagesFromMessages(messages: List[Dict]) -> List[Dict]:
     """
@@ -633,9 +621,7 @@ def truncateHeadForPTLRetry(messages: List[Dict], ptlResponse: Dict) -> Optional
     return sliced
 
 
-# ============================================================
 # PHASE 3: Utility Functions
-# ============================================================
 
 def buildPostCompactMessages(result: CompactionResult) -> List[Dict]:
     """
@@ -699,12 +685,9 @@ def mergeHookInstructions(
     return f'{userInstructions}\n\n{hookInstructions}'
 
 
-# ============================================================
 # PHASE 4-8: Main Async Functions & Helpers (Stubs for now)
-# ============================================================
 # Note: Full implementation of these functions requires 1,600+ lines.
 # These stubs provide the interface; logic can be added incrementally.
-# ============================================================
 
 
 def createCompactCanUseTool():
@@ -818,7 +801,6 @@ def shouldExcludeFromPostCompactRestore(
         pass
     
     return False
-
 
 
 def addErrorNotificationIfNeeded(error, context: Dict) -> None:
@@ -2008,9 +1990,7 @@ async def partialCompactConversation(
             context['setSDKStatus'](None)
 
 
-# ============================================================
 # Module Interface
-# ============================================================
 
 __all__ = [
     # Constants
@@ -2051,5 +2031,3 @@ __all__ = [
     'createPlanAttachmentIfNeeded',
     'createSkillAttachmentIfNeeded',
 ]
-
-

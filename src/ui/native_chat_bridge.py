@@ -135,7 +135,7 @@ class NativeChatBridge(QObject):
         if hasattr(b, 'request_started'):
             b.request_started.connect(self.unmute)
 
-    # ── New Chat: drop what a stopped turn still sends ────────────────
+# New Chat: drop what a stopped turn still sends
     # New Chat stops a running reply, but signals the agent's thread already
     # queued keep arriving afterwards, and ChatPanel._ensure() opens a new
     # assistant message for any chunk when none is open: the fresh chat
@@ -377,7 +377,7 @@ class NativeChatBridge(QObject):
         # fragment: Grep/search results carry a "text" key per match
         # ({"file":..,"line":..,"text":"<matched line>"}), and treating those
         # as thinking glued every matched line into a Thought card with no
-        # separators ("...still" + "showed...", "fix)." + "### 1a.") while the
+# separators ("...still" "showed...", "fix)." " 1a.") while the
         # Grep card never got its results.
         _s = (info or "").lstrip()
         if '"text"' in _s and (_s.startswith("thinking") or _RE_THINKING_INFO.match(_s)):
@@ -389,7 +389,6 @@ class NativeChatBridge(QObject):
                     return
 
         # Deduplicate: key on the FULL args, not info[:50].
-        #
         # info[:50] collided DIFFERENT tools onto one key whenever they shared
         # a long common prefix. run_command is the worst case: its info always
         # starts with the same 'cd "<project path>" && …', so the first 50
@@ -671,4 +670,3 @@ class NativeChatBridge(QObject):
                     rows.append(("add", None, k + 1, n[k]))
 
         return rows
-

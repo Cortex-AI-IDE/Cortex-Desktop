@@ -60,7 +60,7 @@ ACTIONS = (
 MAX_RENDER_CHARS = 8000
 MAX_FINDINGS_RENDERED = 40
 
-# ------------------------------------------------------------------- session
+# session
 # A client report covers a whole engagement, which is several tool calls:
 # recon, then ports, then the web probes, then the code sweep. Each call
 # returns its own payload, so the merged result of each call is kept here and
@@ -119,7 +119,7 @@ def security_tool(
     if action not in ACTIONS:
         return _error(f"unknown action '{action}'. Valid: {', '.join(ACTIONS)}")
 
-    # ---- scope: read-only, by design -------------------------------------
+# scope: read only, by design
     if action == "scope":
         status = guard.status()
         lines = [
@@ -146,11 +146,11 @@ def security_tool(
             "reports": [],
         }
 
-    # ---- report: render the scans so far into a client document ----------
+# report: render the scans so far into a client document
     if action == "report":
         return _write_report_action(root, guard, report_format, engagement)
 
-    # ---- everything else needs a target, except the local code scan ------
+# everything else needs a target, except the local code scan
     if action == "scan_code":
         base = target or root or str(Path.cwd())
         report = defense.scan_project(

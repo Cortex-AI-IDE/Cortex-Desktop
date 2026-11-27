@@ -8,7 +8,6 @@ import os
 # ── Null-safe stdout/stderr for console=False builds ──
 # When built with console=False, sys.stdout/stderr are broken file
 # descriptors. print(..., flush=True) raises OSError: [Errno 22].
-#
 # CRITICAL: the replacements must have REAL OS file descriptors, i.e.
 # open(os.devnull). The previous fake _NullWriter had fileno() == -1,
 # and anything that hands sys.stderr to a child process (the MCP SDK's

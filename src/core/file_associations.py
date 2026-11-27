@@ -257,8 +257,7 @@ def progid(ft: FileType) -> str:
     return f"{PROGID_PREFIX}{ft.ext}"  # "Cortex.py"
 
 
-# ── Windows registry (installer and --register-file-types) ────────────────
-#
+# Windows registry (installer and register file types)
 # One entry: (subkey, value name, data, uninstall). A value name of None
 # creates the key only. uninstall is "key" (delete the key and everything
 # under it), "value" (delete only this value, for keys other programs own
@@ -415,7 +414,7 @@ def cli(args: List[str]) -> Tuple[int, str]:
                "Choose it in Open with > Always, or Settings > Apps > Default apps.")
 
 
-# ── Generated data for the installers ─────────────────────────────────────
+# Generated data for the installers
 
 def _iss_str(s: str) -> str:
     return '"' + s.replace('"', '""') + '"'

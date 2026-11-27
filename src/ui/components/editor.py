@@ -44,9 +44,7 @@ from src.utils.logger import get_logger
 log = get_logger("editor")
 
 
-# ---------------------------------------------------------------------------
 # Pygments-based syntax highlighter
-# ---------------------------------------------------------------------------
 def get_preferred_programming_font() -> str:
     """Get the preferred monospace programming font family.
 
@@ -99,13 +97,11 @@ class PygmentsSyntaxHighlighter(QSyntaxHighlighter):
     # Cortex dark editor palette.
     # Works perfectly with: Python, JS/TS, HTML, CSS, Java, C/C++, Rust, Go, SQL, etc.
     DARK_COLORS = {
-        # ============================================
         # CORTEX DARK EDITOR PALETTE
         # Background: #181818, Foreground: #d6d6dd
         # Syntax ref: keyword=#83d6c5, string=#e394dc, function=#efb080,
         #            number=#efb080, class=#87c3ff, attribute=#aaa0fa,
         #            comment=#6d6d6d, operator=#83d6c5, variable=#d6d6dd
-        # ============================================
         
         # Keywords - teal (#83d6c5)
         Token.Keyword:            ("#83d6c5", False, False),     # Teal - if, def, class, return
@@ -441,9 +437,7 @@ class PygmentsSyntaxHighlighter(QSyntaxHighlighter):
         return [(t[0], t[1], new_state) for t in tokens]
 
 
-# ---------------------------------------------------------------------------
 # Line number gutter with folding indicators
-# ---------------------------------------------------------------------------
 class LineNumberArea(QWidget):
     """Enhanced line number gutter with fold indicators (▶/▼)."""
     
@@ -476,9 +470,7 @@ class LineNumberArea(QWidget):
             self.update()
 
 
-# ---------------------------------------------------------------------------
 # Inline edit overlay
-# ---------------------------------------------------------------------------
 class InlineEditOverlay(QFrame):
     submitted = pyqtSignal(str)
     cancelled = pyqtSignal()
@@ -570,9 +562,7 @@ class InlineEditOverlay(QFrame):
         self.cancelled.emit()
 
 
-# ---------------------------------------------------------------------------
 # Custom delegate for 2-line completion cards
-# ---------------------------------------------------------------------------
 class CompletionItemDelegate(QStyledItemDelegate):
     """Renders completion items with icon badge, keyword, type, and skeleton preview."""
     
@@ -656,9 +646,7 @@ class CompletionItemDelegate(QStyledItemDelegate):
         return QSize(0, 26)
 
 
-# ---------------------------------------------------------------------------
 # Autocomplete Sidebar/Overlay
-# ---------------------------------------------------------------------------
 class CompletionWidget(QWidget):
     """A floating autocomplete popup."""
     item_selected = pyqtSignal(dict)
@@ -801,9 +789,7 @@ class CompletionWidget(QWidget):
             self.item_selected.emit(self._raw_items[idx])
             self.hide()
 
-# ---------------------------------------------------------------------------
 # Main Code Editor
-# ---------------------------------------------------------------------------
 class CodeEditor(QPlainTextEdit):
     cursor_position_changed = pyqtSignal(int, int)  # line, col
     content_modified = pyqtSignal()
@@ -913,7 +899,6 @@ class CodeEditor(QPlainTextEdit):
         # self._folding_timer = QTimer(self)
         # self._folding_timer.setSingleShot(True)
         # self._folding_timer.timeout.connect(self._update_folding_ranges)
-        # 
         # # Initial fold computation (delayed)
         # QTimer.singleShot(500, self._update_folding_ranges)
 
@@ -1229,9 +1214,7 @@ class CodeEditor(QPlainTextEdit):
         # Initial local syntax check (delayed to not block UI)
         QTimer.singleShot(300, self._run_linting)
 
-    # ------------------------------------------------------------------
     # Code Folding Methods
-    # ------------------------------------------------------------------
     def _update_folding_ranges(self):
         """Recompute foldable regions when document changes."""
         # Folding removed in AI-first mode

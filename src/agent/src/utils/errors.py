@@ -11,9 +11,7 @@ Provides error classes and helper functions for:
 from typing import Optional, Any
 
 
-# ============================================================================
 # Custom Error Classes
-# ============================================================================
 
 class AbortError(Exception):
     """Error raised when an operation is aborted."""
@@ -89,9 +87,7 @@ class TelemetrySafeError(Exception):
         self.telemetry_message = telemetry_message if telemetry_message else message
 
 
-# ============================================================================
 # Error Classification Functions
-# ============================================================================
 
 def isENOENT(e: Any) -> bool:
     """
@@ -234,10 +230,7 @@ def is_fs_inaccessible(e: Any) -> bool:
     return any(pattern in message for pattern in inaccessible_patterns)
 
 
-# ============================================================================
-# ============================================================================
 # Convenience Aliases (for backward compatibility)
-# ============================================================================
 
 # camelCase aliases
 hasExactErrorMessage = has_exact_error_message

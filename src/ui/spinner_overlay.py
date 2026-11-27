@@ -80,7 +80,7 @@ class SpinnerOverlay(QFrame):
         self._card_layout.setSpacing(16)
         self._card_layout.setContentsMargins(36, 32, 36, 32)
 
-        # ---- Title label (prominent heading, hidden by default) ----
+# Title label (prominent heading, hidden by default)
         self._title_label = QLabel("")
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title_label.setWordWrap(True)
@@ -120,7 +120,7 @@ class SpinnerOverlay(QFrame):
         """)
         self._card_layout.addWidget(self._status_label)
 
-        # ---- Progress label (count + percentage, hidden by default) ----
+# Progress label (count percentage, hidden by default)
         self._progress_label = QLabel("")
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._progress_label.setWordWrap(False)
@@ -150,7 +150,7 @@ class SpinnerOverlay(QFrame):
         """)
         self._card_layout.addWidget(self._detail_label)
 
-        # --- Centering: horizontal stretch wrapper around the card ---
+# Centering: horizontal stretch wrapper around the card
         self._h_center = QHBoxLayout()
         self._h_center.setContentsMargins(20, 0, 20, 0)
         self._h_center.addStretch(1)
@@ -330,7 +330,6 @@ class SpinnerOverlay(QFrame):
                 pass  # silent-ok: the spinner was already destroyed
 
 
-
     def _setup_spinner(self, key: str):
         """Create and mount the appropriate spinner widget."""
         # Remove old spinner if any
@@ -346,7 +345,6 @@ class SpinnerOverlay(QFrame):
             self._spinner, alignment=Qt.AlignmentFlag.AlignCenter
         )
         self._spinner.start()
-
 
 
     def update_progress(self, current: int, total: int):

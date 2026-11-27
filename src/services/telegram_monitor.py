@@ -171,9 +171,7 @@ PHOTO_MIME = {
     ".webp": "image/webp",
 }
 
-# ---------------------------------------------------------------------------
 # Inbound policy
-# ---------------------------------------------------------------------------
 # Telegram's own limit is 4096 per message. A prompt is left a little under it
 # so one prompt is always one turn, never two halves of a task.
 INBOUND_MAX_CHARS = 4000
@@ -449,9 +447,7 @@ class TransportError(Exception):
     """A transport call failed in a way that is worth retrying."""
 
 
-# ---------------------------------------------------------------------------
 # Transport
-# ---------------------------------------------------------------------------
 
 
 _SSL_CONTEXT = None
@@ -600,9 +596,7 @@ class UrllibTransport:
             raise TransportError(f"{type(e).__name__} on {method}") from e
 
 
-# ---------------------------------------------------------------------------
 # Pure helpers (all unit-tested, none of them touch the network)
-# ---------------------------------------------------------------------------
 
 
 def format_duration(seconds: float) -> str:
@@ -836,9 +830,7 @@ def _looks_like_bare_code(text: str) -> bool:
     return len(token) == PAIR_LEN and all(ch in PAIR_ALPHABET for ch in token)
 
 
-# ---------------------------------------------------------------------------
 # Client: one Telegram call, with the retry rules applied
-# ---------------------------------------------------------------------------
 
 
 def safe_file_path(path: object) -> Optional[str]:
@@ -1172,9 +1164,7 @@ class TelegramClient:
         return (response.get("result") or {}).get("message_id")
 
 
-# ---------------------------------------------------------------------------
 # Pairing
-# ---------------------------------------------------------------------------
 
 
 class PairingManager:
@@ -1304,9 +1294,7 @@ class PairingManager:
         return PAIR_NEEDS_PREFIX if bare else PAIR_WRONG_CODE
 
 
-# ---------------------------------------------------------------------------
 # Live run state
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -1329,9 +1317,7 @@ class RunState:
     finished: bool = False
 
 
-# ---------------------------------------------------------------------------
 # Monitor
-# ---------------------------------------------------------------------------
 
 
 class TelegramMonitor:
@@ -1424,7 +1410,7 @@ class TelegramMonitor:
         self._pairing = PairingManager()
         self.stats: dict = {"sent": 0, "edited": 0, "dropped": 0, "failed": 0, "prompts": 0}
 
-    # -- lifecycle ---------------------------------------------------------
+# lifecycle
 
     @property
     def pairing(self) -> PairingManager:
@@ -1572,7 +1558,7 @@ class TelegramMonitor:
                 return dropped
             dropped += 1
 
-    # -- the only entry point the GUI touches ------------------------------
+# the only entry point the GUI touches
 
     def enqueue(self, event: dict) -> None:
         """Never raises, never blocks, never formats. Safe from any thread."""
@@ -1592,7 +1578,7 @@ class TelegramMonitor:
             log.debug("[Telegram] Enqueue failed: %s", type(e).__name__)
             self.stats["dropped"] += 1
 
-    # -- GUI signal slots --------------------------------------------------
+# GUI signal slots
     # Each one builds a tiny dict and nothing else: no str(), no json.loads(),
     # no regex over caller text. Tests assert this by passing objects whose
     # __str__ raises.
@@ -1734,7 +1720,7 @@ class TelegramMonitor:
         log.info("[Telegram] Photo sent (%s, %.0f KB)", name, len(data) / 1024.0)
         return {"ok": True, "message_id": message_id, "reason": ""}
 
-    # -- pairing -----------------------------------------------------------
+# pairing
 
     def _pairing_policy(self):
         """(ttl_seconds, reusable) from settings, falling back to the old default.
@@ -2025,7 +2011,7 @@ class TelegramMonitor:
                 log.info("[Telegram] A pairing attempt did not match the pending code")
         return False
 
-    # -- inbound prompts ---------------------------------------------------
+# inbound prompts
     # A prompt may start a run or answer the question the agent asked. It may
     # never approve a permission card: that stays in Cortex, on the computer.
     # Everything below is a refusal first and a feature second.
@@ -2112,7 +2098,7 @@ class TelegramMonitor:
         except Exception as e:
             log.debug("[Telegram] Reply failed: %s", type(e).__name__)
 
-    # -- prompts that wait for a run ---------------------------------------
+# prompts that wait for a run
 
     def _enqueue_prompt(self, chat_id: str, body: str, message_id) -> bool:
         """Hold one prompt until the run in progress ends. False when full.
@@ -2256,7 +2242,6 @@ class TelegramMonitor:
             self._reply(chat_id, "Cortex could not take that picture.", message_id)
             return False
         return True
-
 
 
     def _voice_lang(self) -> str:
@@ -2600,7 +2585,7 @@ class TelegramMonitor:
             message_id,
         )
 
-    # -- worker ------------------------------------------------------------
+# worker
 
     def _dispatch(self, event: dict) -> None:
         try:
@@ -2690,7 +2675,7 @@ class TelegramMonitor:
         elif kind == "status":
             self._handle_status(chat_id, event, config)
 
-    # -- event handlers ----------------------------------------------------
+# event handlers
 
     def _handle_started(self, chat_id: str, event: dict, config) -> None:
         self._run = RunState(
@@ -2885,7 +2870,7 @@ class TelegramMonitor:
                 return
         self._send(chat_id, status, config, urgent=False)
 
-    # -- formatting --------------------------------------------------------
+# formatting
 
     def _status_text(self) -> str:
         elapsed = self._clock() - self._run.started_at if self._run.started_at else 0.0
@@ -3018,7 +3003,7 @@ class TelegramMonitor:
         except Exception as e:
             log.debug("[Telegram] Question edit failed: %s", type(e).__name__)
 
-    # -- answers from the phone (poller thread) ------------------------------
+# answers from the phone (poller thread)
 
     def _open_question(self, token: Optional[str] = None):
         """(question_id, record) still waiting for an answer, newest first."""
@@ -3128,7 +3113,7 @@ class TelegramMonitor:
             lines.append(message)
         return "\n".join(lines)
 
-    # -- sending -----------------------------------------------------------
+# sending
 
     def _quiet_now(self, config) -> bool:
         if not config.quiet_enabled:
@@ -3203,9 +3188,7 @@ class TelegramMonitor:
                 run.acked = client.react(chat_id, message_id)
 
 
-# ---------------------------------------------------------------------------
 # Shared instance
-# ---------------------------------------------------------------------------
 # The Settings dialog is rebuilt every time it opens and it has no reference to
 # the main window's agent, so both sides meet here instead of threading a
 # dependency through the dialog constructor. Same shape as get_settings().
@@ -3244,6 +3227,3 @@ def get_monitor() -> TelegramMonitor:
             if _shared is None:
                 _shared = TelegramMonitor(is_subscribed=_subscription_verdict)
     return _shared
-
-
-

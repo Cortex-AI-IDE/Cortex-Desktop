@@ -182,7 +182,6 @@ class ProviderType(Enum):
     DYNAMIC = "dynamic"        # Server-defined OpenAI-compatible providers (dp/<slug>/...)
 
 
-
 @dataclass
 class ModelInfo:
     """Information about an LLM model."""
@@ -515,7 +514,6 @@ class ProviderRegistry:
     # Providers eligible to take over a CHAT request when the requested
     # provider cannot be resolved. Used in exactly one place: the fallback
     # loop in get_provider() below.
-    #
     # SILICONFLOW is absent from this FALLBACK list only. It is still
     # registered lazily via _LAZY_PROVIDERS and implements chat(), but it is
     # the embeddings service, so it is never a sensible automatic substitute
@@ -588,7 +586,6 @@ class ProviderRegistry:
         self._providers[provider_type] = provider
     
 
-        
     def get_dynamic(self, slug: str) -> Optional[BaseProvider]:
         """The live provider for a server-defined slug, or None if not synced."""
         from src.ai import dynamic_providers as _dyn
@@ -632,7 +629,6 @@ class ProviderRegistry:
             provider = self._ensure_provider(provider_type)
         if not provider:
             # Fall back to a real CHAT provider, never to an OCR service.
-            #
             # An unresolved lookup used to be handed to the server-side OCR
             # service unconditionally, so the whole conversation was sent to it
             # and the request died with 401 Unauthorized from its chat endpoint,
@@ -674,8 +670,6 @@ class ProviderRegistry:
                 models.extend(provider.available_models)
         return models
         
-
-
 
 _registry = None
 

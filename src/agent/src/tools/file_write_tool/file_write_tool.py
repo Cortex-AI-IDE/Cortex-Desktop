@@ -1,17 +1,11 @@
-# ------------------------------------------------------------
-# file_write_tool.py
-# 
 # A tool for writing files to the local filesystem.
-# ------------------------------------------------------------
 
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, TypedDict
 import asyncio
 
-# ============================================================
 # LOCAL IMPORTS
-# ============================================================
 
 try:
     from .prompt import FILE_WRITE_TOOL_NAME, get_write_tool_description
@@ -35,9 +29,7 @@ except ImportError:
     class GitDiff(dict): pass
 
 
-# ============================================================
 # UTILITY FUNCTIONS - Enhanced implementations
-# ============================================================
 
 def log_event(name: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """Analytics event logging."""
@@ -374,9 +366,7 @@ def write_text_content(path: str, content: str, encoding: str, line_endings: str
         f.write(content)
 
 
-# ============================================================
 # TYPE DEFINITIONS
-# ============================================================
 
 class FileWriteInput(TypedDict):
     """File write tool input type."""
@@ -394,9 +384,7 @@ class FileWriteOutput(TypedDict, total=False):
     gitDiff: Optional[GitDiff]
 
 
-# ============================================================
 # FILE WRITE TOOL CLASS
-# ============================================================
 
 class FileWriteTool:
     """Writes a file to disk, creating parent directories as needed."""
@@ -406,17 +394,13 @@ class FileWriteTool:
     max_result_size_chars = 100_000
     strict = True
     
-    # ------------------------------------------------------------------
     # Public metadata helpers
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def description() -> str:
         return "Write a file to the local filesystem."
     
-    # ------------------------------------------------------------------
     # Input / output schemas (used by the surrounding framework)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def input_schema() -> type:
@@ -426,17 +410,13 @@ class FileWriteTool:
     def output_schema() -> type:
         return FileWriteOutput
     
-    # ------------------------------------------------------------------
     # Helper for auto-classification (used by the LLM routing layer)
-    # ------------------------------------------------------------------
     
     @staticmethod
     def to_auto_classifier_input(inp: Dict) -> str:
         return f"{inp.get('file_path', '')}: {inp.get('content', '')}"
     
-    # ------------------------------------------------------------------
     # Path handling - resolves and backfills the file path
-    # ------------------------------------------------------------------
     
     @staticmethod
     def get_path(inp: Dict) -> str:
@@ -448,9 +428,7 @@ class FileWriteTool:
         if isinstance(inp.get("file_path"), str):
             inp["file_path"] = expand_path(inp["file_path"])
     
-    # ------------------------------------------------------------------
     # Permission matcher (used by the framework to evaluate wildcard rules)
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def prepare_permission_matcher(file_path: str):
@@ -461,9 +439,7 @@ class FileWriteTool:
             return re.fullmatch(regex_pattern, file_path) is not None
         return match_pattern
     
-    # ------------------------------------------------------------------
     # Permission validation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def check_permissions(inp: Dict, context: Any) -> bool:
@@ -473,9 +449,7 @@ class FileWriteTool:
             FileWriteTool.name, inp, app_state.tool_permission_context
         )
     
-    # ------------------------------------------------------------------
     # Core validation logic
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def validate_input(inp: Dict, tool_use_context: Any) -> Dict[str, Any]:
@@ -558,9 +532,7 @@ class FileWriteTool:
         
         return {"result": True}
     
-    # ------------------------------------------------------------------
     # Core write operation
-    # ------------------------------------------------------------------
     
     @staticmethod
     async def call(
@@ -585,9 +557,7 @@ class FileWriteTool:
         full_file_path = expand_path(file_path)
         dir_path = os.path.dirname(full_file_path)
         
-        # --------------------------------------------------------------
         # Skill discovery (fire-and-forget, non-blocking)
-        # --------------------------------------------------------------
         cwd = get_cwd()
         
         try:
@@ -616,20 +586,14 @@ class FileWriteTool:
             # silent-ok: the skills system is not available in this context
             pass
         
-        # --------------------------------------------------------------
         # LSP diagnostics - notify before the edit
-        # --------------------------------------------------------------
         diagnostic_tracker_before_file_edited(full_file_path)
         
-        # --------------------------------------------------------------
         # Ensure parent directory exists (outside the critical section)
-        # --------------------------------------------------------------
         fs = get_fs_implementation()
         await fs.mkdir(dir_path)
         
-        # --------------------------------------------------------------
         # Optional file-history backup (if enabled)
-        # --------------------------------------------------------------
         file_history_enabled = getattr(context, "file_history_enabled", lambda: False)
         if file_history_enabled():
             try:
@@ -640,9 +604,7 @@ class FileWriteTool:
             except AttributeError:
                 pass  # silent-ok: no uuid on the message, so the association is skipped
         
-        # --------------------------------------------------------------
         # Read current file state (atomic read)
-        # --------------------------------------------------------------
         meta = None
         try:
             meta = read_file_sync_with_metadata(full_file_path)
@@ -650,9 +612,7 @@ class FileWriteTool:
             if not is_enoent(e):
                 raise
         
-        # --------------------------------------------------------------
         # Staleness check - abort if the file changed since the last read
-        # --------------------------------------------------------------
         if meta is not None:
             last_write_time = get_file_modification_time(full_file_path)
             read_file_state = getattr(context, "read_file_state", {})
@@ -673,12 +633,10 @@ class FileWriteTool:
         encoding = meta["encoding"] if meta else "utf-8"
         old_content = meta["content"] if meta else None
         
-        # --------------------------------------------------------------
         # Write the new content (full content replacement)
-        # --------------------------------------------------------------
         # Note: We use LF line endings as specified in the original TS
 
-        # --- SIZE GUARD: prevent content multiplication ---
+# SIZE GUARD: prevent content multiplication
         # If the new content would drastically inflate the file, reject the write.
         # This catches the AI accidentally appending the same content to itself.
         # Thresholds raised: 22→77 lines (3.5x) is a legitimate edit, not multiplication.
@@ -701,13 +659,10 @@ class FileWriteTool:
                     ),
                     "errorCode": 4,
                 }
-        # ----------------------------------------------------------
 
         write_text_content(full_file_path, content, encoding, "LF")
         
-        # --------------------------------------------------------------
         # LSP server notifications (didChange / didSave)
-        # --------------------------------------------------------------
         lsp_manager = get_lsp_server_manager()
         if lsp_manager:
             uri = f"file://{full_file_path}"
@@ -729,14 +684,10 @@ class FileWriteTool:
                 )
                 log_error(exc)
         
-        # --------------------------------------------------------------
         # Connected-IDE diff view notification
-        # --------------------------------------------------------------
         notify_vscode_file_updated(full_file_path, old_content, content)
         
-        # --------------------------------------------------------------
         # Update read-file state so subsequent writes see the fresh timestamp
-        # --------------------------------------------------------------
         read_file_state = getattr(context, "read_file_state", {})
         read_file_state[full_file_path] = {
             "content": content,
@@ -745,15 +696,11 @@ class FileWriteTool:
             "limit": None,
         }
         
-        # --------------------------------------------------------------
         # Log when writing to CORTEX.md
-        # --------------------------------------------------------------
         if full_file_path.endswith(os.sep + "CORTEX.md"):
             log_event("cortex_write_cortexmd", {})
         
-        # --------------------------------------------------------------
         # Optional remote git diff (only when the feature flag is on)
-        # --------------------------------------------------------------
         git_diff: Optional[GitDiff] = None
         if (
             is_env_truthy("CORTEX_CODE_REMOTE")
@@ -774,9 +721,7 @@ class FileWriteTool:
                 },
             )
         
-        # --------------------------------------------------------------
         # Build and return the result payload
-        # --------------------------------------------------------------
         if old_content is not None:
             # File updated - generate patch
             patch = get_patch_for_display(
@@ -836,9 +781,7 @@ class FileWriteTool:
             
             return {"data": data}
     
-    # ------------------------------------------------------------------
     # Mapping to the LLM-compatible block format
-    # ------------------------------------------------------------------
     
     @staticmethod
     def map_tool_result_to_block(data: Dict, tool_use_id: str) -> Dict[str, Any]:
@@ -860,18 +803,14 @@ class FileWriteTool:
             }
 
 
-# ============================================================
 # HELPER FUNCTIONS
-# ============================================================
 
 def log_file_operation(operation: Dict[str, Any]) -> None:
     """Log file operation for analytics."""
     pass  # Stub - replace with real implementation
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "FileWriteTool",

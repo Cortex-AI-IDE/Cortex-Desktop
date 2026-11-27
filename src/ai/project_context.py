@@ -423,7 +423,7 @@ class ProjectContextBuilder(QThread):
                     break
 
 
-# ── Singleton cache ──────────────────────────────────────────────────────────
+# Singleton cache
 
 _project_contexts: Dict[str, ProjectContext] = {}
 _builders: Dict[str, ProjectContextBuilder] = {}

@@ -19,9 +19,7 @@ from typing import Any, Dict, List, Optional
 from src.core.loop_engine.test_integrity import TestIntegritySpec
 
 
-# ---------------------------------------------------------------------------
 # Failure, a single structured, stably-identified verify failure
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Failure:
@@ -53,9 +51,7 @@ class Failure:
         )
 
 
-# ---------------------------------------------------------------------------
 # VerifyCheck / VerifySpec, the gate
-# ---------------------------------------------------------------------------
 
 # Weight-by-kind used when a parser doesn't set one explicitly.
 # Build errors block everything; lint is the least urgent.
@@ -114,9 +110,7 @@ class VerifySpec:
         )
 
 
-# ---------------------------------------------------------------------------
 # Scope & budget
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ScopeSpec:
@@ -165,9 +159,7 @@ class BudgetSpec:
         )
 
 
-# ---------------------------------------------------------------------------
 # LoopSpec, the whole contract
-# ---------------------------------------------------------------------------
 
 @dataclass
 class LoopSpec:
@@ -201,9 +193,7 @@ class LoopSpec:
         )
 
 
-# ---------------------------------------------------------------------------
 # The four-box eligibility test (agent_loop.md §3.1)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class LoopEligibility:

@@ -1,19 +1,13 @@
-# ------------------------------------------------------------
-# destructive_command_warning.py
-# 
 # Detects potentially destructive bash commands and returns 
 # warning strings for display in the permission dialog.
 # This is purely informational, it doesn't affect permission 
 # logic or auto-approval.
-# ------------------------------------------------------------
 
 import re
 from typing import Dict, List, Optional, Tuple
 
 
-# ============================================================
 # DESTRUCTIVE COMMAND PATTERNS
-# ============================================================
 
 class DestructivePattern:
     """Represents a destructive command pattern and its warning."""
@@ -117,9 +111,7 @@ DESTRUCTIVE_PATTERNS: List[DestructivePattern] = [
 ]
 
 
-# ============================================================
 # MAIN WARNING FUNCTION
-# ============================================================
 
 def get_destructive_command_warning(command: str) -> Optional[str]:
     """
@@ -139,9 +131,7 @@ def get_destructive_command_warning(command: str) -> Optional[str]:
     return None
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     "DestructivePattern",

@@ -46,9 +46,7 @@ _TOKEN_RE = re.compile(r"[\w-]+")
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
 
-# ---------------------------------------------------------------------------
 # Data Models
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -122,9 +120,7 @@ class SkillDefinition:
         )
 
 
-# ---------------------------------------------------------------------------
 # SKILL.md Parser
-# ---------------------------------------------------------------------------
 
 _BUNDLED_REL = os.path.join('src', 'agent', 'src', 'skills', 'bundled')
 
@@ -203,7 +199,7 @@ def parse_skill_file(file_path: str) -> Optional[SkillDefinition]:
 
     # Frontmatter may be preceded by an HTML comment (the editable-copy
     # header prepare_edit writes, or any hand-added note). Tolerate it -
-    # requiring "---" at byte zero turned every such file into a nameless
+# requiring " " at byte zero turned every such file into a nameless
     # "Skill" card in the browser.
     _stripped = content.lstrip()
     while _stripped.startswith("<!--"):
@@ -272,9 +268,9 @@ def _as_list(v: Any) -> List[str]:
     return [p.strip() for p in str(v).split(',') if p.strip()]
 
 
-# The frontmatter block: "---" on the FIRST line, closed by the next line that
-# is only "---". Searching for the next "---" anywhere cut a description such
-# as "x --- y" off at the dashes and pasted the rest into the skill body.
+# The frontmatter block: " " on the FIRST line, closed by the next line that
+# is only " ". Searching for the next " " anywhere cut a description such
+# as "x y" off at the dashes and pasted the rest into the skill body.
 _FRONTMATTER_RE = re.compile(r'\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)', re.S)
 
 
@@ -390,9 +386,7 @@ def _strip_frontmatter(content: str) -> str:
     return content[m.end():].strip()
 
 
-# ---------------------------------------------------------------------------
 # SkillsManager
-# ---------------------------------------------------------------------------
 
 
 class SkillsManager:
@@ -453,9 +447,7 @@ class SkillsManager:
         except Exception as e:
             logger.debug(f"Skill state save skipped: {e}")
 
-    # -----------------------------------------------------------------------
     # Public API
-    # -----------------------------------------------------------------------
 
     def list_skills(self) -> List[SkillDefinition]:
         """Return all loaded skills."""
@@ -649,9 +641,7 @@ class SkillsManager:
     def skill_count(self) -> int:
         return len(self._skills)
 
-    # -----------------------------------------------------------------------
     # Internal
-    # -----------------------------------------------------------------------
 
     def _skill_roots(self) -> List[Tuple[str, str]]:
         """Every skills directory, in load order, as (path, label).
@@ -786,9 +776,7 @@ def _same_path(a: Optional[str], b: Optional[str]) -> bool:
         return a == b
 
 
-# ---------------------------------------------------------------------------
 # Module-level singleton
-# ---------------------------------------------------------------------------
 
 # How often a lookup re-checks the skill folders for installs and edits.
 _REFRESH_INTERVAL = 2.0

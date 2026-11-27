@@ -140,7 +140,7 @@ def matching_names(skills: List[Dict], query: str) -> List[str]:
     return [s.get("name", "") for s in search(skills, query)]
 
 
-# ── Prompt-time routing (different problem to the menu) ──────────────────
+# Prompt time routing (different problem to the menu)
 # The "/" menu takes a deliberate 1-3 word query and AND-matches it: typing
 # more words must narrow 251 skills down. The skill router in the system
 # prompt gets the user's whole sentence instead ("make the landing page

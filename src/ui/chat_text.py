@@ -169,7 +169,6 @@ def strip_all_control_tags(text: str) -> str:
         clean = re.sub(rf'<{tag}(?:[^>\n]*)?$', '', clean, flags=re.MULTILINE | re.IGNORECASE)
 
     # Pass 1c: Orphan agent-control tags on a line of their own.
-    #
     # Pass 1 only removes a COMPLETE pair. An answer is often cleaned in more
     # than one piece - prose blocks split wherever thinking or a tool event
     # interleaves, sealed past 2000 chars, restored part by part - and then one
@@ -345,7 +344,7 @@ def clean_markdown_urls(text: str) -> str:
 # A markdown list item at any indent: "- x", "* x", "+ x", "1. x", "2) x".
 _LIST_ITEM_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\S')
 
-# ── Glued fence openers: "```mermaidflowchart TB ..." ─────────────────────
+# Glued fence openers: "```mermaidflowchart TB ..."
 # DeepSeek v4 emits the language and the first statement on ONE line, with no
 # newline between them (verified from the chunk stream in cortex.log). The
 # streaming stripper copes (find_mermaid_spans accepts the glued form), but
@@ -405,7 +404,7 @@ def split_glued_fence_languages(text: str) -> str:
     return _GLUED_FENCE_RE.sub(_split, text)
 
 
-# ── Mermaid auto-wrap gate ────────────────────────────────────────────────
+# Mermaid auto wrap gate
 # Only an unfenced payload that is unambiguously a diagram may be wrapped.
 # `timeline`, `journey`, `gantt`, `pie` and `mindmap` are ordinary English
 # words, so the old re.IGNORECASE test turned prose into a diagram:
@@ -462,7 +461,7 @@ def looks_like_mermaid_payload(text: str) -> bool:
     return bool(_RE_MERMAID_EDGE.search(text))
 
 
-# ── Real mermaid fences: a line-anchored scanner ────────────────────────────
+# Real mermaid fences: a line anchored scanner
 # A fence opener must START A LINE (CommonMark allows up to three leading
 # spaces). The streaming stripper and the turn-end card builder used DOTALL
 # patterns with no anchor, so an inline "```mermaid" written inside a sentence
@@ -663,7 +662,6 @@ def auto_fix_broken_code_fences(text: str) -> str:
     # (mermaid diagrams, nested code).  A plain scan is O(n) and wraps
     # exactly the same blocks: a run of 3+ indented lines, not at the
     # very start of the text, followed by a blank line or end of text.
-    #
     # FIX 2026-08-16 (mermaid regression): track fence state while scanning
     # so indented lines INSIDE an existing ``` block (mermaid diagrams,
     # nested code) are never double-wrapped.  The old regex had the same
@@ -742,7 +740,7 @@ def auto_fix_broken_code_fences(text: str) -> str:
        looks_like_mermaid_payload(trimmed):
         fixed = f'```mermaid\n{trimmed}\n```'
 
-    # ── Fences only count where a fence can be ──────────────────────────
+# Fences only count where a fence can be
     # The three rules below used to fire ANYWHERE in a line. An inline
     # mention of a fence - "That stray ` ``` ` lands", a table cell
     # "| A fenced ```json example |" - was split onto a line of its own and
@@ -751,7 +749,6 @@ def auto_fix_broken_code_fences(text: str) -> str:
     # 2,122 characters swallowed, headings and tables shown as raw text).
     # Rules 1 and 2 now apply only to a fence that STARTS its line; rule 3
     # skips a fence inside an inline code span or a table row.
-    #
     # Fix ```language async fn() → ```language\nasync fn()
     # [ \t]+ NOT \s+: \s matches newlines, so the old pattern also collapsed
     # a legitimate blank line after the fence opener into nothing.
@@ -821,14 +818,13 @@ def auto_fix_broken_code_fences(text: str) -> str:
     return fixed
 
 
-# ── Prose markdown sanitising (save + restore) ──────────────────────────────
+# Prose markdown sanitising (save restore)
 # A table cell that itself contains a ``` fence is legal-looking input but
 # illegal markdown: the fence ends up alone on a line, inside the table body,
 # where mistune reads it as the START of a code block. Everything after it,
 # headings, tables, the task JSON, the rest of the answer, then renders as one
 # monospace blob. Measured on a real saved block: 4,660 of 4,564 characters
 # ended up inside a single <pre> (the 2026-10-21 screenshot).
-#
 # The stray fence is invisible to the tag stripper because it stashes
 # ```...``` regions as protected code, so the <task_summary> JSON riding inside
 # that fake block could never be removed either. Rejoin the row FIRST, and both
@@ -1076,7 +1072,6 @@ def streaming_clean(text: str) -> str:
     # the closing tag hasn't arrived yet during streaming.  Without this,
     # <task_summary>{"title":...}</task_summary> leaks as raw text because
     # the paired-tag regex below only matches when both tags are present.
-    #
     # IMPORTANT: Only strip paired tags for AGENT CONTROL tags (tool output,
     # file operations).  Tags like 'summary', 'analysis', 'plan', 'thinking'
     # can appear in normal AI prose, stripping paired versions would delete
@@ -1162,7 +1157,7 @@ def full_clean(text: str) -> str:
     _TABLE_HEADER_RE = r'^[ \t]*\|(?![\s\-:]+\|?\s*$).+[ \t]*\n'
     _TABLE_SEP_RE_CL = r'^[ \t]*\|[\s\-:]+(?:\|[\s\-:]+)*\|?[ \t]*\n'
     _TABLE_DAT_RE_CL = r'(?:^[ \t]*\|.+[ \t]*\n?\n?)+'
-    # Primary: table with separator (header + --- + data)
+# Primary: table with separator (header data)
     _TABLE_BLOCK_RE = re.compile(
         r'(?:' + _TABLE_HEADER_RE + r')+'
         + _TABLE_SEP_RE_CL + r'\n*'

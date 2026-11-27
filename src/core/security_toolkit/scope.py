@@ -175,7 +175,7 @@ class ScopeGuard:
         # they never depend on the developer's real ~/.cortex scope file.
         self._policy: Optional[ScopePolicy] = policy
 
-    # ---------------------------------------------------------------- loading
+# loading
 
     def policy_paths(self) -> List[Path]:
         paths: List[Path] = []
@@ -233,7 +233,7 @@ class ScopeGuard:
             "always_blocked": ["169.254.0.0/16", "cloud metadata hostnames"],
         }
 
-    # ------------------------------------------------------------- the check
+# the check
 
     def check(self, target: str, purpose: str = "security scan") -> ScopeDecision:
         """Decide whether `target` is in scope.
@@ -347,7 +347,7 @@ class ScopeGuard:
                 reason="infrastructure-port",
             )
 
-    # --------------------------------------------------------------- helpers
+# helpers
 
     def _always_blocked_reason(self, host: str) -> str:
         if host in _ALWAYS_BLOCKED_HOSTS:

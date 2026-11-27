@@ -19,9 +19,7 @@ from dataclasses import dataclass
 from typing import Dict, Literal, Optional
 
 
-# ============================================================================
 # Data Structures
-# ============================================================================
 
 @dataclass
 class ThinkingConfig:
@@ -43,9 +41,7 @@ class ThinkingConfig:
     type: Literal["adaptive", "enabled", "disabled"] = "adaptive"
 
 
-# ============================================================================
 # Reasoning Tiers, Task-aware token budget configuration
-# ============================================================================
 
 # Maps task complexity to reasoning effort and token reservation.
 # Reference: OpenAI recommends reserving 25K+ tokens for GPT-5.5 high effort.
@@ -87,9 +83,7 @@ REASONING_TIERS = {
 DEFAULT_REASONING_TIER = "low"
 
 
-# ============================================================================
 # Runtime Defaults, centralized thinking config (replaces env vars)
-# ============================================================================
 
 # Per-provider thinking defaults (used by providers instead of os.environ)
 # These replace: CORTEX_OPENAI_REASONING_EFFORT, CORTEX_MIMO_THINKING,
@@ -203,9 +197,7 @@ def get_reasoning_tier(tier_name: str) -> dict:
     return REASONING_TIERS.get(tier_name, REASONING_TIERS[DEFAULT_REASONING_TIER])
 
 
-# ============================================================================
 # Model Support Detection
-# ============================================================================
 
 # Models that support extended thinking/reasoning
 THINKING_SUPPORTED_MODELS = {
@@ -331,7 +323,6 @@ def model_supports_thinking(provider: str, model_name: str) -> bool:
     # it first: the tables below cannot know about a model released after this
     # build, and without this a new reasoning model's thinking leaked into the
     # visible reply instead of the Thought card.
-    #
     # Two id shapes reach this function: OpenRouter ids arrive already split
     # (provider="anthropic", model_name="claude-fable-5"), while direct
     # providers pass the plain id. Try the rejoined form first, then the bare
@@ -438,9 +429,7 @@ def get_recommended_thinking_config(provider: str, model_name: str) -> Optional[
     )
 
 
-# ============================================================================
 # Thinking Budget Scaling, context-size-aware defaults
-# ============================================================================
 
 # Models with 1M context get larger thinking budgets (more room to think).
 # Keyed by substring match (matches model_name.lower()).
@@ -487,9 +476,7 @@ def _get_thinking_budget_by_model(provider: str, model_name: str) -> int:
     return _DEFAULT_THINKING_BUDGET
 
 
-# ============================================================================
 # Provider Information
-# ============================================================================
 
 def get_provider_thinking_info(provider: str) -> dict:
     """
@@ -574,9 +561,7 @@ def list_thinking_supported_models() -> Dict[str, list]:
     }
 
 
-# ============================================================================
 # Convenience Functions
-# ============================================================================
 
 def should_enable_thinking_by_default(provider: str, model_name: str) -> bool:
     """
@@ -622,9 +607,7 @@ def get_thinking_summary(provider: str, model_name: str) -> str:
     )
 
 
-# ============================================================================
 # Module Exports
-# ============================================================================
 
 __all__ = [
     # Data classes

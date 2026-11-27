@@ -239,7 +239,7 @@ def get_changed_lines(
         n=3  # Context lines
     ))
     
-    # Skip the header lines (---, +++, @@)
+# Skip the header lines ( , , @@)
     result_lines = []
     markers = []
     
@@ -263,9 +263,7 @@ def get_changed_lines(
     }
 
 
-# ============================================================================
 # Demo / Testing
-# ============================================================================
 
 if __name__ == '__main__':
     import logging as _logging

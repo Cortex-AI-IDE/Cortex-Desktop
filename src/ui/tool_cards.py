@@ -58,9 +58,7 @@ class ElidedLabel(QLabel):
         self._update_elision()
 
 
-# ============================================================
 # CODE VIEW, Rounded code container with line numbers + diff
-# ============================================================
 class CodeView(QFrame):
     """Rounded code container with line numbers + diff coloring.
     Horizontal scroll stays INSIDE this widget (never widens the panel)."""
@@ -140,9 +138,7 @@ def _contain_label(label: QLabel, *, wrap: bool = True):
     label.setWordWrap(wrap)
 
 
-# ============================================================
 # TOOL GUTTER, spinner while running → tinted icon on done
-# ============================================================
 class ToolGutter(QWidget):
     """Left gutter: tool-specific spinner while running -> tinted icon on done/error."""
 
@@ -174,9 +170,7 @@ class ToolGutter(QWidget):
         self._stack.setCurrentIndex(1)
 
 
-# ============================================================
 # BASE CLASS
-# ============================================================
 class ToolCardBase(QFrame):
     """Base class for all tool cards. Header with gutter + optional collapsible body."""
 
@@ -336,9 +330,7 @@ class ToolCardBase(QFrame):
             pass  # silent-ok: the C++ object was already deleted
 
 
-# ============================================================
 # 14 TOOL CARD SUBCLASSES
-# ============================================================
 
 class ReadCard(ToolCardBase):
     """Read, file preview or image vision result."""
@@ -431,7 +423,7 @@ class EditCard(ToolCardBase):
             if self._chev:
                 self._chev.setText("\u2304")
 
-    # ── diff rows ────────────────────────────────────────────────────
+# diff rows
     # Field report 2026-10-22: "the edited diff is not showing inside the
     # tool section". The card only ever rendered data["hunk_lines"], and
     # the only producer of hunk_lines is native_chat_bridge, which feeds
@@ -1066,9 +1058,7 @@ class GenericCard(ToolCardBase):
         super().__init__(name, info[:60], tool_type="generic", has_body=False, parent=parent)
 
 
-# ============================================================
 # DISPATCH
-# ============================================================
 
 # Normalize tool names from bridge → dispatch keys
 _TOOL_NAME_MAP = {

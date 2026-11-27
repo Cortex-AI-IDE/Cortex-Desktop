@@ -37,7 +37,7 @@ from src.utils.agent_tools import (
 log = logging.getLogger("coordinator_system")
 
 
-# ==================== SCRATCHPAD ====================
+# SCRATCHPAD
 
 class Scratchpad:
     """Cross-worker communication via shared directory.
@@ -84,7 +84,6 @@ class Scratchpad:
         return None
     
 
-    
     def cleanup(self):
         """Clean up scratchpad directory."""
         try:
@@ -95,7 +94,7 @@ class Scratchpad:
             log.warning(f"[Scratchpad] Cleanup failed: {e}")
 
 
-# ==================== VISION CONTEXT STORE ====================
+# VISION CONTEXT STORE
 
 class VisionContextStore:
     """Stores vision analysis results for cross-agent access.
@@ -125,7 +124,6 @@ class VisionContextStore:
         return None
     
 
-    
     def clear(self, session_id: str):
         """Clear vision context for a session."""
         self._contexts.pop(session_id, None)
@@ -138,7 +136,7 @@ def get_vision_store() -> VisionContextStore:
     return _vision_store
 
 
-# ==================== COORDINATION ENGINE ====================
+# COORDINATION ENGINE
 
 @dataclass
 class CoordinationResult:

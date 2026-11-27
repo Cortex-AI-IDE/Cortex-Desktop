@@ -96,9 +96,7 @@ except Exception as _exc:  # pragma: no cover - import guard
     log.warning(f"[ProjectHealth] SymbolExtractor unavailable ({_exc}); symbol detail disabled")
 
 
-# --------------------------------------------------------------------------
 # Feature flag
-# --------------------------------------------------------------------------
 
 _FLAG_ENV = "CORTEX_HEALTH_MAP"
 _FALSY = {"0", "false", "no", "off", ""}
@@ -114,9 +112,7 @@ def health_map_enabled() -> bool:
     return raw.strip().lower() not in _FALSY
 
 
-# --------------------------------------------------------------------------
 # Constants
-# --------------------------------------------------------------------------
 
 # Stable namespace so a node's UUID survives rescans. Random UUIDs would make
 # every scan look like "everything is new" and break highlight/selection.
@@ -366,9 +362,7 @@ _CACHE_VERSION = 15
 _CACHE_RELATIVE = Path(".cortex") / "health_map.json"
 
 
-# --------------------------------------------------------------------------
 # Data classes
-# --------------------------------------------------------------------------
 
 
 @dataclass
@@ -433,9 +427,7 @@ class FileHealth:
     deep: bool = False  # did we actually parse it?
 
 
-# --------------------------------------------------------------------------
 # Helpers
-# --------------------------------------------------------------------------
 
 
 def read_source_bom_safe(path: Path) -> str:
@@ -840,9 +832,7 @@ def _collect_submodule_imports(tree: ast.AST, package: str = "") -> List[str]:
     return out
 
 
-# --------------------------------------------------------------------------
 # Scanner
-# --------------------------------------------------------------------------
 
 
 class ProjectHealthScanner:
@@ -860,7 +850,7 @@ class ProjectHealthScanner:
         self.last_scan_ms: float = 0.0
         self.from_cache: bool = False
 
-    # -- public API --------------------------------------------------------
+# public API
 
     def scan(self, force: bool = False) -> Dict[str, Any]:
         """Scan the project and return the health-map payload.
@@ -927,7 +917,7 @@ class ProjectHealthScanner:
         )
         return payload
 
-    # -- walking -----------------------------------------------------------
+# walking
 
     def _walk_files(self) -> List[Tuple[Path, str]]:
         """Collect candidate source files, honouring the exclusion lists."""
@@ -960,7 +950,7 @@ class ProjectHealthScanner:
         out.sort(key=lambda t: t[1])
         return out
 
-    # -- per-file ----------------------------------------------------------
+# per file
 
     def _scan_file(self, path: Path, rel: str, mtime: float) -> FileHealth:
         """Parse one file and classify it."""
@@ -1157,7 +1147,7 @@ class ProjectHealthScanner:
             return
         fh.deep = True
         try:
-            # safe_load_all, not safe_load: multi-document files (--- separated)
+# safe load all, not safe load: multi document files ( separated)
             # are common in CI config and safe_load rejects them outright.
             for _doc in yaml.safe_load_all(source):
                 pass
@@ -1329,7 +1319,7 @@ class ProjectHealthScanner:
             )
         return fh
 
-    # -- graph -------------------------------------------------------------
+# graph
 
     def _resolve_edges(self) -> None:
         """Turn dotted imports into file->file edges within this project."""
@@ -1483,7 +1473,7 @@ class ProjectHealthScanner:
             if fh.rel in affected and fh.status in (STATUS_HEALTHY, STATUS_NEW):
                 fh.status = STATUS_AFFECTED
 
-    # -- dead code -----------------------------------------------------------
+# dead code
 
     def _analyze_dead_code(self) -> Dict[str, Any]:
         """Find orphan files and never-referenced functions/classes/variables.
@@ -1675,7 +1665,7 @@ class ProjectHealthScanner:
         # 3. One tokenising pass over EVERY text file in the project (all
         #    languages, plus .spec/.cfg/.ini/.txt extras the main walk skips):
         #    global occurrence counts for defined names, stem mentions for
-        #    orphan candidates, and the __main__-guard set.
+# orphan candidates, and the main guard set.
         totals: Dict[str, int] = dict.fromkeys(defs, 0)
         stem_hits: Dict[str, int] = dict.fromkeys(cand_stems, 0)
         stem_self: Dict[str, int] = dict.fromkeys(cand_stems, 0)
@@ -1828,7 +1818,7 @@ class ProjectHealthScanner:
             },
         }
 
-    # -- payload -----------------------------------------------------------
+# payload
 
     def _build_payload(self, reused: int = 0) -> Dict[str, Any]:
         """Serialise the scan into the JSON the webview renders."""
@@ -2068,7 +2058,7 @@ class ProjectHealthScanner:
                     return out
         return out
 
-    # -- cache -------------------------------------------------------------
+# cache
 
     def _load_cache(self) -> Dict[str, Any]:
         try:
@@ -2123,7 +2113,7 @@ class ProjectHealthScanner:
         except Exception as exc:
             log.warning(f"[ProjectHealth] could not write cache: {exc}")
 
-    # -- invalidation ------------------------------------------------------
+# invalidation
 
     def invalidate(self) -> bool:
         """Drop the cached map for this project. Called on project switch."""
@@ -2137,9 +2127,7 @@ class ProjectHealthScanner:
         return False
 
 
-# --------------------------------------------------------------------------
 # Report export (Markdown / JSON)
-# --------------------------------------------------------------------------
 
 _REPORT_FORMAT_VERSION = 1
 
@@ -2405,9 +2393,7 @@ def build_report(payload: Dict[str, Any], fmt: str = "md") -> str:
     return _report_md(payload)
 
 
-# --------------------------------------------------------------------------
 # Per-project accessor (isolation boundary)
-# --------------------------------------------------------------------------
 
 _scanners: Dict[str, ProjectHealthScanner] = {}
 

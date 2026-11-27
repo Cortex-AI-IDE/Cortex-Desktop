@@ -21,9 +21,7 @@ from functools import lru_cache
 
 log = logging.getLogger("cortex.agent")
 
-# ============================================================
 # PHASE 1: Core types and data structures (DONE)
-# ============================================================
 
 try:
     from .imageResizer import ImageDimensions
@@ -50,9 +48,7 @@ except ImportError:
         return os.path.join(os.path.expanduser('~'), '.cortex')
 
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 
 # Re-entrancy guard: prevents getConfig → logEvent → getGlobalConfig → getConfig
 # infinite recursion when the config file is corrupted.
@@ -70,9 +66,7 @@ configReadingAllowed = False
 _trustAccepted = False
 
 
-# ============================================================
 # PASTED CONTENT TYPES
-# ============================================================
 
 class PastedContent(TypedDict, total=False):
     """Image dimension info for coordinate mapping"""
@@ -187,9 +181,7 @@ EditorMode = str
 DiffTool = str  # 'terminal' | 'auto'
 
 
-# ============================================================
 # PHASE 2: Global config and constants
-# ============================================================
 
 class GlobalConfig(TypedDict, total=False):
     """Global configuration (user-level)"""
@@ -337,9 +329,7 @@ def isProjectConfigKey(key: str) -> bool:
     return key in PROJECT_CONFIG_KEYS
 
 
-# ============================================================
 # PHASE 3: Trust dialog functions
-# ============================================================
 
 def checkHasTrustDialogAccepted() -> bool:
     """Check if user has accepted trust dialog for cwd"""
@@ -411,9 +401,7 @@ def isPathTrusted(dir: str) -> bool:
         currentPath = parentPath
 
 
-# ============================================================
 # PHASE 4: Config save/load functions
-# ============================================================
 
 def wouldLoseAuthState(fresh: Dict) -> bool:
     """Detect if writing fresh config would lose auth/onboarding state"""
@@ -844,9 +832,7 @@ def getConfigBackupDir() -> str:
     return os.path.join(getCortexConfigHomeDir(), 'backups')
 
 
-# ============================================================
 # PHASE 5: Config file watcher and cache
-# ============================================================
 
 # Cache for global config
 globalConfigCache: Dict[str, Any] = {
@@ -953,9 +939,7 @@ def reportConfigCacheStats() -> None:
     configCacheMisses = 0
 
 
-# ============================================================
 # PHASE 6: Helper utilities
-# ============================================================
 
 def enableConfigs() -> None:
     """Enable config reading"""
@@ -1245,9 +1229,7 @@ def getGlobalCortexFile() -> str:
         return os.path.join(os.path.expanduser('~'), '.cortex', 'cortex.json')
 
 
-# ============================================================
 # STUB FUNCTIONS - For missing imports
-# ============================================================
 
 def logForDebugging(msg: str, level: str = 'info') -> None:
     """Stub logging"""
@@ -1264,9 +1246,7 @@ def logForDiagnosticsNoPII(level: str, message: str, metadata: Dict = None) -> N
     pass
 
 
-# ============================================================
 # SNAKE_CASE ALIASES - For import compatibility
-# ============================================================
 
 get_global_config = getGlobalConfig
 save_global_config = saveGlobalConfig
@@ -1295,9 +1275,7 @@ report_config_cache_stats = reportConfigCacheStats
 get_global_config_write_count = getGlobalConfigWriteCount
 
 
-# ============================================================
 # PUBLIC API EXPORTS
-# ============================================================
 
 __all__ = [
     # Types

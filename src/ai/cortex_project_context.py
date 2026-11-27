@@ -22,9 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # File loaders
-# ---------------------------------------------------------------------------
 
 
 def _read_text_file(file_path: Path) -> Optional[str]:
@@ -60,9 +58,7 @@ def _read_lines(file_path: Path) -> List[str]:
     ]
 
 
-# ---------------------------------------------------------------------------
 # Prompt block formatters
-# ---------------------------------------------------------------------------
 
 
 def _format_block(title: str, content: str, tag: str = "info") -> str:
@@ -131,9 +127,7 @@ def load_memory_block(cortex_dir: Path) -> str:
     return _format_block("Project Memory", "\n".join(parts), tag="memory")
 
 
-# ---------------------------------------------------------------------------
 # Main loader
-# ---------------------------------------------------------------------------
 
 
 def load_all_cortex_context(project_root: Optional[str] = None) -> str:
@@ -202,9 +196,7 @@ def get_cortex_context_summary(project_root: Optional[str] = None) -> Dict[str, 
     }
 
 
-# ---------------------------------------------------------------------------
 # Auto-create .cortex/ directory
-# ---------------------------------------------------------------------------
 
 
 def ensure_cortex_dir(project_root: Optional[str] = None) -> bool:
@@ -295,9 +287,7 @@ def ensure_cortex_dir(project_root: Optional[str] = None) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
 # Auto-update memory.json
-# ---------------------------------------------------------------------------
 
 
 def update_project_memory(

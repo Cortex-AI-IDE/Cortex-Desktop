@@ -396,7 +396,7 @@ class AnthropicProvider(BaseProvider):
                             log.error("[Anthropic] API error: %s", response.text[:1000])
                     response.raise_for_status()
 
-                    # ── Socket-level chunk timeout ──────────────────────────
+# Socket level chunk timeout
                     _saved_sock_timeout = None
                     try:
                         _raw_sock = getattr(getattr(getattr(response.raw, '_fp', None), 'fp', None), 'raw', None)
@@ -721,6 +721,3 @@ class AnthropicProvider(BaseProvider):
 
 
 # Singleton instance
-
-
-

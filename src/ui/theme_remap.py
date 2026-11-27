@@ -194,7 +194,7 @@ def remap_all(was_dark: bool, is_dark: bool, on_done=None) -> None:
     run(0)
 
 
-# ── The app-wide QSS, without re-polishing the chat ────────────────────
+# The app wide QSS, without re polishing the chat
 # QApplication.setStyleSheet() re-matches the whole theme file against EVERY
 # widget. Measured 2026-10-07 on a real 120-turn chat: 13,630 widgets, 12,674
 # of them in the chat, 7.6s in one call (5.6-6.0s in the user's own log),
@@ -294,7 +294,7 @@ def apply_theme_outside(heavy: QWidget, qss: str) -> int:
     return len(roots)
 
 
-# ── Tooltips ───────────────────────────────────────────────────────────
+# Tooltips
 # Qt styles a tooltip with the stylesheets of the widget under the mouse and
 # that widget's parents: QToolTip::showText() sets the tip's
 # "_q_stylesheet_parent" to it and resets the tip's own sheet to "/* */".
@@ -303,7 +303,6 @@ def apply_theme_outside(heavy: QWidget, qss: str) -> int:
 # "* { ... }" and reach the tip, which then painted see-through or #1e1e1e:
 # dark tooltips in light mode over the chat's run-command rows and the
 # editor's "Copy Path" breadcrumb, whatever theme Cortex started in.
-#
 # So every tip is re-parented, for styling only, to a hidden host widget
 # whose sheet is just the current theme's QToolTip rule. The widget's own
 # styling no longer reaches the tip.

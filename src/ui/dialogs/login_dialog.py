@@ -72,7 +72,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout,
 
 log = logging.getLogger(__name__)
 
-# ── layout metrics, kept in one place so the rhythm cannot drift ───────────
+# layout metrics, kept in one place so the rhythm cannot drift
 CARD_WIDTH      = 400
 CARD_RADIUS     = 14
 CARD_PAD_H      = 28
@@ -146,7 +146,7 @@ def _ui_font(size: int, weight: int, tracking: float = 0.0) -> QFont:
     return f
 
 
-# ── colour maths ───────────────────────────────────────────────────────────
+# colour maths
 # Qt stylesheets accept "#rrggbb" everywhere, but the app's tokens also use
 # rgba() with a fractional alpha for text. Compositing to a solid hex here
 # means every colour this screen applies is unambiguous, and it is what makes
@@ -570,7 +570,7 @@ class LoginDialog(QDialog):
             self._status.setWordWrap(True)
             self._status.setToolTip(notice)
 
-    # ── brand ─────────────────────────────────────────────────────────────
+# brand
 
     def _build_brand(self) -> QWidget:
         """Emblem left, two-line wordmark right: the site's lockup."""
@@ -619,7 +619,7 @@ class LoginDialog(QDialog):
         h.addWidget(words, 0, Qt.AlignmentFlag.AlignVCenter)
         return w
 
-    # ── sign-in card ──────────────────────────────────────────────────────
+# sign in card
 
     def _build_card(self) -> QWidget:
         card = QFrame()
@@ -702,7 +702,7 @@ class LoginDialog(QDialog):
         self._help.setAlignment(Qt.AlignmentFlag.AlignCenter)
         return self._help
 
-    # ── status bar ────────────────────────────────────────────────────────
+# status bar
 
     def _build_status_bar(self) -> QWidget:
         """The sign-in state, where a developer already looks for state.
@@ -760,7 +760,7 @@ class LoginDialog(QDialog):
             f"border:none;")
         self._status.setText(message)
 
-    # ── behaviour ─────────────────────────────────────────────────────────
+# behaviour
 
     def _set_busy(self, busy: bool):
         self._busy.setVisible(busy)

@@ -132,9 +132,6 @@ def normalize_rows_without_leading_pipe(text: str) -> str:
     return '\n'.join(result)
 
 
-
-
-
 def split_inline_tables(text: str) -> str:
     """Split collapsed inline tables (all rows on one line) into proper multi-line tables.
 
@@ -148,12 +145,12 @@ def split_inline_tables(text: str) -> str:
     # \|[\s:\-]+\|(?:[\s:\-]+\|)+, let a cell be whitespace alone, so on the
     # collapsed form this function exists to handle it started one pipe early
     # and ended one pipe late:
-    #     Title| H1 | H2 | |---|---| |d1 | d2 |
-    #   matched '| |---|---| |'  -> n_cols 4
+# Title| H1 | H2 | | | | |d1 | d2 |
+# matched '| | | | |' > n cols 4
     #   header  '| H1 | H2 |'    -> hdr_cols 2
     # so the counts never agreed and the split was abandoned every time, for
     # the exact example in this docstring. Requiring a dash per cell matches
-    # '|---|---|' and the counts line up.
+# '| | |' and the counts line up.
     _FULL_SEP = re.compile(r'\|(?:[\s:]*-[-\s:]*\|)+')
     result = []
     lines = text.split('\n')
@@ -390,7 +387,7 @@ def normalize_dash_separator_tables(text: str) -> str:
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
-        # Strip heading prefix if present (e.g., "### Biggest Changes | File | Added")
+# Strip heading prefix if present (e.g., " Biggest Changes | File | Added")
         heading_prefix = ''
         m_heading = re.match(r'^(#{1,6}\s+)', stripped)
         if m_heading:
@@ -463,8 +460,8 @@ def normalize_headerless_pipe_tables(text: str) -> str:
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
-        # Strip heading prefix if present (e.g., "### Audit Summary | Category | Status")
-        # so "### Col1 | Col2 | Col3" becomes "Col1 | Col2 | Col3" for pipe table detection.
+# Strip heading prefix if present (e.g., " Audit Summary | Category | Status")
+# so " Col1 | Col2 | Col3" becomes "Col1 | Col2 | Col3" for pipe table detection.
         heading_prefix = ''
         m_heading = re.match(r'^(#{1,6}\s+)', stripped)
         if m_heading:
@@ -892,14 +889,12 @@ def normalize_table_markdown(text: str, timeout: Optional[float] = 1.0) -> str:
         return text
 
     # KEEP the worker thread and timeout for every caller that asks for one.
-    #
     # An earlier change here ran small text inline, on the reading that a
     # timeout firing on 430 characters had to be thread-scheduling overhead
     # rather than real work. It was real work: split_inline_tables could
     # enter an infinite loop, and the timeout was what kept the UI alive
     # through it. Running inline removed the escape and turned a one second
     # stall per block into a permanent freeze.
-    #
     # That loop is fixed, but the guard stays. It is the only thing standing
     # between a future bug in this file and a hung window, and this file is
     # edited by the agent itself.

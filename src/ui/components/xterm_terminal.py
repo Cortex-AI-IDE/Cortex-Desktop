@@ -103,7 +103,6 @@ def _terminal_label_text(number: int) -> str:
     return f"Terminal {number}"
 
 
-
 class TerminalBridge(QObject):
     """Bridge object that connects JS xterm events with Python."""
     send_output = pyqtSignal(str)   # Python -> JS (write to terminal)
@@ -563,11 +562,9 @@ class XTermWidget(QWidget):
             log.info("[XTerm] ^C received from xterm, writing interrupt to pty "
                      f"(pty_alive={bool(self._pty_process)})")
             # Ctrl+C has two jobs and \x03 alone only does the first:
-            #
             #   1. At the PowerShell prompt, \x03 makes PSReadLine cancel the
             #      half-typed line. That works and is left untouched (\x03 is
             #      still written to the pty at the bottom of this method).
-            #
             #   2. Stopping a FOREGROUND program (`manage.py runserver`, ping,
             #      an npm watcher). This is what the field report "Ctrl+C does
             #      not stop runserver" was about, and \x03 cannot do it. It was
@@ -580,7 +577,6 @@ class XTermWidget(QWidget):
             #      each was worse than the bug (CTRL_BREAK in-process killed the
             #      whole IDE; CTRL_BREAK from a helper dropped PowerShell into
             #      its debugger; CTRL_C broadcast was silently ignored).
-            #
             # So job 2 is done WITHOUT a console signal: if the shell has a
             # foreground child, terminate that child's process tree. The shell
             # (and the IDE) are never touched, nothing is attached to a console,
@@ -669,7 +665,7 @@ class XTermWidget(QWidget):
         try:
             from src.core.terminal_session import classify_prompt
             tail = "\n".join(self._terminal_buffer[-2:]) + self._clean_ansi(self._ai_pending)
-            # Read-Host -AsSecureString echoes '*' per key: "Password: ****"
+# Read Host AsSecureString echoes ' ' per key: "Password: "
             last = tail.rsplit("\n", 1)[-1].rstrip().rstrip("*").rstrip()
             return classify_prompt(last, 0.0) == "secret"
         except Exception:
@@ -964,7 +960,6 @@ class XTermWidget(QWidget):
             self._tdebug(traceback.format_exc())
         
     # Ctrl+C root cause and the fix, measured with the real pty (2026-08-02):
-    #
     #   pywinpty's ConPTY backend spawns the shell with
     #   CREATE_NEW_PROCESS_GROUP, and Windows defines that flag to imply
     #   SetConsoleCtrlHandler(NULL, TRUE): the new process IGNORES Ctrl+C,
@@ -972,11 +967,9 @@ class XTermWidget(QWidget):
     #   correctly cooking our \x03 into CTRL_C_EVENT all along, and the
     #   shell, ping, python, runserver, all silently ignored it. (This is
     #   also why yesterday's helper-process CTRL_C broadcast did nothing.)
-    #
     #   The undo is the shell calling SetConsoleCtrlHandler(NULL, FALSE) in
     #   its own process at startup; children then start with Ctrl+C enabled
     #   and plain \x03 behaves exactly like a normal terminal.
-    #
     # Two command-line landmines cost a day each, do not regress them:
     #   * powershell -Command "quoted string": when spawned directly via
     #     CreateProcess (no cmd.exe in between), PS receives the QUOTES as
@@ -1072,7 +1065,7 @@ class XTermWidget(QWidget):
         env["COLORTERM"] = "truecolor"
         
         if PTY_AVAILABLE:
-            # --- START WINPTY (REAL TERMINAL) ---
+# START WINPTY (REAL TERMINAL)
             try:
                 # Console hiding is handled by runtime_hook_noconsole.py
                 cmd = self._get_shell_command()
@@ -1212,7 +1205,7 @@ class XTermWidget(QWidget):
                 self._start_qprocess_fallback(resolved_path, env)
             
         else:
-            # --- START QPROCESS (FALLBACK) ---
+# START QPROCESS (FALLBACK)
             self._tdebug("Using QProcess fallback (PTY_AVAILABLE=False)")
             self._start_qprocess_fallback(resolved_path, env)
 
@@ -1474,7 +1467,7 @@ class XTermWidget(QWidget):
                 pass
             self._process = None
             
-    # ── Edit-menu actions ────────────────────────────────────────────────
+# Edit menu actions
     # main_window's edit-action router calls term.copy()/paste()/cut()/
     # select_all() when the terminal has focus. None of these existed -
     # pressing Ctrl+V with the terminal focused raised an UNCAUGHT
@@ -1694,17 +1687,7 @@ class XTermWidget(QWidget):
                 self.file_operation_detected.emit(op_type, f"{src} → {dst}", 'running')
                 return
     
-    # ===== ASYNC FILE READING METHODS - NO BLOCKING =====
+# ASYNC FILE READING METHODS NO BLOCKING
     
 
-    
-
-    
-
-    
-    # ===== EMBEDDED TERMINAL - NO WINDOWS TERMINAL POPUP =====
-    
-
-    
-
-    
+# EMBEDDED TERMINAL NO WINDOWS TERMINAL POPUP

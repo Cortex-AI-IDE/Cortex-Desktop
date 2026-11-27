@@ -1,12 +1,8 @@
-# ------------------------------------------------------------
-# model.py
-#
 # Model name resolution and rendering utilities for the multi-LLM IDE.
 # Handles:
 # - Runtime main loop model selection
 # - Model name formatting for display
 # - 200k context model detection
-# ------------------------------------------------------------
 
 import os
 from typing import Optional
@@ -55,14 +51,14 @@ def render_model_name(model: str) -> str:
         Human-readable model display name
     """
     display_names = {
-        # ── Cortex ──────────────────────────────────────────────
+# Cortex
         "cortex-sonnet-4-5": "Cortex Sonnet 4.5",
         "cortex-sonnet-4":   "Cortex Sonnet 4",
         "cortex-opus-4-6":   "Cortex Opus 4.6",
         "cortex-opus-4":     "Cortex Opus 4",
         "cortex-haiku-3-5":  "Cortex Haiku 3.5",
 
-        # ── OpenAI (latest) ─────────────────────────────────────
+# OpenAI (latest)
         "gpt-4o":             "GPT-4o",
         "gpt-4o-mini":        "GPT-4o Mini",
         "gpt-4o-2024-11-20":  "GPT-4o (latest)",
@@ -75,22 +71,22 @@ def render_model_name(model: str) -> str:
         "o3":                 "OpenAI o3",
         "o3-mini":            "OpenAI o3 Mini",
 
-        # ── OpenAI Codex (code-specialised) ─────────────────────
+# OpenAI Codex (code specialised)
         "codex-mini-latest":  "OpenAI Codex Mini",
         "codex":              "OpenAI Codex",
 
-        # ── Google Gemini ───────────────────────────────────────
+# Google Gemini
         "gemini-2.0-flash":      "Gemini 2.0 Flash",
         "gemini-2.0-flash-lite": "Gemini 2.0 Flash Lite",
         "gemini-1.5-pro":        "Gemini 1.5 Pro",
         "gemini-1.5-flash":      "Gemini 1.5 Flash",
 
-        # ── DeepSeek ────────────────────────────────────────────
+# DeepSeek
         "deepseek-chat":     "DeepSeek Chat",
         "deepseek-coder":    "DeepSeek Coder",
         "deepseek-reasoner": "DeepSeek R1",
 
-        # ── Groq / Meta ─────────────────────────────────────────
+# Groq / Meta
         "llama-3.3-70b-versatile": "Llama 3.3 70B (Groq)",
         "llama-3.1-8b-instant":    "Llama 3.1 8B (Groq)",
     }
@@ -133,9 +129,7 @@ def get_runtime_main_loop_model(
     return DEFAULT_MODEL
 
 
-# ============================================================
 # ADDITIONAL MODEL UTILITIES
-# ============================================================
 
 def get_main_loop_model() -> str:
     """Get the current main loop model (falls back to the configured default)."""
@@ -198,9 +192,7 @@ def get_default_model() -> str:
     return DEFAULT_MODEL
 
 
-# ============================================================
 # CAMELCASE ALIASES
-# ============================================================
 
 getRuntimeMainLoopModel = get_runtime_main_loop_model
 getMainLoopModel = get_main_loop_model

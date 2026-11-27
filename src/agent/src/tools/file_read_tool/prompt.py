@@ -1,4 +1,3 @@
-# prompt.py
 # Prompt and description constants for FileReadTool.
 
 # Tool name constant. The app loads this class by dotted path, so the name stays.

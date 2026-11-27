@@ -161,7 +161,6 @@ async def aiter_offloaded(
         # next loop iteration, so no drain task is needed to free it. Spawning
         # one here only produced "Task was destroyed but it is pending" when
         # the loop was torn down before it finished.
-        #
         # No `return` in this block: returning from a finally swallows whatever
         # is propagating out, including the CancelledError that shuts this
         # generator down.

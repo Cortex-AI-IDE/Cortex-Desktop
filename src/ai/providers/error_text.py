@@ -63,7 +63,7 @@ def readable_api_error(body: str, limit: int = 600) -> str:
     return out[:limit]
 
 
-# ── Unknown model names ──────────────────────────────────────────────────────
+# Unknown model names
 # A provider that does not know a model name answers 400 or 404. Every provider
 # words it differently, so this matches the specific codes and phrases they use
 # rather than anything as loose as "not supported" - MiMo's "reasoning_content

@@ -39,7 +39,7 @@ from PyQt6.QtWidgets import QWidget
 from src.ui.tokens import TOKENS as T
 
 
-# ── Theme-aware colour ─────────────────────────────────────────────────────────
+# Theme aware colour
 # Spinners take one colour per tool kind (the palette in
 # src/ui/html/ai_chat/spinner_demo.html), picked for a dark background, and
 # they kept the QColor they were built with. On the light theme that left
@@ -89,7 +89,7 @@ def themed_color(color: QColor) -> QColor:
     return out
 
 
-# ── Shared easing helpers ──────────────────────────────────────────────────────
+# Shared easing helpers
 def _smoothstep(t: float) -> float:
     """Smooth cubic S-curve: 0→1."""
     t = max(0.0, min(1.0, t))
@@ -104,7 +104,7 @@ def _triangle(t: float) -> float:
     return 1.0 - abs(2.0 * (t % 1.0) - 1.0)
 
 
-# ── Base class ─────────────────────────────────────────────────────────────────
+# Base class
 class _BaseSpinner(QWidget):
     _INTERVAL = 16  # ~60 fps
     _alive = True   # guard flag: set False on destroyed to prevent use-after-free
@@ -195,9 +195,7 @@ class _BaseSpinner(QWidget):
         super().paintEvent(e)
 
 
-# ============================================================
 # 1. ArcSpinner, read: sweeping arc with a fading tail
-# ============================================================
 class ArcSpinner(_BaseSpinner):
     """
     A 270° arc that accelerates through its rotation with a
@@ -238,9 +236,7 @@ class ArcSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 2. DotsSpinner, terminal/bash: 3 chasing dots with bounce
-# ============================================================
 class DotsSpinner(_BaseSpinner):
     """
     3 dots orbit, each with a size pulse so the leading dot
@@ -274,9 +270,7 @@ class DotsSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 3. PulseRing, web_search: concentric ripple rings
-# ============================================================
 class PulseRing(_BaseSpinner):
     """
     Two concentric rings expanding outward and fading,
@@ -311,9 +305,7 @@ class PulseRing(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 4. BarsSpinner, grep: equaliser bars with smooth sine
-# ============================================================
 class BarsSpinner(_BaseSpinner):
     """
     5 bars (not 4) rising and falling with offset sine phases.
@@ -346,9 +338,7 @@ class BarsSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 5. OrbitSpinner, edit: two dots counter-orbiting
-# ============================================================
 class OrbitSpinner(_BaseSpinner):
     """
     Two dots orbit in opposite directions on the same track,
@@ -392,9 +382,7 @@ class OrbitSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 6. GridSpinner, thinking/fallback: 4×4 breathing grid
-# ============================================================
 class GridSpinner(_BaseSpinner):
     """
     4×4 grid of squares. Corner squares are hidden.
@@ -442,9 +430,7 @@ class GridSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 7. StackSpinner, list_dir: lines sweeping in from left
-# ============================================================
 class StackSpinner(_BaseSpinner):
     """
     4 horizontal lines that appear sequentially from left to right
@@ -484,9 +470,7 @@ class StackSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 8. PenSpinner, write: nib tip with an ink trail
-# ============================================================
 class PenSpinner(_BaseSpinner):
     """
     A triangular pen nib sweeps left→right with a wavy ink trail
@@ -536,9 +520,7 @@ class PenSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 9. ScatterSpinner, glob: particles scatter then contract
-# ============================================================
 class ScatterSpinner(_BaseSpinner):
     """
     6 particles fly outward from centre then snap back in.
@@ -578,9 +560,7 @@ class ScatterSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 10. RadarSpinner, search: radar sweep with fading trail
-# ============================================================
 class RadarSpinner(_BaseSpinner):
     """
     A sweep line rotates inside a dim ring, leaving a conical
@@ -637,9 +617,7 @@ class RadarSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 11. DownloadSpinner, web_fetch: arrow descending with pulse
-# ============================================================
 class DownloadSpinner(_BaseSpinner):
     """
     A single chevron-arrow descends with a leading glow,
@@ -690,9 +668,7 @@ class DownloadSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 12. CheckSpinner, task: rows filling left to right
-# ============================================================
 class CheckSpinner(_BaseSpinner):
     """
     3 rows sequentially fill from left to right, one at a time,
@@ -739,9 +715,7 @@ class CheckSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 13. NodesSpinner, team: triangle nodes with pulsing edges
-# ============================================================
 class NodesSpinner(_BaseSpinner):
     """
     3 nodes in a triangle. Edges pulse sequentially (A→B→C→A)
@@ -797,9 +771,7 @@ class NodesSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 14. TodoRingSpinner, todo/task: full 360° spinning ring with trail
-# ============================================================
 class TodoRingSpinner(_BaseSpinner):
     """
     A full 360° spinning ring spinner for todo/task in_progress state.
@@ -871,9 +843,7 @@ class TodoRingSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 15. MemorySpinner, memory: chip blocks writing to disk
-# ============================================================
 class MemorySpinner(_BaseSpinner):
     """
     Memory-save spinner: 3 horizontal bars (data blocks) that
@@ -924,9 +894,7 @@ class MemorySpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # 16. CompactionSpinner, compact: context folding into summary
-# ============================================================
 class CompactionSpinner(_BaseSpinner):
     """
     Compaction spinner: concentric rings that pulse inward
@@ -986,9 +954,7 @@ class CompactionSpinner(_BaseSpinner):
         p.end()
 
 
-# ═══════════════════════════════════════════════════════════════
 # 13. MermaidSpinner, mermaid / diagram rendering
-# ═══════════════════════════════════════════════════════════════
 class MermaidSpinner(QWidget):
     """
     Diamond pulsing spinner, echoes the Mermaid logo shape.
@@ -1128,10 +1094,8 @@ class MermaidSpinner(QWidget):
         p.end()
 
 
-# ============================================================
 # 15. NeuralSpinner, semantic search: vector space with
 #     converging dots + pulsing similarity connections
-# ============================================================
 class NeuralSpinner(_BaseSpinner):
     """
     Semantic search spinner, visualises vector similarity search.
@@ -1226,9 +1190,7 @@ class NeuralSpinner(_BaseSpinner):
         p.end()
 
 
-# ============================================================
 # FACTORY
-# ============================================================
 _SPINNER_MAP = {
     "read":               (ArcSpinner,      "tool_read"),
     "list_dir":           (StackSpinner,    "tool_read"),
@@ -1258,7 +1220,7 @@ _SPINNER_MAP = {
     "team":               (NodesSpinner,    "tool_team"),
     "mermaid":            (MermaidSpinner,  "tool_read"),
     "diagram":            (MermaidSpinner,  "tool_read"),
-    # ---- memory & compaction ----
+# memory & compaction
     "memory":             (MemorySpinner,   "tool_write"),
     "memory_write":       (MemorySpinner,   "tool_write"),
     "saving_memory":      (MemorySpinner,   "tool_write"),
