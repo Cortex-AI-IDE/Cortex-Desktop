@@ -187,17 +187,24 @@ class PermissionCard(QFrame):
             self.rejected.emit(self._rid)
 
     def _resolved_ok(self, label: str, color: str):
-        """Collapse to one line, like a finished tool row."""
+        """Allowed: the card goes away (the tool row shows what ran). Denied:
+        one short grey line. A green multi-line "Allowed once: <command>" was
+        left behind after every approval and read as a watermark."""
         self._resolved = True
         for sc in self._shortcuts:
             sc.setEnabled(False)
         self._clear()
+        if label != "Denied":
+            self.hide()
+            self.deleteLater()
+            return
         self._style_card(open_=False)
-        self._v.setContentsMargins(2, 2, 2, 2)
+        self._v.setContentsMargins(2, 0, 2, 0)
         what = (self._command if self._command and self._command not in _GATE_COMMANDS
                 else self._warning)
-        line = f"{label}: {what}" if what else label
-        lbl = self._label(line if len(line) <= 140 else line[:137] + "...", color, 12)
+        first = (what or "").strip().splitlines()[0] if (what or "").strip() else ""
+        line = f"Denied: {first}" if first else "Denied"
+        lbl = self._label(line if len(line) <= 90 else line[:87] + "...", T['muted'], 11)
         lbl.setWordWrap(False)
         self._v.addWidget(lbl)
 
