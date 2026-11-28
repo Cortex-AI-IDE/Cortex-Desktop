@@ -2298,6 +2298,17 @@ class ToolGroup(CollapsibleCard):
         if hasattr(card, 'gutter'):
             card.gutter.mark_done(ok)
 
+        # Run cards own their layout: the command block is already built, so
+        # hand the output to the card. The old path appended a second label
+        # that repeated the command (and only the first 200 chars of it).
+        from src.ui.tool_cards import TerminalCard
+        if isinstance(card, TerminalCard):
+            try:
+                card.set_result(data, ok)
+            except RuntimeError:
+                _swallow("fold a command result into its terminal card")
+            return
+
         # Refresh the count badge from the REAL result (replaces the
         # construction-time '0 items' placeholder).
         _badge = self._result_badge(data)
@@ -2389,18 +2400,8 @@ class ToolGroup(CollapsibleCard):
         if isinstance(card, GrepCard) and isinstance(data.get('matches'), list) and data['matches']:
             content = _grep_rows_html(data['matches']) or content
 
-        # Terminal cards: the console opens with the command it ran (the
-        # header shows it elided) instead of a separate purple command label.
-        from src.ui.tool_cards import TerminalCard
-        if isinstance(card, TerminalCard):
-            _cmd = (card._data.get("command") if hasattr(card, '_data') else None) or ""
-            if _cmd:
-                import html as _html
-                content = (f"<span style='color:{T['mono_muted']};'>$ {_html.escape(_cmd)}</span><br>"
-                           + content)
-            _exit = data.get('exit_code', data.get('returncode'))
-            if _exit is not None:
-                card.set_badge(f"exit {_exit}", error=_exit not in (0, "0"))
+        # Terminal cards never reach here: _update_rich_card hands their output
+        # straight to TerminalCard.set_result (see the branch above).
 
         lbl = QLabel(content)
         lbl.setWordWrap(True)

@@ -13,10 +13,12 @@ Phase 6 of the native chat migration.
 
 from __future__ import annotations
 from PyQt6.QtCore import Qt, QTimer, QEvent
-from PyQt6.QtGui import QTextCharFormat, QColor, QFont, QTextCursor, QFontMetrics
+from PyQt6.QtGui import (QTextCharFormat, QColor, QFont, QTextCursor, QFontMetrics,
+                         QTextOption, QTextLayout)
 from PyQt6.QtWidgets import (
     QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QSizePolicy, QPlainTextEdit, QStackedLayout, QTextBrowser,
+    QStyle,
 )
 
 # Tool cards live only in the chat panel, so they read the chat palette.
@@ -211,11 +213,14 @@ class ToolCardBase(QFrame):
         self.gutter = ToolGutter(tool_type)
         h.addWidget(self.gutter)
 
-        # Chevron (if collapsible)
+        # Chevron (if collapsible): the only affordance that says the header
+        # opens something, so it is a click target of its own, not decoration.
         self._chev = None
         if has_body:
             self._chev = QLabel("\u203A")  # \u203A same chevron as the group header
-            self._chev.setStyleSheet(f"color:{T['mono_muted']};font-size:11px;")
+            self._chev.setFixedWidth(12)
+            self._chev.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._chev.setToolTip("Expand or collapse")
             h.addWidget(self._chev)
 
         self._name_lbl = QLabel(name)
@@ -265,6 +270,17 @@ class ToolCardBase(QFrame):
         self._badge_lbl.setStyleSheet(
             f"color:{T[self._badge_token]};font-family:{T['font_ui']};font-size:11px;"
             f"background:transparent;")
+        self._style_chev()
+
+    def _style_chev(self):
+        """Chevron colour from the LIVE chat palette (theme switch safe)."""
+        if self._chev is None:
+            return
+        try:
+            self._chev.setStyleSheet(
+                f"color:{T['mono_muted']};background:transparent;font-size:11px;")
+        except RuntimeError:
+            pass  # silent-ok: the C++ object was already deleted
 
     def enterEvent(self, event):
         self.setStyleSheet(self._frame_qss(hover=True))
@@ -281,12 +297,25 @@ class ToolCardBase(QFrame):
         return super().eventFilter(obj, event)
 
     def _toggle(self):
+        self.set_collapsed(not self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        """Show or hide the body and keep the chevron in step with it.
+
+        The single place that owns the pair: every path (header click,
+        TerminalCard.reveal, a restored card) goes through here, so the
+        glyph can never disagree with the body's visibility.
+        """
         if not self._has_body:
             return
-        self._collapsed = not self._collapsed
-        self.body.setVisible(not self._collapsed)
-        if self._chev:
-            self._chev.setText("\u2304" if not self._collapsed else "\u203A")  # \u2304 / \u203A
+        self._collapsed = bool(collapsed)
+        try:
+            self.body.setVisible(not self._collapsed)
+            if self._chev is not None:
+                # \u2304 open, \u203A closed
+                self._chev.setText("\u203A" if self._collapsed else "\u2304")
+        except RuntimeError:
+            pass  # silent-ok: the C++ object was already deleted
 
     def set_badge(self, text: str, error: bool = False):
         self._badge_lbl.setText(text)
@@ -316,8 +345,7 @@ class ToolCardBase(QFrame):
         """
         try:
             self.setStyleSheet(self._frame_qss())
-            if self._chev:
-                self._chev.setStyleSheet(f"color:{T['mono_muted']};font-size:11px;")
+            self._style_chev()
             self._style_labels()
         except RuntimeError:
             pass  # silent-ok: the C++ object was already deleted
@@ -624,67 +652,301 @@ class ListDirCard(ToolCardBase):
                 self.body_layout.addWidget(row)
 
 
+class MonoBlock(QPlainTextEdit):
+    """Read-only mono block for a command or its output.
+
+    Text WRAPS: a 340-character one-liner (a chained PowerShell command) has
+    to be readable in place, not panned through horizontally, which is what
+    the owner saw as "partially, name only". Past `max_rows` wrapped rows the
+    block scrolls vertically instead of growing the card.
+    """
+
+    def __init__(self, text: str = "", max_rows: int = 10, color: str = "",
+                 parent=None):
+        super().__init__(parent)
+        self._max_rows = max(1, max_rows)
+        self._color = color or T["text"]
+        self._last_fit = None
+        self._fitting = False
+        self._pending_fit = False
+        self.setObjectName("monoBlock")
+        self.setReadOnly(True)
+        self.setFrameStyle(QFrame.Shape.NoFrame)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(0)
+        self.setStyleSheet(_mono_qss(self._color))
+        self.setPlainText(text or "")
+        QTimer.singleShot(0, self.refit)
+
+    def set_color(self, color: str):
+        self._color = color
+        self.setStyleSheet(_mono_qss(color))
+        # Font/size may have changed with the palette, so the cached wrap
+        # height is stale: drop it and measure again.
+        self._last_fit = None
+        self.refit()
+
+    def set_text(self, text: str):
+        self.setPlainText(text or "")
+        self._last_fit = None
+        self.refit()
+
+    def _text_width(self) -> int:
+        """Width for wrapping, taken from the widget, never from the viewport.
+
+        viewport().width() narrows when a vertical scrollbar appears, which
+        changed the row count, which changed the height, which toggled the
+        scrollbar. The pair oscillated until Qt aborted the process
+        (0xC0000409). Padding (8px a side) and the scrollbar are reserved
+        here instead.
+        """
+        sb = self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+        return max(40, self.width() - 2 * 9 - sb)
+
+    def refit(self):
+        """Height for the wrapped text, capped at max_rows.
+
+        Measured with QTextLayout: QPlainTextEdit's own document().size()
+        reports LINES, not pixels (8 for a command that is 96px tall), which
+        made the block one row high with the rest hidden.
+        """
+        if self._fitting:
+            return
+        self._fitting = True
+        try:
+            width = self._text_width()
+            if self.width() < 60:
+                return  # not laid out yet; resizeEvent refits
+            if self._last_fit and self._last_fit[0] == width:
+                return
+            line_h = max(1, self.fontMetrics().lineSpacing())
+            rows = _wrapped_line_count(self.toPlainText(), self.font(), width)
+            height = int(min(rows, self._max_rows) * line_h + 16)
+            self._last_fit = (width, height)
+            if height != self.height():
+                self.setFixedHeight(height)
+        except RuntimeError:
+            pass  # silent-ok: the C++ object was already deleted
+        finally:
+            self._fitting = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Deferred, never inline: setFixedHeight() inside resizeEvent re-enters
+        # the layout and Qt aborts the process (0xC0000409, seen on a 600px
+        # resize). One pending fit at a time.
+        if self._pending_fit:
+            return
+        self._pending_fit = True
+        QTimer.singleShot(0, self._deferred_fit)
+
+    def _deferred_fit(self):
+        self._pending_fit = False
+        self.refit()
+
+
+def _wrapped_line_count(text: str, font: QFont, width: int) -> int:
+    """Rows `text` occupies once wrapped to `width`, one paragraph at a time.
+
+    WrapAtWordBoundaryOrAnywhere matches the editor's own wrap mode, or a
+    long unbreakable token (a chained command) is measured as one row and the
+    block hides the rest.
+    """
+    if width < 40:
+        return 1
+    option = QTextOption()
+    option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+    rows = 0
+    for para in (text or "").split("\n"):
+        layout = QTextLayout(para, font)
+        layout.setTextOption(option)
+        layout.beginLayout()
+        used = 0
+        while True:
+            line = layout.createLine()
+            if not line.isValid():
+                break
+            line.setLineWidth(width)
+            used += 1
+        layout.endLayout()
+        rows += max(1, used)
+    return max(1, rows)
+
+
+def _mono_qss(color: str) -> str:
+    """Monospace block style shared by the command and output views."""
+    return (f"QPlainTextEdit {{ background:{T['md_code_bg']}; color:{color};"
+            f" border:1px solid {T['border']}; border-radius:6px;"
+            f" font-family:{T['font_mono']}; font-size:12px;"
+            f" padding:6px 8px; }}")
+
+
+def _terminal_command(data: dict) -> str:
+    """The command line from whichever key the bridge or a restore used."""
+    cmd = (data.get("command") or data.get("cmd")
+           or data.get("command_line") or data.get("script") or "")
+    if not cmd:
+        for key in ("arguments", "input"):
+            nested = data.get(key)
+            if isinstance(nested, dict):
+                cmd = (nested.get("command") or nested.get("cmd")
+                       or nested.get("script") or "")
+                if cmd:
+                    break
+    if not cmd:
+        cmd = data.get("info") or data.get("args") or ""
+    return str(cmd).strip()
+
+
 class TerminalCard(ToolCardBase):
-    """Terminal, command output with syntax highlighting."""
+    """Run command card: a summary, the full script, then its output.
+
+    Bug history: the old header elided the command to whatever fitted and the
+    body only existed once output arrived, so a multi-line shell block could
+    never be read anywhere in the UI (the owner's "partially, name only"
+    report). The command now always has its own scrollable block that is
+    visible without clicking the card.
+    """
+
+    _CMD_ROWS = 10      # rows shown before the script block scrolls
+    _OUT_ROWS = 12      # rows shown before the output block scrolls
+
     def __init__(self, data: dict, parent=None):
-        # Extract command from multiple possible keys (direct, nested args, etc.)
-        cmd = (data.get("command") or data.get("cmd")
-               or data.get("command_line") or data.get("script") or "")
-        # Also check nested 'arguments' or 'input' dicts (agent bridge variants)
-        if not cmd and isinstance(data.get("arguments"), dict):
-            _a = data["arguments"]
-            cmd = _a.get("command") or _a.get("cmd") or _a.get("script") or ""
-        if not cmd and isinstance(data.get("input"), dict):
-            _i = data["input"]
-            cmd = _i.get("command") or _i.get("cmd") or _i.get("script") or ""
-        # Last resort: extract from 'info' or 'args' keys
-        if not cmd:
-            cmd = data.get("info") or data.get("args") or ""
-        exit_code = data.get("exit_code") or data.get("returncode")
-        has_output = bool(data.get("output") or data.get("stdout"))
-        # Show correct tool name: Bash, PowerShell, or generic "Run"
-        label = data.get("tool_name") or data.get("label") or "Run"
-        self._data = data  # store for late-update (_update_rich_card)
-        # Header reads as a prompt line; the full command opens the console
-        # below instead of being repeated in a separate purple label.
-        super().__init__(label, f"$ {cmd}" if cmd else "", tool_type="terminal",
-                         has_body=has_output, parent=parent)
+        cmd = _terminal_command(data)
+        exit_code = data.get("exit_code", data.get("returncode"))
+        output = str(data.get("output") or data.get("stdout") or "")
+        label = str(data.get("tool_name") or data.get("label") or "Run")
+        # The activity name ("run_command") is not a label a reader wants.
+        if label.lower() in ("run_command", "command", "terminal", "shell",
+                             "execute"):
+            label = "Run"
+        # Header preview: the tool's own description when it supplied one,
+        # otherwise the first command line. Without it a collapsed card read
+        # as "name only" (the bug the owner reported), because the script now
+        # lives in the block below instead of being squeezed into the header.
+        summary = str(data.get("description") or data.get("summary") or "").strip()
+        if not summary and cmd:
+            _lines = cmd.splitlines()
+            summary = _lines[0].strip()
+            if len(_lines) > 1:
+                summary += f"  (+{len(_lines) - 1} lines)"
+        self._data = data  # kept for _update_rich_card / retheme
+        self._cmd = cmd
+        self._cmd_block = None
+        self._out_view = None
+        self._out_text = ""
+        self._out_ok = True
+        self._user_collapsed = False
+        super().__init__(label, summary, tool_type="terminal",
+                         has_body=bool(cmd or output), parent=parent)
         if exit_code is not None:
-            self.set_status(exit_code == 0)
-            self.set_badge(f"exit {exit_code}", error=exit_code != 0)
-        if has_output and self._has_body:
-            from src.ui.syntax_highlight import highlight_code
-            output = (data.get("output") or data.get("stdout", ""))[:5000]
-            out_color = T['text_dim'] if exit_code == 0 else T['red']
+            self.set_status(self._set_exit_badge(exit_code))
+        if cmd:
+            self._cmd_block = MonoBlock(cmd, self._CMD_ROWS, T["text"])
+            self.body_layout.addWidget(self._cmd_block)
+        if output:
+            self._render_output(output, str(exit_code).strip() in ("0", "None"))
+        self.reveal()
+
+    def reveal(self):
+        """Open the body: the script must be readable without a click.
+
+        A card the user collapsed stays collapsed. Output arriving mid-run
+        must not pop it open under the cursor they just clicked.
+        """
+        if not self._has_body or self._user_collapsed:
+            return
+        self.set_collapsed(False)
+
+    def _toggle(self):
+        """Header/chevron click: remembers that the user chose this state."""
+        super()._toggle()
+        self._user_collapsed = bool(self._collapsed)
+
+    def _set_exit_badge(self, exit_code) -> bool:
+        """Show 'exit N' only on failure; a clean run needs no badge."""
+        ok = str(exit_code).strip() == "0"
+        if ok:
+            self.set_badge("")
+        else:
+            self.set_badge(f"exit {exit_code}", error=True)
+        return ok
+
+    def set_result(self, data: dict, ok: bool = True) -> None:
+        """Fold tool_end output into the card.
+
+        The command block is NOT repeated: the old path prepended a
+        "$ <command>" line to the output label, which showed the truncated
+        command a second time and hid the real one.
+        """
+        output = str(data.get("output") or data.get("stdout") or "")
+        exit_code = data.get("exit_code", data.get("returncode"))
+        if exit_code is None:
+            ok = bool(ok)
+            if not ok and not output:
+                self.set_badge("failed", error=True)
+        else:
+            ok = self._set_exit_badge(exit_code)
+            self.set_status(ok)
+        if output:
+            self._render_output(output, ok)
+        elif not ok:
+            self.reveal()
+
+    def _render_output(self, output: str, ok: bool) -> None:
+        from src.ui.syntax_highlight import highlight_code
+        color = T["text_dim"] if ok else T["red"]
+        # Kept so retheme() can repaint this view: the highlight embeds the
+        # OLD palette inline, so a theme switch left stale colours (0.75ms
+        # per 5.7KB, cheap enough to redo).
+        self._out_text = output
+        self._out_ok = bool(ok)
+        if self._out_view is None:
             out = QTextBrowser()
             out.setOpenExternalLinks(False)
             out.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             out.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             out.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
             out.setMinimumWidth(0)
-            highlighted = highlight_code(output, "bash")
-            highlighted = highlighted.replace('\n', '<br>')
-            if cmd:
-                import html as _html
-                highlighted = (f"<span style='color:{T['mono_muted']};'>$ {_html.escape(cmd)}</span><br>"
-                               + highlighted)
-            css_md = build_markdown_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
-            css_cb = build_code_block_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
-            out.document().setDefaultStyleSheet(f'{css_md}\n{css_cb}')
-            html = f'<html><body><pre style="margin:0;padding:0;"><code>{highlighted}</code></pre></body></html>'
-            out.setHtml(html)
-            out.setStyleSheet(
-                f"background:{T['bg']};color:{out_color};"
-                f"font-family:{T['font_mono']};font-size:12px;"
-                f"border:none;border-radius:0px;padding:8px 10px;"
-            )
-            out.setMaximumHeight(240)
-            def _fit():
-                doc_h = int(out.document().size().height())
-                if doc_h > 0:
-                    out.setMinimumHeight(min(doc_h + 12, 200))
-            QTimer.singleShot(0, _fit)
             self.body_layout.addWidget(out)
+            self._out_view = out
+        out = self._out_view
+        highlighted = highlight_code(output[:8000], "bash").replace("\n", "<br>")
+        css_md = build_markdown_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
+        css_cb = build_code_block_css(chat_theme()).replace('<style>', '').replace('</style>', '').strip()
+        out.document().setDefaultStyleSheet(f'{css_md}\n{css_cb}')
+        out.setHtml('<html><body><pre style="margin:0;padding:0;"><code>'
+                    f'{highlighted}</code></pre></body></html>')
+        out.setStyleSheet(
+            f"background:{T['bg']};color:{color};"
+            f"font-family:{T['font_mono']};font-size:12px;"
+            f"border:none;border-radius:0px;padding:8px 10px;")
+        line_h = max(12, int(QFontMetrics(out.font()).lineSpacing()) + 3)
+        out.setMaximumHeight(self._OUT_ROWS * line_h + 20)
+        out.setMinimumHeight(0)
+
+        def _fit():
+            if self._out_view is None:
+                return
+            doc_h = int(out.document().size().height())
+            if doc_h > 0:
+                out.setMinimumHeight(min(doc_h + 12, self._OUT_ROWS * line_h + 4))
+        QTimer.singleShot(0, _fit)
+        self.reveal()
+
+    def retheme(self):
+        super().retheme()
+        try:
+            if self._cmd_block is not None:
+                self._cmd_block.set_color(T["text"])
+            if self._out_view is not None and self._out_text:
+                self._render_output(self._out_text, self._out_ok)
+        except RuntimeError:
+            pass  # silent-ok: the C++ object was already deleted
 
 
 class TaskCard(ToolCardBase):

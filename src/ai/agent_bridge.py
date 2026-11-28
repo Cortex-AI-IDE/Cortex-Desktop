@@ -87,6 +87,13 @@ _READ_ONLY_VERB_PREFIXES = (
 _BLOCKED_TAG = " ⚠️ [BLOCKED: No mutations, do actual work first]"
 _USER_WAIT_PREFIXES = ("ask ", "ask the user", "ask user", "wait for", "get user", "get approval")
 
+# run_command payload caps. The command used to be sliced to 200 chars before it
+# reached the UI, so a multi-line PowerShell block was unreadable on its card.
+# 8000 matches the timeline's per-string cap, so a restored card shows what the
+# live one did; output stays smaller because the card scrolls.
+_TERMINAL_CMD_MAX = 8000
+_TERMINAL_OUT_MAX = 4000
+
 
 def _is_continuation(message: str) -> bool:
     """A message that carries on the current task instead of starting a new one.
@@ -8444,8 +8451,13 @@ Required behavior:
                         _swallow()
 
             elif activity == "run_command":
-                cmd = args.get("command", "")
-                info["command"] = cmd[:200] if cmd else ""
+                cmd = str(args.get("command") or "")
+                info["command"] = cmd[:_TERMINAL_CMD_MAX] if cmd else ""
+                # A human summary ("Run scroll tests verbosely") lets the card
+                # header say what the command is for instead of printing it.
+                _desc = args.get("description") or args.get("summary") or ""
+                if _desc:
+                    info["description"] = str(_desc)[:200]
                 info["tool_name"] = tool_name  # "Bash" or "PowerShell"
                 info["label"] = tool_name      # TerminalCard display label
                 info["timeout"] = args.get("timeout", "")
@@ -8466,7 +8478,7 @@ Required behavior:
                 if unavailable_reason:
                     info["sandbox_unavailable_reason"] = unavailable_reason
                 if status in ("complete", "error") and result_str:
-                    info["output"] = result_str[:2000]
+                    info["output"] = result_str[:_TERMINAL_OUT_MAX]
 
             elif activity in ("team_create", "team_delete"):
                 info["team_name"] = args.get("name", "")
