@@ -1,13 +1,10 @@
 """Pictures of Cortex, for the paired phone.
 
-Global on purpose: this lives in the app, not in a project, and writes to
-~/.cortex/shots, so asking for a screenshot needs no setup in any project.
-
-Only the Cortex window is ever captured, never the whole desktop. When Cortex is
-in front the screen is read, because that is the only way to get what Chromium
-draws in the sidebar, editor and terminal. When something else may be on top it
-renders its own window instead: reading the screen there would send whatever
-private window is covering it.
+Global on purpose: lives in the app, not a project, and writes to ~/.cortex/shots,
+so a screenshot needs no setup in any project. Only the Cortex window is ever
+captured. When Cortex is in front the screen is read, the only way to get what
+Chromium draws in the sidebar/editor/terminal; when something else may be on top
+it renders its own window instead, so a covering private window is not sent.
 """
 from __future__ import annotations
 

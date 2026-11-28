@@ -2,15 +2,10 @@
 recon.py -- non-destructive reconnaissance against an in-scope target.
 
 Everything here is a read: resolve a name, open a TCP connection, read a
-banner, fetch a certificate, request a page. No payloads are sent that
-attempt to change state on the target, which is what separates this module
-from web_probe.py.
-
-Every entry point calls ScopeGuard.require() before it touches the network,
-so an out-of-scope host fails before a socket exists. Port scanning is
-threaded but capped, and infrastructure ports (SMB/RDP/VNC/telnet) are
-refused outright: hitting those across a LAN is indistinguishable from a
-worm, and they are never part of a web app assessment.
+banner, fetch a certificate, request a page (web_probe.py is the one that
+changes state). Every entry point calls ScopeGuard.require() before touching
+the network, and infrastructure ports (SMB/RDP/VNC/telnet) are refused
+outright: hitting those across a LAN is indistinguishable from a worm.
 """
 
 from __future__ import annotations

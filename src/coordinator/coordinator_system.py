@@ -170,17 +170,10 @@ class CoordinationEngine:
         get_code_context: Callable = None,
     ) -> CoordinationResult:
         """Execute full coordination workflow.
-        
-        Args:
-            text: User's message
-            images: List of image dicts (from frontend)
-            mode: Performance mode (efficient/auto/performance/ultimate)
-            call_vision: Function to call vision API (images, text) -> str
-            call_llm: Function to call main LLM (messages, model) -> str
-            get_code_context: Function to get current code context
-        
-        Returns:
-            CoordinationResult with aggregated response
+
+        ``call_vision(images, text) -> str``, ``call_llm(messages, model) ->
+        str`` and ``get_code_context()`` are injected by the caller. Returns a
+        CoordinationResult with the aggregated response.
         """
         start_time = time.time()
         images = images or []

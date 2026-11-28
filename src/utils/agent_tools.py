@@ -199,15 +199,7 @@ class AgentLifecycleManager:
         prompt: str,
         task_id: Optional[str] = None
     ) -> AgentTask:
-        """Spawn a new agent task.
-        
-        Args:
-            agent_type: Type of agent to spawn
-            prompt: Task prompt for the agent
-            task_id: Optional custom task ID
-        
-        Returns:
-            AgentTask with pending status
+        """Spawn a new agent task. Returns an AgentTask with pending status.
         """
         task = AgentTask(
             task_id=task_id or str(uuid.uuid4())[:8],
@@ -345,18 +337,8 @@ def should_use_parallel(
 ) -> bool:
     """Decide whether to run agents in parallel or sequential.
 
-    Concurrency rules:
-    - Vision tasks: ALWAYS sequential first (vision -> main)
-    - Read-only research: Parallel freely
-    - Write-heavy implementation: Sequential per file set
-    
-    Args:
-        has_images: Whether images are involved
-        task_description: Description of the task
-        mode: Performance mode
-    
-    Returns:
-        True for parallel execution, False for sequential
+    Vision tasks are always sequential (vision -> main); read-only research
+    runs parallel; write-heavy implementation is sequential per file set.
     """
     # Images ALWAYS require sequential (vision first)
     if has_images:

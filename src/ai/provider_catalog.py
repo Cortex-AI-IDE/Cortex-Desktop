@@ -1,14 +1,10 @@
 """Which model names does a provider's API actually accept?
 
-Used only AFTER a provider has rejected a request as an unknown model, to tell
-the user what it does accept (providers/error_text.unknown_model_message).
-Fetches GET /models with the user's own key - free and read-only - and caches
-the answer on disk for six hours so repeated failures don't repeat the call.
-Never raises.
-
-Provider lists are incomplete: DeepSeek serves deepseek-v4-flash without
-listing it. So this is never used to block or rewrite a request, only to
-explain one that has already failed.
+Used only AFTER a provider rejected a request as an unknown model, to tell the
+user what it does accept (providers/error_text.unknown_model_message). Fetches
+GET /models with the user's key, read-only, and caches on disk for six hours.
+Never raises. Provider lists are incomplete, so this never blocks or rewrites a
+request, it only explains one that already failed.
 """
 from __future__ import annotations
 

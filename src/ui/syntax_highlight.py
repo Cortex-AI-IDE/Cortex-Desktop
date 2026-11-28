@@ -2,14 +2,10 @@
 syntax_highlight.py, Code syntax highlighting for Qt Rich Text
 ================================================================
 
-Converts code blocks to syntax-highlighted HTML using inline styles
-that Qt's QTextBrowser can render.
-
-Supports: Python, JavaScript, TypeScript, JSON, HTML, CSS, Bash, Rust, Go,
-          C/C++, SQL, YAML, TOML, Dockerfile, PowerShell, Ruby, PHP, Swift,
-          Kotlin, Java, C#, Lua, Perl, R, Scala, Haskell, Elixir, Zig, Nim
-
-Style: italic keywords, bold types, bold+italic type keywords.
+Converts code blocks to syntax-highlighted HTML using inline styles Qt's
+QTextBrowser can render. Supports ~30 languages (Python, JS/TS, JSON, HTML,
+CSS, Bash, Rust, Go, C/C++, SQL, YAML and more). Style: italic keywords, bold
+types, bold+italic type keywords.
 """
 
 from __future__ import annotations

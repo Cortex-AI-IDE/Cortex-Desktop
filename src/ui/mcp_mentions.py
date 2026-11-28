@@ -1,12 +1,11 @@
 """@-mention menu for the chat input: type "@" to call a connected MCP tool.
 
-The same affordance as the "/" skill menu, pointed at MCP: "@" opens a
-filterable list of every tool the connected servers expose, and picking one
-inserts a compact "@tool " token expanded into an explicit instruction at send
-time. MCP tools were already in the model's function list, but the user had no
-way to see what was available or insist on one, and the model sometimes fell
-back to a built-in instead. Matching is pure so it can be unit-tested; the
-popup widget is reused from slash_commands as a CHILD widget, never top-level.
+Like the "/" skill menu: "@" opens a filterable list of every tool the
+connected servers expose, and picking one inserts a compact "@tool " token
+expanded into an explicit instruction at send time. MCP tools were already in
+the model's function list, but the user had no way to see what was available or
+insist on one. Matching is pure and unit-tested; the popup reuses
+slash_commands' CHILD widget.
 """
 from __future__ import annotations
 
@@ -18,16 +17,10 @@ from typing import Dict, List, Optional
 def parse_at_query(text: str, cursor_pos: Optional[int] = None) -> Optional[str]:
     """Return the MCP query being typed AT THE CURSOR, or None.
 
-    "@" starts a query when it is at the start of the text or follows
-    whitespace, so an email address or a decorator does NOT trigger it, and
-    the fragment up to the cursor contains no whitespace (a space ends it).
-
-        "@"                     -> ""       (show all)
-        "@ctx"                  -> "ctx"    (filter)
-        "use @query" (at end)   -> "query"
-        "a@b.com"               -> None     (not a token boundary)
-        "@ctx more"             -> None     (space ended the token)
-        ""                      -> None
+    "@" starts a query only at the text start or after whitespace (so emails
+    and decorators do not trigger it), and the fragment to the cursor must hold
+    no whitespace: "@" -> "", "@ctx" -> "ctx", "use @query" -> "query",
+    "a@b.com" -> None, "@ctx more" -> None, "" -> None.
     """
     if not text:
         return None

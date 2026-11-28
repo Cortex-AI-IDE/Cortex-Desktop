@@ -1,17 +1,10 @@
 """
 edit_impact.py - cross-file breakage detection for AI edits.
 
-The AI edits file A and removes or renames a function. File A still compiles, so
-nothing complains at edit time, but file B still does `from a import
-removed_function` and Python only finds out at import, when the user runs the
-project.
-
-The fix is deterministic and executes no code: compile() the new content so a
-syntax error is reported in the tool result; AST-diff old and new for top-level
-function/class names to find what this edit removed; then scan the project's
-other .py files for imports or uses of each removed symbol and name the exact
-files and lines. The result is appended to the Edit/Write ToolResult, so the
-model is told in the same turn to fix the caller too.
+The AI removes a function from file A; A still compiles, but file B still
+imports it and Python only fails at import time. Deterministic, runs no code:
+compile() the new content, AST-diff top-level names to find what was removed,
+then scan other .py files for imports/uses and name the exact files and lines.
 """
 
 from __future__ import annotations

@@ -102,14 +102,14 @@ async def get_url_markdown_content(url: str) -> str:
     """
     Fetch a URL and return its content as plain text.
 
-    Uses BeautifulSoup for smart extraction with non-content removal.
-    Handles redirects and common HTTP errors gracefully.
+    BeautifulSoup extraction with non-content removed; redirects and common HTTP
+    errors are handled.
 
     Args:
         url: The URL to fetch.
 
     Returns:
-        Extracted text content from the page, or empty string on failure.
+        Page text, or an empty string on failure.
     """
     url = sanitize_url(url)
 

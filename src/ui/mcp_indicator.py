@@ -1,14 +1,9 @@
 """Text for the status-bar MCP indicator.
 
-Pure functions, kept out of main_window for the same reason as
-skill_indicator: main_window imports the chat panel, which imports
-QtWebEngineWidgets, which Qt refuses to load once a QApplication exists, so
-no test can import main_window directly.
-
-The indicator answers a question the UI could not answer: when the agent used
-an MCP tool on its own, was a server actually reached, and which one? The only
-evidence used to be a line in cortex.log. This is the MCP twin of the skill
-badge, so the two read as one family in the status bar.
+Pure functions, kept out of main_window (which pulls in QtWebEngineWidgets,
+which Qt refuses to load once a QApplication exists). The indicator answers
+whether an agent-run MCP tool actually reached a server, and which one; the
+only evidence used to be a line in cortex.log. The MCP twin of the skill badge.
 """
 from __future__ import annotations
 

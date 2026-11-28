@@ -278,16 +278,12 @@ class NativeChatBridge(QObject):
     def _fallback_text(self, response: str) -> str:
         """What to show when the turn's last segment put no visible text on screen.
 
-        `response` is the WHOLE turn's text: every segment the model wrote
-        between tool calls, joined. Emitting all of it re-showed every
-        progress line of the turn as one wall at the bottom (2026-10-19
-        17:41: a deploy run hit the 50-turn limit on an Edit, and its 25
-        "Code is live. Now HTTPS." lines, already shown between the tool
-        cards, were repeated as a 2,497-char block). Only the last segment -
-        what came after the last tool - is the answer that may be missing -
-        plus any paragraph that never streamed at all (a provider that hands
-        over its answer only at the end). Nothing when the turn ended on a
-        tool call. A turn without tools keeps the whole response, as before.
+        `response` is the WHOLE turn's text; emitting all of it re-showed every
+        progress line as one wall (2026-10-19: a deploy run repeated 25
+        already-shown lines as a 2,497-char block). Only the last segment (what
+        came after the last tool) is the answer that may be missing, plus any
+        paragraph that never streamed at all. Nothing when the turn ended on a
+        tool call; a turn without tools keeps the whole response.
         """
         if not self._turn_had_tool:
             return response

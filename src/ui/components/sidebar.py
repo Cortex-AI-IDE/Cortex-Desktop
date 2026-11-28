@@ -559,14 +559,11 @@ class SidebarWidget(QWidget):
     def _rename_selected_path(self, payload: str):
         """Open the rename dialog for whatever the page reports as selected.
 
-        `payload` is {"var": selectedPath, "dom": the highlighted row's path,
-        "focus": document.hasFocus()}. All three are logged, so a mismatch
-        between the row the user sees highlighted and the path the page
-        variable holds is visible in cortex.log instead of being guessed at.
-
-        A page that reports no focus means this F2 was aimed at the other half
-        of the window (the editor), so the pending fallback runs instead of
-        opening a rename dialog over a tree the user was not looking at.
+        `payload` is {"var": selectedPath, "dom": highlighted row path,
+        "focus": document.hasFocus()}; all three are logged so a mismatch is
+        visible in cortex.log. No focus means this F2 was aimed at the editor,
+        so the pending fallback runs instead of a rename dialog over a tree the
+        user was not looking at.
         """
         import json as _json
         try:
@@ -620,18 +617,11 @@ class SidebarWidget(QWidget):
     def set_project(self, path):
         """Point the Explorer at `path`.
 
-        Bug history (startup restore showed an empty tree until the user
-        re-opened the folder by hand): `_bridge` is NOT created in __init__.
-        It is created in _init_webview, which showEvent schedules 100ms
-        later, so that the window can appear before Chromium is spun up.
-        During a launch, main_window's deferred session restore fires while
-        that timer is still pending, hit `if self._bridge:` -> None, and the
-        restored project path was dropped on the floor. The sidebar then
-        loaded with an empty project path and displayed nothing.
-
-        The two startup timers race, which is why this only happened on some
-        launches. Remember the path here and replay it in _init_webview when
-        the bridge finally exists, so set_project() cannot lose it.
+        `_bridge` is NOT created in __init__ but in _init_webview, which
+        showEvent schedules 100ms later. A launch's deferred session restore
+        can fire first, hit `if self._bridge:` -> None, and drop the path (the
+        two timers race, so it only happened on some launches). The path is
+        remembered here and replayed in _init_webview once the bridge exists.
         """
         self._pending_project_path = path
         if self._bridge:
@@ -681,15 +671,11 @@ class SidebarWidget(QWidget):
         """Rename whatever the Explorer has selected, folders included.
 
         MainWindow._rename_file calls this before falling back to the open
-        editor tab. F2 carries a window-wide QAction shortcut, so the key never
-        reaches Sidebar.eventFilter; this method is how the sidebar answers
-        that action.
-
-        `on_declined` runs when the page reports it does not hold the keyboard,
-        i.e. the keystroke was meant for the editor after all.
-
-        Returns True once the request has been handed to the page, so the
-        caller stops instead of renaming an unrelated editor tab.
+        editor tab; F2 carries a window-wide QAction shortcut, so the key never
+        reaches Sidebar.eventFilter. `on_declined` runs when the page reports it
+        does not hold the keyboard (the keystroke was for the editor). Returns
+        True once handed to the page, so the caller stops instead of renaming an
+        unrelated editor tab.
         """
         if not self._web_view:
             if on_declined:
@@ -712,13 +698,12 @@ class SidebarWidget(QWidget):
     def switch_panel(self, idx: int):
         """Move the sidebar to a panel (0 Explorer, 1 Search, 3 Git Review).
 
-        Bug history: this called ``self._bridge.onPanelSwitched(idx)``, which
-        is the pyqtSlot JS calls to ANNOUNCE a switch the user already made -
-        its body is a record-and-return. Nothing was ever sent to the page,
-        so the toolbar's "Hide/Show Review Panel" button did nothing at all.
-        The page's own entry point is SidebarBridge.switchPanel(), reached
-        through _call_js like every other Python-to-sidebar call (it queues
-        until sidebar.html has loaded, so early calls are not lost).
+        This used to call ``self._bridge.onPanelSwitched(idx)``, which is the
+        pyqtSlot JS calls to ANNOUNCE a switch - its body is a record-and-
+        return, so nothing reached the page and the toolbar's "Hide/Show Review
+        Panel" button did nothing. The page entry point is
+        SidebarBridge.switchPanel(), reached through _call_js (which queues
+        until sidebar.html has loaded).
         """
         idx = int(idx)
         if not self._bridge:

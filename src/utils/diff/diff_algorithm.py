@@ -2,14 +2,9 @@
 Smart Diff Algorithm - word-level diff computation.
 
 Computes character/word-level differences between two text versions: tokenizes
-into words, whitespace and symbols, matches sequences with difflib, and returns
-ranges of changed regions rather than rendered output. Works on code, markdown
-and plain text.
-
-Usage:
-    changes = compute_word_diff("old code", "new code")
-    # {'removed_ranges': [(start, end), ...],   # positions in old text
-    #  'added_ranges': [(start, end), ...]}     # positions in new text
+into words, whitespace and symbols, matches with difflib, and returns ranges of
+changed regions (not rendered output). Works on code, markdown and plain text.
+compute_word_diff returns {'removed_ranges': [...], 'added_ranges': [...]}.
 """
 
 import logging
@@ -23,16 +18,9 @@ def tokenize(text: str) -> List[str]:
     """
     Tokenize text into words, whitespace runs, and individual symbols.
 
-    Tokenizer behavior:
-    - Words: consecutive letters/digits/underscores (Unicode-aware)
-    - Whitespace: consecutive spaces/tabs/newlines
-    - Symbols: individual punctuation characters
-    
-    Args:
-        text: Input text to tokenize
-        
-    Returns:
-        List of token strings
+    Words are consecutive letters/digits/underscores (Unicode-aware),
+    whitespace is consecutive spaces/tabs/newlines, symbols are single
+    punctuation characters.
     """
     tokens = []
     i = 0
@@ -71,18 +59,17 @@ def compute_word_diff(
     change_threshold: float = 0.5
 ) -> dict:
     """
-    Compute word-level differences between two text versions, identifying
-    exactly which character ranges were added or removed.
+    Word-level diff between two texts, as character ranges.
 
     Args:
-        old_text: Original text (before edit).
-        new_text: Modified text (after edit).
-        change_threshold: If more than this fraction changed (0.0-1.0), return
-            empty ranges, since the texts are too different for a word diff.
+        old_text: Text before the edit.
+        new_text: Text after the edit.
+        change_threshold: Above this fraction changed (0.0-1.0) the texts are
+            too far apart for a word diff, so empty ranges are returned.
 
     Returns:
-        Dict with 'removed_ranges' and 'added_ranges', each a list of
-        (start, end) tuples.
+        Dict with 'removed_ranges' (in old_text) and 'added_ranges' (in new_text),
+        each a list of (start, end) tuples.
     """
     # Tokenize both texts
     old_tokens = tokenize(old_text)
@@ -149,16 +136,9 @@ def compute_word_diff(
 
 def find_adjacent_pairs(markers: List[str]) -> List[Tuple[int, int]]:
     """
-    Find adjacent delete/add line pairs for inline diff highlighting.
-    
-    When you have consecutive deleted lines followed by added lines,
-    this pairs them up for side-by-side comparison.
-    
-    Args:
-        markers: List of line markers ('-', '+', ' ')
-        
-    Returns:
-        List of (deleted_line_index, added_line_index) pairs
+    Find adjacent delete/add line pairs for inline diff highlighting: when
+    consecutive deleted lines are followed by added lines, pair them for
+    side-by-side comparison. Returns (deleted_index, added_index) tuples.
     """
     pairs = []
     i = 0
@@ -203,18 +183,9 @@ def get_changed_lines(
 ) -> dict:
     """
     Get line-level diff with markers (simpler than word-level).
-    
-    Useful for quick overview before computing detailed word diffs.
-    
-    Args:
-        old_text: Original text
-        new_text: Modified text
-        
-    Returns:
-        Dictionary with:
-        - 'lines': List of (marker, line_text) tuples
-                   marker is '-', '+', or ' ' (context)
-        - 'markers': List of just the markers for find_adjacent_pairs()
+
+    Returns a dict with 'lines' (list of (marker, line_text) tuples, marker is
+    '-', '+', or ' ') and 'markers' (just the markers, for find_adjacent_pairs).
     """
     import difflib
     

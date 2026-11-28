@@ -135,17 +135,8 @@ def evaluate_time_based_trigger(
     gap_threshold_minutes: float = 60.0,
 ) -> Optional[Dict[str, Any]]:
     """
-    Check if time-based trigger should fire.
-    
-    Returns gap info when trigger fires, or None when it doesn't.
-    
-    Args:
-        messages: List of message dicts
-        query_source: Query source string (must be main thread)
-        gap_threshold_minutes: Minutes threshold for triggering
-        
-    Returns:
-        Dict with 'gap_minutes' or None
+    Check if the time-based trigger should fire. Returns a dict with
+    'gap_minutes' when it fires, or None when it does not.
     """
     # Require explicit main-thread query source
     if not query_source or not query_source.startswith('repl_main_thread'):
@@ -192,18 +183,10 @@ def time_based_microcompact(
 ) -> Optional[Dict[str, Any]]:
     """
     Time-based microcompact: clear old tool results when cache has expired.
-    
+
     When the gap since the last assistant message exceeds the threshold,
-    content-clear all but the most recent N compactable tool results.
-    
-    Args:
-        messages: List of message dicts
-        query_source: Query source string
-        gap_threshold_minutes: Minutes threshold
-        keep_recent: Number of recent tool results to keep
-        
-    Returns:
-        Dict with 'messages' (modified) or None if no compaction needed
+    content-clear all but the most recent N compactable tool results. Returns a
+    dict with 'messages', or None if no compaction is needed.
     """
     trigger = evaluate_time_based_trigger(messages, query_source, gap_threshold_minutes)
     if not trigger:
@@ -275,21 +258,10 @@ def microcompact_messages(
     gap_threshold_minutes: float = 60.0,
     keep_recent: int = 5,
 ) -> Dict[str, Any]:
-    """
-    Main microcompact entry point.
-    
-    Tries time-based microcompact first. If it fires, returns cleared messages.
-    Otherwise returns messages unchanged (cached MC would be handled separately).
-    
-    Args:
-        messages: List of message dicts
-        query_source: Query source string
-        time_based_enabled: Whether time-based MC is enabled
-        gap_threshold_minutes: Gap threshold for time-based trigger
-        keep_recent: Number of recent tool results to keep
-        
-    Returns:
-        Dict with 'messages' and optional compaction info
+    """Main microcompact entry point.
+
+    Tries time-based microcompact first; if it fires, returns cleared
+    messages, otherwise returns messages unchanged.
     """
     # Try time-based microcompact
     if time_based_enabled:

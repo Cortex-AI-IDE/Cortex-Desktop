@@ -136,16 +136,13 @@ def error_message(e: Any) -> str:
 
 def get_errno_code(e: Any) -> Optional[str]:
     """
-    Extract the errno code (e.g., 'ENOENT', 'EACCES') from a caught error.
-    Returns None if the error has no code.
-    
-    Replaces the `(e as NodeJS.ErrnoException).code` cast pattern.
-    
+    Errno code ('ENOENT', 'EACCES') from a caught error, else None.
+
     Args:
-        e: The error value
-        
+        e: The caught error.
+
     Returns:
-        Error code string or None
+        Code string, or None when the error carries no code.
     """
     # Check for 'code' attribute first
     if e and isinstance(e, Exception):
@@ -169,13 +166,6 @@ def get_errno_code(e: Any) -> Optional[str]:
 def is_enoent(e: Any) -> bool:
     """
     True if the error is ENOENT (file or directory does not exist).
-    Replaces `(e as NodeJS.ErrnoException).code === 'ENOENT'`.
-    
-    Args:
-        e: The error value
-        
-    Returns:
-        True if error is ENOENT
     """
     return get_errno_code(e) == 'ENOENT'
 

@@ -1,12 +1,12 @@
 """Turn scan findings into a document you can hand to a client.
 
 The rest of the package answers "is there a problem?"; this answers "what do I
-send the person who hired me?". Adds what a client reads for: the engagement
-block (client, reference, assessor, and the authorization the work ran under),
-severity counts and one risk score, per-finding location/rationale/evidence
-with unconfirmed findings labelled, and a remediation each. Two formats, same
-content: Markdown and a self-contained HTML file (inline CSS, no network).
-Renders findings others produced; it decides nothing about scope.
+send the person who hired me?". Adds the engagement block (client, reference,
+assessor, authorization), severity counts and one risk score, per-finding
+location/rationale/evidence with unconfirmed findings labelled, and a
+remediation each. Two formats, same content: Markdown and a self-contained HTML
+file (inline CSS, no network). Renders findings others produced; decides nothing
+about scope.
 """
 
 from __future__ import annotations

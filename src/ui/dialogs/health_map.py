@@ -1,17 +1,10 @@
 """
 Web-based Project Health dialog for Cortex IDE (EXPERIMENTAL).
 
-Hosts a QWebEngineView rendering src/ui/html/health_map/health_map.html and
-exposes a small QWebChannel bridge onto src.core.project_health. It mirrors
-MemoryManagerDialog deliberately: same page subclass, same channel binding, same
-"queue JS until loaded" helper and timed state push with retries, because those
-exist for real failures (white flash on cold start, runJavaScript evaporating
-before load, Chromium refusing file:// subresources under setHtml without a
-baseUrl).
-
-A scan parses thousands of files, so the slot returns {"pending": true} at once
-and the payload arrives over dataChanged from a worker thread; PyQt queues that
-signal onto the GUI thread, so the slot touching the webview stays safe.
+Hosts a QWebEngineView rendering health_map.html and a QWebChannel bridge onto
+src.core.project_health. A scan parses thousands of files, so the slot returns
+{"pending": true} at once and the payload arrives over dataChanged from a
+worker thread (PyQt queues it onto the GUI thread, keeping the webview safe).
 """
 
 from __future__ import annotations
@@ -112,12 +105,11 @@ class HealthMapBridge(QObject):
         """Last payload built this session, or "" if none.
 
         Deliberately NOT the on-disk cache: <project>/.cortex/health_map.json
-        stores per-file parse results keyed by path, not the rendered
-        nodes/edges/symbols, which are derived (edges need the whole module
-        table, AFFECTED needs the graph to BFS). Serialising both would
-        duplicate every fact and let the copies disagree. This in-memory copy
-        just gives an instant first paint when the dialog reopens in one
-        session; scan(force=False) already reuses unchanged entries.
+        stores per-file parse results keyed by path, not the derived
+        nodes/edges/symbols (edges need the whole module table, AFFECTED needs a
+        graph BFS), so the copies cannot disagree. This in-memory copy gives an
+        instant first paint when the dialog reopens in one session;
+        scan(force=False) already reuses unchanged entries.
         """
         return self._last_payload
 

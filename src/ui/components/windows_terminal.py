@@ -1,15 +1,11 @@
 """
 PATH resolver thread used by the terminal.
 
-The Windows-only terminal widgets that used to live here are gone: the
-editor ships the xterm.js terminal on every platform, so the only thing
-still imported from this module is ``PathResolverThread``.
-
-That thread runs on every platform, so the directory lists below are per
-platform. The lists only *prepend* directories that really exist, and they
-prepend them ahead of the inherited PATH so a toolchain installed outside
-the login shell (Homebrew, pyenv, nvm, cargo, Flutter, the Android SDK) is
-still found when the app is launched from a desktop icon instead of a shell.
+The Windows-only terminal widgets that used to live here are gone; the xterm.js
+terminal ships on every platform, so only ``PathResolverThread`` is still
+imported. Its per-platform lists only prepend directories that really exist, so
+a toolchain installed outside the login shell (Homebrew, pyenv, nvm, cargo) is
+still found when the app is launched from a desktop icon.
 """
 
 from __future__ import annotations

@@ -153,18 +153,13 @@ def should_offer_from_probes(min_failures: int = 2) -> bool:
 
 
 def widget_is_blank(widget) -> Optional[bool]:
-    """True if *widget* rendered as a single flat colour.
+    """True if *widget* rendered as a single flat colour. ADVISORY ONLY.
 
-    ADVISORY ONLY. This must never be the sole reason to tell a user their
-    graphics driver is broken, because it cannot see a QWebEngineView
-    reliably: grab() renders through Qt's paint system while the page is
-    composited by Chromium, so a perfectly healthy panel can come back as a
-    flat colour. It did exactly that on a working machine, reporting every
-    panel blank while the file tree was plainly visible on screen, after
-    reporting "painting normally" on the same machine the day before.
-
-    Returns None when the widget cannot be judged (too small, not visible,
-    grab failed), so callers can tell "no evidence" apart from "blank".
+    Never the sole reason to call a user's driver broken: it cannot see a
+    QWebEngineView reliably (grab() renders through Qt while Chromium
+    composites the page), and once reported every panel blank on a working
+    machine. Returns None when the widget cannot be judged, so callers can tell
+    "no evidence" from "blank".
     """
     try:
         if widget is None or not widget.isVisible():
@@ -188,14 +183,10 @@ def widget_is_blank(widget) -> Optional[bool]:
 
 def screen_colours(widget) -> Optional[Dict]:
     """What the screen really shows where *widget* sits.
-
-    Reads the desktop, not the widget. That is what widget_is_blank() cannot
-    do: grab() goes through Qt's paint system and misses what Chromium
-    composites, while this sees the same pixels the user does, so a panel
-    that loaded and never painted is caught in either render mode.
-
-    Returns {"colours": n, "sample": "#rrggbb"}, or None when it cannot be
-    read (hidden, too small, or a platform that refuses, such as Wayland).
+    Reads the desktop, not the widget, so it sees what Chromium composites
+    (unlike widget_is_blank's Qt-paint grab). Returns
+    {"colours": n, "sample": "#rrggbb"}, or None when it cannot be read
+    (hidden, too small, or a platform that refuses, such as Wayland).
     """
     try:
         if widget is None or not widget.isVisible():

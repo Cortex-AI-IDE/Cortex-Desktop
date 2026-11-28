@@ -10,21 +10,10 @@ from typing import Optional
 
 
 async def isPathGitignored(filePath: str, cwd: str) -> bool:
-    """
-    Checks if a path is ignored by git (via `git check-ignore`).
-    
-    This consults all applicable gitignore sources: repo `.gitignore` files
-    (nested), `.git/info/exclude`, and the global gitignore.
-    
-    Exit codes: 0 = ignored, 1 = not ignored, 128 = not in a git repo.
-    Returns `false` for 128, so callers outside a git repo fail open.
-    
-    Args:
-        filePath: The path to check (absolute or relative to cwd)
-        cwd: The working directory to run git from
-        
-    Returns:
-        True if path is gitignored
+    """True if a path is gitignored (via `git check-ignore`).
+
+    Consults nested .gitignore, .git/info/exclude and the global gitignore.
+    Exit 128 (not a repo) returns False, so callers outside a repo fail open.
     """
     loop = asyncio.get_event_loop()
     

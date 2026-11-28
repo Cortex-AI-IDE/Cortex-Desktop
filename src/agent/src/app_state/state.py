@@ -42,18 +42,10 @@ def getSessionId() -> str:
 
 def regenerateSessionId(set_current_as_parent: bool = False) -> str:
     """
-    Regenerate the session ID.
-
-    Called on every chat boundary (New Chat, History open, project switch) by
-    AgentBridge.start_fresh_session(). Without this roll, the session id stays
-    frozen for the whole process and every message of the run lands in one
-    sessions row, because Database.create_session() is INSERT OR IGNORE.
-
-    Args:
-        set_current_as_parent: If True, save current session as parent
-
-    Returns:
-        New session UUID string
+    Regenerate the session ID at every chat boundary (New Chat, History open,
+    project switch). Without this roll the id stays frozen for the whole
+    process and every message lands in one sessions row, since
+    Database.create_session() is INSERT OR IGNORE. Returns the new UUID.
     """
     previous_session_id = STATE.session_id
     STATE.session_id = str(uuid4())

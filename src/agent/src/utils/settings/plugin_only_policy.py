@@ -15,15 +15,15 @@ CustomizationSurface = str  # 'skills', 'commands', 'hooks', 'agents', etc.
 def isRestrictedToPluginOnly(surface: CustomizationSurface) -> bool:
     """
     Check whether a customization surface is locked to plugin-only sources.
-    
-    "Locked" means user-level and project-level sources are skipped for that surface.
-    Managed (policySettings) and plugin-provided sources always load.
-    
+
+    "Locked" means user-level and project-level sources are skipped for that
+    surface; managed (policySettings) and plugin-provided sources always load.
+
     Args:
-        surface: The customization surface to check
-        
+        surface: The customization surface to check.
+
     Returns:
-        True if surface is restricted to plugin-only sources
+        True if the surface is restricted to plugin-only sources.
     """
     # In full implementation, would read from policy settings
     # For now, default to False (no restrictions)

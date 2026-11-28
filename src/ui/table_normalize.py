@@ -411,15 +411,9 @@ def normalize_dash_separator_tables(text: str) -> str:
 
 
 def normalize_headerless_pipe_tables(text: str) -> str:
-    """Fix tables where header row lacks leading | but separator/data rows have it.
-
-    Catches patterns like:
-        Git Status Summary| Status | Count |
-                                              (optional blank lines)
-        |--------|-------|
-        | data1  | data2 |
-
-    Also catches header rows directly followed by |---| separator (no blank line).
+    """Fix tables whose header row lacks a leading | but whose separator/data
+    rows have one (also header rows directly followed by |---| with no blank
+    line).
     """
     _SEP_RE = re.compile(r'^\s*\|(?:[-:\s]+\|)+\s*$')
     lines = text.split('\n')
@@ -606,15 +600,9 @@ def fix_table_column_counts(text: str) -> str:
 
 
 def fix_separator_first_tables(text: str) -> str:
-    """Fix tables that start with a separator line and have no header row.
-
-    Pattern:
-        |---------|--------|---------|
-        | data1   | data2  | data3  |
-        | data4   | data5  | data6  |
-
-    Generates a blank header so mistune recognizes it as a table.
-    Also strips orphan trailing empty columns (e.g. ``| val | |``).
+    """Fix tables that start with a separator line and have no header row, e.g.
+    |---|---| followed by data rows. Generates a blank header so mistune
+    recognizes it as a table, and strips orphan trailing empty columns.
     """
     _SEP_RE = re.compile(r'^\s*\|(?:[-:\s]+\|)+\s*$')
     lines = text.split('\n')
@@ -661,15 +649,11 @@ def fix_separator_first_tables(text: str) -> str:
 def _merge_excess_pipes(text: str) -> str:
     """Re-align table rows to the separator row's column count.
 
-    The separator row (|---|---|...) is the *source of truth* for how many
-    columns the table is supposed to have.  When an LLM emits cell content
-    that itself contains ``|`` (e.g. ``FramelessWindowHint | WindowStaysOnTopHint``),
-    the header / data rows end up with MORE pipe-splits than the separator.
-    Mistune then creates phantom columns and the table breaks.
-
-    Strategy: find the separator, count its columns (N), then merge excess
-    cells in every other row back into the Nth cell so all rows have exactly
-    N columns.
+    The separator row (|---|---|...) is the source of truth for column count.
+    When a cell contains ``|`` (e.g. ``FramelessWindowHint | WindowStaysOnTopHint``),
+    header/data rows get more pipe-splits than the separator, mistune creates
+    phantom columns, and the table breaks. Finds the separator, counts N, then
+    merges excess cells in every other row into the Nth cell.
     """
     _SEP_RE = re.compile(r'^\s*\|([\s\-:]+\|)+\s*$')
     lines = text.split('\n')
@@ -745,15 +729,11 @@ def _merge_excess_pipes(text: str) -> str:
 def escape_pipes_in_table_cells(text: str) -> str:
     """Escape | characters inside table cell content that would break parsing.
 
-    When an LLM emits table cell content containing literal pipe characters
-    (e.g. CSS like ``border:1px solid |rgba(…)|`` or values like ``rgba(255,255,255,0.85)|
-    from a mis-split row``), the extra pipes create phantom columns and shift
-    all subsequent cells.  This function detects rows that have MORE pipe
-    separators than the table's header row and merges excess cells back.
-
-    Strategy:  Walk through consecutive pipe rows.  The first non-separator
-    row sets the column count (N).  Any data row with more than N cells gets
-    its excess cells merged back into the last real cell.
+    When a cell contains literal pipes (CSS like ``border:1px solid |rgba(...)|``
+    or a mis-split row), the extra pipes create phantom columns and shift later
+    cells. Walks consecutive pipe rows: the first non-separator row sets the
+    column count N, and any row with more than N cells has its excess merged
+    back into the last real cell.
     """
     lines = text.split('\n')
     result: list[str] = []
@@ -837,18 +817,10 @@ def _run_table_pipeline(t: str) -> str:
 def normalize_table_markdown(text: str, timeout: Optional[float] = 1.0) -> str:
     """Run the full table normalization pipeline.
 
-    CRITICAL: This runs on the main thread during streaming. For very large
-    responses (>50KB), the 11 regex passes can block the UI for seconds.
-    Skip normalization for large text to keep the UI responsive.
-
-    A hard timeout (default 1 s) prevents a single buggy normalizer from
-    freezing the entire UI, something that *has* happened when the AI agent
-    edits this file and introduces catastrophic regex backtracking.
-
-    ``timeout=None`` runs the pipeline INLINE on the calling thread with no
-    worker-thread spawn — for the background prose render thread, where
-    blocking is free and spawning an extra OS thread per tick was pure
-    waste (~7 thread spawns/second during streaming).
+    Runs on the main thread during streaming, so text >50KB is skipped and a
+    hard 1 s timeout stops a buggy normalizer freezing the UI (regex
+    backtracking here has done exactly that). ``timeout=None`` runs inline on
+    the calling thread, for the background render thread where blocking is free.
     """
     # Size guard: skip table normalization for large text to prevent UI freeze.
     # Large responses rarely have inline tables that need splitting.

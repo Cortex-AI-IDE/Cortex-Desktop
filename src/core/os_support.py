@@ -1,17 +1,10 @@
-"""Windows 10 versions that Microsoft no longer updates, and a notice for them.
+"""Windows 10 versions Microsoft no longer updates, and a notice for them.
 
-Why this exists (Microsoft Store crash report, 2026-11, Cortex 3.0.78):
-FAIL_FAST c0000602 raised by Windows itself on Cortex's main thread, in
-Qt WebEngine (Chromium) -> msctf.dll -> TextInputFramework.dll ->
-CoreMessaging.dll. The PC ran Windows 10 21H1, build 19043.1081 (June 2021),
-never updated. That is a bug in Windows' own text-input component, fixed by
-later Windows updates. Cortex cannot avoid it: Chromium 140 always uses the
-Windows text-input framework (the old TSFImeSupport switch is gone).
-
-What Cortex can do is tell the user, once in a while, that their Windows no
-longer receives fixes and that updating it stops these sudden closes.
-
-Qt-free at import time; the notice imports Qt only when shown.
+Store crash report, 2026-11 (Cortex 3.0.78): FAIL_FAST c0000602 raised by
+Windows itself in Qt WebEngine -> msctf.dll -> TextInputFramework.dll on an
+unpatched Windows 10 21H1. A bug in Windows' text-input component, fixed by
+later updates; Chromium 140 always uses that framework, so Cortex can only
+tell the user their Windows no longer receives fixes. Qt-free at import time.
 """
 from __future__ import annotations
 

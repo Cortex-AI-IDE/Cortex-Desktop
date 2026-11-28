@@ -1,15 +1,9 @@
 """
 Model deprecation utilities for Cortex AI IDE.
 
-Tracks deprecated models and their retirement dates across all providers.
-Generates user-friendly warnings to prevent broken API calls to retired models.
-
-Supports all Cortex IDE providers:
-  - Anthropic (Claude)
-  - OpenAI (GPT, o1, o3, Codex)
-  - Google Gemini
-  - DeepSeek
-  - Groq
+Tracks deprecated models and their retirement dates across providers
+(Anthropic, OpenAI, Gemini, DeepSeek, Groq) and generates warnings so callers
+do not send requests to retired models.
 """
 
 from typing import Dict, Literal, Optional, TypedDict
@@ -132,21 +126,10 @@ def getDeprecatedModelInfo(
     modelId: str,
     provider: Optional[APIProvider] = None,
 ) -> DeprecationInfo:
-    """
-    Check if a model is deprecated and get its deprecation info.
+    """Return deprecation info for a model, or {'isDeprecated': False}.
 
-    Server-published deprecations win for models the server knows, the same
-    layering used for limits, pricing, provider, thinking and aliases; the
-    built-in table is the offline fallback and still covers legacy ids that are
-    not in the server catalog.
-
-    Args:
-        modelId: Full model ID string (e.g. 'claude-3-opus-20240229').
-        provider: Optional provider name; checks all providers when omitted.
-
-    Returns:
-        DeprecationInfo with the retirement date when deprecated, else
-        {'isDeprecated': False}.
+    Server-published deprecations win; the built-in table is the offline
+    fallback and still covers legacy ids absent from the server catalog.
     """
     # Server-published deprecations win for models the server knows — the
     # same layering used for limits, pricing, provider, thinking and aliases.
@@ -227,18 +210,8 @@ def getModelDeprecationWarning(
 
 def getActiveDeprecations() -> list[Dict]:
     """
-    Get list of all models with active deprecation warnings.
-
-    Returns:
-        List of dicts with model info and retirement dates
-
-    Example:
-        getActiveDeprecations()
-        → [
-            {'key': 'claude-3-opus', 'modelName': 'Claude 3 Opus', ...},
-            {'key': 'gpt-3.5-turbo', 'modelName': 'GPT-3.5 Turbo', ...},
-            ...
-          ]
+    Get all models with active deprecation warnings: a list of dicts with model
+    info and retirement dates.
     """
     return [
         {
@@ -258,11 +231,7 @@ def isModelDeprecated(modelId: str) -> bool:
         modelId: Model ID string to check
 
     Returns:
-        True if model is deprecated
-
-    Example:
-        isModelDeprecated('claude-3-opus-20240229') → True
-        isModelDeprecated('claude-sonnet-4-20250514') → False
+        True if model is deprecated.
     """
     info = getDeprecatedModelInfo(modelId)
     return info['isDeprecated']

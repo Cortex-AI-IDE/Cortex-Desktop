@@ -4,9 +4,8 @@ Enforced structurally, not by prompt. Hard-coded auto-rejects run first (file
 outside scope.allow_paths, deny_paths violation, deleted test file or dropped
 assertion count, secret-looking string in the diff), then a review request goes
 to a different provider/model where possible. Unparseable reviewer output FAILS
-CLOSED (approved=False), so a broken reviewer never reads as "no objections".
-Without this, a passing suite ended the loop even if the agent deleted the
-failing test to get there.
+CLOSED, so a broken reviewer never reads as "no objections" (without this, a
+passing suite ended the loop even if the agent deleted the failing test).
 """
 
 from __future__ import annotations
@@ -269,15 +268,12 @@ riskFlags may include: "large-diff", "test-deleted", "test-weakened", "touched-d
 def _call_reviewer_model(provider_value: str, model_id: str, goal: str, diff_text: str,
                           deny_paths: List[str], attempts_summary: str,
                           usage_out: Optional[Dict[str, int]] = None) -> str:
-    """Makes the single-shot review completion call. Isolated as its own
-    function so it can be monkeypatched in tests without touching the real
-    provider registry.
+    """Makes the single-shot review completion call. Isolated so tests can
+    monkeypatch it without touching the real provider registry.
 
-    `usage_out`, if given, is filled in-place with the REAL input/output
-    token counts the provider reports on its ChatResponse (agent_loop.md §9
-    cost accounting) -- kept as an optional out-param rather than changing
-    the return type so run_review()'s call_model_fn injection point (used
-    by tests) doesn't need to change shape.
+    `usage_out`, if given, is filled in-place with the real input/output token
+    counts from the ChatResponse; kept as an out-param so run_review()'s
+    call_model_fn injection point does not change shape.
     """
     from src.ai.providers import get_provider_registry, ProviderType, ChatMessage
 

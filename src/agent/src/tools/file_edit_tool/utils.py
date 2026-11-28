@@ -264,16 +264,16 @@ def apply_edit_to_file(
     replace_all: bool = False,
 ) -> str:
     """
-    Transform edits to ensure replace_all always has a boolean value.
-    
+    Apply an edit, normalising replace_all to a boolean.
+
     Args:
-        original_content: Original file content
-        old_string: String to replace
-        new_string: Replacement string
-        replace_all: Whether to replace all occurrences
-        
+        original_content: File content before the edit.
+        old_string: Text to replace.
+        new_string: Replacement text.
+        replace_all: Replace every occurrence instead of the first.
+
     Returns:
-        Updated content with edit applied
+        Updated content.
     """
     if replace_all:
         f = lambda content, search, replace: content.replace(search, replace)
@@ -313,18 +313,8 @@ def get_patch_for_edit(
     replace_all: bool = False,
 ) -> Dict[str, Any]:
     """
-    Applies an edit to a file and returns the patch and updated file.
-    Does not write the file to disk.
-    
-    Args:
-        file_path: Path to the file
-        file_contents: Current file contents
-        old_string: String to replace
-        new_string: Replacement string
-        replace_all: Whether to replace all occurrences
-        
-    Returns:
-        Dictionary with 'patch' (StructuredPatchHunk[]) and 'updatedFile' (str)
+    Applies an edit to a file and returns the patch and updated file. Does not
+    write to disk. Returns 'patch' (StructuredPatchHunk[]) and 'updatedFile'.
     """
     return get_patch_for_edits(
         file_path=file_path,
@@ -424,16 +414,14 @@ def get_snippet_for_two_file_diff(
     file_b_contents: str,
 ) -> str:
     """
-    Used for attachments, to show snippets when files change.
-    
-    TODO: Unify this with the other snippet logic.
-    
+    Diff snippet for attachments, shown when files change.
+
     Args:
-        file_a_contents: Content of first file
-        file_b_contents: Content of second file
-        
+        file_a_contents: Content of the first file.
+        file_b_contents: Content of the second file.
+
     Returns:
-        Formatted diff snippet with line numbers
+        Formatted diff snippet with line numbers.
     """
     # Import diff library
     try:
@@ -561,16 +549,7 @@ def get_snippet(
 ) -> Dict[str, Any]:
     """
     Gets a snippet from a file showing the context around a single edit.
-    This is a convenience function that uses the original algorithm.
-    
-    Args:
-        original_file: Original file content
-        old_string: Text to replace
-        new_string: Replacement text
-        context_lines: Number of lines to show before and after the change
-        
-    Returns:
-        Dictionary with 'snippet' and 'startLine'
+    Returns a dict with 'snippet' and 'startLine'.
     """
     # Use the original algorithm
     before = original_file.split(old_string)[0] if old_string in original_file else ''
@@ -664,14 +643,9 @@ DESANITIZATIONS: Dict[str, str] = {
 
 def _desanitize_match_string(match_string: str) -> Dict[str, Any]:
     """
-    Normalizes a match string by applying specific replacements.
-    This helps handle when exact matches fail due to formatting differences.
-    
-    Args:
-        match_string: String to desanitize
-        
-    Returns:
-        Dictionary with 'result' and 'appliedReplacements'
+    Normalize a match string by applying specific replacements, to handle exact
+    matches failing due to formatting differences. Returns 'result' and
+    'appliedReplacements'.
     """
     result = match_string
     applied_replacements = []
@@ -694,16 +668,17 @@ def normalize_file_edit_input(
     edits: List[EditInput],
 ) -> Dict[str, Any]:
     """
-    Normalize the input for the FileEditTool.
-    If the string to replace is not found in the file, try with a normalized version.
-    Returns the normalized input if successful, or the original input if not.
-    
+    Normalize FileEditTool input.
+
+    If the string to replace is not found verbatim, retry against a normalized
+    form of it; the original input comes back unchanged when neither matches.
+
     Args:
-        file_path: Path to the file
-        edits: List of edits to normalize
-        
+        file_path: Path to the file.
+        edits: Edits to normalize.
+
     Returns:
-        Dictionary with normalized file_path and edits
+        Dict with normalized file_path and edits.
     """
     if len(edits) == 0:
         return {"file_path": file_path, "edits": edits}
@@ -780,17 +755,9 @@ def are_file_edits_equivalent(
     original_content: str,
 ) -> bool:
     """
-    Compare two sets of edits to determine if they are equivalent
-    by applying both sets to the original content and comparing results.
-    This handles cases where edits might be different but produce the same outcome.
-    
-    Args:
-        edits1: First set of edits
-        edits2: Second set of edits
-        original_content: Original file content
-        
-    Returns:
-        True if edits are equivalent, False otherwise
+    Compare two sets of edits by applying both to the original content and
+    comparing results, so edits that differ but produce the same outcome count
+    as equivalent.
     """
     # Fast path: check if edits are literally identical
     if len(edits1) == len(edits2):

@@ -643,17 +643,12 @@ _skill_dir_commands_cache: Dict[str, List[Command]] = {}
 
 async def getSkillDirCommands(cwd: str) -> List[Command]:
     """
-    Loads all skills from both /skills/ and legacy /commands/ directories.
+    Load skills from /skills/ and the legacy /commands/ directories.
 
-    Skills from /skills/ directories:
-    - Only support directory format: skill-name/SKILL.md
-    - Default to user-invocable: true (can opt-out with user-invocable: false)
-
-    Skills from legacy /commands/ directories:
-    - Support both directory format (SKILL.md) and single .md file format
-    - Default to user-invocable: true (user can type /cmd)
-
-    Uses simple memoization (not lodash memoize)
+    /skills/ accepts only the directory form (skill-name/SKILL.md); /commands/
+    also accepts a single .md file. Both default to user-invocable, so a skill
+    can be typed as /name and opts out with user-invocable: false. Memoized per
+    cwd.
     """
     # Check cache
     if cwd in _skill_dir_commands_cache:
@@ -959,17 +954,15 @@ def activateConditionalSkillsForPaths(
 ) -> List[str]:
     """
     Activates conditional skills (skills with paths frontmatter) whose path
-    patterns match the given file paths. Activated skills are added to the
-    dynamic skills map, making them available to the model.
-
-    Uses gitignore-style matching (would use 'ignore' library in full implementation),
-    matching the behavior of CORTEX.md conditional rules.
+    patterns match the given file paths, adding them to the dynamic skills map
+    the model sees. Matching is gitignore-style, same as CORTEX.md rules.
 
     Args:
-        file_paths: Array of file paths being operated on
-        cwd: Current working directory (paths are matched relative to cwd)
+        file_paths: Paths being operated on.
+        cwd: Paths are matched relative to this directory.
+
     Returns:
-        Array of newly activated skill names
+        Names of newly activated skills.
     """
     if len(conditional_skills) == 0:
         return []

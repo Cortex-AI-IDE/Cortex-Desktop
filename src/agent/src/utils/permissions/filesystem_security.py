@@ -1,14 +1,10 @@
 """
 Filesystem security and permission system for Cortex AI IDE.
 
-Provides file safety validation, dangerous file/directory detection, path
-traversal prevention, and the permission decision framework for AI agent file
-operations. Provider-agnostic, so it works with Anthropic, OpenAI, Gemini,
-DeepSeek, Groq and SiliconFlow alike.
-
-Phases: dangerous file/directory lists and path safety validation; the
-permission decision framework (deny/ask/allow); internal path allowances and
-working-directory scoping.
+File safety validation, dangerous file/directory detection, path traversal
+prevention, and the permission decision framework (deny/ask/allow) for agent
+file operations, plus internal path allowances and working-directory scoping.
+Provider-agnostic.
 """
 
 import logging
@@ -211,17 +207,10 @@ def check_path_safety_for_auto_edit(path: str) -> dict:
     """
     Check whether a path is safe for auto-editing (acceptEdits mode).
 
-    Covers suspicious Windows path patterns (NTFS streams, 8.3 names, long path
-    prefixes), dangerous files (.bashrc, .gitconfig, .git/, .vscode/, .idea/)
-    and path traversal. Checks the original path AND its resolved symlink paths,
-    so a symlink to a protected file cannot bypass the check.
-
-    Args:
-        path: The path to check for safety.
-
-    Returns:
-        Dict with `safe`; when unsafe it also carries `message` and `reason`
-        (one of dangerous_file, windows_pattern, ...).
+    Covers suspicious Windows path patterns, dangerous files (.bashrc,
+    .gitconfig, .git/, .vscode/) and traversal. Checks the original path AND
+    its resolved symlink paths, so a symlink cannot bypass the check. Returns a
+    dict with `safe`; when unsafe it also carries `message` and `reason`.
     """
     # Get all paths to check (original + symlink resolved paths)
     paths_to_check = get_paths_for_permission_check(path)
@@ -270,18 +259,8 @@ def check_path_safety_for_auto_edit(path: str) -> dict:
 
 def is_path_safe_for_edit(path: str) -> dict:
     """
-    Convenience wrapper for check_path_safety_for_auto_edit.
-    
-    Args:
-        path: Path to validate
-        
-    Returns:
-        Safety check result dictionary
-        
-    Example:
-        >>> result = is_path_safe_for_edit('/home/user/.gitconfig')
-        >>> if not result['safe']:
-        ...     print(f"Unsafe: {result['message']}")
+    Convenience wrapper for check_path_safety_for_auto_edit. Returns the
+    safety-check result dict.
     """
     return check_path_safety_for_auto_edit(path)
 
@@ -487,13 +466,6 @@ def check_write_permission(
 def is_path_in_working_directories(path: str, working_directories: list[str]) -> bool:
     """
     Check if path is within any of the allowed working directories.
-    
-    Args:
-        path: Path to check
-        working_directories: List of allowed working directory paths
-        
-    Returns:
-        True if path is within any working directory
     """
     if not working_directories:
         return False

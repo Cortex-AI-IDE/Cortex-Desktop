@@ -364,14 +364,8 @@ class SiliconFlowEmbeddings:
     
     def generate_embeddings_batch(self, texts: List[str], batch_size: int = 16) -> List[EmbeddingResult]:
         """
-        Generate embeddings for multiple texts.
-        
-        Args:
-            texts: List of texts to embed
-            batch_size: Batch size for API calls
-        
-        Returns:
-            List of EmbeddingResult objects
+        Generate embeddings for multiple texts in batches. Returns a list of
+        EmbeddingResult objects.
         """
         if not texts:
             return []

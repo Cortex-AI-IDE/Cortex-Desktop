@@ -2,13 +2,10 @@
 verifier.py, The Verifier Gate (agent_loop.md §4).
 
 The only component in the loop allowed to declare pass/fail on objective
-criteria. Runs real commands (L1), parses their output into structured
-Failure objects with STABLE ids (file + rule/test name, never a line
-number, so a formatting change can't fake "progress"), and compares two
-runs to detect real improvement vs. regression vs. a stall.
-
-Zero model involvement here by design, see agent_loop.md line 35:
-"the verifier lives in L1, not L3... never a model judgment."
+criteria. Runs real commands (L1), parses output into structured Failure objects
+with STABLE ids (file + rule/test name, never a line number, so a formatting
+change can't fake progress), and compares two runs to detect improvement vs.
+regression vs. stall. Zero model involvement by design (agent_loop.md line 35).
 """
 
 from __future__ import annotations

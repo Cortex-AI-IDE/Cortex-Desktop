@@ -1,17 +1,8 @@
 """Send a recording to the Cortex server and get text back.
 
-The audio goes to our server, which holds the Deepgram key and forwards it.
-The key is never on this machine, for the same reason the OCR key
-is not: anything written to a client can be read off it.
-
-Two callers exist and they share one implementation:
-
-  * the mic button in the chat panel, which records a .wav file;
-  * a Telegram voice note, which arrives as OGG/Opus bytes.
-
-``transcribe_bytes`` is the blocking core. ``transcribe_async`` is the GUI
-wrapper and adds the thread hop, because uploading on the GUI thread would
-freeze the window for the length of a network round trip.
+The audio goes to our server, which holds the Deepgram key; the key is never on
+this machine. ``transcribe_bytes`` is the blocking core; ``transcribe_async``
+adds the thread hop so the upload does not freeze the GUI.
 """
 from __future__ import annotations
 
@@ -44,15 +35,10 @@ def transcribe_bytes(
 ) -> Tuple[str, str]:
     """Transcribe in-memory audio. Blocking; safe off the GUI thread.
 
-    Returns ``(text, error)``: exactly one of the two is meaningful, and an
-    empty ``text`` with an empty ``error`` means the recording held no words.
-
-    ``language`` is the voice language picked next to the mic ("en", "ml",
-    "hi", "ar"). The server routes on it: Deepgram has no Malayalam, so "ml"
-    is transcribed by another model there (MAI-Transcribe 2).
-
-    ``mime`` is what the server is told the bytes are. The mic sends
-    ``audio/wav``; Telegram voice notes are ``audio/ogg``.
+    Returns ``(text, error)``: exactly one is meaningful, and both empty means
+    the recording held no words. ``language`` ("en", "ml", "hi", "ar") routes on
+    the server; Deepgram has no Malayalam, so "ml" uses MAI-Transcribe 2.
+    ``mime`` declares the bytes: the mic sends audio/wav, Telegram audio/ogg.
     """
     size = len(data)
     if not data:

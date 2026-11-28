@@ -88,13 +88,10 @@ class TerminalBridge(QObject):
 
 class AsyncFileReader(QThread):
     """
-    Async file reader for terminal - prevents UI freezing.
-
-    Reads files in background thread for smooth terminal experience.
-
-    Imported at module level by `xterm_terminal.py`, so the name has to exist
-    here even though nothing on this platform calls `read_file_async` yet.
-    Removing it turns that import into an ImportError and takes the whole
+    Async file reader for terminal - reads in a background thread to avoid UI
+    freezing. Imported at module level by xterm_terminal.py, so the name must
+    exist here even though nothing on this platform calls read_file_async yet;
+    removing it turns that import into an ImportError and takes the whole
     Terminal panel down.
     """
 

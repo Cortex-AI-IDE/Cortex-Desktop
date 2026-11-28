@@ -1,16 +1,10 @@
 """Keeping long MCP (browser) sessions moving and their context small.
 
-Two findings from the 2026-10-19 chrome-devtools sessions. First, browser work
-did not count as progress: auto-continue only continues a cycle that made
-progress, and progress meant Write / Edit / Bash / PowerShell, so a task driven
-by click / fill / navigate_page made "0 mutations" and stopped after cycle 1 of
-5 with todos pending. is_mcp_action tells real MCP actions from reads.
-
-Second, stale page snapshots filled the context: chrome-devtools returns the
-page's accessibility tree from take_snapshot and many actions, one was 187,737
-chars, and 35 of them added ~325K chars in an hour. Only the newest snapshot
-describes the page, so prune_stale_snapshots keeps it in full and cuts the older
-ones to a one-line note, keeping whatever the tool said before the snapshot.
+Two fixes from the 2026-10-19 chrome-devtools sessions. Auto-continue only
+counted Write/Edit/Bash as progress, so a click/fill/navigate task stopped after
+cycle 1 with todos pending; is_mcp_action counts real MCP actions. And stale
+page snapshots filled the context (one was 187,737 chars), so
+prune_stale_snapshots keeps the newest in full and cuts older ones to a note.
 """
 from __future__ import annotations
 

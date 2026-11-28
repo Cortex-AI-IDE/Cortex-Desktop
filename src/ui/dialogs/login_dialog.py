@@ -1,15 +1,11 @@
 """The full-screen sign-in window shown when nobody is signed in.
 
-Built before the main window, so it reads colours from the same source as
-everything else: the named theme from Settings if set, else the Cortex mode
-main.py resolved into tokens. The old version painted #141417 / #06b6d4
-regardless, so a Tokyo Night or Light user met a card from no theme. Text
-colours are composited onto their surface and nudged to WCAG AA; the button
-label follows the accent's luminance. brand_mark_dark.png is the LIGHT-ink
-mark (the name is the background, not the ink), scaled at the device pixel
-ratio. The password is typed on the web page in the OAuth loopback flow, so
-there are no credential fields here. Closing without signing in returns
-Rejected and main.py exits, which is the point of the gate.
+Built before the main window, it reads colours from the same source as
+everything else (the named theme if set, else the resolved Cortex mode), so a
+Tokyo Night or Light user does not meet a card from no theme. Text is
+composited for WCAG AA; brand_mark_dark.png is the light-ink mark. Password is
+typed on the web page (OAuth loopback), so there are no credential fields.
+Closing without signing in returns Rejected and main.py exits.
 """
 from __future__ import annotations
 
@@ -49,17 +45,13 @@ DOT_SIZE        = 1
 
 
 def _asset(relative: str) -> str:
-    """Absolute path to a bundled asset - dev tree and PyInstaller alike.
+    """Absolute path to a bundled asset, dev tree and PyInstaller alike.
 
-    A bare relative path resolves against the PROCESS WORKING DIRECTORY, which
-    is the repo root only by luck. Launch Cortex from anywhere else - or from
-    a frozen build, where the files live under sys._MEIPASS and not next to
-    the source at all - and the logo silently does not appear. There is no
-    error for a QPixmap that failed to load; you just get a blank.
-
-    This does not call main_window._resource_path on purpose: the login screen
-    runs BEFORE the main window exists and must not drag the whole IDE into
-    its import just to find a PNG.
+    A bare relative path resolves against the process working directory, which
+    is the repo root only by luck; from a frozen build the files live under
+    sys._MEIPASS and the logo silently does not appear (a failed QPixmap load
+    raises nothing, you just get a blank). main_window._resource_path is not
+    called on purpose: the login screen runs before the main window exists.
     """
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base = Path(sys._MEIPASS)

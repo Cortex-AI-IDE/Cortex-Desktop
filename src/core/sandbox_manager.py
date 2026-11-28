@@ -1,14 +1,9 @@
 """
 Sandbox Execution Manager (Phase 7).
 
-Wraps tool execution with file system and command-level isolation.
-Degrades gracefully when Docker is unavailable, falls back to restricted
-subprocess execution with a temp working directory.
-
-Architecture:
-  - SandboxConfig: settings (enabled, allowed commands, restricted paths)
-  - SandboxManager: the core class that wraps command execution
-  - Graceful fallback: Docker → restricted subprocess → passthrough
+Wraps tool execution with filesystem and command-level isolation. Degrades
+gracefully when Docker is unavailable: Docker then restricted subprocess with a
+temp working directory, then passthrough. SandboxConfig holds the settings.
 """
 
 import os
@@ -104,12 +99,9 @@ class SandboxManager:
     """
     Sandbox execution manager.
 
-    Wraps command execution with isolation. Supports multiple backends:
-    1. Docker (preferred, full filesystem isolation)
-    2. Restricted subprocess (temp working directory + allow-list)
-    3. Passthrough (sandbox disabled)
-
-    Degrades gracefully when backends are unavailable.
+    Wraps command execution with isolation. Backends: Docker (preferred, full
+    filesystem isolation), restricted subprocess (temp dir + allow-list),
+    passthrough (disabled). Degrades gracefully when a backend is unavailable.
     """
 
     def __init__(self, config: Optional[SandboxConfig] = None):

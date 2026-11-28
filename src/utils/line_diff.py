@@ -1,16 +1,10 @@
 """Unified-diff rows for the editor's read-only diff view.
 
-Not just difflib.unified_diff: opening a diff from a chat card runs on the GUI
-thread and cost 0.8-2.3 s for this repo's own files (measured 2026-10-22,
-agent_bridge.py 17.7k lines, 1.93 s in SequenceMatcher(autojunk=False) alone),
-because autojunk=False compares every blank line with every other, which is
-quadratic in blank lines.
-
-So the diff runs in two stages: a coarse pass with autojunk on, then an exact
-autojunk=False re-diff of each gap the coarse pass left open. Gaps are the
-changed regions, so the exact stage is cheap, and a gap too large to refine is
-left coarse rather than allowed to block the GUI. Rows are memoised on the two
-texts, so re-opening the same diff costs a hash.
+Opening a diff from a chat card runs on the GUI thread and cost 0.8-2.3 s with
+plain difflib (autojunk=False is quadratic in blank lines). So the diff runs in
+two stages: a coarse autojunk pass, then an exact autojunk=False re-diff of
+each changed gap; a gap too large to refine stays coarse rather than blocking
+the GUI. Rows are memoised on the two texts.
 """
 
 from __future__ import annotations

@@ -1,14 +1,11 @@
 """
 telegram_config.py - where Telegram settings actually live.
 
-Telegram needs two kinds of state and they must not share a home: the bot token
-is a secret and lives in KeyManager (keys.enc, provider "telegram"), while
-enabled, chat_id, event flags and quiet hours are plain and live in
-~/.cortex/settings.json.
-
-The split is not a preference: config/settings.py blanks any field whose name
-ends in _key, _token or _secret on the way to disk, so a telegram_bot_token
-entry would be written as *** and could never be read back.
+Two kinds of state, different homes: the bot token is a secret and lives in
+KeyManager (keys.enc, provider "telegram"), while enabled, chat_id, event flags
+and quiet hours are plain and live in ~/.cortex/settings.json. The split is
+required, not preference: config/settings.py blanks any field ending in _key,
+_token or _secret, so telegram_bot_token would be written as ***.
 """
 
 from __future__ import annotations

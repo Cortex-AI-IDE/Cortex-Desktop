@@ -277,17 +277,9 @@ class ChatHistoryManager:
                  part_type: str, status: str = 'pending',
                  data: dict = None) -> str:
         """
-        Add a single typed part to a conversation.
-
-        Args:
-            conversation_id: The conversation this part belongs to
-            message_id: DB row ID of the parent chat_messages row
-            part_type: One of VALID_PART_TYPES
-            status: 'pending', 'running', 'completed', or 'error'
-            data: Part-specific data dict (content, tool_type, filePath, etc.)
-
-        Returns:
-            The generated part_id string.
+        Add a single typed part to a conversation. ``part_type`` is one of
+        VALID_PART_TYPES, ``status`` one of pending/running/completed/error.
+        Returns the generated part_id string.
         """
         return self.db.insert_part(conversation_id, message_id, part_type, status, data)
 

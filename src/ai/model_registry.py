@@ -1,11 +1,9 @@
 """Provider activation state and the model dropdown's list.
 
-Not a catalog: models and built-in providers are published by the server
-(GET /api/v1/models/config/), cached by remote_models.py with a generated
-offline snapshot. This module only answers which providers the user may see,
-and what the dropdown renders now. Both are functions, never constants, so a
-server refresh or a fresh toggle is visible without a restart.
-
+Not a catalog: models and built-in providers are published by the server and
+cached by remote_models.py with a generated offline snapshot. This module only
+answers which providers the user may see and what the dropdown renders now,
+both as functions so a refresh or toggle is visible without a restart.
 Regenerate the snapshot: python tools/sync_server_catalog.py
 """
 
@@ -32,18 +30,13 @@ def _directory() -> list:
 
 
 def toggleable_providers() -> list:
-    """Providers the user may switch on: the togglable built-ins, plus any
-    the user created or the server published dynamically.
+    """Providers the user may switch on: the togglable built-ins plus any the
+    user created or the server published dynamically.
 
-    Two lists used to be stitched together here - a hardcoded
-    ``TOGGLEABLE_PROVIDERS`` and whatever ``dynamic_providers`` had cached.
-    The hardcoded half meant a provider added in the admin panel could not be
-    toggled at all: set_provider_enabled() refused to add it,
-    get_enabled_providers() filtered it back out, so the switch looked on
-    until the next restart and its models never reached the dropdown. Now the
-    built-in half comes from the same published directory the Settings panel
-    renders, and ``togglable=False`` rows (the "auto" router, the bundled
-    subscription services) are excluded by the server, not by a list here.
+    The built-in half comes from the same published directory the Settings
+    panel renders, so a provider added in the admin panel can be toggled
+    immediately; togglable=False rows (the "auto" router, bundled services)
+    are excluded by the server. A hardcoded list here once blocked that.
     """
     out = [str(p.get("slug") or "") for p in _directory() if p.get("togglable", True)]
     out = [s for s in out if s]
@@ -102,17 +95,11 @@ def _sanitise(raw) -> list | None:
 def get_enabled_providers() -> list:
     """Read the enabled-provider list from settings ('ai.enabled_providers').
 
-    Returns what was SAVED, sanitised but not filtered. Filtering out slugs
-    missing from toggleable_providers() made the answer depend on whether
-    dynamic_providers had loaded its cache yet, and since
-    set_provider_enabled() writes this result straight back, one toggle click
-    with a cold cache erased every server-published and user-added provider
-    from disk. A slug that no longer exists is harmless; it matches no group
-    in the dropdown.
-
-    The read is deliberately fresh: a second Cortex saves whole files, so the
-    copy loaded at startup can lag what the user just switched elsewhere. It
-    falls back to the in-memory value when the file cannot be read.
+    Returns what was SAVED, sanitised but not filtered: filtering by
+    toggleable_providers() made the answer depend on whether dynamic_providers
+    had loaded yet, and since set_provider_enabled() writes this back, one
+    toggle with a cold cache erased every server-published provider. The read
+    is fresh (a second Cortex saves whole files), falling back to memory.
     """
     try:
         from src.config.settings import get_settings
@@ -177,16 +164,11 @@ def set_provider_enabled(provider: str, enabled: bool) -> list:
 def get_model_groups() -> list:
     """The model list the dropdown should render.
 
-    Each group is
-    ``(label_or_None, [(model_id, display_name, description, accent_color)], tier, provider)``.
-    ``provider`` is the slug used both for the key-status dot and for the
-    Settings → Models & Providers activation filter: only groups whose
-    provider is enabled are shown, and "auto" is always shown.
-
-    The published catalog comes first (server, else the offline snapshot, else
-    the last good disk cache - remote_models decides), then the user's own
-    ``dp/<slug>/...`` providers are appended so the built-in ordering is
-    preserved.
+    Each group is ``(label_or_None, [(model_id, display_name, description,
+    accent_color)], tier, provider)``; ``provider`` drives the key-status dot
+    and the activation filter (only enabled providers show, "auto" always
+    does). The published catalog comes first (server, else snapshot, else disk
+    cache), then the user's own dp/<slug>/... providers.
     """
     base: list = []
     try:

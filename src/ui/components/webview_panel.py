@@ -903,12 +903,10 @@ class WebviewPanel(QWidget):
         """Switch to an already-open file WITHOUT re-sending its content.
 
         Avoids a model.setValue() through QWebChannel, the main crash trigger
-        during Chromium warmup. If the file is still queued for JS delivery its
-        content is flushed first, otherwise switchToFile silently fails
-        (openFiles[path] undefined) and the editor keeps the previous content.
-        If the file was tracked in _open_files but never delivered (session
-        restore warmup, page crash recovery), it falls back to a full open_file
-        that sends content, for the same reason.
+        during Chromium warmup. A file still queued for JS delivery has its
+        content flushed first (else switchToFile silently fails and the editor
+        keeps the previous content); a file tracked in _open_files but never
+        delivered falls back to a full open_file.
         """
         if file_path not in self._open_files:
             log.warning(f"[WebviewPanel] switch_to_file: {file_path} not in _open_files")
@@ -1014,18 +1012,11 @@ class WebviewPanel(QWidget):
                            activate: bool) -> bool:
         """The single choke point for handing file text to the Monaco renderer.
 
-        Every delivery path (user click, tab switch, crash recovery, XHR
-        fallback) routes through here so the size ceiling cannot be bypassed by
-        choosing a different path. Returns True if delivered, False if the file
-        was refused as too large.
-
-        Three tiers:
-          <= _LARGE_CHAR_THRESHOLD  -> inline openFile (fastest, safest)
-          <= _MAX_EDITOR_CHARS      -> same-origin XHR openFileFromUri: stays
-                                       editable, but the text never becomes one
-                                       multi-MB JS string literal (the exact V8
-                                       allocation that crashed the renderer)
-          >  _MAX_EDITOR_CHARS      -> refuse with a read-only notice tab
+        Every delivery path routes through here so the size ceiling cannot be
+        bypassed. Three tiers: <= _LARGE_CHAR_THRESHOLD inline openFile;
+        <= _MAX_EDITOR_CHARS same-origin XHR (text never becomes one multi-MB
+        JS string, the allocation that crashed the renderer); above that,
+        refuse with a read-only notice. Returns True if delivered.
         """
         fp = file_path or ""
         fdata = self._open_files.get(fp) or {}
@@ -1351,17 +1342,13 @@ class WebviewPanel(QWidget):
     def get_active_file_and_content_async(self, callback, timeout_ms: int = 700):
         """callback(path, content) for the tab the editor REALLY shows.
 
-        Both come from ONE call into the editor, so the content always
-        belongs to the path. Save used the Python mirror for the path: the
-        mirror is set when Python asks for a file to be shown, and the editor
-        may decline (it keeps the tab the user is working in when a file is
-        opened in the background). On 2026-10-01 that sent four Ctrl+S
-        presses in a row to .env.example while the user was editing .env.
-
-        `content` is None when the editor could not supply it; the caller
-        then fetches it its own way. If the editor does not answer within
-        `timeout_ms` (dropped runJavaScript callbacks are a known QWebEngine
-        failure), the mirror is used, so Save never silently does nothing.
+        Both come from ONE call into the editor, so content always belongs to
+        the path. The Python mirror for the path is wrong when the editor
+        declines to switch tabs: on 2026-10-01 four Ctrl+S presses went to
+        .env.example while the user edited .env. `content` is None when the
+        editor could not supply it; if it does not answer within `timeout_ms`
+        (dropped runJavaScript callbacks are a known failure), the mirror is
+        used so Save never silently does nothing.
         """
         state = {"done": False}
 

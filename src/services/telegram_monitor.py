@@ -2,13 +2,10 @@
 telegram_monitor.py - run notifications and inbound prompts over Telegram.
 
 Outbound reports run on this module's worker thread, so a slow network cannot
-reach the GUI thread. Inbound is off by default (telegram.inbound.enabled); a
+reach the GUI thread. Inbound is off by default (telegram.inbound.enabled): a
 message in the paired chat can start a run or answer a question, but never
 approve a permission card, since approvals happen in Cortex on the computer.
-
-The GUI calls only enqueue: no string building, JSON parsing or regex on that
-path, and a full queue drops its oldest event. No PyQt here, so tests run
-headless.
+The GUI only enqueues, and a full queue drops its oldest event. No PyQt here.
 """
 
 from __future__ import annotations
@@ -1392,17 +1389,11 @@ class TelegramMonitor:
     def _entitled(self) -> bool:
         """Whether this account may use Telegram at all.
 
-        The verdict comes from an injected predicate that reads the saved
-        account copy (no network, no blocking), and it is reused for
-        ENTITLEMENT_TTL_S because this sits on every send, poll and prompt.
-        get_monitor() wires the app's single subscription check into it.
-
-        With no predicate wired the answer is True: this class is transport,
-        and only the application knows about billing.
-
-        Failing closed matters more than convenience here: an exception in the
-        predicate, or an account whose plan lookup broke, must not hand out a
-        remote-control channel for free.
+        Verdict comes from an injected predicate reading the saved account copy
+        (no network), cached for ENTITLEMENT_TTL_S since this sits on every
+        send, poll and prompt. With no predicate wired the answer is True (this
+        class is transport). Failing closed matters: a predicate exception must
+        not hand out a remote-control channel for free.
         """
         if self._is_subscribed is None:
             return True
@@ -1721,16 +1712,11 @@ class TelegramMonitor:
     def begin_pairing(self) -> str:
         """Issue a code, or a refusal marker when it cannot be issued safely.
 
-        A code is refused while a chat is already paired. Today a second code
-        would be accepted and silently overwrite the saved chat, which is the
-        takeover path: whoever holds a fresh code moves the channel and the
-        owner's phone just goes quiet. Moving it stays possible, but it has to
-        be deliberate: unpair first, which is one click.
-
-        A code is also refused without an active subscription, and that is
-        checked before the token for a reason: _ensure_client() already answers
-        None for a lapsed account, so testing it first would report "no token"
-        to someone whose token is fine and whose plan simply ended.
+        Refused while a chat is already paired: a second code would overwrite
+        the saved chat silently, which is the takeover path (owner's phone just
+        goes quiet). Unpair first. Also refused without an active subscription,
+        checked before the token because _ensure_client() already answers None
+        for a lapsed account and would misreport "no token".
         """
         if not self._entitled():
             log.info("[Telegram] Pairing refused: no active subscription")
@@ -3148,17 +3134,11 @@ _shared_lock = threading.Lock()
 def _subscription_verdict() -> bool:
     """Whether the signed-in account may use Telegram.
 
-    Exactly the check OCR, embeddings and web search use:
-    CortexAPIClient.has_subscription(). Keeping one verdict for the whole app is
-    the point: a plan that lapses freezes everything together, and a renewal
-    unfreezes everything together, so this bot can never run on a rule of its
-    own.
-
-    Answers from the saved account copy (no network, no blocking) and refreshes
-    behind the scenes, so the freeze happens on the same tick as the rest of
-    Cortex.
-
-    Fail closed: an account that cannot be read is not an entitled one.
+    Exactly the check OCR, embeddings and web search use
+    (CortexAPIClient.has_subscription()), so a plan that lapses freezes
+    everything together. Answers from the saved account copy (no network) and
+    refreshes behind the scenes. Fail closed: an unreadable account is not
+    entitled.
     """
     try:
         from src.core.cortex_api import get_api_client

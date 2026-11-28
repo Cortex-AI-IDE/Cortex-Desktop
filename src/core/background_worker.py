@@ -1,16 +1,9 @@
 """
 Background Execution Worker (Phase 6).
 
-Spawning a separate Python process that loads the same agent bridge
-in background mode. Communicates via stdin/stdout JSON-line protocol
-with heartbeat monitoring and automatic cleanup.
-
-Architecture:
-  - Main process: BackgroundWorker (QProcess wrapper)
-  - Child process: worker_entrypoint.py (runs agent bridge in background mode)
-  - Protocol: JSON-line over stdin/stdout
-  - Heartbeat: child sends {"type":"heartbeat","ts":...} every 30s
-  - If 3 heartbeats missed → auto-terminate and clean up
+Spawns a separate Python process running the same agent bridge in background
+mode, via a stdin/stdout JSON-line protocol. The child sends a heartbeat every
+30s; 3 missed heartbeats auto-terminate and clean up.
 """
 
 import json
@@ -79,17 +72,8 @@ class BackgroundWorker:
     """
     Manage a background agent process.
 
-    Uses a plain subprocess for cross-platform compatibility.
-    Communicates via stdin/stdout JSON-line protocol.
-
-    Usage
-    -----
-    worker = BackgroundWorker(project_root="/path/to/project")
-    worker.start()
-    worker.dispatch_task("Run tests on module X")
-    # ... later ...
-    result = worker.collect_result(timeout=600)
-    worker.stop()
+    Plain subprocess for cross-platform compatibility, communicating via a
+    stdin/stdout JSON-line protocol: start(), dispatch_task(), collect_result().
     """
 
     HEARTBEAT_TIMEOUT = 100.0  # seconds before considering worker dead

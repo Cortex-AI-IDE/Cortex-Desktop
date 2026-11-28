@@ -1,12 +1,10 @@
 """Text for the status-bar skill indicator.
 
-Pure functions, kept out of main_window so they can be tested directly:
-main_window imports the chat panel, which imports QtWebEngineWidgets, which
-Qt refuses to load once a QApplication exists, so no test can import it.
-
-The indicator answers a question the UI previously could not: when you write
-"use the apple-design skill", did that actually do anything? The only
-evidence used to be a line in cortex.log.
+Pure functions, kept out of main_window so they can be tested directly
+(main_window pulls in QtWebEngineWidgets, which Qt refuses to load once a
+QApplication exists). The indicator answers whether writing "use the
+apple-design skill" actually did anything; the only evidence used to be a line
+in cortex.log.
 """
 from __future__ import annotations
 

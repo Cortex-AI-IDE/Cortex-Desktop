@@ -100,18 +100,9 @@ class FileEditOutput(TypedDict, total=False):
 
 def validate_file_edit_input(data: Dict[str, Any]) -> FileEditInput:
     """
-    Validate and coerce input data to FileEditInput.
-    
-    Equivalent to Zod schema validation for inputSchema.
-    
-    Args:
-        data: Raw input dictionary
-        
-    Returns:
-        Validated FileEditInput dictionary
-        
-    Raises:
-        ValueError: If required fields are missing or invalid
+    Validate and coerce raw input data to FileEditInput (runtime validation
+    equivalent to the Zod inputSchema). Raises ValueError on missing or
+    invalid required fields.
     """
     if not isinstance(data, dict):
         raise ValueError("Input must be a dictionary")

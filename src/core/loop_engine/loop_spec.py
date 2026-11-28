@@ -1,12 +1,10 @@
 """
 loop_spec.py, The contract a loop is run against.
 
-Implements Docs/agent_loop/agent_loop.md §3 (LoopSpec) and §3.1 (the
-four-box eligibility test) as Python dataclasses.
-
-Design rule carried over from the spec: if `check_eligibility()` says no,
-the caller (LoopOrchestrator.start) refuses to create a loop. There is no
-soft mode where a loop runs without a hard verifier.
+Implements Docs/agent_loop/agent_loop.md §3 (LoopSpec) and §3.1 (the four-box
+eligibility test) as dataclasses. Design rule from the spec: if
+check_eligibility() says no, LoopOrchestrator.start refuses to create a loop;
+there is no soft mode where a loop runs without a hard verifier.
 """
 
 from __future__ import annotations

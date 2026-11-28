@@ -47,17 +47,10 @@ def microcompact_messages(
 ) -> Tuple[List[Any], int]:
     """
     Clear old tool result contents, keeping the most recent N results.
-    
-    This is a cheap, no-LLM-call operation that replaces old tool result
-    content with a short placeholder. The LLM still sees that a tool was
-    called (the tool_call_id remains), but the bulky output is gone.
 
-    Args:
-        messages: The conversation message list
-        keep_recent: Number of most-recent compactable tool results to keep
-    
-    Returns:
-        (modified_messages, tokens_saved_estimate)
+    No LLM call: the tool_call_id remains so the model still sees the call, but
+    the bulky output is replaced with a short placeholder. Returns
+    (modified_messages, tokens_saved_estimate).
     """
     # Step 1: Collect all compactable tool_call_ids from assistant messages
     compactable_ids = _collect_compactable_tool_ids(messages)
@@ -167,16 +160,16 @@ def should_auto_compact(
     threshold_pct: float = AUTOCOMPACT_THRESHOLD_PCT,
 ) -> bool:
     """
-    Check if auto-compaction should trigger.
+    Should auto-compaction trigger.
 
     Args:
-        estimated_tokens: Current estimated token usage
-        context_budget: Total context budget for the model
-        state: Auto-compact tracking state (for circuit breaker)
-        threshold_pct: Fraction of budget that triggers compaction
-    
+        estimated_tokens: Current estimated token usage.
+        context_budget: Context budget for the model.
+        state: Auto-compact tracking state, for the circuit breaker.
+        threshold_pct: Fraction of budget that triggers compaction.
+
     Returns:
-        True if auto-compaction should run
+        True if auto-compaction should run.
     """
     if state and state.circuit_breaker_tripped:
         return False

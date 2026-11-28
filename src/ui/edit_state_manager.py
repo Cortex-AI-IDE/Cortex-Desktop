@@ -2,14 +2,10 @@
 edit_state_manager.py, Centralized File Edit State Manager
 ============================================================
 
-Single source of truth for all file-edit state during a turn.
-Synchronizes DiffCard <-> EditedFileRow <-> Changed Files section.
-
-Supports MULTIPLE edits to the same file, all DiffCards for a file
-are linked together. Accept/Reject one → all update.
-
-One instance per ChatPanel turn. Created fresh in begin_assistant_turn,
-resolved/consumed in on_turn_done.
+Single source of truth for all file-edit state during a turn, synchronizing
+DiffCard <-> EditedFileRow <-> Changed Files. Multiple edits to one file are
+linked: Accept/Reject one updates all. One instance per turn, created in
+begin_assistant_turn and consumed in on_turn_done.
 """
 
 from __future__ import annotations
@@ -104,17 +100,13 @@ class EditStateManager(QObject):
 
     @staticmethod
     def _detect_content_duplication(preview: str, original: str | None = None) -> tuple[bool, str]:
-        """Detect if NEW content has internal duplication (same heading/title repeated).
+        """Detect internal duplication in NEW content (same heading repeated).
         Returns (is_duplicated, warning_message).
-        Prevents accidental concatenation when AI regenerates documents repeatedly.
 
-        If ORIGINAL content is provided (existing file being edited), only flags
-        duplication if the preview count EXCEEDS the original count by >1.
-        This avoids false positives when editing files that already have standard
-        headings (e.g. project index, README, documentation files).
-
-        Skips separator/decorator comments (e.g. # ========, # --------, # ********)
-        which legitimately appear many times in source files.
+        With ORIGINAL content, flags only if the preview count EXCEEDS the
+        original by >1, avoiding false positives on files with standard
+        headings. Skips separator comments (# ====, # ----) that legitimately
+        repeat in source.
         """
         lines = preview.split("\n")
         if len(lines) < 10:

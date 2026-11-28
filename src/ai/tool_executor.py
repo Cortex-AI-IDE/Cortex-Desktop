@@ -1,15 +1,12 @@
 """
 tool_executor.py
 ----------------
-Handles the tool execution batching logic extracted from agent_bridge.py.
+Tool execution batching, extracted from agent_bridge.py.
 
-Responsible for:
-  - Classifying tools as read-only (parallel-safe) vs mutating (sequential)
-  - Grouping consecutive read-only tools into parallel batches
-  - Applying circuit breaker filtering per batch
-  - Executing batches (single or parallel via asyncio.gather)
-  - Consecutive same-readonly-tool detection with nudge injection
-  - Search result dedup (prevents running same Grep/Glob twice)
+Classifies tools as read-only (parallel-safe) or mutating (sequential), groups
+consecutive read-only tools into parallel batches, applies circuit-breaker
+filtering per batch, executes via asyncio.gather, and injects nudges for
+repeated same-tool calls (search dedup prevents running the same Grep twice).
 """
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Callable
@@ -76,16 +73,9 @@ class ToolExecutionEngine:
         """
         Execute a single turn's worth of tool calls.
 
-        Args:
-            parsed_calls: List of (tool_name, tool_id, args) tuples from the LLM.
-            execute_fn: Async callable for executing one tool. Will be called
-                        as execute_fn(tool_name, tool_id, args, messages, PCM, limits).
-            messages: The conversation message list (will be appended to).
-            PCM: The message constructor (e.g. ChatMessage or dataclass).
-            limits: The ToolLimitsLike instance for this turn.
-
-        Returns:
-            List of nudge messages to inject into the conversation (empty if none).
+        ``execute_fn`` is awaited as execute_fn(tool_name, tool_id, args,
+        messages, PCM, limits). Returns nudge messages to inject (empty if
+        none).
         """
         nudges: List[str] = []
         tool_messages = []

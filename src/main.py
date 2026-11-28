@@ -1359,12 +1359,11 @@ def _exit_without_teardown(code: int) -> None:
     """Leave after the event loop, skipping Python's object teardown.
 
     sys.exit() made the interpreter destroy every PyQt wrapper in arbitrary
-    order while Qt objects they point at were already gone: a segfault in
-    sip_api_get_address under Py_Exit on most closes (crash.log, 6 identical
-    traces 2026-10-17..20). Everything Cortex must do at exit has already run
-    by now (closeEvent and aboutToQuit save the chat and state); the atexit
-    hooks (clean-shutdown marker, temp pages; src/utils/exit_hooks.py) run here, the logs
-    are flushed and closed, and the process ends without the teardown.
+    order while the Qt objects were already gone: a segfault in
+    sip_api_get_address under Py_Exit on most closes (6 identical traces
+    2026-10-17..20). Everything Cortex must do at exit has run by now
+    (closeEvent/aboutToQuit save the chat and state); the atexit hooks
+    (src/utils/exit_hooks.py) run here, logs flush, and the process ends.
     """
     try:
         from src.utils.exit_hooks import run_all

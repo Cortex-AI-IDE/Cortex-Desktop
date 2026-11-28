@@ -69,17 +69,8 @@ def parseSlashCommandToolsFromFrontmatter(toolsValue: Any) -> List[str]:
 
 def getProjectDirsUpToHome(subdir: str, cwd: str) -> List[str]:
     """
-    Get project directories from cwd up to home directory.
-    
-    Walks up from current directory to git root or home,
-    collecting directories that contain the specified subdir.
-    
-    Args:
-        subdir: Subdirectory name (e.g., 'skills', 'commands')
-        cwd: Current working directory
-        
-    Returns:
-        List of directory paths containing the subdir
+    Get project directories from cwd up to the git root or home, collecting
+    those that contain the specified subdir (e.g. 'skills', 'commands').
     """
     home = os.path.expanduser('~')
     current = os.path.abspath(cwd)
@@ -107,19 +98,9 @@ async def loadMarkdownFilesForSubdir(
     cwd: str,
 ) -> List[MarkdownFile]:
     """
-    Load markdown files from a subdirectory across all config locations.
-    
-    Searches:
-    - User config (~/.cortex/<subdir>)
-    - Managed config (/etc/cortex/.cortex/<subdir>)
-    - Project config (.cortex/<subdir> in cwd and parents)
-    
-    Args:
-        subdir: Subdirectory name (e.g., 'skills', 'commands')
-        cwd: Current working directory
-        
-    Returns:
-        List of MarkdownFile objects
+    Load markdown files from a subdirectory across all config locations:
+    user (~/.cortex/<subdir>), managed (/etc/cortex/.cortex/<subdir>), and
+    project (.cortex/<subdir> in cwd and parents). Returns MarkdownFile objects.
     """
     from .frontmatter_parser import parseFrontmatter
     

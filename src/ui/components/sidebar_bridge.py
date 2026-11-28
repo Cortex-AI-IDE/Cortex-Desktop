@@ -215,17 +215,11 @@ class _WatchScanSignaller(QObject):
 class _WatchDirScanRunner(QRunnable):
     """Scan watch directories on a pool thread (UI-STALL, 2026-10-27).
 
-    os.walk over a real project took 1.6-2.0 s, and it ran on the GUI thread
-    inside _start_file_watcher, freezing session restore at startup. The
-    watchdog caught the stack: _deferred_session_restore -> _restore_session
-    -> set_project -> _start_file_watcher -> _collect_watch_dirs -> os.walk.
-    The scan now runs here and the result is applied back on the GUI thread
-    through the queued dirs_ready signal.
-
-    A QThreadPool runner, not a QThread: the pool waits for running tasks at
-    shutdown, so quitting the app mid-scan cannot kill the process with
-    "QThread: Destroyed while thread is still running" (which is exactly what
-    a raw child QThread does when its parent is destroyed first).
+    os.walk over a real project took 1.6-2.0 s on the GUI thread inside
+    _start_file_watcher, freezing session restore. It now runs here and applies
+    back on the GUI thread through the queued dirs_ready signal. A QThreadPool
+    runner, not a raw QThread: the pool waits at shutdown, so quitting mid-scan
+    cannot hit "QThread: Destroyed while thread is still running".
     """
 
     def __init__(self, root: str, exclude: set, cap: int, generation: int,
@@ -513,15 +507,12 @@ class SidebarBridge(QObject):
     def _collect_watch_dirs(self, root: str) -> List[str]:
         """Every directory under `root` worth watching, recursively.
 
-        QFileSystemWatcher is NOT recursive: it reports changes only for
+        QFileSystemWatcher is not recursive: it reports changes only for
         directories explicitly added. The old code added the root plus its
-        IMMEDIATE children, so creating a file any deeper than one level
-        (src/ui/components/new.py) fired nothing at all and the Explorer only
-        updated when the user hit Refresh manually, the reported bug.
-
-        Thin wrapper over _walk_watch_dirs, kept for synchronous callers.
-        The watcher startup and the periodic sync use _start_watch_scan so
-        the walk happens off the GUI thread.
+        immediate children, so a file created any deeper fired nothing and the
+        Explorer only updated on a manual Refresh. Thin wrapper over
+        _walk_watch_dirs for synchronous callers; the watcher startup and
+        periodic sync use _start_watch_scan to keep the walk off the GUI thread.
         """
         return _walk_watch_dirs(root, self._WATCH_EXCLUDE_DIRS,
                                 self._WATCH_DIR_CAP)
@@ -1717,11 +1708,10 @@ class SidebarBridge(QObject):
         deleteFile() emits file_deleted signal → editor tab auto-closes.
 
         Returns "ok", or "Error: <reason>". The result used to be swallowed
-        here, so a delete that failed (a directory held open by another
-        process returns a failure from SHFileOperation and stays on disk)
-        was indistinguishable from one that succeeded, and every caller went
-        on to run the full post-delete teardown for a file that was still
-        there. Callers must check this.
+        here, so a failed delete (a directory held open returns a failure from
+        SHFileOperation and stays on disk) looked like success and callers ran
+        the full post-delete teardown for a file still there. Callers must
+        check this.
         """
         result = self.deleteFile(file_path)
         if result == "ok":

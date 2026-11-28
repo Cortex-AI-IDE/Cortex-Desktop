@@ -1,16 +1,11 @@
 """Settings -> Appearance -> Color theme: one theme for the whole of Cortex.
 
-"cortex" (the default) is Cortex's own look, following Dark / Light / System;
-any other choice is a well-known editor theme applied everywhere. Web pages get
-a <style id="cortex-color-theme"> on the shared WebEngine profile that
-overrides each page's colour variables, rewritten live on switch. The editor
-follows it when Editor -> Theme is "auto", the terminal through xterm's
-16-colour theme, and native Qt through the token palettes in tokens.py: a
-switch points the palettes at the theme (apply_native) then runs the dark/light
-pipeline with the previous palette as the colour source.
-
-A theme is dark or light (`base`); choosing one also switches Cortex to that
-mode, so anything not covered by an override still matches.
+"cortex" (default) is Cortex's own look, following Dark / Light / System; any
+other choice is a well-known editor theme applied everywhere. Web pages get a
+<style id="cortex-color-theme"> on the shared profile, the editor follows it
+when Editor -> Theme is "auto", the terminal through xterm's 16-colour theme,
+and native Qt through tokens.py (apply_native). A theme is dark or light
+(`base`); choosing one switches Cortex to that mode.
 """
 from __future__ import annotations
 

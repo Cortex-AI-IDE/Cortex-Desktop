@@ -1,13 +1,11 @@
 """Self-Healing Debug Loop, Phase 2 of Autonomous Enhancement.
 
-When the agent's changes produce errors, this module detects the failure
-and injects a structured debug→fix→verify cycle instead of relying on the
-LLM to self-correct.
+When the agent's changes produce errors, this module detects the failure and
+injects a structured debug/fix/verify cycle instead of relying on the LLM to
+self-correct.
 
-State machine:
-  IDLE → INVESTIGATING → FORMULATING_HYPOTHESIS → APPLYING_FIX → VERIFYING_FIX → IDLE
-                   ↑                                                               │
-                   └─────────────── retry (max 3) ←────────────────────────────────┘
+State machine: IDLE, INVESTIGATING, FORMULATING_HYPOTHESIS, APPLYING_FIX,
+VERIFYING_FIX, back to IDLE. Each failure retries up to 3 times.
 """
 
 import enum

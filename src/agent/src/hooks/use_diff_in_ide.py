@@ -72,16 +72,12 @@ def get_patch_from_contents(params: Dict) -> List[Dict]:
 
 class _CortexDiffBridge:
     """
-    Singleton that wires useDiffInIDE into Cortex IDE's Qt signal system.
+    Singleton wiring useDiffInIDE into Cortex IDE's Qt signal system.
 
-    Registration (call once from agent_bridge.py or main_window.py):
-        CortexDiffBridge.instance().register_open_diff(callback)
-        CortexDiffBridge.instance().register_accept_signal(signal)
-        CortexDiffBridge.instance().register_reject_signal(signal)
-
-    When an edit occurs:
-        future = CortexDiffBridge.instance().open_diff(path, old, new)
-        action = await asyncio.wait_for(future, timeout=300)  # 'accept' | 'reject'
+    Register once from agent_bridge.py or main_window.py
+    (register_open_diff / register_accept_signal / register_reject_signal), then
+    an edit becomes future = instance().open_diff(path, old, new) and the answer
+    is awaited as 'accept' or 'reject'.
     """
     _instance: Optional['_CortexDiffBridge'] = None
 

@@ -37,13 +37,9 @@ class ChangeGroup:
 class ChangeOrchestrator:
     """
     Manages AI-driven changes with full undo/redo support.
-    
-    Industry Standard Features:
-    - Atomic multi-file changes
-    - Complete undo/redo stack
-    - Change preview before applying
-    - Batch operations
-    - Change metadata and descriptions
+
+    Atomic multi-file changes, a complete undo/redo stack, preview before
+    applying, batch operations, and change metadata/descriptions.
     """
     
     def __init__(self):

@@ -1,18 +1,7 @@
-"""
-Model allowlist/permission system for Cortex AI IDE.
+"""Model allowlist/permission system for Cortex AI IDE.
 
-Controls which models can be used based on admin/team settings.
-Supports 3-tier matching:
-  1. Family wildcards ("opus", "gpt4o", "gemini") — allows entire model families
-  2. Version prefixes ("sonnet-4-0", "gpt-4o-2024") — allows specific versions
-  3. Exact matches ("cortex-sonnet-4-5") — allows only exact model IDs
-
-Multi-LLM support for all Cortex IDE providers:
-  - Cortex: opus, sonnet, haiku
-  - OpenAI: gpt4, gpt4o, o1, o3, codex
-  - Google Gemini: gemini1, gemini2
-  - DeepSeek: chat, code, r1
-  - Groq: llama3
+Controls which models admin/team settings permit, matching in 3 tiers: family
+wildcards ("opus", "gpt4o"), version prefixes ("sonnet-4-0"), exact ids.
 """
 
 from typing import List, Optional, Set
@@ -44,11 +33,8 @@ def isModelFamilyAlias(model: str) -> bool:
         model: Model string to check (e.g. 'opus', 'gpt4o')
 
     Returns:
-        True if it's a family alias
-
-    Example:
-        isModelFamilyAlias('opus') → True
-        isModelFamilyAlias('cortex-opus-4-6') → False
+        True if it's a family alias, e.g. isModelFamilyAlias('opus') is True
+        but isModelFamilyAlias('cortex-opus-4-6') is False.
     """
     return model.lower() in MODEL_FAMILIES
 
@@ -82,19 +68,9 @@ def modelBelongsToFamily(model: str, family: str) -> bool:
 
 def prefixMatchesModel(modelName: str, prefix: str) -> bool:
     """
-    Check if a model name starts with a prefix at a segment boundary.
-    The prefix must match up to the end of the name or a "-" separator.
-
-    Args:
-        modelName: Full model ID (e.g. 'cortex-opus-4-5-20251101')
-        prefix: Prefix to check (e.g. 'cortex-opus-4-5')
-
-    Returns:
-        True if prefix matches at segment boundary
-
-    Example:
-        prefixMatchesModel('cortex-opus-4-5-20251101', 'cortex-opus-4-5') → True
-        prefixMatchesModel('cortex-opus-4-50', 'cortex-opus-4-5') → False  # Not at boundary
+    Check if a model name starts with a prefix at a segment boundary (up to the
+    end of the name or a "-"): prefixMatchesModel('cortex-opus-4-5-20251101',
+    'cortex-opus-4-5') is True but 'cortex-opus-4-50' is False.
     """
     if not modelName.startswith(prefix):
         return False
@@ -157,19 +133,10 @@ def isModelAllowed(
     availableModels: Optional[List[str]] = None,
 ) -> bool:
     """
-    Check if a model is allowed by the availableModels allowlist.
-    If availableModels is not set, all models are allowed.
+    Check if a model is allowed by the availableModels allowlist (None = all).
 
-    Matching tiers: family aliases ("opus", "sonnet", "haiku") are a wildcard
-    for the whole family unless more specific entries exist; version prefixes
-    ("opus-4-5") match any build of that version; full model IDs match exactly.
-
-    Args:
-        model: Model ID or alias to check.
-        availableModels: List of allowed models/aliases (None = all allowed).
-
-    Returns:
-        True if model is allowed.
+    Tiers: family aliases ("opus") are a wildcard unless more specific entries
+    exist; version prefixes ("opus-4-5") match any build; full IDs match exactly.
     """
     # No restrictions - all models allowed
     if availableModels is None:

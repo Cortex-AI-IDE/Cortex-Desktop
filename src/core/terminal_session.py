@@ -1,18 +1,9 @@
 """Persistent shell sessions shared by the AI and the Terminal panel.
 
-PowerShell in a ConPTY on Windows, bash/zsh in a POSIX pty elsewhere
-(pty_backend.py hides the difference). The Bash tool used to start a fresh
-non-interactive powershell per call with no stdin, so state was lost and
-anything prompting for input (ssh, y/n, password) hung until timeout; it now
-types into a real ConPTY shell shown as a "Cortex AI" tab.
-
-Command end and exit code come from an OSC 633 script (633;C starts output,
-633;D;<code> ends it, 633;P;Cwd=<dir> reports the directory). A quiet prompt-
-like last line raises on_input_needed and the command clock stops until the
-user answers. run(background=True) returns after a startup window and leaves
-the command running. ssh with no remote command enters remote mode, where each
-command is followed by a one-time token plus $?. Keystrokes go straight to the
-PTY, are never logged, and a password prompt does not echo.
+PowerShell in a ConPTY on Windows, bash/zsh in a POSIX pty elsewhere. Command
+end/exit code come from an OSC 633 script; a prompt-like last line raises
+on_input_needed and pauses the clock. Keystrokes go straight to the PTY, are
+never logged, and a password prompt does not echo.
 """
 import base64
 import itertools

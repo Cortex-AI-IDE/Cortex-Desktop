@@ -1,15 +1,11 @@
 """Which models can watch a video, and how a video goes on the wire.
 
-Video is not assumed: of 443 OpenRouter models on 2026-09-16, 78 accept video
-and only 35 of those accept the soundtrack. Sending a video to a model that
-cannot read it is the worst outcome, since the payload was historically dropped
-in the serializers and the model answered from text alone, looking like it had
-watched something it never received. Capability is looked up, never guessed:
-OpenRouter publishes architecture.input_modalities, cached under
-~/.cortex/cache for a day; direct providers match by the part after the vendor
-prefix; a small built-in family list keeps it working offline.
-
-Wire format: {"type": "video_url", "video_url": {"url": "<https or data:>"}}
+Video is not assumed: capability is looked up, never guessed (OpenRouter
+publishes architecture.input_modalities, cached a day; direct providers match
+by the part after the vendor prefix; a small built-in list keeps it working
+offline). Sending a video to a model that cannot read it looks like it watched
+something it never received. Wire format:
+{"type": "video_url", "video_url": {"url": "<https or data:>"}}
 """
 
 from __future__ import annotations

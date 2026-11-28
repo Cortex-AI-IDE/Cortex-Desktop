@@ -1,16 +1,11 @@
 """
 defense.py - blue-team scanning for the code you own.
 
-The offensive modules answer "what can be reached from outside?"; this answers
-"what is wrong in here?". It reads local source, config and lockfiles, so it
-needs no scope declaration and opens no sockets.
-
-scan_secrets finds committed credentials by pattern plus a Shannon-entropy
-check, since the dangerous keys are the ones with no recognisable prefix.
-check_hardening catches config shipped by accident (uncommitted .env, DEBUG on,
-wildcard CORS, default framework secret, raw SQL from string formatting,
-verify=False). audit_dependencies reports known CVEs via pip-audit / npm audit /
-safety when present. All three are read-only.
+Reads local source, config and lockfiles, so it needs no scope declaration and
+opens no sockets. scan_secrets finds committed credentials by pattern plus a
+Shannon-entropy check; check_hardening catches shipped-by-accident config
+(uncommitted .env, DEBUG on, wildcard CORS, verify=False); audit_dependencies
+reports known CVEs via pip-audit / npm audit / safety. All read-only.
 """
 
 from __future__ import annotations

@@ -41,15 +41,13 @@ def should_auto_continue(
 ) -> bool:
     """Whether a cycle that ended with todos still open should restart itself.
 
-    completed_cycles counts auto-continue cycles already finished, so at the
-    next decision it equals the number that ran. A cycle that edited something
-    always continues up to max_cycles; a read-only cycle continues while fewer
-    than two have finished. The nudge used to require completed_cycles == 0,
-    which is the 2026-10-28 15:19:23 incident: 14s after "Auto-continue cycle
-    1/5", with 4 cycles unused, a read-only continuation emitted turn_limit_hit
-    and the chat showed Resume, even though the model had only stopped to hand
-    the plan to the user. Two read-only cycles with no edit do stop and ask, so
-    a read-only investigation cannot loop forever on the same lookups.
+    A cycle that edited something continues up to max_cycles; a read-only cycle
+    continues while fewer than two have finished. The nudge used to require
+    completed_cycles == 0, which is the 2026-10-28 15:19:23 incident: 14s after
+    "Auto-continue cycle 1/5", with 4 cycles unused, a read-only continuation
+    emitted turn_limit_hit and the chat showed Resume while the model had only
+    stopped to hand the plan to the user. Two read-only cycles with no edit do
+    stop and ask, so a read-only investigation cannot loop on the same lookups.
     """
     if completed_cycles >= max_cycles:
         return False

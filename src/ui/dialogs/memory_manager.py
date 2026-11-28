@@ -2162,12 +2162,10 @@ class MemoryManagerDialog(QDialog):
         """Send JS to the page, queueing until it is loaded.
 
         Most runJavaScript() sites had no _page_loaded guard, so a call made
-        before load evaporated (the page's functions did not exist yet) and the
-        panel showed stale state with nothing logged. `callback`, when given,
-        receives the result, same contract as runJavaScript(js, callback).
-        Result-callback calls cannot be queued (there is no result to deliver
-        before the page exists), so before load they are dropped; both such
-        call sites guard on _page_loaded and retry themselves.
+        before load evaporated and the panel showed stale state with nothing
+        logged. `callback` receives the result, same contract as
+        runJavaScript(js, callback); result-callback calls cannot be queued, so
+        before load they are dropped (both such call sites guard and retry).
         """
         if not getattr(self, '_view', None):
             return

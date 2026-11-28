@@ -1,16 +1,10 @@
 """Hand paths from a second Cortex launch to the running instance.
 
-Double-clicking a file associated with Cortex, or "Open with Cortex IDE",
-starts a new Cortex process with the path as its argument. Only one instance
-runs (the single-instance check at the top of main.py), so that second
-process sends its paths here and exits, and the running window opens them.
-
-Transport: multiprocessing.connection over a named pipe (Windows) or a Unix
-socket in $XDG_RUNTIME_DIR, else ~/.cortex (Linux). Both ends must know a
-random key the running instance writes to ~/.cortex/instance.key, so another
-user or process cannot push paths into Cortex. Messages are JSON, never
-pickle. Standard library only: the sending side runs before main.py imports
-PyQt6.
+A second launch (file association, "Open with") sends its paths here and exits;
+the running window opens them. Transport: multiprocessing.connection over a
+named pipe or a Unix socket. Both ends share a random key the running instance
+writes to ~/.cortex/instance.key, so another process cannot push paths in.
+Messages are JSON, never pickle. Standard library only (runs before PyQt6).
 """
 
 from __future__ import annotations

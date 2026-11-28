@@ -1,16 +1,9 @@
 """
 spinner.py - 15 animated tool spinners for Cortex IDE.
 
-All native Qt (QPainter + QTimer), no assets or dependencies.
-
-    from src.ui.spinner import spinner_for
-    sp = spinner_for("read", size=16); sp.start(); sp.stop()
-
-read -> ArcSpinner, list_dir -> StackSpinner, edit -> OrbitSpinner, write ->
-PenSpinner, grep -> BarsSpinner, glob -> ScatterSpinner, search -> RadarSpinner,
-semantic_search -> NeuralSpinner, terminal -> DotsSpinner, web_search ->
-PulseRing, web_fetch -> DownloadSpinner, thinking -> GridSpinner, task ->
-CheckSpinner, team -> NodesSpinner, anything else -> GridSpinner.
+All native Qt (QPainter + QTimer), no assets or dependencies. Use
+spinner_for("read", size=16). Names map to classes, e.g. read -> ArcSpinner,
+edit -> OrbitSpinner, grep -> BarsSpinner; anything unknown -> GridSpinner.
 """
 
 import math

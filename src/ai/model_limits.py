@@ -295,16 +295,9 @@ _ESCALATION_TABLE: Dict[str, Tuple[int, int, int]] = {
 def get_escalated_max_output_tokens(model_id: str, escalation_level: int = 0) -> int:
     """Return the max_output_tokens for a model at a given escalation tier.
 
-    Used by agent_bridge to auto-raise output caps during auto-continue
-    cycles when the agent needs more headroom for large code generation.
-
-    Args:
-        model_id:         Model identifier (e.g. 'deepseek-v4-pro' or 'anthropic/claude-haiku-4.5').
-        escalation_level: 0 = conservative default, 1 = moderate, 2 = full.
-
-    Returns:
-        Escalated max_output_tokens, clamped to the highest defined tier.
-        Falls back to the conservative base cap for unknown models.
+    Used by agent_bridge to auto-raise output caps during auto-continue cycles.
+    ``escalation_level`` 0 = conservative default, 1 = moderate, 2 = full,
+    clamped to the highest tier; unknown models fall back to the base cap.
     """
     if not model_id:
         return _DEFAULT_LIMITS.max_output_tokens

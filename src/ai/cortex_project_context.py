@@ -1,15 +1,9 @@
 """
 cortex_project_context.py, Load .cortex/ project files into the system prompt.
 
-Reads the industry-standard .cortex/ directory structure and returns
-formatted prompt blocks for injection into the LLM system prompt.
-
-.cortex/ layout:
-├── rules.md      , Coding conventions, architecture rules, what to avoid
-├── context.md    , Project overview, stack, architecture, entry points
-├── commands.md   , Custom slash commands and shortcuts
-├── memory.json   , Agent's persistent memory (decisions, known bugs, prefs)
-└── ignore.txt    , Files/folders the agent should never touch
+Reads the .cortex/ directory and returns formatted prompt blocks: rules.md
+(conventions), context.md (stack, entry points), commands.md (slash commands),
+memory.json (decisions, bugs, prefs), ignore.txt (files never to touch).
 """
 
 from __future__ import annotations

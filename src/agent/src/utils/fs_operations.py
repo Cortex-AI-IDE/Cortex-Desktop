@@ -387,14 +387,8 @@ def resolveDeepestExistingAncestorSync(fs: FsOperations, absolutePath: str) -> O
 
 def getPathsForPermissionCheck(inputPath: str) -> List[str]:
     """
-    Gets all paths that should be checked for permissions.
-    This includes the original path, all intermediate symlink targets in the chain,
-    and the final resolved path.
-    
-    For example, if test.txt -> /etc/passwd -> /private/etc/passwd:
-    - test.txt (original path)
-    - /etc/passwd (intermediate symlink target)
-    - /private/etc/passwd (final resolved path)
+    Gets all paths to check for permissions: the original path, every
+    intermediate symlink target in the chain, and the final resolved path.
     """
     # Expand tilde notation defensively
     path = inputPath

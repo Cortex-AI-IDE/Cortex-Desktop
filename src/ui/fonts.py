@@ -1,17 +1,10 @@
 """Cortex's bundled typefaces: Inter for the interface, JetBrains Mono for code.
 
-Cortex used to ship no font files: the tokens named Geist and JetBrains Mono,
-neither was installed, and every surface silently fell back to Segoe UI and
-Consolas. The fonts now live in src/assets/fonts/ (SIL Open Font License 1.1)
-and reach both halves of the UI from here: native Qt widgets through
-QFontDatabase.addApplicationFont (register_qt_fonts), and every WebEngine page
-through one script on the shared profile that adds @font-face rules and the
---font-ui / --font-mono variables (install_web_fonts), since Chromium does not
-see Qt-registered fonts.
-
-Naming, measured on Windows: Qt registers the variable Inter file as "Inter
-Variable", so a request for plain "Inter" resolves to Tahoma. The stacks below
-list both names.
+Fonts live in src/assets/fonts/ and reach both halves: Qt via
+QFontDatabase.addApplicationFont (register_qt_fonts), WebEngine via one script
+on the shared profile (install_web_fonts), since Chromium does not see
+Qt-registered fonts. Qt registers the variable file as "Inter Variable", so a
+request for plain "Inter" falls back to Tahoma; the stacks list both names.
 """
 from __future__ import annotations
 

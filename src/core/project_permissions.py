@@ -1,17 +1,10 @@
 """"Allow always", remembered per project.
 
-"Allow always" on a permission card (project access, a file edit, a command)
-used to last until Cortex restarted, so the first agent message after every
-start asked again: 95 answers to the project-access card in the logs of
-2026-10-14..20, one per start. The answer is now kept for the project it was
-given in, across restarts, until the user turns it off ("Always allow" in the
-status bar).
-
-The list lives in ~/.cortex/always_allow.json, never inside the project, so a
-repository cannot grant itself access. It names exact folders: unlike
-workspace trust, allowing a project does not allow the folders under it. A
-remembered grant is not applied while the folder runs in Restricted Mode
-(src/core/workspace_trust.py), and none is recorded there.
+Grants used to last until restart, so every start re-asked (95 project-access
+answers in the 2026-10-14..20 logs). The list lives in
+~/.cortex/always_allow.json, never inside the project, so a repository cannot
+grant itself access. It names exact folders, and a grant is not applied while
+the folder runs in Restricted Mode (workspace_trust.py).
 """
 from __future__ import annotations
 

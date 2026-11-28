@@ -54,17 +54,9 @@ class SearchResult:
 class SemanticSearch:
     """
     Semantic search for codebase using SiliconFlow Qwen embeddings.
-    
-    Features:
-    - Cloud-based embeddings (no local model)
-    - Persistent index on disk
-    - Incremental updates
-    - Fast cosine similarity search
-    
-    Usage:
-        searcher = SemanticSearch("/path/to/project")
-        searcher.index_project()
-        results = searcher.search("authentication logic")
+
+    Cloud embeddings, a persistent on-disk index, incremental updates and fast
+    cosine similarity: index_project() then search("authentication logic").
     """
     
     def __init__(self, project_root: str):
@@ -157,16 +149,12 @@ class SemanticSearch:
     def _prune_outside_root(self) -> int:
         """Drop cache and metadata entries that belong to another project.
 
-        The index is per-project (<root>/.cortex/semantic_index) and used to be
-        trusted blindly: index_project only added and updated keys, so an index
-        ever seeded with a parent or sibling tree kept those rows through every
-        rebuild, force=True included. Measured here before the fix: 1700 of
-        3619 rows pointed at cortex_desktop while the index belonged to
-        cortex_opensource, and searches returned that code with high scores.
-
-        Pruning at load makes search honest immediately; pruning again before a
-        rebuild is what removes the rows from disk on the next save. Returns
-        how many entries were dropped.
+        The index is per-project and used to be trusted blindly: index_project
+        only added keys, so an index ever seeded with a parent or sibling tree
+        kept those rows through every rebuild (measured: 1700 of 3619 rows
+        pointed at cortex_desktop). Pruning at load makes search honest now;
+        pruning before a rebuild removes the rows on the next save. Returns the
+        number dropped.
         """
         foreign = [
             key for key in self.embeddings_cache if not self._within_root(key)
@@ -515,17 +503,10 @@ class SemanticSearch:
     ) -> List[SearchResult]:
         """
         Search codebase semantically.
-        
-        Args:
-            query: Search query (natural language)
-            top_k: Number of results to return
-            min_similarity: Minimum similarity threshold (auto-adjusted based on backend)
-            scope_path: Optional directory to restrict results to, inside the
-                project root. Filtering happens before ranking, so entries
-                outside the scope cannot consume a ``top_k`` slot.
-        
-        Returns:
-            List of SearchResult objects
+
+        ``scope_path`` restricts results to a directory inside the project
+        root; filtering happens before ranking, so outside entries cannot
+        consume a ``top_k`` slot. Returns SearchResult objects.
         """
         if not self.embeddings_provider:
             log.warning("[SemanticSearch] No embeddings provider available")
@@ -646,18 +627,11 @@ class SemanticSearch:
     def _extract_code_content(self, content: str, file_path: str) -> str:
         """Extract meaningful content from a source file for embedding.
 
-        The goal is to capture enough of the file's semantics that an embedding
-        can tell "this file handles authentication" from "this file renders a
-        spinner". The previous version kept only def/class headers plus 4
-        lines, throwing away imports, constants, assignments, bodies and string
-        literals, which are what carry topical meaning.
-
-        Python keeps the module docstring, imports, top-level assignments,
-        class/def signatures with the first body lines, and docstring-like
-        strings and comments. Web files keep imports/exports, function and
-        arrow headers, classes, tag structure, CSS selectors and substantial
-        comments. Markdown keeps full text; everything else keeps any non-blank
-        line. Total length is capped so a 14K-line file is not embedded whole.
+        Keeps enough semantics to tell "authentication" from "spinner": Python
+        docstrings, imports, top-level assignments, class/def signatures and
+        first body lines; web files keep imports/exports, function headers,
+        classes, tag structure and selectors; Markdown keeps full text. Capped
+        so a 14K-line file is not embedded whole.
         """
         ext = Path(file_path).suffix.lower()
         lines = content.split('\n')

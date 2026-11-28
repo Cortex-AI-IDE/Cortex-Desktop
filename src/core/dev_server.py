@@ -1,11 +1,9 @@
 """Own a project's dev server so the Live Preview panel can show a real app.
 
 The panel could render a local .html file but not a Vite/Next/Django app, so a
-UI change went unverified unless a human started the server. This module owns
-the process; the panel only displays a URL.
-
-Three traps: the server picks the port (read from stdout, falling back to the
-OS's listening ports for the child's tree, since piped output is often
+UI change went unverified unless a human started the server. This owns the
+process; the panel only displays a URL. Three traps: the server picks the port
+(read from stdout, falling back to listening ports, since piped output is often
 buffered); on Windows ``npm run dev`` is a cmd.exe shim over node.exe, so the
 whole tree must be killed or the next start hits EADDRINUSE; and stdout/stderr
 are drained on daemon threads, since a full pipe blocks the child.

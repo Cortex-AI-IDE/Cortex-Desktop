@@ -148,18 +148,11 @@ class ThemeManager(QObject):
     def apply(self, theme_name: str, app: QApplication = None, freeze_widget: QWidget = None):
         """Load and apply a QSS theme stylesheet globally.
 
-        Args:
-            theme_name: One of 'dark', 'light', or 'system' (auto-detects OS theme).
-            app: Target QApplication instance (default: QApplication.instance()).
-            freeze_widget: A top-level QWidget to suspend repaints on while the
-                stylesheet is being applied (coalesces the flood of per-widget
-                repaints setStyleSheet() triggers into a single repaint on
-                thaw). QApplication.setStyleSheet() is always the target that
-                actually carries the theme, but QApplication is not a QWidget
-                and has no setUpdatesEnabled(), so this must be passed
-                separately. Previously this freeze silently never ran because
-                the code checked isinstance(app_instance, QWidget), which is
-                always False.
+        ``freeze_widget`` suspends repaints while the stylesheet is applied,
+        coalescing the per-widget repaint flood into one. It must be passed
+        separately because QApplication carries the theme but is not a QWidget
+        and has no setUpdatesEnabled(); an earlier isinstance(app, QWidget)
+        check was always False, so the freeze never ran.
         """
         t_start = time.perf_counter()
         ram_before = _ram_pct()

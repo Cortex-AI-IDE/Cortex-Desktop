@@ -470,15 +470,11 @@ ERROR_MESSAGE_INCOMPLETE_RESPONSE = 'Compaction interrupted · This may be due t
 def stripImagesFromMessages(messages: List[Dict]) -> List[Dict]:
     """
     Strip image blocks from user messages before sending for compaction.
-    Images are not needed for generating a conversation summary and can
-    cause the compaction API call itself to hit the prompt-too-long limit,
-    especially in CCD sessions where users frequently attach images.
-    Replaces image blocks with a text marker so the summary still notes
-    that an image was shared.
-    
-    Note: Only user messages contain images (either directly attached or within
-    tool_result content from tools). Assistant messages contain text, tool_use,
-    and thinking blocks but not images.
+
+    The summary does not need the images, and leaving them in can make the
+    compaction call itself hit the prompt-too-long limit. Each image becomes a
+    text marker so the summary still notes one was shared. Only user messages
+    carry images.
     """
     result = []
     for message in messages:
@@ -558,17 +554,11 @@ def stripReinjectedAttachments(messages: List[Dict]) -> List[Dict]:
 
 def truncateHeadForPTLRetry(messages: List[Dict], ptlResponse: Dict) -> Optional[List[Dict]]:
     """
-    Drops the oldest API-round groups from messages until tokenGap is covered.
-    Falls back to dropping 20% of groups when the gap is unparseable (some
-    Vertex/Bedrock error formats). Returns null when nothing can be dropped
-    without leaving an empty summarize set.
-    
-    This is the last-resort escape hatch for CC-1180, when the compact request
-    itself hits prompt-too-long, the user is otherwise stuck. Dropping the
-    oldest context is lossy but unblocks them. The reactive-compact path
-    has the proper retry loop that peels from the tail;
-    this helper is the dumb-but-safe fallback for the proactive/manual path
-    that wasn't migrated in bfdb472f's unification.
+    Drops the oldest API-round groups until tokenGap is covered, falling back
+    to dropping 20% of groups when the gap is unparseable (some Vertex/Bedrock
+    formats). Returns None when nothing can be dropped without leaving an empty
+    summarize set. The last-resort escape hatch when the compact request itself
+    hits prompt-too-long; lossy but unblocks the user.
     """
     # Strip our own synthetic marker from a previous retry before grouping.
     # Otherwise it becomes its own group 0 and the 20% fallback stalls
@@ -827,17 +817,10 @@ async def createPostCompactFileAttachments(
     messagesToKeep: Optional[List[Dict]] = None,
 ) -> List[Dict]:
     """
-    Re-read the most recently accessed files post-compaction.
-    Respects token budgets (per-file and total).
-    
-    Creates attachment messages for recently accessed files to restore them after compaction.
-    This prevents the model from having to re-read files that were recently accessed.
-    Re-reads files using FileReadTool to get fresh content with proper validation.
-    Files are selected based on recency, but constrained by both file count and token budget limits.
-    
-    Files already present as Read tool results in preservedMessages are skipped -
-    re-injecting identical content the model can already see in the preserved tail
-    is pure waste (up to 25K tok/compact).
+    Re-read the most recently accessed files post-compaction, within per-file
+    and total token budgets. Files already present as Read results in
+    preservedMessages are skipped: re-injecting identical content the model can
+    already see is pure waste (up to 25K tok/compact).
     """
     if messagesToKeep is None:
         messagesToKeep = []

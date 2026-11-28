@@ -36,16 +36,13 @@ def is_200k_model(model: str) -> bool:
 
 def render_model_name(model: str) -> str:
     """
-    Format a model name for display to the user.
-
-    Mirrors TS renderModelName().
-    Converts internal model IDs to human-readable names.
+    Human-readable display name for an internal model ID.
 
     Args:
-        model: Internal model identifier
+        model: Internal model identifier.
 
     Returns:
-        Human-readable model display name
+        Display name.
     """
     display_names = {
 # Cortex

@@ -1,17 +1,9 @@
 """Ordering of the main window's three panels.
 
-The main splitter holds three panels: the sidebar, the chat panel, and the
-editor+terminal block. Settings -> Appearance -> Interface lets the user put
-the sidebar and the chat panel on either edge; the editor+terminal block
-fills whatever space the other two leave.
-
-Both settings are resolved into ONE order here, on purpose. Two independent
-"move my panel here" handlers would fight each other: each inserts at a fixed
-index, so the second call silently undoes the first. Computing the whole order
-from both values makes every combination deterministic, and the editor needs
-no setting of its own.
-
-Pure string logic with no Qt import, so it is testable headless.
+Both the sidebar and chat "put me on this edge" settings resolve into ONE
+order here, on purpose: two independent handlers each inserting at a fixed
+index silently undo each other. The editor+terminal block fills the gap.
+Pure string logic, no Qt, so it is testable headless.
 """
 
 from typing import Tuple

@@ -1,24 +1,14 @@
 """
 Token estimation utilities for LLM API calls.
 
-Provides rough token counting based on character/byte ratios.
-Actual token counts vary by model and tokenizer.
+Rough token counting from character/byte ratios; real counts vary by model.
 """
 
 
 def roughTokenCountEstimation(content: str, bytesPerToken: int = 4) -> int:
     """
-    Rough token count estimation based on character length.
-    
-    Default assumption: 1 token ≈ 4 bytes/characters for English text.
-    This is a very rough estimate, actual tokens depend on the model's tokenizer.
-    
-    Args:
-        content: Text content to estimate tokens for
-        bytesPerToken: Average bytes per token (default 4 for English text)
-        
-    Returns:
-        Estimated token count
+    Rough token count from character length, assuming ~4 bytes per token for
+    English text. Very approximate; actual counts depend on the tokenizer.
     """
     if not content:
         return 0

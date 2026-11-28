@@ -51,8 +51,8 @@ def compute_word_diff(
     Args:
         old_text: Text before the edit.
         new_text: Text after the edit.
-        change_threshold: If more than this fraction changed (0.0-1.0),
-            return empty ranges; word-level diff is meaningless that far apart.
+        change_threshold: Above this fraction changed (0.0-1.0) the texts are
+            too far apart for a word diff, so empty ranges are returned.
 
     Returns:
         {'removed_ranges': [(start, end)...] in old_text,
@@ -123,16 +123,13 @@ def compute_word_diff(
 
 def find_adjacent_pairs(markers: List[str]) -> List[Tuple[int, int]]:
     """
-    Find adjacent delete/add line pairs for inline diff highlighting.
-    
-    When you have consecutive deleted lines followed by added lines,
-    this pairs them up for side-by-side comparison.
-    
+    Pair adjacent delete/add lines for inline diff highlighting.
+
     Args:
-        markers: List of line markers ('-', '+', ' ')
-        
+        markers: Line markers, one of '-', '+', ' '.
+
     Returns:
-        List of (deleted_line_index, added_line_index) pairs
+        (deleted_line_index, added_line_index) pairs.
     """
     pairs = []
     i = 0
@@ -177,18 +174,9 @@ def get_changed_lines(
 ) -> dict:
     """
     Get line-level diff with markers (simpler than word-level).
-    
-    Useful for quick overview before computing detailed word diffs.
-    
-    Args:
-        old_text: Original text
-        new_text: Modified text
-        
-    Returns:
-        Dictionary with:
-        - 'lines': List of (marker, line_text) tuples
-                   marker is '-', '+', or ' ' (context)
-        - 'markers': List of just the markers for find_adjacent_pairs()
+
+    Returns a dict with 'lines' (list of (marker, line_text) tuples, marker is
+    '-', '+', or ' ') and 'markers' (just the markers, for find_adjacent_pairs).
     """
     import difflib
     

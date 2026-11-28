@@ -4,12 +4,9 @@ Cortex security toolkit - offensive and defensive security testing.
 Offensive (recon, web_probe) runs active testing against a declared target,
 gated by ScopeGuard so an undeclared host is refused before a socket opens.
 Defensive (defense) scans local source for committed secrets, hardening
-mistakes and dependency CVEs.
-
-The agent's entry point is tools.security_tool(), exposed as the single
-`SecurityScan` tool with an `action` enum, so the toolkit costs one schema.
-The scope gate is enforced in code and cannot be changed by the agent; see
-tools.py for why.
+mistakes and dependency CVEs. The agent's entry point is tools.security_tool(),
+exposed as the single `SecurityScan` tool with an `action` enum, so the toolkit
+costs one schema; the scope gate is enforced in code, not by the agent.
 """
 
 from src.core.security_toolkit.finding import (

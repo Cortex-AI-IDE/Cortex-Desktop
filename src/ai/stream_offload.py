@@ -32,16 +32,10 @@ async def aiter_offloaded(
 ) -> AsyncIterator[Any]:
     """Iterate a blocking generator without blocking the event loop.
 
-    ``make_gen`` is called on the worker thread, so building the generator is
-    offloaded too - relevant because a provider may do real work (payload
-    assembly, key lookup) before yielding anything.
-
-    ``should_stop`` is polled while waiting for the next chunk. Returning True
-    ends the iteration promptly even if the provider has produced nothing,
-    which is the case Stop used to be unable to interrupt.
-
-    Exceptions raised by the generator are re-raised here with their original
-    traceback, so existing error handling around the call site is unaffected.
+    ``make_gen`` is called on the worker thread, so generator construction is
+    offloaded too. ``should_stop`` is polled while waiting, so Stop ends the
+    iteration promptly even when the provider has produced nothing. Generator
+    exceptions are re-raised here with their original traceback.
     """
     loop = asyncio.get_running_loop()
     # Unbounded asyncio queue; the bound lives in `slots` below, on the
@@ -53,18 +47,12 @@ async def aiter_offloaded(
     def _put(item: Any) -> None:
         """Hand one item to the loop, exactly once. Blocks the WORKER, never the loop.
 
-        Blocking here is deliberate: it is the backpressure that stops a fast
-        provider from queueing an unbounded number of chunks. It waits in
-        slices so that a consumer which has stopped reading cannot strand the
-        thread.
-
-        It used to put with run_coroutine_threadsafe(queue.put(item)), wait
-        2 s, then cancel and put the SAME item again. When the first put had
-        in fact completed just as the wait timed out (the agent loop was
-        slow: fast models, a busy GUI), the chunk was delivered twice - text
-        repeated in the chat (owner report 2026-11-22). Now a slot is taken
-        first and the item is handed over with one call_soon_threadsafe,
-        which cannot be half-done.
+        Blocking is deliberate backpressure against an unbounded queue. It
+        used to put with run_coroutine_threadsafe, wait 2 s, then cancel and
+        put the SAME item again; when the first put had completed just as the
+        wait timed out, the chunk was delivered twice (text repeated in chat,
+        owner report 2026-11-22). Now a slot is taken first and the item is
+        handed over with one call_soon_threadsafe, which cannot be half-done.
         """
         while not cancelled.is_set():
             if not slots.acquire(timeout=_PUT_SLICE_SECONDS):

@@ -185,18 +185,10 @@ def calculate_messages_to_keep_index(
 ) -> int:
     """
     Calculate starting index for messages to keep after compaction.
-    
-    Starts from lastSummarizedMessageId, expands backwards to meet minimums:
-    - At least config.min_tokens tokens
-    - At least config.min_text_block_messages messages with text blocks
-    Stops expanding if config.max_tokens is reached.
-    
-    Args:
-        messages: List of message dicts
-        last_summarized_index: Index of last summarized message (-1 if none)
-        
-    Returns:
-        Start index for messages to keep
+
+    Starts from lastSummarizedMessageId and expands backwards to meet minimums
+    (config.min_tokens tokens, config.min_text_block_messages text-block
+    messages), stopping if config.max_tokens is reached.
     """
     if not messages:
         return 0
@@ -260,14 +252,7 @@ def should_use_session_memory_compaction(
     disable_env: Optional[bool] = None,
 ) -> bool:
     """
-    Check if session memory compaction should be used.
-    
-    Args:
-        enable_env: Environment override (ENABLE_CORTEX_CODE_SM_COMPACT)
-        disable_env: Environment override (DISABLE_CORTEX_CODE_SM_COMPACT)
-        
-    Returns:
-        True if SM compaction should be used
+    True if SM compaction should be used (env vars override the passed flags).
     """
     import os
     
@@ -290,16 +275,16 @@ def try_session_memory_compaction(
     auto_compact_threshold: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Try to use session memory for compaction instead of traditional compaction.
-    
+    Try session memory instead of traditional compaction.
+
     Args:
-        messages: List of message dicts
-        session_memory: Session memory content (extracted memories)
-        last_summarized_message_id: UUID of last summarized message
-        auto_compact_threshold: Token threshold for autocompact (None for manual)
-        
+        messages: Message dicts.
+        session_memory: Extracted session memory content.
+        last_summarized_message_id: UUID of the last summarized message.
+        auto_compact_threshold: Token threshold for autocompact, None for manual.
+
     Returns:
-        Compaction result dict or None if SM compaction cannot be used
+        Compaction result dict, or None when session memory cannot be used.
     """
     if not should_use_session_memory_compaction():
         return None

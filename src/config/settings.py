@@ -322,15 +322,11 @@ class Settings:
         """Parse settings.json, retrying a transient refusal.
 
         Returns the stored dict (possibly empty) or None when the file could
-        not be read at all. None and {} are deliberately different answers:
-        {} is a readable but empty file - a fresh install - while None means
-        "the file is there and we were refused". Only the caller that
-        decides whether to OVERWRITE needs the distinction, and conflating
-        the two is what made a moment of contention look like a first run.
-
-        A file that is valid JSON but not an object is treated as empty; a
-        file that is not JSON at all is not retried, because no amount of
-        patience repairs it.
+        not be read at all. None and {} differ on purpose: {} is a readable but
+        empty file (fresh install), None means "there and we were refused".
+        Only the caller deciding whether to OVERWRITE needs that, and
+        conflating them made a moment of contention look like a first run. A
+        valid-JSON non-object is treated as empty; non-JSON is not retried.
         """
         last_error: OSError | None = None
         for attempt in range(_READ_RETRIES):
@@ -381,17 +377,16 @@ class Settings:
         node[path[-1]] = value
 
     def _merged_with_disk(self) -> dict | None:
-        """What a save writes: this instance's touched leaves over the file
-        as it is now, or None when a save must not happen at all.
+        """What a save writes: this instance's touched leaves over the file as it is
+        now, or None when a save must not happen.
 
         A save used to dump the whole in-memory tree, so two Cortexes on
-        ~/.cortex played last-writer-wins and whichever saved last reverted the
-        other's keys (how provider toggles came back as defaults). Untouched
-        leaves now copy from the current file. When the live read is refused the
-        merge falls back to the last copy this instance read; with no earlier
-        copy AND a file present, None says "do not write", since dumping memory
-        would delete the provider list, recents and window geometry. The caller
-        turns None into "stay dirty and retry", not a failed save.
+        ~/.cortex played last-writer-wins and the last save reverted the
+        other's keys. Untouched leaves now copy from the current file; if the
+        live read is refused the merge falls back to the last copy read here.
+        With no earlier copy AND a file present, None means "do not write",
+        since dumping memory would delete the provider list, recents and window
+        geometry. The caller turns None into "stay dirty and retry".
         """
         base = json.loads(json.dumps(self._data))
         disk = self._read_disk()
@@ -485,18 +480,11 @@ class Settings:
     def _write_payload(self, payload: str, tmp: str) -> OSError | None:
         """Put payload on disk. None on success, else the error that stopped it.
 
-        Two ways to write, and the second is tried inside the SAME attempt
-        because they fail for different reasons. A sibling temp file renamed
-        over settings.json is crash safe and leaves no half file, but it must
-        CREATE a file and then MOVE it, and the create is the fragile half:
-        the console shows the temp being refused with Errno 13 on every save,
-        while the rename also needs FILE_SHARE_DELETE on the destination. A
-        plain truncating write needs neither, and was measured to succeed at
-        the moment the atomic path was refused.
-
-        The fallback used to hang off the rename alone, so a refused temp
-        ended the save before the fallback was reached and the change was lost
-        even though the direct write would have worked.
+        Tries an atomic sibling-temp-and-rename (crash safe), then a plain
+        truncating write inside the SAME attempt, because the create step of
+        the atomic path is refused with Errno 13 on some systems. The fallback
+        used to hang off the rename alone, so a refused temp ended the save
+        before the fallback was reached and the change was lost.
         """
         atomic_error = None
         try:

@@ -415,12 +415,11 @@ class BaseProvider(ABC):
         """Drop 'tool' messages that don't answer an immediately preceding
         assistant 'tool_calls'. Every OpenAI-compatible API 400s on these.
 
-        Used to be three near-identical copies, each doing PASS 1 only: it
-        stripped tool_calls off an assistant message with unanswered calls but
-        left that message's already-matching tool responses behind, so those
-        became orphans pointing at an assistant with no tool_calls and the API
-        rejected the turn anyway. Pass 1 also missed a standalone 'tool' message
-        whose assistant parent was trimmed by history truncation.
+        Used to be three near-identical PASS-1-only copies: stripping
+        tool_calls off an assistant message but leaving its matching tool
+        responses made those orphans pointing at an assistant with no
+        tool_calls, so the API rejected the turn anyway. Pass 1 also missed a
+        standalone 'tool' whose assistant parent was trimmed by truncation.
         """
         # Pass 1: an assistant's tool_calls needs ALL ids answered in the immediately
         # following contiguous tool messages or the API rejects the turn; strip

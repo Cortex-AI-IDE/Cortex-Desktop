@@ -406,15 +406,12 @@ class CrashStore:
 
     def get_unsaved_turns(self, conversation_id: str) -> list:
         """
-        Get messages that may have been lost in the crash: those saved to
-        the crash DB AFTER the last clean shutdown. Everything older lived
-        through a session that exited normally, so the timeline already
-        has it, returning it again is not recovery, it's replay.
-
-        chat_messages is never pruned (it doubles as the agent's context
-        store), so without this cutoff one crash made the next open replay
-        the conversation's whole life, 345 rows for one project, 30 extra
-        renders on top of the normal restore, a 79s UI freeze.
+        Get messages that may have been lost in the crash: those saved to the
+        crash DB AFTER the last clean shutdown. Older rows lived through a
+        normal exit and are already in the timeline, so returning them is
+        replay, not recovery. chat_messages is never pruned (it doubles as the
+        agent's context store), so without this cutoff one crash made the next
+        open replay the whole conversation (345 rows, a 79s UI freeze).
         """
         if not self.was_crash_detected(conversation_id):
             return []

@@ -4128,13 +4128,13 @@ class CortexMainWindow(QMainWindow):
         """Return git HEAD content for a tracked file.
 
         Args:
-          allow_blocking: run git inline even on the GUI thread. Set for a
-            single explicit user action (one CHANGES row click); the bulk path
-            defers to a worker instead.
+          allow_blocking: run git inline on the GUI thread. Set for a single
+            explicit user action (one CHANGES row click); the bulk path defers
+            to a worker instead.
 
         Returns:
-          str content from HEAD when tracked; "" when untracked inside a repo
-          (all lines are adds); None when git is unavailable / not a repo.
+          HEAD content when tracked; "" when untracked inside a repo (all lines
+          are adds); None when git is unavailable or this is not a repo.
         """
         try:
             root = self._changes_project_root(file_path)

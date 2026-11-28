@@ -11,17 +11,10 @@ from typing import Optional
 def run_post_compact_cleanup(query_source: Optional[str] = None) -> None:
     """
     Run cleanup of caches and tracking state after compaction.
-    
-    Call this after both auto-compact and manual /compact to free memory
-    held by tracking structures that are invalidated by compaction.
-    
-    Note: We intentionally do NOT clear invoked skill content here.
-    Skill content must survive across multiple compactions.
-    
-    Args:
-        query_source: Query source to determine if this is main-thread compact.
-                     Subagents run in same process and share module-level state,
-                     so we only reset main-thread state for main-thread compacts.
+
+    Call after both auto-compact and manual /compact. Skill content must survive
+    across compactions. Only main-thread state is reset: subagents (agent:*)
+    share module-level state with the main thread.
     """
     # Determine if this is a main-thread compact
     # Subagents (agent:*) share module-level state with main thread

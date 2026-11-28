@@ -160,13 +160,10 @@ class TerminalBridge(QObject):
     def open_external_url(self, url):
         """Open URL in default browser when a terminal link is clicked.
 
-        Runs the launch on a daemon thread. This is a @pyqtSlot invoked on the
-        GUI thread via QWebChannel, and webbrowser.open() shells out to the OS
-        (on Windows the FIRST call also scans the registry for browsers, then
-        ShellExecutes) - both can block for a beat. On the GUI thread that adds
-        to the very contention that makes a Ctrl+click feel dead while the
-        agent is streaming, so the slot returns instantly and the launch
-        happens off-thread.
+        Runs the launch on a daemon thread: this is a @pyqtSlot on the GUI
+        thread and webbrowser.open() shells out to the OS (on Windows the first
+        call also scans the registry), which can block for a beat and make a
+        Ctrl+click feel dead while the agent streams.
         """
         import threading
         import webbrowser
@@ -1413,15 +1410,11 @@ class XTermWidget(QWidget):
     def copy(self):
         """Ctrl+C, terminal semantics (copy when there is a selection).
 
-        The Edit menu binds Ctrl+C APPLICATION-WIDE (main_window:1741) and
-        routes it here when the terminal has focus, the keystroke never
-        reaches xterm.js. Field report: `python manage.py runserver` could
-        not be stopped, because "copy" swallowed every Ctrl+C and SIGINT was
-        never sent to the shell.
-
-        Real terminals disambiguate by selection:
-          text selected   → copy it to the clipboard
-          nothing selected → send SIGINT (\\x03) to the running process
+        The Edit menu binds Ctrl+C application-wide (main_window:1741) and
+        routes it here, so the keystroke never reaches xterm.js. Field report:
+        `runserver` could not be stopped because "copy" swallowed every Ctrl+C
+        and SIGINT was never sent. Text selected copies; nothing selected sends
+        SIGINT (\\x03) to the running process.
         """
         try:
             def _sel_or_sigint(sel):

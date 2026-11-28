@@ -1,12 +1,10 @@
 """The Microsoft Store link, the store channel's only way to update.
 
 The MSIX build must not download or install anything itself: the Store owns
-updating the package, and a self-updating desktop app is rejected during
-certification. So an update here is a deep link into this product's Store page;
-src/services/update_notice.py decides when to offer it.
-
-Channel detection lives in src/version.py (CHANNEL/IS_STORE_BUILD, baked in by
-build.ps1 -Store).
+updating the package, and a self-updating app is rejected in certification. So
+an update here is a deep link into the product's Store page;
+src/services/update_notice.py decides when to offer it. Channel detection lives
+in src/version.py (CHANNEL/IS_STORE_BUILD, baked in by build.ps1 -Store).
 """
 from __future__ import annotations
 

@@ -61,14 +61,9 @@ def getModelOptions(
     categories: Optional[List[str]] = None,
 ) -> List[ModelOption]:
     """
-    Generate the complete model picker option list for Cortex IDE.
-
-    Args:
-        availableModels: Optional allowlist from settings (None = all models).
-        categories: Optional category filter, e.g. ['recommended', 'coding'].
-
-    Returns:
-        List of ModelOption dicts for the UI picker.
+    Generate the model picker option list. ``availableModels`` is an optional
+    allowlist (None = all), ``categories`` an optional filter such as
+    ['recommended', 'coding']. Returns ModelOption dicts.
     """
     options: List[ModelOption] = [
         getDeepSeekV4ProOption(),
@@ -92,18 +87,8 @@ def filterModelOptionsByAllowlist(
     availableModels: List[str],
 ) -> List[ModelOption]:
     """
-    Filter model options by the availableModels allowlist.
-
-    Args:
-        options: List of model options to filter
-        availableModels: Allowlist from settings
-
-    Returns:
-        Filtered list respecting the allowlist
-
-    Example:
-        filterModelOptionsByAllowlist(options, ['sonnet', 'gpt4o'])
-        → [Sonnet option, GPT-4o option only]
+    Filter model options by the availableModels allowlist, e.g.
+    filterModelOptionsByAllowlist(options, ['sonnet', 'gpt4o']).
     """
     if not availableModels:
         return options
@@ -119,18 +104,7 @@ def getModelOptionByValue(
     availableModels: Optional[List[str]] = None,
 ) -> Optional[ModelOption]:
     """
-    Get a specific model option by its value.
-
-    Args:
-        value: Model value to find (e.g., 'sonnet', 'gpt4o')
-        availableModels: Optional allowlist
-
-    Returns:
-        ModelOption if found, None otherwise
-
-    Example:
-        getModelOptionByValue('gpt4o')
-        → {'value': 'gpt4o', 'label': 'GPT-4o', 'description': '...', 'category': 'recommended'}
+    Get a specific model option by its value (e.g. 'sonnet', 'gpt4o'), or None.
     """
     allOptions = getModelOptions(availableModels)
     for opt in allOptions:
@@ -147,15 +121,12 @@ def getCategoryOptions(
     Get all model options in a specific category.
 
     Args:
-        category: Category name ('recommended', 'coding', 'budget', 'local')
-        availableModels: Optional allowlist
+        category: One of 'recommended', 'coding', 'budget', 'local'.
+        availableModels: Optional allowlist.
 
     Returns:
-        List of ModelOption in the category
-
-    Example:
-        getCategoryOptions('coding')
-        → [Codex, DeepSeek Coder options]
+        ModelOption list for that category, e.g. Codex and DeepSeek Coder for
+        'coding'.
     """
     return getModelOptions(availableModels, categories=[category])
 

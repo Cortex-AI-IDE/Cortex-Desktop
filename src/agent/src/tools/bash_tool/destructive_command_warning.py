@@ -113,14 +113,8 @@ DESTRUCTIVE_PATTERNS: List[DestructivePattern] = [
 
 def get_destructive_command_warning(command: str) -> Optional[str]:
     """
-    Check if a bash command matches known destructive patterns.
-    
-    Args:
-        command: The bash command string to check
-    
-    Returns:
-        A human-readable warning string, or None if no destructive 
-        pattern is detected.
+    Check if a bash command matches known destructive patterns, returning the
+    warning text or None.
     """
     for pattern_obj in DESTRUCTIVE_PATTERNS:
         if pattern_obj.pattern.search(command):

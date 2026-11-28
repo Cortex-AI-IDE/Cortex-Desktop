@@ -673,18 +673,11 @@ def _iter_rg_candidates(root: str, exe: Optional[str] = None,
 def _find_npm_ripgrep() -> Optional[str]:
     """
     Try to locate rg.exe via the npm 'ripgrep' package.
-    
-    The npm package provides a pre-compiled, platform-specific rg binary
-    at require('ripgrep').rgPath. This is more reliable than our bundled
-    copy because it ships with the correct platform build.
-    
-    Checks:
-    1. node -e "require('ripgrep').rgPath" (local npm install)
-    2. Common npm global install paths
-    3. node_modules/** patterns on disk
-    
-    Returns:
-        Path to rg.exe or None
+
+    That package ships a pre-compiled, platform-specific rg binary at
+    require('ripgrep').rgPath, more reliable than our bundled copy. Checks
+    node -e require('ripgrep').rgPath, common npm global paths, then
+    node_modules/** on disk. Returns the path or None.
     """
     import subprocess
     import sys as _sys
@@ -775,18 +768,11 @@ def _find_npm_ripgrep() -> Optional[str]:
 
 def _find_ripgrep() -> Optional[str]:
     """
-    Find the ripgrep (rg) executable.
-    
-    Priority:
-    1. npm 'ripgrep' package (via require('ripgrep').rgPath, pre-compiled binary)
-    2. Cached copy in the platform cache dir (frozen build, avoids rescans)
-    3. ripgrep shipped in the bundle: bin/, node_modules/, _internal/node_modules/
-    4. Project bin/ and node_modules (development mode)
-    5. System PATH (shutil.which)
-    6. Fallback to Python-based grep if rg not found
-    
-    Returns:
-        Path to rg executable or None if not found
+    Find the ripgrep (rg) executable, or None.
+
+    Priority: npm 'ripgrep' package (pre-compiled binary), cached copy in the
+    platform cache dir, the bundled bin/ and node_modules/, project bin/ and
+    node_modules (dev), then PATH. Falls back to Python grep when rg is absent.
     """
     import shutil
     import hashlib
@@ -985,14 +971,7 @@ def apply_head_limit(
 
 def format_limit_info(applied_limit: Optional[int], applied_offset: Optional[int]) -> str:
     """
-    Format limit/offset information for display.
-    
-    Args:
-        applied_limit: Limit that was applied
-        applied_offset: Offset that was applied
-        
-    Returns:
-        Formatted string with limit/offset info
+    Format applied limit/offset info for display.
     """
     parts = []
     if applied_limit is not None:
@@ -1142,15 +1121,11 @@ class GrepTool:
     ) -> List[str]:
         """Window a very long result line around its match instead of losing it.
 
-        ripgrep's own ``--max-columns`` answers an over-long line with
-        ``[Omitted long matching line]``: the file and line number survive, the
-        token the search was for does not. That is the worst possible trade for
-        an agent, which then knows a match exists but not what it says.
-
-        Lines at or under ``MAX_RESULT_LINE_CHARS`` are returned untouched, so
-        ordinary code output is byte-for-byte what it was before this existed.
-        Only lines that used to be replaced outright are rewritten, and they
-        keep their ``path:line:`` prefix so the location stays readable.
+        ripgrep's ``--max-columns`` answers an over-long line with
+        ``[Omitted long matching line]``: file and line survive, the searched
+        token does not, which leaves an agent knowing a match exists but not
+        what it says. Lines at or under ``MAX_RESULT_LINE_CHARS`` are returned
+        untouched; rewritten lines keep their ``path:line:`` prefix.
         """
         if not lines:
             return lines

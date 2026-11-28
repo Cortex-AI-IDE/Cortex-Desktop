@@ -391,13 +391,11 @@ class UsageTracker:
     def get_token_breakdown(self) -> dict:
         """Resolved input / cached / uncached / output split.
 
-        `input_tokens` INCLUDES the cached portion (all providers here send
+        `input_tokens` INCLUDES the cached portion (all providers send
         OpenAI-style prompt_tokens, where cached is a subset), so a consumer
-        must never add cached to input. The relationship is returned already
-        resolved so no caller has to re-derive it:
-
-            total_tokens = input_tokens + output_tokens   (cached not added)
-            uncached_input_tokens = input_tokens - cached
+        must never add cached to input. The relationship is pre-resolved:
+        total_tokens = input_tokens + output_tokens (cached not added);
+        uncached_input_tokens = input_tokens - cached.
         """
         life = self._usage.get("lifetime", {})
         inp = max(0, int(life.get("input_tokens", 0) or 0))
@@ -473,18 +471,10 @@ class UsageTracker:
         return {"points": []}
 
     def get_usage_for_range(self, start_date: str, end_date: str, granularity: str = "daily") -> dict:
-        """Return usage data for a date range, grouped by granularity (daily/weekly/cumulative).
-
-        Returns:
-            {
-                "range": {"start": "2026-06-01", "end": "2026-06-28"},
-                "granularity": "daily",
-                "points": [
-                    {"date": "2026-06-01", "tokens": 1200, "requests": 3, "tool_calls": 5, "models": {}},
-                    ...
-                ],
-                "totals": {"tokens": 45000, "requests": 120, "tool_calls": 200}
-            }
+        """Return usage for a date range, grouped by granularity
+        (daily/weekly/cumulative): {"range": ..., "granularity": ...,
+        "points": [{"date", "tokens", "requests", "tool_calls", "models"}],
+        "totals": {"tokens", "requests", "tool_calls"}}.
         """
         daily = self._usage.get("daily_usage", {})
         try:

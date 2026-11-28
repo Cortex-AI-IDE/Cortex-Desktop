@@ -23,14 +23,8 @@ class ToolCircuitBreaker:
 
     Counts consecutive failures, limits total repetitive calls, auto-recovers
     when a disabled tool succeeds, and resets on expected errors (file-not-found
-    should not trip the breaker). Search tools (Grep, Glob, SemanticSearch) get
-    higher limits for deep exploration.
-
-    Usage:
-        cb = ToolCircuitBreaker(threshold=3, repetitive_limit=50)
-        cb.record_call("Read", success=True)
-        if cb.is_disabled("Bash"):
-            ...  # tell the LLM not to call it
+    should not trip it). Search tools (Grep, Glob, SemanticSearch) get higher
+    limits for deep exploration.
     """
 
     # Search/exploration tools get much higher limits, deep codebase

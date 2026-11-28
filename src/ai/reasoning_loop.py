@@ -1,17 +1,9 @@
 """Detect a model stuck repeating the same few reasoning lines.
 
-Evidence 2026-09-10: deepseek-v4-flash-vision-exp streamed one 36,100-char
-thought of 2,683 lines with only 300 distinct ('Go.' x637, 'Writing.' x567,
-'OK.' x524, 'Let me write.' x457). The 32K-token thinking budget never
-tripped (the loop was ~9K tokens), so the Thinking card grew into a wall.
-A token count cannot see a loop; the share of distinct lines can.
-
-Evidence 2026-10-28: a MiMo reasoning loop repeated two Malayalam lines
-5 and 10 times in a row while the user watched the Thinking card fill
-with copies and killed the IDE. The 120-line window below never filled,
-because the loop died with the process first: a window rule alone is
-too slow for a tight loop. A run of four consecutive identical lines now
-trips immediately, long before any window is full.
+A token budget cannot see a loop; the share of distinct lines can (2026-09-10:
+a 2,683-line thought with only 300 distinct lines never tripped the budget). A
+window alone is too slow for a tight loop (2026-10-28: two lines repeated until
+the process died), so a run of four identical lines now trips immediately.
 """
 from collections import Counter, deque
 

@@ -1,17 +1,10 @@
 """Kill a child's process group without ever hitting Cortex's own.
 
-``os.killpg(os.getpgid(child), sig)`` is how a command's whole tree is
-stopped (bash plus the git/scp/node it started). It is only safe when the
-child was started in a group of its own (``start_new_session=True`` or
-``setsid``). When it was not, the child's group IS Cortex's group, and a
-Cortex launched from the Ubuntu dock shares that group with GNOME Shell,
-Xwayland and every other app the dock started: the "kill the command" call
-then SIGKILLs GNOME Shell and logs the user out. That happened 7 times on
-2026-10-12, each time a silent command (``sleep 75; ...``) reached the 30 s
-run-command timeout.
-
-``kill_process_group`` checks the group first and, if it is ours (or a
-system group), signals only the child itself.
+``os.killpg(os.getpgid(child), sig)`` is only safe when the child started in
+its own group (``start_new_session=True``); otherwise the child's group IS
+Cortex's, and killing it SIGKILLs GNOME Shell and logs the user out (happened
+7 times on 2026-10-12). ``kill_process_group`` checks the group first and, if
+it is ours, signals only the child.
 """
 from __future__ import annotations
 

@@ -1,17 +1,10 @@
 """Which Chrome the AI's browser tools use, and handing sign-ins to the user.
 
-chrome-devtools-mcp used to launch its OWN Chrome, an empty profile with
-automation switches, so Chrome showed "controlled by automated test software",
-no logins were present, and Cloudflare-style checks refused it.
-
-Mode ("own" / "separate", settings browser.ai_browser): in "own" mode the
-server starts with --autoConnect and attaches to the Chrome the user already
-runs (144+), after they enable remote debugging once at
-chrome://inspect/#remote-debugging. The user's mcp.json is never edited.
-
-Handover: when a browser tool hits a sign-in page or a security check, the
-agent stops and a chat card asks the user to finish it in Chrome. The AI never
-types passwords or codes and never tries to get past a check.
+In "own" mode the server starts with --autoConnect and attaches to the Chrome
+the user already runs, instead of its own empty automated profile (which showed
+"controlled by automated test software" and failed Cloudflare checks). When a
+tool hits a sign-in page or security check, the agent stops and a chat card
+asks the user to finish it; the AI never types passwords or codes.
 """
 from __future__ import annotations
 

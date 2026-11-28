@@ -1,16 +1,10 @@
 """Streaming text pipeline for the agent chat panel.
 
-Pure string work: mermaid/question stripping, fence extraction, live
-code-card highlighting and the seal-boundary splitters. No widget is
-constructed here, so this module imports and runs without a
-``QApplication``, which is what makes it testable (W1).
-
-Extracted from ``src/ui/chat_panel.py`` under W1. The names are re-exported
-from ``chat_panel``, so every existing call site and every test that imports
-them from there keeps working unchanged.
-
-The two caches below are module-level mutable state and live here with the
-functions that own them. Nothing outside this module may rebind them.
+Pure string work: mermaid/question stripping, fence extraction, live code-card
+highlighting and the seal-boundary splitters. No widget is constructed, so this
+runs without a QApplication (W1). Names are re-exported from chat_panel so
+existing call sites keep working. The two module-level caches live here with
+the functions that own them; nothing outside may rebind them.
 """
 
 from __future__ import annotations
@@ -128,14 +122,12 @@ _OPEN_FENCE_HL_DELTA = 400  # chars of growth before a full re-highlight
 def _highlight_for_stream(code: str, lang: str, is_open: bool = False) -> str:
     """Syntax-highlight code → QTextBrowser HTML, cached. Falls back to
     plain escaped text if the highlighter is unavailable.
-
-    Cache key includes the active theme bg, highlight colors are baked
-    inline per-theme, so a dark-rendered entry must not be served after a
-    live switch to light (invisible white comments on the warm page).
-
-    ``is_open=True`` (fence still streaming) enables incremental mode:
-    reuse the last full highlight and append the new tail escaped, doing a
-    full pygments pass only every ``_OPEN_FENCE_HL_DELTA`` chars."""
+    Cache key includes the active theme bg: highlight colors are baked inline
+    per-theme, so a dark-rendered entry must not be served after a live switch
+    to light (invisible white comments on the warm page). ``is_open=True``
+    (fence still streaming) enables incremental mode: reuse the last full
+    highlight and append the new tail escaped, doing a full pygments pass only
+    every ``_OPEN_FENCE_HL_DELTA`` chars."""
     key = (lang, T['bg'])
     if is_open:
         st = _OPEN_FENCE_HL_STATE.get(key)
@@ -318,19 +310,15 @@ _TABLE_SEP_RE = re.compile(r'^[ \t]*\|?[\s\-:|]+\|?$')
 
 
 def _split_open_block_for_seal(buf: str, tail_target: int) -> tuple:
-    """Fallback seal split for a live buffer that grew past the hard cap
-    with NO paragraph or fence-close boundary (one giant open code fence,
-    one giant table, or one open mermaid diagram).
+    """Fallback seal split for a live buffer past the hard cap with no
+    paragraph or fence-close boundary (one giant open fence, table, or
+    mermaid diagram).
 
-    Returns ``(split_off, prefix_extra, tail_extra)`` or ``(-1, "", "")``.
-    ``prefix_extra`` is appended to the prefix (e.g. a synthetic fence
-    close) and ``tail_extra`` prepended to the tail (fence opener / table
-    header) so BOTH halves are well-formed markdown — critical because the
-    turn-end renderer renders each sealed segment independently.
-
-    The split keeps the tail ≤ ``tail_target`` chars so the per-tick live
-    re-render stays bounded forever; the one-time cost of rendering the big
-    sealed prefix is paid once, off the hot path.
+    Returns ``(split_off, prefix_extra, tail_extra)`` or ``(-1, "", "")``;
+    prefix_extra is appended to the prefix and tail_extra prepended to the tail
+    so BOTH halves are well-formed markdown (each sealed segment renders
+    independently). The tail stays <= ``tail_target`` chars to bound per-tick
+    re-render; the big sealed prefix is rendered once, off the hot path.
     """
     lines = buf.split('\n')
     offs = []

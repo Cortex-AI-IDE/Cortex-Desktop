@@ -2,12 +2,8 @@
 
 Serves the current HTML file's directory over local HTTP, injects a live-reload
 polling script into HTML responses, and watches the HTML plus its linked CSS/JS
-so a save reloads the tab.
-
-    server = LiveServer(root_dir, html_file_path)
-    port   = server.start()       # server + watcher threads
-    url    = server.get_url(html_file_path)
-    server.stop()
+so a save reloads the tab: server = LiveServer(root_dir, html_file_path);
+port = server.start(); url = server.get_url(html_file_path); server.stop().
 """
 
 import json

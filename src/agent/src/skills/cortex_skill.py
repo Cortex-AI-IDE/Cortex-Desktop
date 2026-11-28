@@ -3,12 +3,9 @@ cortex_skill.py, the Skills system for Cortex IDE.
 
 A skill is a SKILL.md file: YAML frontmatter (name, description, tags) plus a
 markdown body holding a proven working method. Cortex ships 219 of them under
-skills/bundled/, and users can add their own.
-
-- SkillsManager: load, list, search, activate reusable prompt packs (SKILL.md format)
-- SKILL.md frontmatter parser with relevance matching
-- Auto-detection from user prompts using keyword matching
-- System prompt injection for active skills
+skills/bundled/, and users can add their own. SkillsManager loads, lists,
+searches and activates them, the frontmatter parser matches on relevance, and
+active skills are injected into the system prompt.
 """
 
 from __future__ import annotations
@@ -178,15 +175,8 @@ def parse_skill_file(file_path: str) -> Optional[SkillDefinition]:
     """
     Parse a SKILL.md file and return a SkillDefinition.
 
-    Expected format:
-    ---
-    name: my-skill
-    description: Helps with ...
-    aliases: [my, skill]
-    tags: [python, backend]
-    when_to_use: When the user asks about...
-    ---
-    Markdown content with instructions...
+    Frontmatter is a YAML block (name, description, aliases, tags,
+    when_to_use) between --- fences, followed by the instruction markdown.
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:

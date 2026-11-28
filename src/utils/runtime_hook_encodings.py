@@ -1,15 +1,10 @@
 """
 PyInstaller Runtime Hook - Force Import encodings & codecs at Boot
 
-CRITICAL: PyInstaller sometimes fails to bundle the encodings stdlib module,
-causing "Failed to start embedded python interpreter: Failed to import encodings
-module" at startup. This hook forces ALL common encodings to be loaded before
-the application starts, ensuring they are available in the frozen environment.
-This hook runs BEFORE the application code.
-
-References:
-  - https://github.com/pyinstaller/pyinstaller/issues/4384
-  - https://github.com/pyinstaller/pyinstaller/issues/4706
+PyInstaller sometimes fails to bundle the encodings stdlib module, causing
+"Failed to import encodings module" at startup. This hook forces all common
+encodings to load before the app starts (runs before application code).
+See pyinstaller issues 4384 and 4706.
 """
 # Force import of encodings module tree at boot time.
 # This is the most commonly missed module in PyInstaller builds.

@@ -1,12 +1,10 @@
 """Ranked keyword search over the skill library.
 
-With 251 skills, the old substring test over name+description broke down:
-"3d website" and "seo audit" matched nothing (the skill is
-3d-website-architect; a space is not a hyphen), "responsive" left the right
-skill 40 rows down because matches were hidden, never reordered, and tags were
-never searched. Here separators are equivalent, every term must match (AND),
-matches are ranked, and tags count. Pure functions, no Qt, so the Skills
-browser and the "/" menu share one behaviour.
+With 251 skills, a plain substring test over name+description broke down: "3d
+website" and "seo audit" matched nothing (a space is not a hyphen), and matches
+were hidden rather than reordered. Here separators are equivalent, every term
+must match (AND), matches are ranked, and tags count. Pure functions, no Qt, so
+the Skills browser and the "/" menu share one behaviour.
 """
 from __future__ import annotations
 

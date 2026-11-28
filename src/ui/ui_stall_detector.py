@@ -1,14 +1,10 @@
 """GUI-thread stall detector: makes UI freezes name themselves in the log.
 
-"The UI froze" was previously diagnosed from indirect evidence, gaps between
-log lines that mix worker and GUI threads, where model and network waits look
-identical to real freezes. Here a QTimer on the GUI thread ticks every 500ms;
-a late tick means the event loop was blocked for that long. Worker threads,
-network waits and model latency cannot trigger it.
-
-Log output: [UI-STALL] GUI thread blocked ~3.4s (tick expected 15:27:41,
-arrived 15:27:44). Correlate that timestamp with the surrounding log lines and
-the culprit is named with evidence. Cost: one timer event twice a second.
+"The UI froze" was previously diagnosed from log-line gaps, where model and
+network waits look identical to real freezes. Here a QTimer on the GUI thread
+ticks every 500ms; a late tick means the event loop was blocked that long, and
+worker/network/model latency cannot trigger it. Output: [UI-STALL] GUI thread
+blocked ~3.4s (tick expected 15:27:41, arrived 15:27:44).
 """
 from __future__ import annotations
 

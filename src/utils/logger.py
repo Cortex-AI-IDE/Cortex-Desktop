@@ -22,16 +22,12 @@ from pathlib import Path
 class _HourlyRotatingFileHandler(BaseRotatingHandler):
     """
     Hourly log rotation that WORKS on Windows.
-    
-    Unlike TimedRotatingFileHandler, this doesn't rely on os.rename()
-    which fails on Windows when another process holds the file handle.
-    Instead it copies the content and truncates — avoiding rename errors.
-    
-    Also rotates early if file exceeds maxBytes (default 10MB).
-    
-    THREAD SAFETY: A lock protects shouldRollover/doRollover/emit so that
-    concurrent logging from LSP threads, asyncio, thread pool workers, and
-    the main thread don't corrupt the file handle or crash on Windows.
+
+    Unlike TimedRotatingFileHandler it does not use os.rename(), which fails
+    when another process holds the handle; it copies and truncates instead.
+    Also rotates early past maxBytes (10MB). A lock protects
+    shouldRollover/doRollover/emit against concurrent logging from LSP,
+    asyncio and pool threads.
     """
     
     def __init__(self, filename, backupCount=168, maxBytes=10*1024*1024, encoding='utf-8'):
@@ -296,13 +292,11 @@ _DROP_QT = tuple(dict.fromkeys(_StderrFilter._DROP + [
 def install_qt_message_filter():
     """Drop Qt C++ noise through Qt's own hook, on every platform.
 
-    The fd-level layers of install_stderr_filter() catch messages Qt writes
-    straight to fd 2, but replacing a process-wide descriptor also swallows
-    print() and child output on POSIX. qInstallMessageHandler() is the
-    supported hook: every qtDebug/qtWarning/qtCritical reaches it before
-    touching a descriptor, so nothing is redirected. Call after QApplication
-    exists; safe to call more than once, and guarded so it can never block
-    startup.
+    The fd-level layers of install_stderr_filter() catch messages Qt writes to
+    fd 2, but replacing a process-wide descriptor also swallows print() and
+    child output on POSIX. qInstallMessageHandler() is the supported hook, so
+    nothing is redirected. Call after QApplication exists; safe to call more
+    than once and guarded so it can never block startup.
     """
     try:
         from PyQt6 import QtCore
@@ -376,16 +370,10 @@ _shared_console_handler = None
 def _resolve_log_dir() -> Path:
     """Directory holding cortex.log.
 
-    Default is ``~/.cortex/logs/``, shared across all projects so that every
-    diagnosis looks in one place. ``CORTEX_LOG_DIR`` overrides it.
-
-    Why the override exists: the test suite deliberately exercises failure
-    paths, and those fixtures log at CRITICAL ("tool exploded", "disk went
-    away", "DeadView has no attribute reload"). Without an override every
-    pytest run appended those fake catastrophes to the user's real log, so a
-    clean suite looked like a crashing app and real errors were harder to
-    find. ``tests/conftest.py`` points this at the gitignored
-    ``.cortex/test-logs/``.
+    Default is ``~/.cortex/logs/``, shared across projects. CORTEX_LOG_DIR
+    overrides it so the test suite's deliberate CRITICAL fixtures ("tool
+    exploded") do not append fake catastrophes to the user's real log;
+    tests/conftest.py points it at .cortex/test-logs/.
     """
     override = os.environ.get("CORTEX_LOG_DIR")
     if override:

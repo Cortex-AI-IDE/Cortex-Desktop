@@ -1058,14 +1058,10 @@ def _svg_icon_hq(svg_data: str, size: int) -> QPixmap:
     """
     Render SVG crisp on any display density.
 
-    Technique:
-      1. Detect the screen device-pixel-ratio (DPR), e.g. 1.5× on a 150% Windows display.
-      2. Render at  (size × DPR × oversample)  pixels, large enough for perfect edges.
-      3. Scale down to  (size × DPR)  with smooth filtering.
-      4. Tag the pixmap with setDevicePixelRatio(dpr) so Qt maps
-         that physical pixel count back to the correct logical size.
-    Result: the icon appears at exactly `size` logical pixels but uses
-    all available physical pixels, identical sharpness to a browser icon.
+    Detect the screen DPR, render at size x DPR x oversample pixels, scale down
+    to size x DPR with smooth filtering, then setDevicePixelRatio(dpr) so Qt
+    maps back to the correct logical size. The icon appears at exactly `size`
+    logical pixels but uses all available physical pixels.
     """
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance()

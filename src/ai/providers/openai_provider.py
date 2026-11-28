@@ -130,19 +130,7 @@ class OpenAIProvider(BaseProvider):
              tools: Optional[List[Dict[str, Any]]] = None,
              tool_choice: Optional[str] = None) -> ChatResponse:
         """
-        Send a chat completion request with retry logic.
-
-        Args:
-            messages: List of chat messages
-            model: Model ID to use
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-            stream: Whether to stream the response
-            tools: List of tools available to the model
-            tool_choice: Tool choice configuration
-
-        Returns:
-            ChatResponse object
+        Send a chat completion request with retry logic. Returns ChatResponse.
         """
         start_time = time.time()
         last_error: Optional[Exception] = None

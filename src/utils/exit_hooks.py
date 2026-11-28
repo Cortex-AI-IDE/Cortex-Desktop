@@ -1,12 +1,11 @@
 """Cortex's own exit hooks, runnable without Python's full teardown.
 
-main.py ends the process with os._exit() after the event loop, because the
-interpreter's teardown of PyQt objects segfaulted on most closes (sip, under
-Py_Exit). os._exit skips atexit, so the hooks Cortex needs at exit - the
-clean-shutdown marker, temp page cleanup - register here: they are recorded
-for main.py to run, and still handed to atexit for every other exit path.
-atexit._run_exitfuncs() is not an option: it also runs PyQt's own hooks,
-which touch Qt objects that are already gone (the same segfault).
+main.py ends with os._exit() after the event loop, because the interpreter's
+teardown of PyQt objects segfaulted on most closes. os._exit skips atexit, so
+the hooks Cortex needs (clean-shutdown marker, temp page cleanup) register here
+for main.py to run, and still go to atexit for every other exit path.
+atexit._run_exitfuncs() is not an option: it also runs PyQt's hooks, which
+touch Qt objects already gone (the same segfault).
 """
 from __future__ import annotations
 

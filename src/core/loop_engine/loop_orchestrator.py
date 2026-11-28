@@ -2,13 +2,12 @@
 
 The agent_loop.md state machine as four entry points (start/verify/status/stop)
 rather than a runLoop() driving its own nested conversation: CortexAgentBridge
-already IS the plan-act-observe-revise engine, and a second LLM tool loop inside
+already is the plan-act-observe-revise engine, and a second LLM tool loop inside
 a tool dispatcher would nest one agent loop in another in a single dispatch.
-So PLAN/ACT stay the agent's normal turns and this engine owns what must not be
-model judgment: DISCOVER (baseline), VERIFY (the gate), REVISE (state/stall
-bookkeeping) and the hard stops. Each checkpoint passes test_integrity.py, and
-each green result passes reviewer.py's maker/checker split. Gates run cheapest
-first: budget/stall, checkpoint, integrity, verify commands, reviewer.
+PLAN/ACT stay the agent's normal turns; this engine owns what must not be model
+judgment: DISCOVER (baseline), VERIFY (the gate), REVISE (state/stall) and the
+hard stops. Gates run cheapest first: budget/stall, checkpoint,
+test_integrity.py, verify commands, reviewer.py.
 """
 
 from __future__ import annotations

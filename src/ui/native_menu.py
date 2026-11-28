@@ -111,16 +111,10 @@ def theme_native_menus(view) -> None:
 class _GlobalMenuThemer(QObject):
     """Themes every QMenu in the app as Qt polishes it.
 
-    Per-view installation kept missing menus, because it depends on
-    knowing which attribute of which panel holds the view AND on the
-    install having run. This does not: Qt delivers Polish to the menu
-    itself, so one filter on QApplication sees every menu in the process,
-    including the ones Chromium builds inside a QWebEngineView.
-
-    Menus that already carry a stylesheet are left alone, so the places
-    that deliberately style their own context menu keep their look. In
-    practice the untouched ones are exactly the native menus this is
-    meant to fix.
+    Per-view installation kept missing menus (it depends on knowing which panel
+    holds the view); Qt delivers Polish to the menu itself, so one filter on
+    QApplication sees every menu, including those Chromium builds inside a
+    QWebEngineView. Menus that already carry a stylesheet are left alone.
     """
 
     def eventFilter(self, a0, a1):

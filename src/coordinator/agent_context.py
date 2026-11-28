@@ -21,17 +21,9 @@ def get_worker_tool_context(
     simple_mode: bool = False
 ) -> Dict[str, str]:
     """
-    Build context telling workers what tools they have access to.
-    
-    This is injected into the worker's system prompt so they know
-    their capabilities.
-    
-    Args:
-        mcp_servers: List of MCP server configs with 'name' key
-        simple_mode: If True, use minimal tool set
-    
-    Returns:
-        Dictionary with 'worker_tools_context' key containing formatted string
+    Build context telling workers what tools they have access to, injected into
+    the worker's system prompt. Returns a dict with a 'worker_tools_context' key
+    holding the formatted string.
     """
     if mcp_servers is None:
         mcp_servers = []
@@ -61,16 +53,16 @@ def format_worker_prompt(
     expected_output: str = None
 ) -> str:
     """
-    Format a well-structured worker prompt following best practices.
-    
+    Structured worker prompt.
+
     Args:
-        task_description: Clear description of what to do
-        purpose: Why this task matters (helps worker calibrate depth)
-        file_paths: Specific files to work with
-        expected_output: What "done" looks like
-    
+        task_description: What to do.
+        purpose: Why it matters, which helps the worker calibrate depth.
+        file_paths: Files to work with.
+        expected_output: What "done" looks like.
+
     Returns:
-        Formatted prompt string
+        Formatted prompt string.
     """
     parts = []
     

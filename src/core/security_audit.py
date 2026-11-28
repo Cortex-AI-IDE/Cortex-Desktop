@@ -60,13 +60,9 @@ class SecurityEvent(Enum):
 class SecurityAuditLogger:
     """
     Security audit logger for tracking security-relevant events.
-    
-    Features:
-    - Structured JSON logging
-    - Event categorization
-    - Severity levels
-    - File-based storage with rotation
-    - Integrity verification
+
+    Structured JSON logging with event categorization, severity levels, and
+    file-based storage with rotation and integrity verification.
     """
     
     # Severity levels
@@ -136,15 +132,7 @@ class SecurityAuditLogger:
     def log_event(self, event: SecurityEvent, details: Optional[Dict[str, Any]] = None,
                   user_id: Optional[str] = None, ip_address: Optional[str] = None,
                   user_agent: Optional[str] = None):
-        """
-        Log a security event.
-        
-        Args:
-            event: Security event type
-            details: Additional event details
-            user_id: User ID (if applicable)
-            ip_address: Client IP address
-            user_agent: Client user agent
+        """Log a security event with optional details, user id, IP and agent.
         """
         # Create audit entry
         entry = {
@@ -261,17 +249,8 @@ class SecurityAuditLogger:
                    end_time: Optional[datetime] = None,
                    limit: int = 100) -> List[Dict[str, Any]]:
         """
-        Retrieve audit events.
-        
-        Args:
-            event_type: Filter by event type
-            severity: Filter by severity
-            start_time: Filter by start time
-            end_time: Filter by end time
-            limit: Maximum number of events
-            
-        Returns:
-            List of audit events
+        Retrieve audit events, filtered by event_type, severity, start_time,
+        end_time, up to limit. Returns a list of event dicts.
         """
         # Flush buffer first
         self._flush()

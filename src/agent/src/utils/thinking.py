@@ -5,14 +5,10 @@
 """
 Extended thinking/reasoning configuration for multi-LLM models.
 
-Different LLM providers call this feature by different names:
-- OpenAI: "reasoning_effort" (GPT-5.x models)
-- MiMo: "thinking" parameter (V2.5 family)
-- DeepSeek: Always-on reasoning (V4 models, no toggle)
-- Alibaba: "thinking_budget" (Qwen3 models via DashScope API)
-
-This module provides unified configuration across all providers,
-including tiered reasoning budgets mapped to task complexity.
+Each provider names it differently: OpenAI "reasoning_effort" (GPT-5.x), MiMo
+"thinking" (V2.5), DeepSeek always-on (V4, no toggle), Alibaba
+"thinking_budget" (Qwen3 via DashScope). This maps them to one configuration,
+including tiered reasoning budgets keyed to task complexity.
 """
 
 from dataclasses import dataclass
@@ -457,17 +453,8 @@ def get_provider_thinking_info(provider: str) -> dict:
 
 def list_thinking_supported_models() -> Dict[str, list]:
     """
-    List all models that support extended thinking across all providers.
-    
-    Returns:
-        Dict mapping providers to lists of supported models
-    
-    Examples:
-        >>> models = list_thinking_supported_models()
-        >>> "gpt-5.5" in models["openai"]
-        True
-        >>> "mimo-v2.5-pro" in models["mimo"]
-        True
+    List all models that support extended thinking, as a dict mapping provider
+    names to lists of model ids.
     """
     return {
         provider: sorted(list(models))
@@ -480,14 +467,8 @@ def list_thinking_supported_models() -> Dict[str, list]:
 
 def should_enable_thinking_by_default(provider: str, model_name: str) -> bool:
     """
-    Check if thinking should be enabled by default for a model.
-    
-    Args:
-        provider: LLM provider
-        model_name: Model identifier
-    
-    Returns:
-        True if thinking should be enabled by default
+    Check if thinking should be enabled by default for a model (True only when
+    the model supports it).
     """
     # Only enable by default if model supports thinking
     return model_supports_thinking(provider, model_name)
@@ -495,18 +476,8 @@ def should_enable_thinking_by_default(provider: str, model_name: str) -> bool:
 
 def get_thinking_summary(provider: str, model_name: str) -> str:
     """
-    Get human-readable summary of thinking support for a model.
-    
-    Args:
-        provider: LLM provider
-        model_name: Model identifier
-    
-    Returns:
-        Human-readable description
-    
-    Examples:
-        >>> print(get_thinking_summary("openai", "o3-mini"))
-        "OpenAI o3-mini: Supports Extended Thinking (adaptive mode)"
+    Get a human-readable summary of thinking support for a model, e.g.
+    "OpenAI o3-mini: Supports Extended Thinking (adaptive mode)".
     """
     provider_info = get_provider_thinking_info(provider)
     

@@ -1,16 +1,10 @@
 """
 Tiny listener-set primitive for pure event signals (no stored state).
 
-Collapses the ~8-line `listeners = set(); def subscribe():…; def notify():…`
-boilerplate that was duplicated ~15× across the codebase into a one-liner.
-
-Distinct from a store (AppState, createStore), there is no snapshot, no
-getState. Use this when subscribers only need to know "something happened",
-optionally with event args, not "what is the current value".
-
-Usage:
-    changed = createSignal()
-    # later: changed.emit()
+Collapses the ~8-line `listeners = set(); def subscribe(); def notify()`
+boilerplate duplicated ~15x across the codebase into a one-liner. Distinct from
+a store: no snapshot, no getState. Use when subscribers only need to know
+"something happened", not "what is the current value": changed = createSignal().
 """
 
 from typing import Any, Callable, List

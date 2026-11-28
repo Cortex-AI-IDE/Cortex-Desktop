@@ -1,16 +1,10 @@
 """File types Cortex opens from the operating system, and how each
 distribution registers them.
 
-FILE_TYPES below is the only list; every distribution is generated from it:
-Inno Setup via build_tools/file_assoc/gen_file_assoc.py iss, MSIX via the same
-script's msix output, Linux via its linux output (shared-mime-info package and
-the .desktop MimeType line), and a Windows build without the installer via
-`Cortex.exe --register-file-types`.
-
-Registering never takes a file type over: it adds Cortex to "Open with" and to
-Settings > Default apps, and the user makes it the default there, since Windows
-does not let an installer set it. To support another extension, add one line to
-FILE_TYPES and rebuild.
+FILE_TYPES is the only list; every distribution is generated from it (Inno
+Setup, MSIX and Linux via build_tools/file_assoc/gen_file_assoc.py, or
+`Cortex.exe --register-file-types`). Registering never takes a type over: it
+adds Cortex to "Open with" and the user sets the default there.
 """
 
 from __future__ import annotations

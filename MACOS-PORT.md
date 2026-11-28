@@ -4,14 +4,14 @@
 
 ### The official port roadmap
 
-**Cortex 3.0.63** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Maintainer-authorized porting guide
+**Cortex 3.0.82** &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; Maintainer-authorized porting guide
 
-**Windowsh 10/11 and Linux ship today.** This is the step-by-step roadmap for
+**Windows 10/11 and Linux ship today.** This is the step-by-step roadmap for
 building the macOS version, published with the maintainer's permission.
 
-**Verified against the 3.0.63 source tree.** Each file, line number and platform
-check below was re-read in the released 3.0.63 code (`src/version.py:21`), not
-carried forward from an earlier revision.
+**Verified against the 3.0.82 source tree.** Each file, line number and platform
+check below was re-read in the current code (`src/version.py:8`), not carried
+forward from an earlier revision.
 
 </div>
 
@@ -63,7 +63,7 @@ it, a double-clickable `.app` inside a `.dmg`.
 
 ## Contents
 
-- [What 3.0.61 and 3.0.63 changed for macOS](#what-3061-and-3063-changed-for-macos)
+- [What changed for macOS since 3.0.61](#what-changed-for-macos-since-3061)
 - [What already works on macOS](#what-already-works-on-macos)
 - [What needs changing](#what-needs-changing)
 - [The port is in the source tree](#the-port-is-in-the-source-tree)
@@ -81,15 +81,16 @@ it, a double-clickable `.app` inside a `.dmg`.
 
 ---
 
-## What 3.0.61 and 3.0.63 changed for macOS
+## What changed for macOS since 3.0.61
 
-Two releases landed after this guide was first written, and both touch things a
-port cares about: fonts, theming and process cleanup. The short answer is that
-**neither release adds a Windows dependency.** Every module introduced by them
-was searched for `win32`, `winpty`, `powershell`, `sys.platform`, `os.name`,
-`LOCALAPPDATA` and `APPDATA`. None contains a platform branch. The only hit is a
-comment in `src/ai/mcp_context.py` that mentions PowerShell in passing, while
-explaining why browser actions count as progress.
+Nineteen releases landed between 3.0.61 and 3.0.82, and they touch things a port
+cares about: fonts, theming, the terminal, the browser and process cleanup. The
+short answer is that **none of them adds a Windows dependency.** Every module
+they introduced was searched for `win32`, `winpty`, `powershell`, `sys.platform`,
+`os.name`, `LOCALAPPDATA` and `APPDATA`. The only platform branches found are the
+ones that already existed, plus two new ones that help macOS: the Chrome locator
+in `src/services/ai_browser.py:98` and the shell default in
+`src/core/terminal_session.py:129`.
 
 | Release | Change | New or changed files | Effect on macOS |
 |---|---|---|---|
@@ -107,9 +108,37 @@ explaining why browser actions count as progress.
 | 3.0.63 | Update check sends `platform` | `src/services/update_checker.py` | Fixes a build being offered an installer for another platform |
 | 3.0.63 | Sign-in window and sidebar follow the theme | `src/ui/dialogs/login_dialog.py`, `src/ui/components/sidebar.py`, `src/ui/html/sidebar.html` | Works. The sidebar can also sit on the right, which some macOS users prefer |
 | 3.0.63 | Semantic memory LRU cache and time budget | `src/core/semantic_memory.py` | Works. Keeps a slow search from holding up a turn |
+| 3.0.75 | SSH and git sign-ins in the AI terminal, one password card per login | `src/core/terminal_session.py`, `src/ai/agent_bridge.py` | Works, and it exercises the POSIX PTY harder than before: the sign-in flow depends on the session staying alive across turns. This is the strongest reason to fix the terminal first |
+| 3.0.76 | The AI browser uses the user's own Chrome | `src/services/ai_browser.py` | Works. Line 96 picks `chrome.exe` on Windows, line 98 the macOS app path, line 114 the Linux names. Nothing to port |
+| 3.0.78 | Two devices per account, sign-in can be skipped | `src/core/auth_manager.py`, `src/ui/dialogs/login_dialog.py` | Works. The login gate reads `~/.cortex/auth.json` and never touches the network at startup |
+| 3.0.79 | Attach files to chat, stop repeated answers, survive GPU crashes | `src/ui/chat_panel.py`, `src/core/gpu_compat.py` | Works. The GPU probe already returns early off Windows (`gpu_compat.py:83`) |
+| 3.0.81 | Chat image viewer sized to the picture, close button in a header bar | `src/ui/chat_image.py` | Works. Pure Qt layout, no platform branch |
+| 3.0.82 | Terminal card owns its command output; one chat scroll owner | `src/ui/tool_cards.py`, `src/ui/chat_panel.py` | Works. Both are native Qt widgets |
+| 3.0.82 | Quality ratchet and a CI guard | `tools/quality_ratchet.py`, `.github/workflows/quality-ratchet.yml` | Works. Run `python tools/quality_ratchet.py` before you change any Python under `src/`, on any platform |
 
 Nothing above changes the port plan. The terminal work in
 [What needs changing](#what-needs-changing) is unchanged and still the real job.
+
+### One thing that did change, and it matters for the build
+
+Since this guide was first written, `.gitignore:138` was given a bare `*.spec`
+rule, and the comment above it (`:143`) states the intent plainly: *"Specs,
+installer scripts and packaging helpers are release tooling that lives on the
+machine doing the build, not source."*
+
+So **`cortex-macos.spec` is not in the published repository**, and neither is the
+Windows `cortex.spec`. An earlier revision of this guide said the macOS spec was
+committed; it is not. You have two options, and both are covered below:
+
+1. **Write it from the copy in [A working macOS spec](#a-working-macos-spec).**
+   That is the whole file, and it is what the CI workflow expects to find at the
+   project root.
+2. **Un-ignore it in your fork** if you want it tracked. Add
+   `!cortex-macos.spec` after the `*.spec` line.
+
+This also means the CI workflow at `.github/workflows/macos-build.yml` will not
+build a fresh clone until that spec exists, because PyInstaller is pointed at it.
+Write the spec first, then run the workflow.
 
 ### Bundled fonts (3.0.61) and your build
 
@@ -162,27 +191,49 @@ macOS there is nothing to port, but two things are worth knowing while you test:
 ## What already works on macOS
 
 Before anything is changed, a surprising amount is already portable. Each row
-below was read directly in the 3.0.63 source tree. This is the good news, and it
+below was read directly in the 3.0.82 source tree. This is the good news, and it
 is why the job is short.
 
 | Area | Evidence | Status |
 |------|----------|--------|
-| **Master encryption secret** | `src/core/key_manager.py:231` branches to `_macos_keychain_secret()` (line 234), which uses the macOS `security` CLI to read and create a Keychain item | Works |
-| **Linux secret store** | `src/core/key_manager.py:267` uses `secret-tool` | Works |
-| **Server platform reporting** | `src/core/cortex_api.py:41` maps `darwin` to `macos` | Works |
-| **MCP server resolving** | `src/services/mcp_manager.py:115` has an explicit `darwin` branch (the `npx.cmd` shim problem is Windows-only) | Works |
-| **Recycle Bin / Trash** | `src/utils/safe_delete.py:132` tries `send2trash` first, which is cross-platform. The Windows-only `SHFileOperationW` path is guarded at line 69 by `sys.platform != "win32"` and returns unavailable | Works |
-| **Single instance guard** | `src/core/instance_ipc.py:41` selects `AF_UNIX` on non-Windows and puts the socket in `$XDG_RUNTIME_DIR` or `~/.cortex` | Works |
-| **GPU compatibility probe** | `src/core/gpu_compat.py:106` returns early on non-Windows | Works |
-| **Process spawning** | `src/ui/components/sidebar_bridge.py:1346` already branches to the macOS and Linux fire-and-forget path, and the five `CREATE_NO_WINDOW` call sites are all written as `... if sys.platform == "win32" else 0` | Works |
-| **Process killing** | `src/utils/proc_kill.py` gives the Bash tool a real POSIX process-group kill, used from `BashTool.py:187`. Windows uses `taskkill /T` instead | Works |
-| **Startup sequence** | Every `sys.platform == 'win32'` block in `src/main.py` (lines 76, 94, 107, 298, 340, 351, 385, 512, 899) is an `if`, not an assumption. They no-op on macOS | Works |
-| **Bash tool backend** | `src/agent/src/tools/BashTool/BashTool.py:139` resolves the shell with `shutil.which("bash")`, which finds `/bin/bash` on macOS. Line 160 sets `CREATE_NO_WINDOW` to `0` off Windows, and the `taskkill` block at 171 is Windows-gated | Works |
-| **Grep fallback chain** | `src/agent/src/tools/GrepTool/GrepTool.py:639` tries the npm ripgrep package first, then ends at line 720 with `return shutil.which('rg')` | Works once `rg` is installed |
-| **Bundled fonts** (3.0.61) | `src/ui/fonts.py:64` registers the shipped `.ttf` files with Qt and line 454 installs `@font-face` rules on the shared WebEngine profile. Both are platform-neutral | Works, see the build note above |
+| **Master encryption secret** | `src/core/key_manager.py:282` branches to `_macos_keychain_secret()` (defined at line 286), which uses the macOS `security` CLI to read and create a Keychain item | Works |
+| **Linux secret store** | `src/core/key_manager.py:316` uses `secret-tool` | Works |
+| **Per-provider API keys off Windows** | `src/core/key_manager.py:609` no longer returns `None` on non-Windows. It goes through the `keyring` library (`_keyring_backend`, line 144), which on macOS resolves to the Keychain backend when `keyring` is installed, and falls back to the encrypted vault when it is not | Works, with a caveat (see below) |
+| **Server platform reporting** | `src/core/cortex_api.py:34` maps `darwin` to `macos` | Works |
+| **MCP server resolving** | `src/services/mcp_manager.py:133` has an explicit `darwin` branch (the `npx.cmd` shim problem is Windows-only) | Works |
+| **Recycle Bin / Trash** | `src/utils/safe_delete.py:19` tries `send2trash` first, which is cross-platform. The Windows-only `SHFileOperationW` path is guarded at line 92 by `sys.platform != "win32"` and returns unavailable | Works |
+| **Single instance guard** | `src/core/instance_ipc.py:43` selects `AF_UNIX` on non-Windows and puts the socket in `$XDG_RUNTIME_DIR` or `~/.cortex` | Works |
+| **GPU compatibility probe** | `src/core/gpu_compat.py:83` returns early on non-Windows | Works |
+| **Process spawning** | `src/ui/components/sidebar_bridge.py:1396` branches to the Windows path, line 1398 to the macOS one, and every `CREATE_NO_WINDOW` call site (lines 1121, 1277, 1295, 1313, 1328, 1796) is written as `... if sys.platform == "win32" else 0` | Works |
+| **Process killing** | `src/utils/proc_kill.py` gives the Bash tool a real POSIX process-group kill. Windows uses `taskkill /T` instead | Works |
+| **Startup sequence** | Every `sys.platform == 'win32'` block in `src/main.py` (lines 66, 85, 94, 190, 323, 369, 380, 395, 498, 884) is an `if`, not an assumption. They no-op on macOS | Works |
+| **Bash tool backend** | There is no separate `BashTool.py` in this repository: the tool is `BridgeBashTool` at `src/ai/agent_bridge.py:1510`, and its description is chosen by platform at line 1506. The POSIX text at line 1476 tells the model to use `&&`, `$(...)` and `2>/dev/null` | Works |
+| **Grep fallback chain** | `src/agent/src/tools/grep_tool/grep_tool.py:769` is `_find_ripgrep()`. It tries the npm ripgrep package first, then the bundled copy, then ends at line 862 with `return shutil.which('rg')` | Works once `rg` is installed |
+| **Bundled fonts** (3.0.61) | `src/ui/fonts.py:51` (`register_qt_fonts`) registers the shipped `.ttf` files with Qt at line 69, and line 440 (`install_web_fonts`) installs the `@font-face` rules built by `font_face_css()` at line 400. `fonts_dir()` at line 44 resolves `sys._MEIPASS/src/assets/fonts` when frozen. All platform-neutral | Works, see the build note above |
 | **Colour themes** (3.0.61, 3.0.63) | `src/ui/color_themes.py` and `src/ui/editor_theme.py` contain no `sys.platform` check at all | Works |
-| **Terminal UI** | `src/ui/components/xterm_terminal.py:1061` falls back to a `QProcess` shell when pywinpty is absent | Partial, see below |
+| **Chrome locator** (3.0.76) | `src/services/ai_browser.py:96` picks `chrome.exe` on Windows, line 98 the macOS application path, line 114 the Linux binary names | Works |
+| **Terminal UI** | `src/ui/components/xterm_terminal.py:1129` falls back to a `QProcess` shell when pywinpty is absent. Line 43 already defaults to `zsh` on darwin | Partial, see below |
 | **The four Chromium panels** | Monaco, xterm.js, Mermaid and the HTML panels are all vendored web assets. Qt WebEngine is identical on macOS | Works |
+
+### The API-key caveat, stated plainly
+
+The old `if os.name != 'nt': return None` is gone. Non-Windows now goes through
+the `keyring` library, which on macOS talks to the Keychain when the library and
+its backend are present. But `keyring` is listed in `requirements-linux.txt`, not
+in `requirements.txt`, so a plain `pip install -r requirements.txt` on your Mac
+leaves it out and the keys land in the encrypted vault instead.
+
+Either is safe. The vault is AES-GCM under a master secret that *is* in the
+Keychain, so the file is unreadable without it. If you want Keychain parity with
+Windows, add `keyring` to your environment:
+
+```bash
+python -m pip install keyring
+```
+
+There is nothing to change in the code for that; the backend is already resolved
+at `src/core/key_manager.py:144`.
+
 
 ---
 
@@ -191,9 +242,10 @@ is why the job is short.
 > **Status: done in this source tree.** The blockers below were the work, and
 > that work is now committed, so a macOS build needs no hand-editing. This table
 > stays because it is the map of what the port touches: if a line number shifts
-> or a regression appears, this is where to look. The original analysis is kept
-> unchanged underneath it, and [The port is in the source tree](#the-port-is-in-the-source-tree)
-> says exactly where each item now lives.
+> or a regression appears, this is where to look. The line numbers are the
+> pre-port 3.0.63 ones, kept because they are what the original analysis
+> referred to; the current locations are in
+> [The port is in the source tree](#the-port-is-in-the-source-tree).
 
 Ranked by how much it hurts. Rows 1 to 3 are the real work. Rows 4 and below
 are correctness and polish.
@@ -220,29 +272,51 @@ Note on `requirements.txt`: `pywinpty>=2.0` is already correctly marked
 deliberate and correct. It is also exactly why row 1 exists: the terminal
 session code was written against pywinpty and has no POSIX twin.
 
+### What is left of rows 6 to 8 today
+
+Two of the three moved. Worth knowing before you go looking for them:
+
+- **Row 6, the recoverable delete.** The helper is now
+  `_build_recovery_delete_command` at `src/ai/agent_bridge.py:1405`, and it does
+  branch: Windows gets the PowerShell Recycle Bin command, and anything else
+  gets `gio trash` when `gio` is on PATH. **On macOS `gio` is normally absent**,
+  so the function returns `None` and the original `rm` runs unrecoverably. That
+  is a real gap, and the honest fix is a `send2trash` branch for darwin. The
+  helper already returns `None` rather than a command that would fail, which is
+  the right shape; it just has no macOS arm yet.
+- **Rows 7 and 8, the agent's own instructions.** These are done. The tool
+  description is chosen by platform at `src/ai/agent_bridge.py:1506` and the
+  environment line at line 1499, both from `_BASH_TOOL_DESC_POSIX` (line 1476)
+  and `_TERMINAL_GUIDANCE_POSIX` (line 2094). The `PowerShell` tool name still
+  appears in the interaction-mode sets at line 2849, which is about Ask mode,
+  not about which platform you are on.
+
+
 ---
 
 ## The port is in the source tree
 
 These are the files the port added or changed. Read them before changing
-anything else, because the reasoning is in the comments.
+anything else, because the reasoning is in the comments. Line numbers are the
+current 3.0.82 ones.
 
 | What | Where | Why it is shaped that way |
 |------|-------|---------------------------|
-| One PTY interface for every platform | `src/core/pty_backend.py` (new) | Exports `PTY_AVAILABLE` and `PtyProcess.spawn(...)`. On Windows it delegates to pywinpty; everywhere else it uses `pty.fork()`, which does the three things a controlling terminal needs (fork, `setsid`, open the slave as stdin/stdout/stderr) so Ctrl+C raises a real SIGINT instead of being four echoed bytes. `PosixPty` copies pywinpty's method names on purpose (`read`, `write`, `isalive`, `pid`, `setwinsize`, `terminate`), so neither panel needed a second code path. |
-| The AI's shared session | `src/core/terminal_session.py` | `start()` now calls `_launch_command()`, which returns the Windows PowerShell line unchanged or a POSIX one. Both `sys.platform != "win32"` guards are gone; the gate is `PTY_AVAILABLE`. |
-| zsh and bash integration | `_INTEGRATION_ZSH`, `_INTEGRATION_BASH`, `_INTEGRATION_ZSHENV` in the same file | The same three OSC 633 markers the PowerShell prompt writes, produced by shell hooks instead: zsh `preexec`/`precmd`, bash `DEBUG` trap plus `PROMPT_COMMAND`. The user's own rc file is sourced first and the hooks are added after it, so their prompt and theme survive and the markers sit beside the prompt that is really drawn. zsh has no `--rcfile`, so `ZDOTDIR` points at a generated folder. |
-| Shell names | `XTermWidget._get_posix_shell_command` in `src/ui/components/xterm_terminal.py` | `zsh` then `bash`, resolved with `shutil.which`. A synced setting of `powershell` falls back to zsh rather than launching nothing. |
-| The agent's own instructions | `_BASH_TOOL_DESC_POSIX` and `_TERMINAL_GUIDANCE_POSIX` in `src/ai/agent_bridge.py` | On Windows the model is told "this runs PowerShell, NOT bash". On macOS that sentence has to invert, or it spends turns writing `;` and `2>$null` into a shell that rejects them. |
-| The macOS build | `cortex-macos.spec` (new, project root) | Same structure as the Windows spec, with the Windows-only binaries excluded, `upx=False` because UPX breaks signing, and the version read from `src/version.py` rather than typed in. |
-| The CI build | `.github/workflows/macos-build.yml` (new) | Two jobs: a dependency-free terminal test on every pull request, and the full `.app` plus `.dmg` on a tag or on demand. Standard runners are free for public repositories, which is why no Mac is required. |
+| One PTY interface for every platform | `src/core/pty_backend.py` (new) | Exports `PTY_AVAILABLE` (line 32) and `PtyProcess.spawn(...)` (line 150). On Windows it delegates to pywinpty; everywhere else `_spawn_posix()` at line 164 uses `pty.fork()` (imported at line 23), which does the three things a controlling terminal needs (fork, `setsid`, open the slave as stdin/stdout/stderr) so Ctrl+C raises a real SIGINT instead of being four echoed bytes. `PosixPty` (line 38) copies pywinpty's method names on purpose (`read`, `write`, `isalive`, `pid`, `setwinsize`, `terminate`), so neither panel needed a second code path. |
+| The AI's shared session | `src/core/terminal_session.py` | `start()` at line 545 gates on `_PTY_AVAILABLE` (imported at line 19) instead of on `sys.platform`. `_launch_command()` at line 565 returns the Windows PowerShell line unchanged or a POSIX one. The shell default is chosen at line 129: `zsh` on darwin, `bash` elsewhere. |
+| zsh and bash integration | `_INTEGRATION_ZSH` (line 64), `_INTEGRATION_BASH` (line 75), `_INTEGRATION_ZSHENV` (line 94) in the same file | The same three OSC 633 markers the PowerShell prompt writes, produced by shell hooks instead: zsh `preexec`/`precmd`, bash `DEBUG` trap plus `PROMPT_COMMAND`. The user's own rc file is sourced first and the hooks are added after it, so their prompt and theme survive and the markers sit beside the prompt that is really drawn. zsh has no `--rcfile`, so `ZDOTDIR` points at a generated folder (`_write_if_changed` calls at lines 588 to 595). |
+| Shell names | `_platform_default_shell()` (line 35) and `_resolve_posix_shell()` (line 45) in `src/ui/components/xterm_terminal.py` | `zsh` on darwin, `bash` elsewhere, then `$SHELL`, then the other common shells, each checked with `shutil.which` so a returned path is always runnable. A synced setting of `powershell` falls back to a real shell rather than launching nothing. |
+| The agent's own instructions | `_BASH_TOOL_DESC_POSIX` (line 1476), `_TERMINAL_GUIDANCE_POSIX` (line 2094), and `_ENV_OS_SHELL` (line 1497) in `src/ai/agent_bridge.py` | On Windows the model is told "this runs PowerShell, NOT bash". On macOS that sentence inverts, or it spends turns writing `;` and `2>$null` into a shell that rejects them. `_ENV_OS_SHELL` is the three-way branch that decides the `OS:` and `Shell:` lines of the system prompt. |
+| The macOS build | `cortex-macos.spec` (project root, **not committed**) | Same structure as the Windows spec, with the Windows-only binaries excluded, `upx=False` because UPX breaks signing, and the version read from `src/version.py` rather than typed in. `.gitignore:138` ignores `*.spec`, so write this file from [A working macOS spec](#a-working-macos-spec) in your own checkout. |
+| The CI build | `.github/workflows/macos-build.yml` (committed) | Two jobs: a dependency-free terminal test on every pull request, and the full `.app` plus `.dmg` on a tag or on demand. Standard runners are free for public repositories, which is why no Mac is required. |
 
 ### What is still Windows-shaped, and why it is fine
 
 | Item | Effect on macOS | Where |
 |------|-----------------|-------|
-| Per-provider API keys | They work, but are kept in the encrypted key file rather than the macOS Keychain. The master secret that encrypts that file does come from the Keychain, so the file is not readable without it | `src/core/key_manager.py:425` |
-| The `PowerShell` tool | Stays in the tool list and errors if the model calls it. The `Bash` tool description now steers the model away | `src/ai/agent_bridge.py` |
+| Per-provider API keys | They work. Off Windows they go through the `keyring` library, which reaches the Keychain when `keyring` is installed, and the encrypted vault when it is not. `keyring` is in `requirements-linux.txt` but not `requirements.txt`, so a plain install takes the vault path | `src/core/key_manager.py:609`, backend at line 144 |
+| The agent's recoverable delete | On macOS `gio` is usually absent, so `_build_recovery_delete_command` returns `None` and an `rm` is not rewritten to a recoverable delete. The right fix is a `send2trash` branch for darwin | `src/ai/agent_bridge.py:1405` |
+| The `PowerShell` tool | It stays in the interaction-mode sets, which is about Ask mode rather than platform. The `Bash` tool description steers the model to POSIX syntax | `src/ai/agent_bridge.py:2849` |
 | `windows_terminal.py` | A legacy panel the main window does not use | `src/ui/components/windows_terminal.py` |
 
 None of these stops the app from running, and none is on the path of a normal

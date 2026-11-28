@@ -1,11 +1,10 @@
 """Bring a WebEngine panel back after Chromium's render process dies.
 
 main.py runs Chromium with --renderer-process-limit=1, so every internal page
-shares one renderer. When it dies every panel loses its pixels at once (the
+shares one renderer; when it dies every panel loses its pixels at once (the
 "whole app is blank" report) while the native chat keeps working. Chromium only
 restarts the renderer on the next navigation, so a panel comes back only if
 something reloads it; the editor did, the sidebar and terminal only logged.
-
 Recovery is bounded: one reload per crash, at most max_attempts in a row.
 """
 from __future__ import annotations

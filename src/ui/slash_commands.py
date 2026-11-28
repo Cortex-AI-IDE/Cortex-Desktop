@@ -1,12 +1,9 @@
 """Slash-command menu for the chat input, type "/" to call a skill.
 
-Industry-standard chat affordance: at the start of the
-input, "/" opens a filterable menu of skills; picking one inserts an explicit
-instruction so the agent loads that skill for the message.
-
-The matching logic here is pure and unit-tested; the popup widget below is a
-CHILD widget (never a top-level window, see the project's capsule/ghost-
-window rule) positioned over the input.
+At the start of the input, "/" opens a filterable menu of skills; picking one
+inserts an explicit instruction so the agent loads that skill. The matching
+logic here is pure and unit-tested; the popup widget is a CHILD widget (never
+top-level, per the capsule/ghost-window rule) positioned over the input.
 """
 from __future__ import annotations
 
@@ -93,13 +90,10 @@ def invocable_skill_names(skills: List[Dict]) -> Dict[str, str]:
 def expand_skill_tokens(text: str, known_names) -> str:
     """Turn "/skill" tokens into an explicit agent instruction at send time.
 
-    Only tokens matching a KNOWN skill are expanded, so a stray "/foo" the
-    user typed is left alone. `known_names` is a list of names or a
-    {token: name} mapping (invocable_skill_names). Referenced skills are named
-    up front ("Use the X skill.") - the strongest signal for the agent to load
-    them - and the tokens are removed from the inline text. Order preserved,
-    duplicates dropped. Returns the text unchanged when no known skill token
-    is present.
+    Only tokens matching a KNOWN skill expand; a stray "/foo" is left alone.
+    `known_names` is a list or a {token: name} mapping. Referenced skills are
+    named up front ("Use the X skill.") and the tokens removed from the inline
+    text. Order preserved, duplicates dropped.
     """
     import re as _re
     if isinstance(known_names, dict):
@@ -127,16 +121,10 @@ def expand_skill_tokens(text: str, known_names) -> str:
 def filter_skills(skills: List[Dict], query: str, limit: int = 50) -> List[Dict]:
     """Rank skills for a slash query. Empty query -> alphabetical.
 
-    The cap exists only to bound pathological lists, it must NOT hide skills
-    the user deliberately enabled. It was 8, which silently truncated the menu
-    to the first 8 alphabetically (visible as "SKILLS · 8" no matter how many
-    were toggled on). The menu itself shows 6 rows and scrolls for the rest.
-
-    Ranking is shared with the Skills browser (src/ui/skill_search.py) so
-    the same query gives the same order in both places. That module also
-    makes separators equivalent, so "3d website" finds
-    `3d-website-architect`, the old local matcher could not, because a
-    space is not a hyphen.
+    The cap only bounds pathological lists; it must NOT hide skills the user
+    enabled (it was 8, silently truncating the menu). Ranking is shared with
+    the Skills browser (src/ui/skill_search.py), which also makes separators
+    equivalent, so "3d website" finds `3d-website-architect`.
     """
     from src.ui.skill_search import search
     return search(skills, query, limit=limit)

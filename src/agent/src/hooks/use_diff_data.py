@@ -1,14 +1,9 @@
 """
 Diff data management for Cortex IDE.
 
-Provides git diff tracking with:
-- File-level stats (lines added/removed)
-- Binary file detection
-- Large file handling (>400 lines truncated)
-- Untracked file inclusion
-- Async diff fetching
-
-PyQt6-compatible async service.
+Git diff tracking with file-level stats, binary detection, truncation of large
+files (>400 lines), untracked file inclusion, and async fetching. PyQt6-friendly
+async service.
 """
 
 import asyncio

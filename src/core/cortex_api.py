@@ -2,12 +2,8 @@
 Cortex API Client, HTTP client for Django backend.
 
 Handles all communication between Desktop IDE and Django server:
-- Authentication (OAuth2 token management)
-- Profile CRUD
-- Usage sync
-- Billing/subscription queries
-
-Falls back to local data when offline.
+authentication (OAuth2 token management), profile CRUD, usage sync, and
+billing/subscription queries. Falls back to local data when offline.
 """
 import json
 import logging
@@ -603,18 +599,9 @@ class CortexAPIClient:
     ) -> Optional[Dict]:
         """Fetch model configuration from server with ETag caching.
 
-        Uses persistent client for connection pooling. Caches result locally
-        to avoid re-fetching when version hasn't changed.
-
-        Args:
-            cached_version: Previously fetched config version string.
-                           If it matches, server returns 304.
-            ide_version:   This build's version. The server hides models whose
-                           min_ide_version is newer, so a desktop that lacks
-                           the client code for a model never lists it.
-
-        Returns:
-            Config dict with providers, models, defaults, or None if unchanged/error.
+        ``ide_version`` lets the server hide models whose min_ide_version is
+        newer, so a desktop lacking the client code never lists them. Returns
+        the config dict, or None if unchanged/error.
         """
         version_to_use = cached_version or self._cached_config_version
         headers = {"Content-Type": "application/json"}
@@ -701,12 +688,7 @@ class CortexAPIClient:
         - siliconflow_embeddings: Semantic search embeddings
         - web_search: Web search (SerpAPI)
 
-        Args:
-            service: Service name ("ocr", "siliconflow_embeddings", "web_search")
-            **kwargs: Service-specific parameters
-
-        Returns:
-            Response dict or None on error.
+        Returns the response dict, or None on error.
         """
         # Get license key from subscription
         sub_info = self.get_subscription()

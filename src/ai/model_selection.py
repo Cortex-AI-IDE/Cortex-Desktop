@@ -1,14 +1,11 @@
 """Single source of truth for "which model runs this turn".
 
-Cortex is fully BYOK: there is no Cortex-owned chat model, so every turn runs on
-whatever the user picked. This module answers two questions: what did the user
-pick (ai.model_id, written by the chat and Models & Providers dropdowns), and
-what does "Auto" mean? Auto is not a model: it means the last concrete pick,
-stored in ai.last_model_id, falling back to DEFAULT_MODEL_ID on a fresh install.
-
-Before this module the decision was made in five places with five answers, and
-picking "Auto" overwrote the user's saved model with a hardcoded one. All call
-sites now resolve through resolve_model_id and record through record_selection.
+Cortex is fully BYOK, so every turn runs on whatever the user picked. This
+answers two questions: what did the user pick (ai.model_id), and what does
+"Auto" mean? Auto is not a model: it means the last concrete pick in
+ai.last_model_id, falling back to DEFAULT_MODEL_ID on a fresh install. Before
+this module the decision lived in five places with five answers, and picking
+"Auto" overwrote the saved model with a hardcoded one.
 """
 
 from __future__ import annotations
@@ -46,17 +43,10 @@ def is_auto(model_id: Optional[str]) -> bool:
 def resolve_model_id(ai_map: Optional[Dict[str, Any]]) -> str:
     """Return the concrete model id a turn should run on.
 
-    Resolution order:
-      1. the current pick (``model_id``, legacy ``model``) when concrete;
-      2. the last concrete pick (``last_model_id``) when the current pick
-         is Auto;
-      3. :data:`DEFAULT_MODEL_ID` on a fresh install.
-
-    Never returns "auto" and never returns a legacy performance-mode
-    string, so callers can hand the result straight to a provider. A saved
-    id that no provider family claims -- which is what a pick from a since
-    removed provider looks like -- resolves to :data:`DEFAULT_MODEL_ID`;
-    see :func:`_routable_or_default`.
+    Order: the current pick when concrete; the last concrete pick when the
+    current is Auto; DEFAULT_MODEL_ID on a fresh install. Never returns "auto"
+    or a legacy mode string, and a saved id no provider family claims resolves
+    to DEFAULT_MODEL_ID (_routable_or_default).
     """
     if not isinstance(ai_map, dict):
         ai_map = {}

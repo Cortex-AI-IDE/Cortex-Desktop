@@ -1,15 +1,8 @@
 """Shared extraction of cached-token counts from provider usage payloads.
 
-Every provider parses OpenAI-style `usage` dicts (prompt_tokens /
-completion_tokens) but discarded the cache information, so the usage
-tracker could never show an input/output/cached breakdown. Dialects:
-
-- OpenAI / OpenRouter / compatible: usage.prompt_tokens_details.cached_tokens
-- DeepSeek:                         usage.prompt_cache_hit_tokens
-- Anthropic native:                 usage.cache_read_input_tokens
-
-Cached tokens are a SUBSET of prompt_tokens on all of these, they are
-informational (billed cheaper), not additive to the total.
+Dialects: OpenAI/OpenRouter usage.prompt_tokens_details.cached_tokens, DeepSeek
+usage.prompt_cache_hit_tokens, Anthropic usage.cache_read_input_tokens. Cached
+tokens are a SUBSET of prompt_tokens (billed cheaper), never additive.
 """
 from typing import Any
 

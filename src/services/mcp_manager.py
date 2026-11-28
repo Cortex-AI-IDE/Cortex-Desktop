@@ -1,13 +1,11 @@
 """MCP client manager: connects external servers and exposes their tools.
 
 The `mcp` SDK is asyncio-based and the agent loop is not, so a daemon thread
-owns a private asyncio loop; every public method here is sync and thread-safe.
-Tools are namespaced `mcp__<server>__<tool>` as OpenAI-style schemas.
-
-Config is standard mcp.json (global ~/.cortex/mcp.json, per-project overrides).
-A project config arrives inside a git clone, so it is untrusted: a server it
-declares will not launch until the user approves it, and approvals live in
-~/.cortex/mcp_trust.json so a repo cannot approve its own commands.
+owns a private asyncio loop; every public method is sync and thread-safe. Tools
+are namespaced `mcp__<server>__<tool>` as OpenAI-style schemas. Config is
+standard mcp.json (global ~/.cortex/mcp.json, per-project overrides); a project
+config arrives inside a clone, so a server it declares will not launch until the
+user approves it, and approvals live in ~/.cortex/mcp_trust.json.
 """
 
 from __future__ import annotations

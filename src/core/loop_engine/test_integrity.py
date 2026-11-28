@@ -2,13 +2,10 @@
 
 Deleting or weakening the failing test to make the suite green. The verifier
 gate cannot see it (passing tests still pass) and the reviewer catches it only
-after the suite is green. This is git diff + regex, run in VERIFY before test
-results are interpreted, comparing the iteration's commit against the previous
-checkpoint. On violation the commit is reverted immediately.
-
-Deliberately dumb: a regex count over two blobs occasionally flags a legitimate
-refactor as "assertions weakened". A false positive costs one bounced
-iteration; a false negative costs a gutted test suite.
+after the suite is green. git diff + regex, run in VERIFY before test results
+are interpreted, comparing this iteration's commit against the previous
+checkpoint; on violation the commit is reverted. Deliberately dumb: a false
+positive costs one bounced iteration, a false negative a gutted test suite.
 """
 
 from __future__ import annotations

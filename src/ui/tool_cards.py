@@ -2,13 +2,10 @@
 tool_cards.py, 14 Tool Card implementations for native chat
 =============================================================
 
-Per cortex_tool_card_catalog.md:
-  1. ReadCard       5. GlobCard       9. ThoughtCard    13. WebFetchCard
-  2. EditCard       6. SearchCard    10. TaskCard       14. GenericCard
-  3. WriteCard      7. ListDirCard   11. TeamCard
-  4. GrepCard       8. TerminalCard  12. WebSearchCard
-
-Phase 6 of the native chat migration.
+Per cortex_tool_card_catalog.md: ReadCard, EditCard, WriteCard, GrepCard,
+GlobCard, SearchCard, ListDirCard, TerminalCard, ThoughtCard, TaskCard,
+TeamCard, WebSearchCard, WebFetchCard, GenericCard (Phase 6 of the native
+chat migration).
 """
 
 from __future__ import annotations
@@ -1168,11 +1165,10 @@ class TodoCard(ToolCardBase):
 
     A TodoWrite row once drew nothing usable because three links were missing
     at once: "todo_write" was absent from _TOOL_NAME_MAP, no TodoCard existed
-    in TOOL_CARDS (so it fell to GenericCard), and _build_activity_info had no
-    branch for it, so the payload was the generic {"raw": ...} and GenericCard
-    printed the bare string "todo_write". The live Tasks panel above the input
-    is a different widget (secondary_ui.TodoSection, fed by todos_updated), so
-    a broken row here never stopped the panel working.
+    in TOOL_CARDS (so it fell to GenericCard, printing the bare string), and
+    _build_activity_info had no branch for it. The live Tasks panel above the
+    input is a different widget (secondary_ui.TodoSection), so a broken row
+    here never stopped the panel working.
     """
 
     _MAX_ROWS = 12

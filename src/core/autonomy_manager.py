@@ -1,12 +1,9 @@
 """
 Autonomy Manager with Safety Gates (Phase 8).
 
-Provides graduated autonomy levels for the agent:
-- ASK: Prompt user for every tool action
-- AUTO: Proceed autonomously with safety gates for destructive operations
-- PLAN: Proceed autonomously within approved plan scope
-
-Integrates with the existing permission infrastructure in
+Graduated autonomy levels for the agent: ASK (prompt for every tool action),
+AUTO (proceed with safety gates for destructive operations), PLAN (proceed
+within approved plan scope). Integrates with the permission infrastructure in
 src/agent/src/utils/permissions/.
 """
 
@@ -121,13 +118,8 @@ class AutonomyDecision:
     """
     Result of an autonomy check for a tool action.
 
-    Attributes:
-        requires_permission: Whether user permission is needed
-        tool_name: The tool being checked
-        tool_category: The category of the tool
-        autonomy_level: The current autonomy level
-        reason: Why this decision was made
-        approved_in_plan: Whether this was pre-approved in a plan
+    Fields: requires_permission, tool_name, tool_category, autonomy_level,
+    reason, and approved_in_plan (pre-approved in a plan).
     """
     requires_permission: bool
     tool_name: str = ""
@@ -199,16 +191,7 @@ class AutonomyManager:
         """
         Check whether a tool action requires user permission.
 
-        Parameters
-        ----------
-        tool_name : str
-            The name of the tool being invoked.
-        args : dict, optional
-            The tool arguments (used for content-aware checks).
-
-        Returns
-        -------
-        AutonomyDecision
+        ``args`` is used for content-aware checks. Returns an AutonomyDecision.
         """
         level = self.get_level()
         category = TOOL_CATEGORIES.get(tool_name, ToolCategory.EXEC)

@@ -3,12 +3,10 @@ dynamic_providers.py - server-defined providers, driven by one generic class.
 
 Almost every provider speaks the OpenAI chat-completions format, so what differs
 is data: base URL, auth header, model ids and limits. The server publishes it,
-this module caches it, and providers/dynamic_provider.py turns one entry into a
-live provider. scope is "global" (admin) or "private" (the user's own).
-
-Keys never leave this machine: each lives in KeyManager under dyn_<slug>, and
-only model ids reach the server. Model ids are dp/<slug>/<upstream id>, checked
-before the "slash means OpenRouter" rule. The cache works offline.
+this caches it, and providers/dynamic_provider.py turns one entry into a live
+provider; scope is "global" (admin) or "private" (the user's own). Keys never
+leave this machine (KeyManager, dyn_<slug>), only model ids reach the server,
+and model ids are dp/<slug>/<upstream id>. The cache works offline.
 """
 from __future__ import annotations
 

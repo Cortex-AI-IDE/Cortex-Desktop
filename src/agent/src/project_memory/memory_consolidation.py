@@ -1,14 +1,9 @@
 """
-Memory Consolidation & Deduplication System.
+Memory consolidation and deduplication.
 
-Identifies and merges duplicate/similar memories to prevent memory bloat
-and maintain a clean, organized knowledge base.
-
-Features:
-- Semantic similarity detection using embeddings
-- Duplicate merging with content consolidation
-- Stale memory cleanup based on age and relevance
-- Automated consolidation scheduling
+Finds and merges duplicate or similar memories so the knowledge base stays
+clean: embedding-based similarity, merge with content consolidation, stale
+cleanup by age and relevance, and scheduled consolidation.
 """
 
 import os
@@ -180,17 +175,8 @@ class MemoryConsolidator:
     
     def _compute_similarity(self, mem1: Dict, mem2: Dict) -> float:
         """
-        Compute similarity between two memories.
-        
-        Uses semantic similarity if embeddings are available,
-        otherwise falls back to keyword overlap.
-        
-        Args:
-            mem1: First memory metadata
-            mem2: Second memory metadata
-            
-        Returns:
-            Similarity score (0.0-1.0)
+        Compute similarity (0.0-1.0) between two memories, using embeddings when
+        available and falling back to keyword overlap.
         """
         # Try semantic similarity first
         if self.embeddings and 'embedding' in mem1 and 'embedding' in mem2:

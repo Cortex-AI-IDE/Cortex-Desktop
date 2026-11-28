@@ -1,12 +1,10 @@
 """
 file_skeleton.py - compact structural skeletons of source files for LLM context.
 
-Instead of reading a 3,000+ line file, this extracts only imports, class
-definitions, function signatures with decorators, and top-level constants,
-typically 5-10% of the original, so the model can locate the section it needs
-and read it with offset/limit.
-
-Python, JS/TS, Java, C/C++, Go, Rust, HTML and CSS/SCSS/LESS are supported.
+Extracts only imports, class definitions, function signatures with decorators
+and top-level constants (typically 5-10% of the file) so the model can locate a
+section and read it with offset/limit. Python, JS/TS, Java, C/C++, Go, Rust,
+HTML and CSS/SCSS/LESS are supported.
 """
 
 import os

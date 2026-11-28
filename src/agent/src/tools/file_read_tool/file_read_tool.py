@@ -972,13 +972,9 @@ def get_feature_value_cached_may_be_stale(feature_name: str, default: Any) -> An
 class FileReadTool:
     """
     FileReadTool - Reads files including text, images, PDFs, and notebooks.
-    
-    This is the core tool for reading file content in Cortex IDE.
-    Supports:
-    - Text files with line ranges
-    - Image files (png, jpg, jpeg, gif, webp)
-    - PDF files with optional page extraction
-    - Jupyter notebooks (.ipynb)
+
+    Text with line ranges, images (png/jpg/gif/webp), PDFs with optional page
+    extraction, and Jupyter notebooks (.ipynb).
     """
     
     name = FILE_READ_TOOL_NAME
@@ -1308,15 +1304,15 @@ class FileReadTool:
     ) -> Dict[str, Any]:
         """
         Execute the file read operation.
-        
+
         Args:
-            input_data: Contains file_path, offset, limit, pages
-            context: Tool execution context
-            can_use_tool: Function to check if tool can be used
-            parent_message: Parent message for message ID tracking
-        
+            input_data: file_path, offset, limit, pages.
+            context: Tool execution context.
+            can_use_tool: Permission check for the tool.
+            parent_message: Parent message, for message ID tracking.
+
         Returns:
-            Dict with 'data' containing FileReadOutput and optional 'new_messages'
+            Dict with 'data' holding FileReadOutput, and optional 'new_messages'.
         """
         # Refuse bad input before touching the filesystem. The hook tolerates a
         # missing or failing validator, so it can never block the read itself.

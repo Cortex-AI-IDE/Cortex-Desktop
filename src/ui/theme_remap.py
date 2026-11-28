@@ -1,15 +1,11 @@
 """Carry widget stylesheets across a live theme switch.
 
-Most widgets build their stylesheet once from the theme tokens of the moment
-and keep that string, so a live switch leaves them in the old theme until
-restart (39 widgets in a fresh window on 2026-10-07). Instead of a retheme hook
-in each class, this walks every widget, finds the old theme's colours in its
-own stylesheet, and substitutes the new value for the same token.
-
-Only a stale widget is touched: one whose stylesheet holds a colour present in
-the old palettes and nowhere in the new ones. One old colour can map to several
-tokens, so the choice looks at the property it sits in: `color:` prefers text
-tokens, `background:` surface, `border:` border.
+Most widgets build their stylesheet once and keep that string, so a live switch
+leaves them in the old theme until restart (39 widgets on 2026-10-07). This
+walks every widget and substitutes old theme colours for the new value. Only a
+stale widget is touched (holds an old-palette colour absent from the new ones),
+and the property it sits in picks the token: color -> text, background ->
+surface, border -> border.
 """
 from __future__ import annotations
 

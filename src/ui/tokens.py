@@ -580,17 +580,8 @@ def family_list(value: str) -> list[str]:
 
 def build_markdown_css(t: dict | None = None) -> str:
     """Generate unified markdown CSS from design tokens. Single source of truth.
-
-    OC-2 styling:
-    - Headings: purple, bold
-    - Strong/bold: orange
-    - Emphasis/italic: gold
-    - Inline code: green with subtle bg
-    - Code blocks: dark bg, subtle border, no padding (handled by wrapper)
-    - Blockquotes: gold, italic, left border
-    - Links: peach underline
-    - Lists: blue markers
-    - Tables: subtle borders, header bg
+    OC-2 styling: purple bold headings, orange bold, gold italic, green inline
+    code, dark code blocks, gold blockquotes, peach links, blue list markers.
     """
     if t is None:
         t = _current_theme

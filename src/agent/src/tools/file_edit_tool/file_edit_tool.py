@@ -121,18 +121,8 @@ def matching_rule_for_input(
     behavior: str,   # 'allow' | 'deny' | 'ask'
 ) -> Optional[Any]:
     """
-    Find matching permission rule for the given path and behavior.
-    
-    Uses gitignore-style pattern matching against permission rules.
-    
-    Args:
-        path: File path to check
-        tool_permission_context: Permission context with rules
-        tool_type: 'edit' or 'read'
-        behavior: 'allow', 'deny', or 'ask'
-        
-    Returns:
-        Matching PermissionRule or None
+    Find the matching permission rule for the path and behavior, using
+    gitignore-style pattern matching. Returns a PermissionRule or None.
     """
     if not tool_permission_context:
         return None

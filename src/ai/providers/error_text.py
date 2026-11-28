@@ -3,10 +3,9 @@
 Providers put the raw JSON body into the displayed error, and the chat's final
 cleaner (strip_all_control_tags Pass 8) deletes anything shaped like a JSON
 object with a "message" key, so the user saw only `{"error":}` and lost the one
-sentence saying what was wrong. readable_api_error() pulls that sentence out.
-The error `type` and `code` are kept because agent_bridge matches phrases like
-'context_length_exceeded' in error text to trigger recovery. Full body still
-goes to the log.
+sentence saying what was wrong. readable_api_error() pulls it out; the type and
+code are kept because agent_bridge matches phrases like
+'context_length_exceeded' to trigger recovery. Full body still goes to the log.
 """
 from __future__ import annotations
 

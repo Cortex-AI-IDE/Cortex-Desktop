@@ -1,12 +1,12 @@
 """Relaunching Cortex, shared by every caller. Carries two easy-to-lose fixes:
 
 1. Frozen build: sys.executable is Cortex.exe with no main.py on disk, so the
-   relaunch must be the exe ALONE. The old Popen([exe, "src/main.py"]) passed a
-   nonexistent argument and the installed app never came back up.
-2. Single-instance mutex race: the dying process holds the mutex for ~4s while
-   it flushes memory and the DB, so a new instance started too early
-   foregrounds the dying window and exits. The relauncher waits on the exact
-   pid instead of guessing a delay.
+   relaunch must be the exe ALONE (the old Popen([exe, "src/main.py"]) passed a
+   nonexistent argument and the installed app never came back up).
+2. Single-instance mutex race: the dying process holds the mutex ~4s while it
+   flushes memory and the DB, so a new instance started too early foregrounds
+   the dying window and exits. The relauncher waits on the exact pid instead of
+   guessing a delay.
 """
 from __future__ import annotations
 

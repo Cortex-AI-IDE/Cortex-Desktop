@@ -1,16 +1,9 @@
 """
 Cross-Project Memory Sharing System.
 
-Enables global memories to be shared across all projects while maintaining
-project-specific memory isolation. Automatically merges global preferences
-with project context.
-
-Features:
-- Global memory directory (~/.cortex/global/memory)
-- Smart merging with project memories
-- Conflict resolution (project wins)
-- Automatic sync on project load
-- Memory type classification (global vs project-specific)
+Shares global memories (~/.cortex/global/memory) across all projects while
+keeping project-specific memory isolated: smart merging with conflict
+resolution (project wins), automatic sync on project load.
 """
 
 import os
@@ -164,17 +157,9 @@ class CrossProjectMemoryManager:
     
     def sync_memories_to_project(self, project_root: str, auto_merge: bool = True) -> MemorySyncReport:
         """
-        Sync global memories to a project's memory directory.
-        
-        This merges global preferences with project-specific memories,
-        with project memories taking priority on conflicts.
-        
-        Args:
-            project_root: Project root directory
-            auto_merge: If True, automatically merge conflicts
-            
-        Returns:
-            Sync report
+        Sync global memories to a project's memory directory, merging global
+        preferences with project-specific memories (project wins on conflicts).
+        Returns a MemorySyncReport.
         """
         project_memory_dir = self.get_project_memory_dir(project_root)
         os.makedirs(project_memory_dir, exist_ok=True)

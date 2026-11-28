@@ -1,12 +1,7 @@
 """
 DeepSeek Provider
-Supports DeepSeek V4 models (V4-Pro, V4-Flash) with cost tracking and 1M context length
-
-Models:
-- deepseek-v4-pro: 1.6T total / 49B active params, world-class performance
-- deepseek-v4-flash: 284B total / 13B active params, fast and cost-effective
-
-Note: deepseek-chat and deepseek-reasoner will be retired after Jul 24th, 2026
+Supports DeepSeek V4 models (V4-Pro, V4-Flash) with cost tracking and 1M
+context. Note: deepseek-chat and deepseek-reasoner retire after Jul 24th, 2026.
 """
 from src.ai.providers.usage_parse import cached_tokens_from
 

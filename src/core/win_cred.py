@@ -1,14 +1,11 @@
 """Windows Credential Manager via raw ctypes.
 
 pywin32's win32cred.CredRead failed inside PyInstaller-frozen builds while
-CredWrite kept working, so every installed launch "lost" the stored keys,
-silently created a NEW master secret, and made keys.enc undecryptable
-(InvalidTag). Dev runs were fine, hiding it, and bare excepts hid the errors.
-Talking to advapi32.dll directly avoids that marshalling layer; errors are
-real OSError, and ERROR_NOT_FOUND is the only soft outcome (returns None).
-
-Reads return RAW BYTES: old pywin32 writes were UTF-16LE, new writes UTF-8.
-decode_blob() handles both.
+CredWrite kept working, so every installed launch "lost" the stored keys and
+silently created a new master secret, making keys.enc undecryptable (InvalidTag).
+Dev runs hid it. Talking to advapi32.dll directly avoids that marshalling layer;
+ERROR_NOT_FOUND is the only soft outcome (returns None). Reads return RAW BYTES
+(old pywin32 writes UTF-16LE, new writes UTF-8); decode_blob() handles both.
 """
 
 import ctypes

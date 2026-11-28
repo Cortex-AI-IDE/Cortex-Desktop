@@ -1,12 +1,11 @@
 """Active vulnerability probes against an in-scope web target.
 
-Sends payloads, so the boundaries are deliberate: detection never
-exploitation (prove an injection point exists, stop; no UNION extraction, file
-write or shell), non-destructive payloads only (a quote to break a query, or
-AND 1=1 vs 1=2; never DROP/DELETE/UPDATE/INSERT), and every request goes
-through one Requester that enforces scope and a per-minute ceiling.
-Read-only probes: SQLi, reflected XSS, path traversal, open redirect,
-exposed paths, dangerous HTTP methods, CORS.
+Sends payloads, so boundaries are deliberate: detection never exploitation
+(prove an injection point, stop; no UNION extraction, file write or shell),
+non-destructive payloads only (a quote to break a query, or AND 1=1 vs 1=2;
+never DROP/DELETE/UPDATE/INSERT), and every request goes through one Requester
+that enforces scope and a per-minute ceiling. Probes: SQLi, reflected XSS, path
+traversal, open redirect, exposed paths, dangerous HTTP methods, CORS.
 """
 
 from __future__ import annotations

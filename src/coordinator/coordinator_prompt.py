@@ -268,14 +268,8 @@ You:
 
 def get_worker_capabilities_description(simple_mode: bool = False) -> str:
     """
-    Get description of worker capabilities for the coordinator prompt.
-    
-    Args:
-        simple_mode: If True, use simplified tool set (Bash, Read, Edit only)
-                    If False, include all available tools and MCP servers
-    
-    Returns:
-        Description string of worker capabilities
+    Get the worker capabilities description for the coordinator prompt.
+    ``simple_mode`` limits the tool set to Bash, Read and Edit.
     """
     if simple_mode:
         return "Workers have access to Bash, Read, and Edit tools, plus MCP tools from configured MCP servers."

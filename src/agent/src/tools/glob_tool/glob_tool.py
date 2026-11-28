@@ -215,15 +215,8 @@ async def glob(
     """
     Execute glob search.
 
-    Args:
-        pattern: Glob pattern to match
-        search_dir: Directory to search in
-        options: Search options (limit, offset, ignore_patterns)
-        signal: Optional cancellation signal
-        permission_context: Permission context
-
-    Returns:
-        Dictionary with 'files' list and 'truncated' flag
+    ``options`` carries limit, offset and ignore_patterns. Returns a dict with
+    a 'files' list and a 'truncated' flag.
     """
     import fnmatch
 

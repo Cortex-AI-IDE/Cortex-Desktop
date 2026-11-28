@@ -1,15 +1,11 @@
 """Workspace trust: does the user trust the authors of the folder they opened?
 
-Opening a folder is enough for Cortex to act on what is inside it: source the
-project venv, offer the MCP servers its config names, run git (whose repo
-config can name programs of its own), and hand the AI the project's skills and
-.cortex rules. Fine for the user's own code, dangerous for a cloned repository.
-So the first open asks, and an untrusted folder opens in Restricted Mode: no
-venv activation, no project MCP servers, no project skills or rules in the
-prompt, no automatic git, and every shell command and edit asks first.
-
-Decisions live in ~/.cortex/workspace_trust.json, never inside the project, so
-a repository cannot mark itself trusted. No decision yet counts as restricted.
+Opening a folder lets Cortex act on its contents (source the venv, offer its
+MCP servers, run git, load its skills and rules), which is fine for your own
+code but dangerous for a cloned repo. The first open asks; an untrusted folder
+opens in Restricted Mode (no venv/MCP/skills/rules, every command and edit
+asks). Decisions live in ~/.cortex/workspace_trust.json, never inside the
+project, and no decision yet counts as restricted.
 """
 from __future__ import annotations
 

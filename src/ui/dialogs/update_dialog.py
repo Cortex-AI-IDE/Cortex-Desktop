@@ -33,14 +33,8 @@ class UpdateDialog(QDialog):
     """
     Modal dialog for update notifications.
 
-    Force mode:
-      - Only one button: "Download & Update"
-      - Cannot close the dialog (no X button)
-      - Blocks all IDE interaction
-
-    Normal mode:
-      - "Update Now" and "Remind Later" buttons
-      - Can close the dialog
+    Force mode: one "Download & Update" button, no X, blocks all IDE
+    interaction. Normal mode: "Update Now" and "Remind Later", closable.
     """
 
     install_requested = pyqtSignal(str)  # emits path to downloaded installer

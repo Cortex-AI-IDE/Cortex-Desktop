@@ -1,15 +1,11 @@
 """
 Cross-Session Semantic Memory Index (Phase 5).
 
-Enables the agent to retrieve relevant memories from past sessions
-using embedding-based semantic search. Built on top of the existing
-SiliconFlow / local / hash embedding pipeline.
-
-Architecture:
-  - On session end: summarize conversation → generate embedding → store
-  - On session start: embed current query → cosine search → inject top-3
-  - Storage: JSON index + individual embedding files in ~/.cortex/semantic_memory/
-  - Graceful degradation when no API key is available (hash-based fallback)
+Retrieves relevant memories from past sessions using embedding-based semantic
+search, on top of the existing SiliconFlow / local / hash embedding pipeline. On
+session end: summarize then embed then store; on session start: embed the query,
+cosine search, inject top-3. Storage: JSON index + embedding files in
+~/.cortex/semantic_memory/. Degrades to a hash fallback without an API key.
 """
 
 import json
@@ -276,13 +272,11 @@ class SemanticMemoryIndex:
     ) -> str:
         """The prompt section, or "" when the search outlasts *budget_s*.
 
-        The query embedding is a network round-trip: 1.9-3.4 s measured on a
-        real session, paid on the GUI thread while the turn's system prompt
-        was being assembled. That is why the first message of a session sat
-        still before the request even left. This section is supplementary
-        context, so the turn goes out without it and the worker runs on: it
-        fills the query cache, and the next prompt that repeats this text
-        gets the section with no wait (``search`` serves it from the cache).
+        The query embedding is a network round-trip (1.9-3.4 s measured), paid
+        on the GUI thread while the system prompt was assembled, which stalled
+        the first message of a session. This section is supplementary, so the
+        turn goes out without it and the worker fills the query cache; the next
+        prompt repeating this text gets the section with no wait.
         """
         if not self._entries:
             return ""

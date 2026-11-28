@@ -1,13 +1,12 @@
 """Where a partial file read should stop, so it stops on a structural break.
 
 A read with offset/limit can cut mid-function; this snaps the end to the
-nearest definition so the model gets whole units. Pure (no Qt, no bridge, no
-I/O), so it is testable without a QApplication. It lived inside the
-17,000-line bridge where a defect stayed invisible: every reference used a
-class name that no longer existed (AgentBridge._BOUNDARY_PATTERNS), so each
-call raised NameError and snapping never happened, silently, because the tool
-wrapper turns any exception into an error result. Regex-based on purpose: it
-runs on any language, including ones with no parser here.
+nearest definition so the model gets whole units. Pure (no Qt, no I/O), so it
+is testable without a QApplication. It lived inside the 17,000-line bridge
+where a defect stayed invisible: every reference used a class name that no
+longer existed (AgentBridge._BOUNDARY_PATTERNS), so each call raised NameError
+and snapping never ran, silently, because the tool wrapper turns exceptions
+into error results. Regex-based on purpose: it runs on any language.
 """
 
 from __future__ import annotations
@@ -66,16 +65,9 @@ def snap_chunk_end(
 ) -> int:
     """Adjust a chunk end so it lands on a definition boundary.
 
-    Args:
-        lines: Every line of the file.
-        target_end: The raw chunk end, 0-based and exclusive.
-        file_ext: Extension including the dot, e.g. ``".py"``.
-        window: Lines to search either side of the cut.
-
-    Returns:
-        The adjusted end, 0-based exclusive. Equal to ``target_end`` when the
-        language is unsupported, the cut is already at the end of the file, or
-        no definition is near.
+    ``target_end`` is 0-based exclusive. Returns the adjusted end, equal to
+    ``target_end`` when the language is unsupported, the cut is at EOF, or no
+    definition is within ``window``.
     """
     pattern = pattern_for(file_ext)
     if pattern is None:

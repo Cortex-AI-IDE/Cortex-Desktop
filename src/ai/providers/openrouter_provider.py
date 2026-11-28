@@ -146,14 +146,12 @@ OPENROUTER_MODEL_MAX_TOKENS: Dict[str, int] = {
 def openrouter_supports_vision(model_id: str) -> bool:
     """Whether an OpenRouter-routed model accepts image input.
 
-    Bug history: available_models() hardcoded supports_vision=False for
-    EVERY OpenRouter model, so agent_bridge's native-vision routing treated
-    even Claude/Gemini/GPT (all natively multimodal) as text-only and forced
-    a paste through the subscription-gated OCR path, blocking
-    non-subscribers who were using a vision-capable model with their own key.
-
-    These families are multimodal and take images directly; DeepSeek, GLM,
-    and the listed Qwen text variants are text-only.
+    Bug history: available_models() hardcoded supports_vision=False for EVERY
+    OpenRouter model, so native-vision routing treated even Claude/Gemini/GPT
+    as text-only and forced a paste through the subscription-gated OCR path,
+    blocking non-subscribers using a vision model with their own key. The
+    families below are multimodal; DeepSeek, GLM and the Qwen text variants are
+    text-only.
     """
     m = (model_id or "").lower()
     # Report a model as multimodal when chosen for an image prompt: calling it
@@ -184,13 +182,10 @@ def openrouter_supports_vision(model_id: str) -> bool:
 def _reasoning_text_from_details(details: Any) -> str:
     """Readable reasoning in a streamed ``delta.reasoning_details`` list.
 
-    OpenRouter documents streamed reasoning as ``reasoning_details`` items:
-    ``reasoning.text`` (``text``), ``reasoning.summary`` (``summary``) and
-    ``reasoning.encrypted`` (opaque ``data``, may stream as "[REDACTED]").
-    Some models fill the plain ``delta.reasoning`` too, but one that sends
-    only the details list (Gemini through OpenRouter) left the thought card
-    empty, because the stream reader looked at ``delta.reasoning`` alone.
-    Encrypted items carry nothing displayable and are skipped.
+    OpenRouter documents items as reasoning.text, reasoning.summary and
+    reasoning.encrypted (opaque, may stream "[REDACTED]"). Some models also fill
+    plain ``delta.reasoning``, but one that sends only the details list (Gemini
+    via OpenRouter) left the thought card empty. Encrypted items are skipped.
     """
     if not isinstance(details, list):
         return ""
@@ -213,16 +208,10 @@ def _reasoning_text_from_details(details: Any) -> str:
 def _extract_openrouter_error(resp_body: str) -> str:
     """Pull the most informative message out of an OpenRouter error body.
 
-    When the UPSTREAM provider (xAI, Anthropic, ...) rejects a request,
-    OpenRouter wraps it as:
-        {"error": {"message": "Provider returned error", "code": 403,
-                   "metadata": {"provider_name": "xAI",
-                                "raw": "{...upstream error json...}"}}}
-    'error.message' alone is the useless generic wrapper, the real reason
-    (e.g. xAI's "The model grok-4.5 is not available in your region.")
-    lives inside metadata.raw. Bug history: users only ever saw
-    "[OpenRouter Error] OpenRouter HTTP 403: Provider returned error" and
-    had no idea the model was region-locked by the upstream provider.
+    When an upstream provider rejects a request, OpenRouter wraps it, and
+    'error.message' is just "Provider returned error"; the real reason lives in
+    metadata.raw. Users used to see only the generic wrapper and had no idea
+    the model was region-locked by the upstream provider.
     """
     try:
         err = json.loads(resp_body).get('error', {}) or {}

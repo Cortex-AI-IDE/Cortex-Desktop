@@ -1,14 +1,11 @@
 """How to use each connected MCP server, derived from what the server exposes.
 
 A flat tool list says what a tool does but not how the tools fit together,
-which change data, or which of two similar servers suits a task. Without that
-the agent guessed: on 2026-10-02 it spent ten turns on one screenshot,
-switching browser servers and inventing a `selector` parameter Playwright does
-not have.
-
-Nothing here names a server. Every line comes from the server itself: its own
-`instructions` from the initialize response (Cortex used to discard them), the
-user's notes in its mcp.json entry, and rules read from its tool definitions.
+which change data, or which of two similar servers suits a task; without that
+the agent guessed (on 2026-10-02 it spent ten turns on one screenshot, switching
+browser servers and inventing a `selector` parameter Playwright does not have).
+Nothing here names a server: every line comes from the server's own
+`instructions`, the user's mcp.json notes, and rules read from its tools.
 """
 from __future__ import annotations
 
@@ -136,15 +133,14 @@ _FILE_PARAMS = ("filePath", "filename", "file_path", "path", "outputPath")
 
 
 def _workflow_lines(tools: List[Dict[str, Any]]) -> List[str]:
-    """Long-session rules for servers that expose a page snapshot or a
-    screenshot that can go to a file (any browser server).
+    """Long-session rules for servers exposing a page snapshot or a screenshot
+    that can go to a file (any browser server).
 
     From the 2026-10-19/20 chrome-devtools sessions: 35 snapshots in an hour
-    (one 187K chars) piled up in the conversation although only the newest
-    describes the page, screenshots came back into the context instead of a
-    file, and multi-step browser tasks without a todo list ended after one
-    step. Cortex now trims old snapshots and lets servers write into the
-    project; these lines tell the model to work with that.
+    (one 187K chars) piled up although only the newest describes the page, and
+    screenshots came back into context instead of a file. Cortex now trims old
+    snapshots and lets servers write into the project; these lines tell the
+    model to work with that.
     """
     names = [t.get("name", "") for t in tools]
     # The PAGE snapshot - chrome-devtools also has take_heapsnapshot (a

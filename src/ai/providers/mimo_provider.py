@@ -1,15 +1,10 @@
 """
 Xiaomi MiMo provider - the MiMo-V2.5 model family.
 
-MiMo-V2.5-Pro is a 1.02T-param MoE (42B active) with 1M context and 128K output,
-built for long-horizon agentic coding; MiMo-V2.5 is full-modal (text, image,
-video, audio) with the same context. API: OpenAI-compatible chat completions at
-https://api.xiaomimimo.com/v1/chat/completions.
-
-Pricing per 1M tokens (overseas, cache-miss / cached / output): pro $1.00 /
-$0.20 / $3.00, v2.5 $0.40 / $0.08 / $2.00, with a long-context surcharge past
-256K. Env: MIMO_API_KEY (sk-* pay-as-you-go, tp-* token plan), plus
-CORTEX_MIMO_MAX_RETRIES and the connect/read/tool-read timeout vars.
+Pro is a 1.02T-param MoE (42B active), 1M context, 128K output; MiMo-V2.5 is
+full-modal (text, image, video, audio). OpenAI-compatible at
+https://api.xiaomimimo.com/v1/chat/completions. Env: MIMO_API_KEY (sk-*
+pay-as-you-go, tp-* token plan) plus CORTEX_MIMO_MAX_RETRIES and timeout vars.
 """
 from src.ai.providers.usage_parse import cached_tokens_from
 import os
@@ -393,13 +388,12 @@ class MimoProvider(BaseProvider):
         """Send a chat completion request to the Mimo API (OpenAI-compatible).
 
         Args:
-            thinking: MiMo thinking mode control.
-                {"type": "enabled"} for deep reasoning (slower, higher quality).
-                {"type": "disabled"} for fast responses (default for agentic coding).
-                If None, MiMo defaults apply (enabled for pro, disabled for v2.5).
-            top_p: Nucleus sampling (0.0-1.0). Default API value if None.
-            frequency_penalty: -2.0 to 2.0. Default API value if None.
-            presence_penalty: -2.0 to 2.0. Default API value if None.
+            thinking: {"type": "enabled"} for deep reasoning, {"type": "disabled"}
+                for fast agentic coding, None for model defaults (enabled on
+                pro, disabled on v2.5).
+            top_p: Nucleus sampling (0.0-1.0).
+            frequency_penalty: -2.0 to 2.0.
+            presence_penalty: -2.0 to 2.0.
             stop: Up to 4 stop sequences.
         """
         start_time = time.time()
@@ -971,15 +965,10 @@ class MimoProvider(BaseProvider):
                    limit: int = 5,
                    user_location: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
-        Search the web using MiMo's native web_search built-in tool.
-
-        API spec: max_keyword (1-50, default 5), limit (1-50, default 5),
-        force_search (bool, default False, we default True for agent use).
-
-        Returns a list of dicts with keys:
-          title, url, snippet, site_name, publish_time, logo_url
-
-        Returns empty list on failure (caller should fall back to other search providers).
+        Search the web using MiMo's native web_search tool (max_keyword 1-50
+        default 5, limit 1-50 default 5, force_search defaults True here).
+        Returns a list of dicts with title, url, snippet, site_name,
+        publish_time, logo_url, or [] on failure.
         """
         if not self._api_key:
             log.debug("MimoProvider.web_search: no API key configured")

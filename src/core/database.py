@@ -441,14 +441,11 @@ class CortexDatabase:
     def _purge_duplicate_messages(self) -> int:
         """Delete consecutive duplicate rows already stored, once.
 
-        Guarding add_message only stops NEW duplicates. Existing databases
-        still hold what the six uncoordinated writers produced before it, and
-        every checkpoint keeps rendering them, so a chat that recorded "hi"
-        twice would still show it twice forever.
-
-        Only a row whose immediate predecessor in the same conversation is
-        identical is removed, which is the same rule add_message applies. A
-        message repeated later in a chat is left alone.
+        Guarding add_message only stops NEW duplicates. Existing databases still
+        hold what the six uncoordinated writers produced before it, and every
+        checkpoint keeps rendering them. Only a row whose immediate predecessor
+        in the same conversation is identical is removed, the same rule
+        add_message applies; a message repeated later in a chat is left alone.
         """
         try:
             with self._get_connection() as conn:
@@ -547,16 +544,10 @@ class CortexDatabase:
         """Get messages for a conversation, the MOST RECENT `limit`, in
         chronological (oldest to newest) order.
 
-        This used ORDER BY timestamp ASC LIMIT ?, which returns the OLDEST
-        limit messages. The agent restore uses limit=20, so past 20 messages
-        the AI was rehydrated with stale turns and "forgot" recent ones after a
-        restart. The inner DESC query selects the newest rows; the outer SELECT
-        re-sorts them. `id` breaks ties, since timestamps have second
-        resolution and rapid turns would otherwise restore scrambled.
-
-        Flushes the write queue before reading, so messages saved through the
-        debounced queue are committed before the read; skipped during restore,
-        where no writes are pending.
+        A plain ASC LIMIT returned the OLDEST rows, so agent restore (limit=20)
+        rehydrated stale turns and "forgot" recent ones after a restart; the
+        inner DESC query selects the newest and the outer re-sorts, with `id`
+        breaking ties. Flushes the write queue first (skipped during restore).
         """
         if not self._restoring:
             # Read-your-writes barrier: must flush SYNCHRONOUSLY before the
@@ -963,16 +954,10 @@ class CortexDatabase:
         """
         PUBLIC: Force-flush all queued write operations immediately.
 
-        CRITICAL: Call this after batch chat saves (save_single_chat_to_sqlite)
-        and during shutdown to guarantee data is persisted before the app exits.
-        Without this, writes queued via the 500ms QTimer debounce will be
-        lost if the timer hasn't fired yet when the window closes.
-
-        force=True flushes SYNCHRONOUSLY on the calling thread (shutdown /
-        must-persist-now paths). force=False just wakes the writer thread.
-
-        Skipped during restore (unless force=True), no writes are pending
-        and the flush would block the UI for no benefit.
+        Call after batch chat saves and at shutdown, or writes queued behind
+        the 500ms QTimer debounce are lost when the window closes.
+        force=True flushes synchronously on the calling thread; force=False
+        just wakes the writer thread. Skipped during restore unless forced.
         """
         if self._restoring and not force:
             return
@@ -1071,15 +1056,13 @@ class CortexDatabase:
     def create_session(self, session_id: str, project_id: str,
                        parent_session_id: Optional[str] = None) -> str:
         """
-        Create a new session record. Safe to call multiple times (INSERT OR IGNORE).
-        Returns the session_id.
+        Create a session record. Idempotent (INSERT OR IGNORE); returns session_id.
 
         Args:
-            session_id: Unique session identifier
-            project_id: Project path or identifier
+            session_id: Unique session identifier.
+            project_id: Project path or identifier.
             parent_session_id: Session this one replaced (New Chat lineage).
-                Only written on the insert; INSERT OR IGNORE means an existing
-                row keeps the parent it was created with.
+                Only written on insert, so an existing row keeps its parent.
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -1097,17 +1080,8 @@ class CortexDatabase:
                          token_count: int = None) -> int:
         """
         Add a single chat message to the session-scoped messages table.
-        Stores immediately (no write queue) for timeline reliability.
-
-        Args:
-            session_id: Unique session identifier
-            project_id: Project path or identifier
-            role: 'user', 'assistant', or 'system'
-            content: The message text
-            token_count: Estimated token count (optional)
-
-        Returns:
-            The auto-generated row ID.
+        Stores immediately (no write queue) for timeline reliability. Returns
+        the auto-generated row ID.
         """
         if role not in ('user', 'assistant', 'system'):
             raise ValueError(f"Invalid role: {role}. Must be user/assistant/system.")

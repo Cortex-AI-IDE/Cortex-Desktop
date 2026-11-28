@@ -2,12 +2,10 @@
 chat_text.py, Text/markdown cleaning pipeline for native chat
 ==============================================================
 
-Text/markdown cleaning helpers used by the native chat panel:
-  clean_assistant_response, preprocess_thought_blocks, strip_control_tags,
-  clean_broken_windows_paths, clean_markdown_urls, auto_fix_code_fences,
-  detect_content_type, escape_currency_dollars
-
-Phase 4 of the native chat migration.
+Cleaning helpers used by the native chat panel: clean_assistant_response,
+preprocess_thought_blocks, strip_control_tags, clean_broken_windows_paths,
+clean_markdown_urls, auto_fix_code_fences, detect_content_type,
+escape_currency_dollars (Phase 4 of the native chat migration).
 """
 
 from __future__ import annotations
@@ -460,14 +458,11 @@ _FENCE_HEAD_KEYWORDS = frozenset({
 def _mermaid_fence_body_ok(code: str) -> bool:
     """True when a fenced body is diagram syntax rather than prose.
 
-    Even inside a real ```mermaid fence, prose stays a code block: showing the
-    author's text is right, drawing it is not. Permissive about body shape
-    (an edge-less flowchart and a mindmap are both valid mermaid); only the
-    ambiguous heads are checked, and only for syntax mermaid requires. graph /
-    flowchart need a direction token ("graph is a data structure" is rejected);
-    timeline/gantt/pie/journey/mindmap are ordinary English words, so what
-    follows must be empty or "title" ("timeline is decisive" rejected, "pie
-    title Pets" kept); every other declared type is trusted.
+    Even inside a real ```mermaid fence, prose stays a code block. Only the
+    ambiguous heads are checked: graph/flowchart need a direction token ("graph
+    is a data structure" rejected); timeline/gantt/pie/journey/mindmap are
+    ordinary words, so what follows must be empty or "title" ("timeline is
+    decisive" rejected, "pie title Pets" kept); every other type is trusted.
     """
     lines = [ln.strip() for ln in code.splitlines() if ln.strip()]
     if not lines:
@@ -487,15 +482,11 @@ def _mermaid_fence_body_ok(code: str) -> bool:
 def find_mermaid_spans(text: str) -> list[tuple[int, int, str, bool]]:
     """Return ``(start, end, code, complete)`` for every real mermaid fence.
 
-    ``start``/``end`` are offsets into ``text`` covering the whole fence (opener
-    through closing fence, or through the end of the text when the stream
-    stopped mid-diagram). Inline backtick mentions and the literal token inside
-    another code block are never returned, and a fence whose body is prose is
-    skipped so it renders as the code block the author wrote.
-
-    Handles the glued form this project's providers emit
-    ("```mermaidflowchart TB ... end```") in both directions: language glued to
-    the first statement, and the closing fence glued to the last line.
+    ``start``/``end`` cover the whole fence (opener through closing fence, or
+    through end of text when the stream stopped mid-diagram). Inline backtick
+    mentions and the literal token inside another code block are never
+    returned, and a fence whose body is prose is skipped. Handles the glued
+    form this project's providers emit ("```mermaidflowchart TB ... end```").
     """
     if not text or 'mermaid' not in text.lower():
         return []
@@ -856,18 +847,10 @@ def _repair_pipe_entity_scars(text: str) -> str:
 def sanitize_prose_markdown(text: str) -> str:
     """Make saved assistant markdown safe to store and to re-render.
 
-    Runs, in this order (the order matters):
-      1. rejoin table rows broken by a stray fence (and escape its backticks),
-      2. close any unbalanced fence,
-      3. strip control tags (<task_summary> and friends).
-
-    Step 2 must precede step 3: the tag stripper protects everything between
-    two fences, so a closing fence left dangling at the end of an answer makes
-    it pair with an inline fence earlier on and hide the task JSON from the
-    stripper. Balancing first removes that accidental protection, which is also
-    what makes this function idempotent.
-
-    Idempotent: sanitising an already-clean block returns it unchanged.
+    Order matters: rejoin table rows broken by a stray fence, close any
+    unbalanced fence, then strip control tags. Balancing must precede tag
+    stripping, since the stripper protects text between two fences and a
+    dangling fence would hide the task JSON. Idempotent.
     """
     if not text:
         return text

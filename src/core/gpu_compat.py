@@ -3,11 +3,9 @@
 On some machines Chromium cannot get a GPU context and every WebEngine surface
 paints blank while Python looks healthy. The fix is SwiftShader, decided BEFORE
 QApplication exists because QTWEBENGINE_CHROMIUM_FLAGS is read once at init, so
-this module is Qt-free and main.py imports it first.
-
-First match wins: CORTEX_SOFTWARE_RENDERING=1, ui.rendering_mode, legacy
-ui.software_rendering, a native-thread crash in 7 days, then hardware detection
-(Basic Display adapters, AMD/Intel drivers older than 2017).
+this is Qt-free and main.py imports it first. First match wins:
+CORTEX_SOFTWARE_RENDERING=1, ui.rendering_mode, legacy ui.software_rendering, a
+native-thread crash in 7 days, then hardware detection.
 """
 from __future__ import annotations
 

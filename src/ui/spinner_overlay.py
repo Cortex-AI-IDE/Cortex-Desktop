@@ -174,13 +174,10 @@ class SpinnerOverlay(QFrame):
     def retheme(self):
         """Re-apply LIVE theme tokens to the card and its labels.
 
-        Bug history: every color here (card bg was already token-driven,
-        but title/status/progress/detail text were hardcoded near-white/
-        gray) is set at CONSTRUCTION only, SpinnerOverlay is built once
-        in ChatPanel.__init__ and never touched again, so a live theme
-        switch left the card correctly light while its text stayed
-        near-white, invisible ("Summarizing chat to memory..." unreadable
-        on the now-light card). Called from ChatPanel.set_theme().
+        The text colors are set at CONSTRUCTION only, and SpinnerOverlay is
+        built once in ChatPanel.__init__, so a live switch left the card light
+        while its near-white text stayed invisible. Called from
+        ChatPanel.set_theme().
         """
         try:
             self._apply_scrim()
@@ -246,12 +243,8 @@ class SpinnerOverlay(QFrame):
         """
         Show the overlay with a spinner and status message.
 
-        Args:
-            message: Status text (e.g., "Compacting conversation...")
-            spinner_key: Tool type key for spinner_for() factory
-            detail: Optional detail text below the main message
-            title: Optional prominent heading above the spinner
-            progress: Optional (current, total) tuple for progress display
+        ``spinner_key`` is a tool type for spinner_for(); ``progress`` is an
+        optional (current, total) tuple.
         """
         if not self.parent():
             log.warning("[SpinnerOverlay] No parent set, cannot show overlay")

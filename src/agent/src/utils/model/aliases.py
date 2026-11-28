@@ -1,18 +1,8 @@
-"""
-Model alias definitions for Cortex AI IDE.
+"""Model alias definitions for Cortex AI IDE.
 
-Provides friendly shorthand names across active LLM providers so
-users can type 'deepseek' or 'gpt54' instead of full model IDs.
-
-Active providers (mirrors src/ai/providers/):
-  - DeepSeek, OpenAI, Alibaba Qwen, MiMo
-  - SiliconFlow (embeddings / vision)
-
-Restored 2026-10-22. This module was deleted by the 333-module purge in
-commit cdc6184, which classified it as unused. It was not unused:
-`tools/gen_model_inventory.py` imports ALIAS_MAP and
-`src/ui/dialogs/memory_manager.py` imports resolveOrPassthrough. Both
-references survived the deletion, so the purge removed a reachable module.
+Shorthand names ('deepseek', 'gpt54') mapped to full model IDs. Restored
+2026-10-22 after the cdc6184 purge deleted it as "unused" while
+tools/gen_model_inventory.py and memory_manager.py still imported it.
 """
 
 from typing import Dict, Optional, Tuple
@@ -108,12 +98,7 @@ def resolveAlias(alias: str) -> Optional[str]:
     Args:
         alias: Short alias string (e.g. 'opus', 'deepseek')
 
-    Returns:
-        Full model ID string, or None if alias is not recognised
-
-    Example:
-        resolveAlias('opus')    -> 'anthropic/claude-opus-4.8'
-        resolveAlias('unknown') -> None
+    Returns the full model ID string, or None if the alias is not recognised.
     """
     # Server-published aliases (admin-editable per model) win over the
     # built-in map, same layering as resolveOrPassthrough below; None from
@@ -135,14 +120,7 @@ def resolveOrPassthrough(modelInput: str) -> str:
 
     Server-published aliases (from remote_models) are consulted first, then the
     built-in ALIAS_MAP, the same layering used for limits, pricing, provider and
-    thinking. Remote wins on conflict since the admin owns the published list;
-    the built-in map is the offline fallback.
-
-    Args:
-        modelInput: Alias or full model ID.
-
-    Returns:
-        Canonical model ID.
+    thinking. Remote wins on conflict; the built-in map is the offline fallback.
     """
     try:
         from src.ai.remote_models import get_remote_alias

@@ -38,16 +38,11 @@ def is_git_repo(repo_dir: str) -> bool:
 def abs_path(repo_dir: str, path: str) -> str:
     """Resolve a path reported by git to an absolute filesystem path.
 
-    `git status --porcelain` reports paths relative to the repo root, so a
-    consumer that hands one to os.stat()/open() only works when the process
-    CWD happens to be the repo. That holds when running from the source tree
-    and fails in the packaged app, where CWD is the install directory: the
-    same click then resolved to nothing and the diff came out as a whole-file
-    delete instead of the real change.
-
-    Absolute input is normalized and returned unchanged. An empty repo_dir
-    means the caller has no root to resolve against, so the input passes
-    through untouched rather than being guessed at.
+    `git status --porcelain` reports repo-relative paths, so handing one to
+    open() only works when CWD is the repo: fine from source, broken in the
+    packaged app (CWD is the install dir), where the diff came out as a
+    whole-file delete. Absolute input is normalized and returned unchanged; an
+    empty repo_dir passes the input through rather than guessing.
     """
     if not path:
         return path

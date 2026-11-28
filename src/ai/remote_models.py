@@ -411,12 +411,9 @@ def remote_supports_thinking(model_id: str) -> Optional[bool]:
     """Whether the server says this model produces extended reasoning.
 
     Returns None when the model is not in the server config at all, so callers
-    can tell "server says no" apart from "server has never heard of it" and
-    fall back to the built-in table for the latter.
-
-    Matching is tried both ways because the runtime asks in two shapes: an
-    OpenRouter id arrives already split into vendor + name
-    ("anthropic", "claude-fable-5"), while direct providers pass the plain id.
+    can tell "server says no" from "server has never heard of it" and fall back
+    to the built-in table. Matching is tried both ways because the runtime asks
+    in two shapes (split vendor + name for OpenRouter, plain id for direct).
     """
     needle = (model_id or "").strip().lower()
     if not needle:
@@ -438,17 +435,11 @@ def remote_supports_thinking(model_id: str) -> Optional[bool]:
 def remote_supports_vision(model_id: str) -> Optional[bool]:
     """Whether the server says this model accepts image input.
 
-    Three-state, mirroring ``remote_supports_thinking``:
-      * None        - the server has never published this model (or never been
-                      reached), so the caller falls back to its own vision table.
-      * True/False  - the server's explicit answer, which wins.
-
-    This is the authoritative source an admin sets in the panel. It exists
-    because the built-in ``openrouter_supports_vision()`` prefix table cannot
-    know about models published after this build ships (a brand-new
-    ``deepseek/deepseek-v4-flash-vision-exp`` id is simply absent from
-    ``VISION_PREFIXES``), so a vision-capable model pasted a screenshot and it
-    was misrouted to the subscription-gated OCR path.
+    Three-state, like remote_supports_thinking: None means the server never
+    published it (caller falls back to its own table), True/False is the
+    server's answer and wins. Needed because the built-in prefix table cannot
+    know models published after this build ships, so a new vision id was
+    misrouted to the subscription-gated OCR path.
     """
     needle = (model_id or "").strip().lower()
     if not needle:

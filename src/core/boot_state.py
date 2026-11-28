@@ -1,16 +1,11 @@
 """Process-wide startup (boot) flag.
 
-While the main window's startup overlay is up, WebEngine pages load in
-"boot-hidden" mode: they paint only their flat dark background and keep all
-content invisible. Chromium's native child window z-orders ABOVE the Qt
-startup overlay, so any opaque page content (logo, welcome screen, old
-splash animation) would punch through and appear NEXT TO the main loading
-screen - the "two CORTEX splashes" boot bug.
-
-main_window marks boot complete the moment the overlay is dismissed; the
-panels then call each page's window.__cortexReveal() to show real content.
-Pages also self-reveal as a backstop (20s) and on any post-boot load, so a
-missed reveal can never leave a panel invisible.
+While the startup overlay is up, WebEngine pages load "boot-hidden": they paint
+only a flat dark background. Chromium's native child window z-orders ABOVE the
+Qt overlay, so opaque page content would punch through and appear NEXT TO the
+loading screen (the "two CORTEX splashes" bug). main_window clears the flag
+when the overlay is dismissed; panels then call __cortexReveal(). Pages also
+self-reveal after 20s as a backstop.
 """
 
 _booting = True

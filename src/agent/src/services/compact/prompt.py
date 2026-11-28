@@ -274,14 +274,8 @@ def get_partial_compact_prompt(
     direction: str = 'from',
 ) -> str:
     """
-    Get partial compact prompt (for recent messages only).
-    
-    Args:
-        custom_instructions: Optional additional instructions
-        direction: 'from' or 'up_to' (determines which template to use)
-        
-    Returns:
-        Formatted compact prompt string
+    Get the partial compact prompt (recent messages only). ``direction`` is
+    'from' or 'up_to' and selects the template.
     """
     template = PARTIAL_COMPACT_UP_TO_PROMPT if direction == 'up_to' else PARTIAL_COMPACT_PROMPT
     prompt = NO_TOOLS_PREAMBLE + template
@@ -352,16 +346,16 @@ def get_compact_user_summary_message(
     recent_messages_preserved: bool = False,
 ) -> str:
     """
-    Create user-facing summary message for context continuation.
-    
+    User-facing summary message that continues the session after compaction.
+
     Args:
-        summary: Raw summary from compact API call
-        suppress_follow_up_questions: Whether to suppress follow-up questions
-        transcript_path: Optional path to full transcript
-        recent_messages_preserved: Whether recent messages are kept verbatim
-        
+        summary: Raw summary from the compact API call.
+        suppress_follow_up_questions: Drop the follow-up question.
+        transcript_path: Optional path to the full transcript.
+        recent_messages_preserved: Recent messages are kept verbatim.
+
     Returns:
-        Formatted user message for session continuation
+        Formatted user message for session continuation.
     """
     formatted_summary = format_compact_summary(summary)
     

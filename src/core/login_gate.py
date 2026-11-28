@@ -1,13 +1,11 @@
 """Decide whether Cortex may start, from the SAVED session alone.
 
 Asking the server at startup would lock every paying user out of an editor that
-works offline the day cortex-ide.app is slow or mid-deploy, so the gate never
-touches the network. It reads ~/.cortex/auth.json: no token means BLOCK and
-show the login window (unless the user chose "Skip for now"); a token in date
-means ALLOW; a token expired means ALLOW and refresh in the background.
-
-The expired case is deliberate: a minute-stale refresh token is not a security
-event. The server still checks the access token on every API call. Qt-free.
+works offline the day cortex-ide.app is slow, so the gate never touches the
+network. It reads ~/.cortex/auth.json: no token means BLOCK and show login
+(unless "Skip for now"); a token in date means ALLOW; expired means ALLOW and
+refresh in the background (a minute-stale refresh token is not a security
+event; the server checks the access token on every call). Qt-free.
 """
 from __future__ import annotations
 

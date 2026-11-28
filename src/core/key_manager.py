@@ -1,12 +1,11 @@
 """
 Secure Key Management System for Cortex AI IDE
-- OS Keyring (Windows Credential Manager / macOS Keychain / Secret Service) as PRIMARY storage
-- Encrypted file as BACKUP storage
-- Auto-re-prompt on decryption failure
-- Export/import for migration
+- OS Keyring (Windows Credential Manager / macOS Keychain / Secret Service) as
+  PRIMARY storage, encrypted file as BACKUP
+- Auto-re-prompt on decryption failure, export/import for migration
 
-Security: Keys are encrypted with a master secret sourced from the OS
-keyring or a user-provided passphrase, never persisted in clear text.
+Security: keys are encrypted with a master secret from the OS keyring or a
+user-provided passphrase, never persisted in clear text.
 """
 
 import os
@@ -206,15 +205,12 @@ class KeyManager:
     def _resolve_master_secret(self) -> tuple:
         """Choose the master secret and report its source.
 
-        Only the OS keystore holds something actually secret, so it is the only
-        source that protects the vault. The machine fingerprint (COMPUTERNAME,
-        USERNAME, PROCESSOR_IDENTIFIER, home dir) is public, and a key derived
-        from it makes keys.enc reversible by anyone who copies keys.enc and
-        keys.salt. It is used in exactly two loud cases: an existing vault must
-        stay readable, or the owner opted in with
-        CORTEX_ALLOW_INSECURE_KEYSTORE=1. Otherwise the key is random and never
-        leaves the process, so Cortex writes no vault rather than one filled
-        with ciphertext that only looks encrypted.
+        Only the OS keystore holds something actually secret. The machine
+        fingerprint is public, so a key derived from it makes keys.enc
+        reversible to anyone who copies keys.enc and keys.salt; it is used only
+        in two loud cases (an existing vault must stay readable, or
+        CORTEX_ALLOW_INSECURE_KEYSTORE=1). Otherwise the key is random and never
+        leaves the process, so Cortex writes no vault rather than fake ciphertext.
         """
         keystore_secret = self._get_os_keyring_secret()
         if keystore_secret:
@@ -320,16 +316,11 @@ class KeyManager:
     def _secret_service_secret(self) -> Optional[str]:
         """Read the vault master secret from the Secret Service, creating it once.
 
-        Two routes reach the same Secret Service, in this order:
-
-          * the `keyring` library, which is what earlier Linux builds used,
-            so it finds the secret an existing vault was encrypted with;
-          * libsecret's `secret-tool` CLI, for environments without the
-            Python package.
-
-        A read that FAILS is not a missing entry: creating a fresh master
-        secret there would orphan every stored key, so None is returned and
-        _resolve_master_secret() decides what to do.
+        Two routes to the same service, in order: the `keyring` library (what
+        earlier Linux builds used, so it finds the existing secret), then
+        libsecret's `secret-tool` CLI. A read that FAILS is not a missing
+        entry: creating a fresh secret there would orphan every stored key, so
+        None is returned and _resolve_master_secret decides.
         """
         keyring = self._keyring_backend()
         if keyring is not None:
@@ -392,16 +383,11 @@ class KeyManager:
     def _get_machine_fingerprint(self) -> str:
         """Get machine-specific fingerprint for key derivation.
 
-        NOT a secret: every component is public or trivially guessable, so a
-        key derived from this string only obfuscates. See
-        _resolve_master_secret() for the two cases where it may be used.
-
-        The components differ per platform on purpose. COMPUTERNAME,
-        USERNAME and PROCESSOR_IDENTIFIER do not exist on Linux, so reading
-        them there produced "|||/home/<user>", a different string from the
-        one earlier builds used (/etc/machine-id, hostname, USER, home).
-        That mismatch alone made every vault entry on those machines
-        impossible to decrypt.
+        NOT a secret: every component is public or guessable, so a key derived
+        from it only obfuscates (see _resolve_master_secret). Components differ
+        per platform on purpose: COMPUTERNAME/USERNAME/PROCESSOR_IDENTIFIER do
+        not exist on Linux, and reading them there produced a different string
+        than earlier builds, making every vault entry undecryptable.
         """
         if os.name == 'nt':
             components = [
@@ -736,16 +722,11 @@ class KeyManager:
         """Load encrypted keys from file, parsing it once per write.
 
         The Settings panel asks for one key per provider row, and every miss
-        used to read and re-parse this whole file, so the cost of opening the
-        panel grew with the number of providers the server publishes. On
-        Linux it was paid for every row, because _get_os_keyring_key() is a
-        no-op there and every lookup falls through to this file.
-
-        The file is written only by _store_encrypted_file(), delete_key() and
-        import_credentials(), each of which drops this cache, and nothing
-        outside this class reads it, so the memo cannot outlive a change. A
-        copy is handed out so a caller that mutates the mapping before a write
-        cannot leave the memo ahead of the file if that write fails.
+        used to re-parse the whole file, so opening the panel grew with the
+        provider count (paid per row on Linux, where the keyring is a no-op).
+        Only _store_encrypted_file/delete_key/import_credentials write the
+        file, each dropping this cache; a copy is handed out so a caller
+        mutating the mapping cannot leave the memo ahead of a failed write.
         """
         if self._vault_cache is not None:
             return dict(self._vault_cache)

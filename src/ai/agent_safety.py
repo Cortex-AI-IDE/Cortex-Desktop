@@ -1,16 +1,10 @@
 """
 Agent Safety Guard, Industry-standard agentic loop protections.
 
-Implements:
-  P1: Doom-loop detection (MD5 fingerprinting, 3x repeat → pause)
-  P2: Tool call counter (advisory reminders every 50 calls, never blocks)
-  P3: Read-before-edit enforcement (tracks files read, warns before blind edits)
-  P4: Stale-read detection (mtime tracking, warns if file changed since last read)
-  P5: Search-before-edit enforcement (requires search before editing large files)
-  P6: Search exclusion patterns (skip __pycache__, node_modules, etc.)
-  P7: Tool-explanation-before-action directive
-  P8: Error recovery budget (3 recovery messages then forced exit)
-
+P1 doom-loop detection (MD5 fingerprinting, 3x repeat pauses); P2 tool-call
+counter (advisory, never blocks); P3 read-before-edit; P4 stale-read detection
+(mtime); P5 search-before-edit on large files; P6 search exclusions; P7
+explain-before-acting; P8 error recovery budget (3 then forced exit).
 """
 
 import hashlib
@@ -232,12 +226,9 @@ class AgentSafetyGuard:
         """
         Check tool call count, soft warnings only, NEVER blocks.
 
-        The agent is allowed to use as many tools as needed to complete work.
-        Periodic reminders are emitted at intervals so the agent stays aware
-        of its usage, but no hard stop is enforced.
-
-        Returns:
-            None if OK, advisory reminder message at intervals.
+        The agent may use as many tools as it needs; periodic reminders keep it
+        aware of usage, but nothing hard-stops it. Returns None if OK, or an
+        advisory reminder at intervals.
         """
         self._state.iteration_count += 1
         count = self._state.iteration_count
@@ -502,12 +493,12 @@ class AgentSafetyGuard:
         Run all safety checks for a tool call.
 
         Args:
-            tool_name: Name of the tool being called
-            args: Tool arguments (dict or string)
-            is_auto_mode: Whether the agent is in AUTO mode
+            tool_name: Tool being called.
+            args: Tool arguments, dict or string.
+            is_auto_mode: Whether the agent is in AUTO mode.
 
         Returns:
-            (should_proceed, warnings), whether to proceed and any warning messages
+            (should_proceed, warnings).
         """
         warnings: List[str] = []
         should_proceed = True
@@ -561,14 +552,13 @@ class AgentSafetyGuard:
     def register_tool_result(self, tool_name: str, args: Any, result: Any = None) -> None:
         """Register a SUCCESSFUL tool call. Called from the bridge funnel.
 
-        Had no caller once, and the log (2026-07-29) showed the cost: searches
-        were never registered, so check_search_before_edit warned 'SEARCH
-        REQUIRED' 40 times even right after the demanded Grep; and the agent's
-        own Edit/Write bumped the file mtime with the read record unrefreshed,
-        so every follow-up edit warned 'STALE READ' 76 times. The model treats
-        those as real errors and reroutes edits through throwaway shell scripts.
-        Reads are NOT registered here: the Read dispatcher calls
-        register_file_read with partial-read details this funnel lacks.
+        Had no caller once, and the 2026-07-29 log showed the cost: searches were
+        never registered, so check_search_before_edit warned "SEARCH REQUIRED" 40
+        times right after the demanded Grep, and the agent's own Edit/Write
+        bumped the mtime with the read record unrefreshed, so every follow-up
+        edit warned "STALE READ" 76 times. The model treats those as real errors
+        and reroutes edits through throwaway scripts. Reads are not registered
+        here; the Read dispatcher calls register_file_read.
         """
         # P4: a successful Write/Edit is the freshest possible knowledge
         # of the file, the agent authored the current content. Refresh

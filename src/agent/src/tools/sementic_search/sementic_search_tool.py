@@ -114,16 +114,11 @@ def resolve_search_scope(
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """Split the tool's ``path`` argument into (index root, scope, error).
 
-    ``path`` is documented as "Path to search within", so it is a filter, not
-    the root of a new index. Using it as the root built a second index at
-    ``<subdir>/.cortex/semantic_index`` and re-embedded files the project
-    index already held, which cost real embedding tokens on every such call,
-    evicted the project singleton, and made ``relative_path`` meaningless.
-
-    Returns:
-        (project_root, scope, error). ``scope`` is None when the whole project
-        is to be searched. ``error`` is a caller-facing message when the path
-        cannot be honoured; the caller must not index in that case.
+    ``path`` is a filter, not the root of a new index: using it as the root
+    built a second index under the subdir, re-embedded files the project index
+    already held (costing real tokens), evicted the project singleton, and made
+    ``relative_path`` meaningless. ``scope`` is None for the whole project;
+    ``error`` is a caller-facing message when the path cannot be honoured.
     """
     project_root = get_cwd()
 
@@ -296,15 +291,11 @@ def _format_results_for_llm(
 class SementicSearchTool:
     """
     Semantic code search tool for Cortex IDE.
-    
-    Performs natural language search over the codebase using AI embeddings.
-    Designed for large codebases where regex/grep struggles to find
-    conceptually related code (e.g., "authentication logic", "error handling").
-    
-    Uses the Cortex SemanticSearch infrastructure:
-    - Primary: SiliconFlow Qwen embeddings (cloud, fast, semantic)
-    - Fallback: Local sentence-transformers (if installed)
-    - Last resort: Hash-based embeddings (always available)
+
+    Natural-language search over the codebase via embeddings, for the cases
+    where regex cannot find conceptually related code ("authentication logic").
+    Embeddings come from SiliconFlow Qwen, then local sentence-transformers,
+    then a hash fallback that always works.
     """
     
     name = SEMANTIC_SEARCH_TOOL_NAME
@@ -426,16 +417,8 @@ class SementicSearchTool:
     ) -> Dict[str, Any]:
         """
         Execute semantic search.
-        
-        Args:
-            inp: Tool input with query, path, options
-            context: Agent context
-            can_use_tool: Permission callback
-            assistant_message: Assistant message object
-            progress_callback: Progress reporting callback
-        
-        Returns:
-            Dict with 'data' containing search results
+
+        Returns a dict with 'data' containing the search results.
         """
         # Refuse bad input before building or querying the index. The hook
         # tolerates a missing or failing validator, so it can never block the

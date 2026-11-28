@@ -1,14 +1,10 @@
 """`skills:<name>` and `mcp:<server>[:<tool>]` tokens in a user message.
 
 Picking a skill from the "/" menu or an MCP server/tool from the "@" menu puts
-one of these tokens in the chat input. They stay in the message as written -
-the input and the sent bubble show them as chips, and history keeps them - and
-the agent bridge turns each one it recognises into an explicit instruction in
-front of the message the model receives, since a bare mention in a sentence is
-not reliably acted on.
-
-Pure functions only: the UI paints with TOKEN_RE, the bridge calls
-agent_directive().
+one of these in the input. They stay in the message as written (shown as chips,
+kept in history) and the bridge turns each recognised token into an explicit
+instruction in front of the message the model receives. Pure functions only: the
+UI paints with TOKEN_RE, the bridge calls agent_directive().
 """
 from __future__ import annotations
 
@@ -54,13 +50,11 @@ def agent_directive(text: str,
                     mcp_tool_names: Iterable[str]) -> str:
     """The instruction to put in front of the message for the model, or "".
 
-    resolve_skill(token) returns the skill's real name, or None when no such
-    skill is installed. mcp_tool_names are the connected `mcp__server__tool`
-    functions. Tokens naming nothing are left alone (no instruction): telling
-    the model to use a skill that does not exist only sends it hunting.
-
-    The MCP wording is the one agent_bridge._mcp_mentioned_tools reads to load
-    those tool definitions up front, so it must keep these exact phrases.
+    resolve_skill(token) returns the skill's real name or None when no such
+    skill is installed; mcp_tool_names are the connected mcp__server__tool
+    functions. Tokens naming nothing are left alone (telling the model to use a
+    missing skill only sends it hunting). The MCP wording is the exact phrase
+    agent_bridge._mcp_mentioned_tools reads to load those tools up front.
     """
     skills, mcp = find_tokens(text)
     if not skills and not mcp:
