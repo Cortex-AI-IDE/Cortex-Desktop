@@ -11,10 +11,14 @@ def _run_git(repo_dir: str, args: List[str], timeout: int = 10) -> str:
     """Run a git command and return stdout."""
     try:
         result = subprocess.run(
-            ["git"] + args,
+            # quotepath=false + UTF-8: git otherwise octal-quotes non-ASCII
+            # names and the locale codec garbled the rest.
+            ["git", "-c", "core.quotepath=false"] + args,
             cwd=repo_dir,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
@@ -90,18 +94,24 @@ def get_status(repo_dir: str) -> Dict[str, Any]:
         if len(parts) == 2:
             ahead, behind = int(parts[0]), int(parts[1])
 
-    # Porcelain status with --untracked-files=all: git's default "normal" collapses
-    # a brand-new untracked directory into one "?? dir/" line instead of listing
-    # files. Downstream name-from-path extraction then gets "" for the trailing
-    # slash, producing blank "U" rows in the sidebar.
-    porcelain = _run_git(repo_dir, ["status", "--porcelain=v1", "--untracked-files=all"])
-    files: List[Dict[str, str]] = []
-    for line in porcelain.splitlines():
+    # --untracked-files=all lists a new folder's files, not "?? dir/" (a blank
+    # row). -z keeps paths unquoted and splits a rename into two fields, so
+    # names with spaces or non-ASCII letters match their diff counts.
+    porcelain = _run_git(repo_dir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+    files: List[Dict[str, Any]] = []
+    records = porcelain.split("\0")
+    i = 0
+    while i < len(records):
+        line = records[i]
+        i += 1
         if not line or len(line) < 3:
             continue
         index_status = line[0]
         work_status = line[1]
-        filepath = line[3:]
+        if "R" in (index_status, work_status) or "C" in (index_status, work_status):
+            i += 1   # the next field is the old path
+        # A folder with its own .git is listed as "dir/"; its name was "".
+        filepath = line[3:].rstrip("/")
 
         # Determine display status
         if index_status == "?":
@@ -120,11 +130,17 @@ def get_status(repo_dir: str) -> Dict[str, Any]:
         files.append({"path": filepath, "status": display})
 
     # Merge diff stats (additions/deletions) into each file entry
-    diff_stats = get_diff_stats(repo_dir)
+    # Counted like the diff viewer (line endings ignored): the panel said
+    # +696 -674 where the viewer showed +22 after an LF->CRLF rewrite. A
+    # line-ending change is still flagged so it is not committed unseen.
+    diff_stats = get_diff_stats(repo_dir, ignore_eol=True)
+    raw_stats = get_diff_stats(repo_dir)
     for f in files:
         stats = diff_stats.get(f["path"], {"added": 0, "deleted": 0})
+        raw = raw_stats.get(f["path"], stats)
         f["additions"] = stats["added"]
         f["deletions"] = stats["deleted"]
+        f["eolChanged"] = (raw["added"], raw["deleted"]) != (stats["added"], stats["deleted"])
 
     branches = get_branches(repo_dir)
 
@@ -138,7 +154,8 @@ def get_status(repo_dir: str) -> Dict[str, Any]:
     }
 
 
-def get_diff_stats(repo_dir: str, staged: bool = False) -> Dict[str, Dict[str, int]]:
+def get_diff_stats(repo_dir: str, staged: bool = False,
+                   ignore_eol: bool = False) -> Dict[str, Dict[str, int]]:
     """Get lines added/deleted per file via git diff --numstat.
     Returns dict like: {"path/to/file.py": {"added": 5, "deleted": 3}}
 
@@ -147,26 +164,35 @@ def get_diff_stats(repo_dir: str, staged: bool = False) -> Dict[str, Dict[str, i
     To get BOTH (staged + unstaged), pass both=False and this function
     merges the two by calling itself recursively with staged=True.
     """
-    args = ["diff", "--numstat"]
+    args = ["diff", "--numstat", "-z"]
     if staged:
         args.append("--cached")
+    if ignore_eol:
+        args.append("--ignore-cr-at-eol")
     raw = _run_git(repo_dir, args)
-    stats = {}
-    for line in raw.splitlines():
-        parts = line.strip().split("\t")
-        if len(parts) >= 3:
-            try:
-                added = int(parts[0])
-                deleted = int(parts[1])
-                fpath = parts[2]
-                stats[fpath] = stats.get(fpath, {"added": 0, "deleted": 0})
-                stats[fpath]["added"] += added
-                stats[fpath]["deleted"] += deleted
-            except (ValueError, IndexError):  # silent-ok: numstat prints "-\t-" for binary files
-                continue
+    stats: Dict[str, Dict[str, int]] = {}
+    fields = raw.split("\0")
+    i = 0
+    while i < len(fields):
+        parts = fields[i].strip("\n").split("\t")
+        i += 1
+        if len(parts) < 3:
+            continue
+        fpath = parts[2]
+        if not fpath:            # rename: "added\tdeleted\t" then old, new
+            fpath = fields[i + 1] if i + 1 < len(fields) else ""
+            i += 2
+        try:
+            added = int(parts[0])
+            deleted = int(parts[1])
+        except ValueError:  # silent-ok: numstat prints "-\t-" for binary files
+            continue
+        stats[fpath] = stats.get(fpath, {"added": 0, "deleted": 0})
+        stats[fpath]["added"] += added
+        stats[fpath]["deleted"] += deleted
     # If this is the unstaged call, also fetch staged and merge
     if not staged:
-        staged_stats = get_diff_stats(repo_dir, staged=True)
+        staged_stats = get_diff_stats(repo_dir, staged=True, ignore_eol=ignore_eol)
         for fpath, cnt in staged_stats.items():
             if fpath in stats:
                 stats[fpath]["added"] += cnt["added"]

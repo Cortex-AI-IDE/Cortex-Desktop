@@ -4410,6 +4410,15 @@ function updateGitFiles(jsonData) {
           delSpan.textContent = '-' + f.deletions;
           countsSpan.appendChild(delSpan);
         }
+        // Counts ignore line endings, like the diff view; say when they changed.
+        if (f.eolChanged) {
+          var eolSpan = document.createElement('span');
+          eolSpan.className = 'git-eol';
+          eolSpan.textContent = 'EOL';
+          eolSpan.title = 'Line endings (LF/CRLF) changed in this file as well';
+          eolSpan.style.cssText = 'margin-left:4px;font-size:9px;opacity:.75;border:1px solid currentColor;border-radius:3px;padding:0 3px;';
+          countsSpan.appendChild(eolSpan);
+        }
         div.appendChild(countsSpan);
       }
 
