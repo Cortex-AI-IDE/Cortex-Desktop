@@ -3019,10 +3019,8 @@ CORE_TOOLS = frozenset({
 })
 # Sent only when a phone is paired, so an unused tool costs nobody tokens.
 TELEGRAM_TOOLS = frozenset({"SendPhoto"})
-# Registered, but deliberately not offered. A tool in neither list can never be
-# called, which is how SendPhoto, ShowImage and LivePreview sat unreachable:
-# tests/test_tool_reach.py fails on a new tool until it is placed in one.
-UNOFFERED_TOOLS = frozenset({"BashOutput", "KillShell", "SecurityScan"})
+# BashOutput, KillShell and SecurityScan are registered but never offered: a
+# tool in neither list above cannot be called.
 
 
 def _core_tool_names(telegram_paired: bool = False) -> Set[str]:

@@ -690,11 +690,6 @@ class MonoBlock(QPlainTextEdit):
         self._last_fit = None
         self.refit()
 
-    def set_text(self, text: str):
-        self.setPlainText(text or "")
-        self._last_fit = None
-        self.refit()
-
     def _text_width(self) -> int:
         """Width for wrapping, taken from the widget, never from the viewport.
 

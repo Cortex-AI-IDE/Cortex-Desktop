@@ -1347,11 +1347,6 @@ class SidebarBridge(QObject):
     # AI TOOLS OPERATIONS
 
     @pyqtSlot(str)
-    def requestAIAction(self, action: str):
-        """Request an AI action (explain, refactor, debug, test, etc.)."""
-        self.ai_action_requested.emit(action)
-
-    @pyqtSlot(str)
     def setAIProvider(self, provider: str):
         """Set the AI provider."""
         # This will be handled by the main window
@@ -1558,11 +1553,6 @@ class SidebarBridge(QObject):
         if not json_data:
             return
         self._call_js(f"updateChanges({json_data});")
-
-    @pyqtSlot()
-    def refreshChanges(self):
-        """JS requests a fresh CHANGES list (panel opened / refresh button)."""
-        self.changes_refresh_requested.emit()
 
     @pyqtSlot(str)
     def onViewDiff(self, file_path: str):
@@ -1782,11 +1772,6 @@ class SidebarBridge(QObject):
     def onFileSearchOpened(self, file_path: str, line_num: int):
         """Open file at specific line (JS calls from search results)."""
         self.file_search_opened.emit(file_path, line_num)
-
-    @pyqtSlot(str, str, str, float)
-    def onAiAction(self, action: str, provider: str, model: str, temperature: float):
-        """Request AI action with config (JS calls from AI Tools panel)."""
-        self.requestAIAction(action)
 
     @pyqtSlot(str, str)
     def onGitFileClicked(self, repo_root: str, rel_path: str):

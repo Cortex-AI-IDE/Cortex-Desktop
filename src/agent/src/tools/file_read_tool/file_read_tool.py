@@ -56,24 +56,9 @@ PDF_AT_MENTION_INLINE_THRESHOLD = 10
 PDF_EXTRACT_SIZE_THRESHOLD = 10 * 1024 * 1024  # 10MB
 PDF_MAX_PAGES_PER_READ = 20
 
-# Cyber risk mitigation reminder
-CYBER_RISK_MITIGATION_REMINDER = '''
-
-<system-reminder>
-Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. You can analyze existing code, write reports, or improve the code. You can analyze existing code, write reports, or describe the code behavior.
-</system-reminder>
-'''
-
-# Models where cyber risk mitigation should be skipped
-MITIGATION_EXEMPT_MODELS = frozenset({'cortex-opus-4-6'})
-
 # Tool names
 FILE_READ_TOOL_NAME = 'Read'
 BASH_TOOL_NAME = 'Bash'
-FILE_UNCHANGED_STUB = (
-    'File unchanged since last read. The content from the earlier Read tool_result '
-    'in this conversation is still current - refer to that instead of re-reading.'
-)
 
 
 # HELPER FUNCTIONS
@@ -178,24 +163,6 @@ def parse_pdf_page_range(pages: str) -> Optional[Tuple[int, Union[int, float]]]:
     return None
 
 
-def format_file_lines(content: str, start_line: int = 1) -> str:
-    """Format file content with line numbers (cat -n style)."""
-    if not content:
-        return ''
-    
-    lines = content.split('\n')
-    max_line_num = start_line + len(lines) - 1
-    line_num_width = len(str(max_line_num))
-    
-    result_lines = []
-    for i, line in enumerate(lines):
-        line_num = start_line + i
-        # Right-align line number, pad to 6 chars total, add arrow
-        result_lines.append(f'{line_num:>{line_num_width}}→{line}')
-    
-    return '\n'.join(result_lines)
-
-
 def format_file_size(size_bytes: int) -> str:
     """Format file size in human-readable format."""
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -203,15 +170,6 @@ def format_file_size(size_bytes: int) -> str:
             return f'{size_bytes:.1f}{unit}'
         size_bytes /= 1024
     return f'{size_bytes:.1f}PB'
-
-
-def should_include_file_read_mitigation(model_name: Optional[str] = None) -> bool:
-    """Check if cyber risk mitigation should be included."""
-    if model_name is None:
-        return True
-    # Get short name (after last slash if present)
-    short_name = model_name.split('/')[-1] if '/' in model_name else model_name
-    return short_name not in MITIGATION_EXEMPT_MODELS
 
 
 def get_cwd() -> str:
@@ -413,52 +371,6 @@ def _notify_file_read_listeners(file_path: str, content: str) -> None:
             pass  # silent-ok: one bad listener must not stop the others
 
 
-# MEMORY FILE MTIMES (WeakMap equivalent)
-
-# Side-channel from call() to result mapping: mtime of auto-memory files
-# keyed by data object identity. A plain dict, not WeakKeyDictionary, because
-# string keys gain nothing from weak refs and WeakKeyDictionary's id()-based
-# equality breaks equal-valued strings.
-_memory_file_mtimes: Dict[str, float] = {}
-
-
-def _set_memory_file_mtime(data: object, mtime_ms: float) -> None:
-    """Set the mtime for a memory file result."""
-    _memory_file_mtimes[data] = mtime_ms
-
-
-def _get_memory_file_mtime(data: object) -> Optional[float]:
-    """Get the mtime for a memory file result."""
-    return _memory_file_mtimes.get(data)
-
-
-def _is_auto_mem_file(file_path: str) -> bool:
-    """Check if file is an auto-memory file."""
-    # Simplified check - would integrate with memoryFileDetection in full impl
-    config_dir = get_cortex_config_home_dir()
-    return file_path.startswith(config_dir) and file_path.endswith('.md')
-
-
-def _memory_freshness_note(mtime_ms: float) -> str:
-    """Generate a freshness note for memory files."""
-    import time
-    now_ms = time.time() * 1000
-    age_ms = now_ms - mtime_ms
-    age_seconds = age_ms / 1000
-    
-    if age_seconds < 60:
-        return f'<system-reminder>This memory was last modified {int(age_seconds)} seconds ago.</system-reminder>\n'
-    elif age_seconds < 3600:
-        minutes = int(age_seconds / 60)
-        return f'<system-reminder>This memory was last modified {minutes} minute(s) ago.</system-reminder>\n'
-    elif age_seconds < 86400:
-        hours = int(age_seconds / 3600)
-        return f'<system-reminder>This memory was last modified {hours} hour(s) ago.</system-reminder>\n'
-    else:
-        days = int(age_seconds / 86400)
-        return f'<system-reminder>This memory was last modified {days} day(s) ago.</system-reminder>\n'
-
-
 # IMAGE PROCESSING
 
 def _detect_image_format_from_buffer(buffer: bytes) -> str:
@@ -564,16 +476,6 @@ async def read_notebook(file_path: str) -> List[Dict[str, Any]]:
     with open(file_path, 'r', encoding='utf-8') as f:
         notebook = json.load(f)
     return notebook.get('cells', [])
-
-
-def map_notebook_cells_to_tool_result(cells: List[Any], tool_use_id: str) -> Dict[str, Any]:
-    """Map notebook cells to tool result format."""
-    content = json.dumps(cells, indent=2)
-    return {
-        'tool_use_id': tool_use_id,
-        'type': 'tool_result',
-        'content': content,
-    }
 
 
 # PDF READING
@@ -1040,12 +942,6 @@ def activate_conditional_skills_for_paths(paths: List[str], cwd: str) -> None:
 
 
 # MODEL UTILITIES
-
-def get_main_loop_model() -> str:
-    """Get the main loop model name."""
-    # Would get from config in full implementation
-    return os.environ.get('CORTEX_MODEL', 'cortex-sonnet-4-5')
-
 
 def get_canonical_name(model: str) -> str:
     """Get the canonical short name for a model."""
@@ -1838,10 +1734,6 @@ class FileReadTool:
             ),
         )
         
-        # Set memory file mtime for freshness tracking
-        if _is_auto_mem_file(full_file_path):
-            _set_memory_file_mtime(full_file_path, mtime_ms)
-        
         log_file_operation(
             operation='read',
             tool='FileReadTool',
@@ -1866,90 +1758,6 @@ class FileReadTool:
         })
         
         return {'data': data}
-    
-    def map_tool_result_to_tool_result_block_param(
-        self,
-        data: FileReadOutput,
-        tool_use_id: str,
-    ) -> Dict[str, Any]:
-        """Convert tool result to the provider tool-result block format."""
-        
-        if data.type == 'image':
-            return {
-                'tool_use_id': tool_use_id,
-                'type': 'tool_result',
-                'content': [{
-                    'type': 'image',
-                    'source': {
-                        'type': 'base64',
-                        'data': data.file.base64,
-                        'media_type': data.file.media_type,
-                    },
-                }],
-            }
-        
-        if data.type == 'notebook':
-            return map_notebook_cells_to_tool_result(data.file.cells, tool_use_id)
-        
-        if data.type == 'pdf':
-            return {
-                'tool_use_id': tool_use_id,
-                'type': 'tool_result',
-                'content': f'PDF file read: {data.file.file_path} ({format_file_size(data.file.original_size)})',
-            }
-        
-        if data.type == 'parts':
-            return {
-                'tool_use_id': tool_use_id,
-                'type': 'tool_result',
-                'content': f'PDF pages extracted: {data.file.count} page(s) from {data.file.file_path} ({format_file_size(data.file.original_size)})',
-            }
-        
-        if data.type == 'file_unchanged':
-            return {
-                'tool_use_id': tool_use_id,
-                'type': 'tool_result',
-                'content': FILE_UNCHANGED_STUB,
-            }
-        
-        if data.type == 'text':
-            content = ''
-            
-            if data.file.content:
-                # Memory file freshness prefix
-                mtime_ms = _get_memory_file_mtime(data.file.file_path)
-                if mtime_ms:
-                    content += _memory_freshness_note(mtime_ms)
-                
-                content += format_file_lines(data.file.content, data.file.start_line)
-                
-                # Cyber risk mitigation, only for script/executable file types
-                _SCRIPT_EXTENSIONS = {
-                    'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd', 'vbs',
-                    'js', 'ts', 'jsx', 'tsx', 'py', 'rb', 'pl', 'php',
-                }
-                file_ext = os.path.splitext(data.file.file_path)[1].lstrip('.').lower()
-                if should_include_file_read_mitigation(get_main_loop_model()) and file_ext in _SCRIPT_EXTENSIONS:
-                    content += CYBER_RISK_MITIGATION_REMINDER
-            else:
-                # Determine the appropriate warning message
-                if data.file.total_lines == 0:
-                    content = '<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>'
-                else:
-                    content = f'<system-reminder>Warning: the file exists but is shorter than the provided offset ({data.file.start_line}). The file has {data.file.total_lines} lines.</system-reminder>'
-            
-            return {
-                'tool_use_id': tool_use_id,
-                'type': 'tool_result',
-                'content': content,
-            }
-        
-        # Fallback
-        return {
-            'tool_use_id': tool_use_id,
-            'type': 'tool_result',
-            'content': str(data.file),
-        }
 
 
 # BUILD TOOL FUNCTION
@@ -1990,10 +1798,8 @@ __all__ = [
     
     # Constants
     'FILE_READ_TOOL_NAME',
-    'FILE_UNCHANGED_STUB',
     'BLOCKED_DEVICE_PATHS',
     'IMAGE_EXTENSIONS',
-    'CYBER_RISK_MITIGATION_REMINDER',
     'PDF_AT_MENTION_INLINE_THRESHOLD',
     'PDF_EXTRACT_SIZE_THRESHOLD',
     'PDF_MAX_PAGES_PER_READ',
@@ -2005,9 +1811,7 @@ __all__ = [
     'has_binary_extension',
     'is_pdf_extension',
     'parse_pdf_page_range',
-    'format_file_lines',
     'format_file_size',
-    'should_include_file_read_mitigation',
     'detect_session_file_type',
     'create_image_response',
     'read_image_with_token_budget',

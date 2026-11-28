@@ -144,10 +144,6 @@ def get_session_id() -> str:
     return getSessionId()
 
 
-def get_parent_session_id() -> Optional[str]:
-    return getParentSessionId()
-
-
 def getOriginalCwd() -> str:
     return get_original_cwd()
 

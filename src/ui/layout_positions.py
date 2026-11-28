@@ -14,7 +14,7 @@ no setting of its own.
 Pure string logic with no Qt import, so it is testable headless.
 """
 
-from typing import Sequence, Tuple
+from typing import Tuple
 
 LEFT = "left"
 RIGHT = "right"
@@ -68,8 +68,3 @@ def panel_order(sidebar: object = LEFT, chat: object = LEFT) -> Tuple[str, ...]:
     inner = ["chat", "editor"] if chat_side == LEFT else ["editor", "chat"]
     order = ["sidebar"] + inner if side == LEFT else inner + ["sidebar"]
     return tuple(order)
-
-
-def is_permutation(order: Sequence[str]) -> bool:
-    """True when ``order`` contains each panel exactly once."""
-    return sorted(order) == sorted(PANELS)

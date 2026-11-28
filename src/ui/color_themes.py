@@ -239,16 +239,6 @@ THEMES.update({
     },
 })
 
-# Order shown in Settings: Cortex, the colour themes, then the accessibility
-# themes (an "Accessibility" group in the dropdown). The Settings page and the
-# tests read the order from here.
-COLOR_THEME_CHOICES = (("cortex", "Cortex (Dark / Light / System)"),) + tuple(
-    (tid, THEMES[tid]["label"]) for tid in (
-        "dark-plus", "light-plus", "one-dark-pro", "dracula", "monokai", "github-dark",
-        "github-light", "night-owl", "tokyo-night", "catppuccin-mocha", "nord",
-        "solarized-light",
-        "high-contrast-dark", "high-contrast-light", "distinct-colors-dark", "distinct-colors-light"))
-ACCESSIBILITY_THEMES = tuple(t for t, v in THEMES.items() if v.get("a11y"))
 
 _listeners: list = []
 _active_at_start = DEFAULT_COLOR_THEME     # the theme the native palettes hold now

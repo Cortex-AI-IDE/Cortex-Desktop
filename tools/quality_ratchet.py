@@ -76,7 +76,12 @@ def comment_counts(files: list[str]) -> dict[str, int]:
     """Count consecutive full-line comment runs of at least five lines."""
     counts: collections.Counter[str] = collections.Counter()
     for name in files:
-        text = (ROOT / name).read_text(encoding="utf-8-sig", errors="replace")
+        path = ROOT / name
+        if not path.exists():
+            # git still lists a file deleted in the working tree until the
+            # removal is staged, and reading it crashed the check.
+            continue
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
         run = 0
         for line in text.splitlines():
             if line.lstrip().startswith("#"):
