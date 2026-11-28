@@ -103,7 +103,8 @@ def _is_continuation(message: str) -> bool:
     Resume reset the edit count and blocked finished todos.
     """
     text = (message or "").lstrip()
-    return text.startswith("Continue the task") or text.startswith("[Question answer]")
+    return text.startswith(("Continue the task", "[Question answer]",
+                            "I declined that step."))   # reject with a reason (chat panel)
 
 
 _DESTRUCTIVE_WORDS = (
@@ -3675,7 +3676,13 @@ class AgentWorker(QThread):
             # Always emit response_ready, even with empty text, so on_complete -> onComplete ->
             # _onGenerationComplete fires in JS, drains the message queue and un-sticks any
             # Continue enqueued while _isGenerating was still True.
-            if not self.bridge.stop_requested:
+            if self.bridge.stop_requested and getattr(self.bridge, '_stop_reason', '') == "rejected":
+                # A rejection stops the run like Stop, but no Stop button reset the
+                # UI: it sat on "Exploring..." with the Stop button lit (2026-11-28).
+                self.bridge.allow_notification = False
+                log.info("[WORKER] Run ended by a rejected permission; returning the UI to idle")
+                self.response_ready.emit(response or "")
+            elif not self.bridge.stop_requested:
                 # Attach task completion metadata to response for notification control
                 self.response_ready.emit(response or "")
                 
@@ -14000,6 +14007,7 @@ Required behavior:
         """Entry point: called by ai_chat.py when the user sends a message."""
         _was_stopped = self._stop_requested  # Save before reset for history cleanup
         self._stop_requested = False  # Clear any previous stop before handling new request
+        self._stop_reason = ""
         # Fresh AbortController so tools from the previous (aborted) request can't
         # accidentally cancel this new one.
         self._tool_ctx.abort_controller = create_abort_controller()
@@ -14170,6 +14178,7 @@ Required behavior:
     def stop_generation(self):
         log.info("[BRIDGE] stop_generation")
         self._stop_requested = True          # Interrupt the streaming loop immediately
+        self._stop_reason = "stop"
         # Stopped on purpose: no Resume offer after a restart.
         self.discard_interrupted_run()
 
@@ -14259,6 +14268,7 @@ Required behavior:
         elif decision == "rejected":
             self._project_access_granted = False
             self._stop_requested = True
+            self._stop_reason = "rejected"
             log.info("[BRIDGE] User REJECTED project access, stopping agentic turn")
         
         if self._project_access_event is not None:
@@ -14307,6 +14317,7 @@ Required behavior:
         # ── ENFORCE USER CHOICE: reject = abort the current turn ──
         if decision == 'reject':
             self._stop_requested = True
+            self._stop_reason = "rejected"
             log.info("[BRIDGE] User REJECTED permission, stopping agentic turn")
         if self._permission_event is not None:
             # _permission_event may have been created in the async worker thread.

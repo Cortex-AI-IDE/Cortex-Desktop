@@ -12561,6 +12561,8 @@ class ChatPanel(QWidget):
         except (AttributeError, RuntimeError):
             _swallow("stop the todo spinners")
         QTimer.singleShot(1500, self._end_follow_after_turn)
+        if getattr(self, '_pending_reject_reason', None):
+            QTimer.singleShot(0, self._flush_reject_reason)
         try:
             if self._cur_msg is not None:
                 for _g in self._cur_msg.findChildren(ActivityGroup):
@@ -13722,6 +13724,7 @@ class ChatPanel(QWidget):
 
         card.allow_once.connect(lambda rid: _handle(rid, "once"))
         card.allow_always.connect(lambda rid: _handle(rid, "always"))
+        card.reason_given.connect(lambda rid, text: self._queue_reject_reason(text))
         card.rejected.connect(lambda rid: _handle(rid, "rejected"))
 
         if self._cur_msg:
@@ -13770,6 +13773,7 @@ class ChatPanel(QWidget):
 
         card.allow_once.connect(lambda rid: _handle(rid, "once"))
         card.allow_always.connect(lambda rid: _handle(rid, "always"))
+        card.reason_given.connect(lambda rid, text: self._queue_reject_reason(text))
         card.rejected.connect(lambda rid: _handle(rid, "rejected"))
 
         if self._cur_msg:
@@ -13786,6 +13790,22 @@ class ChatPanel(QWidget):
             notify_permission_required('AI wants to access project files. Allow Once, Always Allow, or Reject.')
         except Exception:
             _swallow("raise the Windows notification for a project access request")
+
+    _REJECT_PREFIX = "I declined that step. Instead: "
+
+    def _queue_reject_reason(self, text: str) -> None:
+        """Hold the user's instruction until the run the rejection stops has
+        ended (on_turn_done); sending it earlier would race that run's end."""
+        self._pending_reject_reason = text
+        QTimer.singleShot(5000, self._flush_reject_reason)   # if no turn end arrives
+
+    def _flush_reject_reason(self) -> None:
+        text = getattr(self, '_pending_reject_reason', None)
+        if not text:
+            return
+        self._pending_reject_reason = None
+        log.info("[PERMISSION] Sending the instruction given with a rejection")
+        self.input_area.send_requested.emit(self._REJECT_PREFIX + text)
 
     def _on_project_access_response(self, decision: str):
         """Handle project access permission response.
@@ -13817,11 +13837,17 @@ class ChatPanel(QWidget):
         
         # ── ENFORCE USER CHOICE: on reject, inject visible STOP ──
         if decision == "rejected":
-            self._inject_system_message(
-                "STOP: The user REJECTED project access. "
-                "Do NOT continue writing code or injecting files. "
-                "STOP and wait for the user's next message."
-            )
+            # Shown to the user only; the AI gets the rejection as the tool result.
+            if getattr(self, '_pending_reject_reason', None):
+                self._inject_system_message(
+                    "You declined file access. Cortex stopped and changed nothing, "
+                    "and will continue with your instruction.")
+            else:
+                self._inject_system_message(
+                    "You declined file access, so Cortex stopped and changed nothing. "
+                    "Send a message to continue: it will ask again before editing, "
+                    "or choose Allow always to stop these prompts."
+                )
 
     def _on_file_edit_permission_response(self, decision: str):
         """Handle file edit permission response from PermissionCard (file edit mode).
@@ -13858,11 +13884,15 @@ class ChatPanel(QWidget):
         
 # ENFORCE USER CHOICE: on reject, inject visible STOP
         if decision == "rejected":
-            self._inject_system_message(
-                "STOP: The user REJECTED the file edit. "
-                "Do NOT continue writing code or injecting files. "
-                "STOP and wait for the user's next message."
-            )
+            if getattr(self, '_pending_reject_reason', None):
+                self._inject_system_message(
+                    "You declined this edit. The file was not changed, and Cortex "
+                    "will continue with your instruction.")
+            else:
+                self._inject_system_message(
+                    "You declined this edit, so Cortex stopped and the file was not "
+                    "changed. Send a message to tell it what to do instead."
+                )
 
     def on_permission_request(self, request_id, command, warning, files_json):
         import json

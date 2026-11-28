@@ -35,11 +35,14 @@ class PermissionCard(QFrame):
     Allow always → confirm step: remembered for this project, also after a
     restart, until turned off in the status bar (src/core/project_permissions.py).
 
-    Emits: allow_once(str), allow_always(str), rejected(str) with request_id.
+    Emits: allow_once(str), allow_always(str), rejected(str) with request_id,
+    and reason_given(request_id, text) just before rejected when the user
+    rejects with an instruction ("No, tell Cortex what to do instead").
     """
     allow_once   = pyqtSignal(str)   # request_id
     allow_always = pyqtSignal(str)   # request_id
     rejected     = pyqtSignal(str)   # request_id
+    reason_given = pyqtSignal(str, str)   # request_id, what to do instead
 
     def __init__(self, request_id: str, command: str, warning: str = "",
                  patterns: list[str] | None = None, parent=None):
@@ -65,15 +68,19 @@ class PermissionCard(QFrame):
         self._build_main(command, warning)
 
     def _clear(self):
+        # hide() first: deleteLater only runs on the next event-loop pass, so
+        # the old view stayed drawn under the new one until then.
         while self._v.count():
             it = self._v.takeAt(0)
             if it.widget():
+                it.widget().hide()
                 it.widget().deleteLater()
             elif it.layout():
                 lay = it.layout()
                 while lay.count():
                     x = lay.takeAt(0)
                     if x.widget():
+                        x.widget().hide()
                         x.widget().deleteLater()
 
     def _patterns_block(self, title: str):
@@ -127,12 +134,15 @@ class PermissionCard(QFrame):
         once = self._btn("Allow once", C['accent_fill'], filled=True)
         always = self._btn("Allow always", T['text_dim'])
         rej = self._btn("Reject", T['text_dim'])
+        instead = self._btn("No, tell Cortex what to do instead", T['text_dim'])
         once.clicked.connect(lambda: (self.allow_once.emit(self._rid), self._resolved_ok("Allowed once", T['green'])))
         rej.clicked.connect(lambda: (self.rejected.emit(self._rid), self._resolved_ok("Rejected", T['red'])))
         always.clicked.connect(self._build_confirm)
+        instead.clicked.connect(self._build_reason)
         row.addWidget(once)
         row.addWidget(always)
         row.addWidget(rej)
+        row.addWidget(instead)
         row.addStretch()
         self._v.addLayout(row)
 
@@ -165,6 +175,42 @@ class PermissionCard(QFrame):
         row.addWidget(cancel)
         row.addStretch()
         self._v.addLayout(row)
+
+    def _build_reason(self):
+        """Reject and say what to do instead, like Claude Code's "No, and tell
+        Claude what to do differently": the text becomes the next message."""
+        self._clear()
+        ti = QLabel("Tell Cortex what to do instead")
+        ti.setStyleSheet(f"color:{T['text']};font-weight:600;font-size:13px;")
+        self._v.addWidget(ti)
+        self._reason = edit = QLineEdit()
+        edit.setPlaceholderText("e.g. Don't create a test file, just read the code and explain")
+        edit.setStyleSheet(
+            f"QLineEdit {{ background:{T['bg_input']}; color:{T['text']}; border:1px solid {T['border']};"
+            f" border-radius:4px; padding:5px 8px; font-size:12px; }}")
+        self._v.addWidget(edit)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        send = self._btn("Reject and send", C['accent_fill'], filled=True)
+        back = self._btn("Back", T['text_dim'])
+        send.clicked.connect(self._send_reason)
+        edit.returnPressed.connect(self._send_reason)
+        back.clicked.connect(lambda: self._build_main(self._command, self._warning))
+        row.addWidget(send)
+        row.addWidget(back)
+        row.addStretch()
+        self._v.addLayout(row)
+        edit.setFocus()
+
+    def _send_reason(self):
+        if self._resolved:
+            return
+        text = self._reason.text().strip() if getattr(self, '_reason', None) else ""
+        if text:
+            # Before rejected: the panel deletes the card when it sees rejected.
+            self.reason_given.emit(self._rid, text)
+        self.rejected.emit(self._rid)
+        self._resolved_ok("Rejected, your instruction was sent" if text else "Rejected", T['red'])
 
     def _resolved_ok(self, label: str, color: str):
         self._resolved = True
