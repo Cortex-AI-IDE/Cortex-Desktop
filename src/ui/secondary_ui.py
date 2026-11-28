@@ -474,6 +474,14 @@ class TodoSection(QFrame):
     def update_todos(self, todos: list[dict], main_task: str = ""):
         """Update the todo list. Each todo: {text, done, status}.
         Sorts by priority: in_progress → pending → completed."""
+        # Same rows, same title, same running state: nothing to redraw. The AI
+        # re-sends identical lists, and each rebuild resized the footer.
+        sig = (tuple((t.get("text", ""), t.get("status", ""), bool(t.get("done")))
+                     for t in todos), main_task,
+               any(t.get("status") == "in_progress" for t in todos) and getattr(self, '_running', True))
+        if sig == getattr(self, '_last_sig', None):
+            return
+        self._last_sig = sig
         self._last_todos, self._last_main_task = list(todos), main_task
         # Stop old spinners
         self._stop_all_spinners()

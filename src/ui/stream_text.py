@@ -415,3 +415,77 @@ def _split_open_block_for_seal(buf: str, tail_target: int) -> tuple:
         if offs[i] <= want:
             return offs[i], "", ""
     return -1, "", ""
+
+
+# Block reveal: how much of the arrived-but-unshown text to put on screen.
+_SENTENCE_END = re.compile(r"[.?!।။。！？](?=\s)\s*")
+_FENCE_LINE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+
+
+def _is_table_line(line: str) -> bool:
+    return line.lstrip().startswith("|")
+
+
+def _last_cluster_cut(text: str) -> int:
+    """Offset before the last grapheme cluster (which may still grow)."""
+    try:
+        import regex
+        ends = [m.end() for m in regex.finditer(r"\X", text)]
+    except ImportError:
+        return max(0, len(text) - 1)
+    return ends[-2] if len(ends) >= 2 else 0
+
+
+def next_reveal_cut(pending: str, waited_ms: float, *, fence_open: bool = False,
+                    prev_line: str = "", hold_ms: float = 700.0) -> int:
+    """Code points of ``pending`` to reveal now, in whole units.
+
+    Complete lines (heading, paragraph line, list item, table row, code line)
+    go at once. A table header waits for its separator and a fence opener for
+    its first code line. Of an unfinished line, finished sentences go at once;
+    after ``hold_ms`` the rest goes in whole words, table rows in whole cells,
+    unspaced scripts (Thai, CJK) in whole grapheme clusters. ``waited_ms`` is
+    how long the head of ``pending`` has been waiting; 0 means keep waiting.
+    """
+    if not pending:
+        return 0
+    timed_out = waited_ms >= hold_ms
+    nl = pending.rfind("\n")
+    if nl >= 0:
+        cut = nl + 1
+        if not timed_out:
+            lines = pending[:cut].split("\n")[:-1]
+            in_fence, before = fence_open, prev_line
+            starts, off = [], 0
+            for ln in lines:
+                starts.append((off, ln, in_fence, before))
+                if _FENCE_LINE.match(ln):
+                    in_fence = not in_fence
+                before = ln
+                off += len(ln) + 1
+            start, last, was_in_fence, line_before = starts[-1]
+            opener = bool(_FENCE_LINE.match(last)) and not was_in_fence
+            header = (not was_in_fence and _is_table_line(last)
+                      and not _is_table_line(line_before))
+            if opener or header:
+                return start   # wait for the line that completes it
+        return cut
+    head = pending[nl + 1:] if nl >= 0 else pending
+    base = nl + 1 if nl >= 0 else 0
+    if not head:
+        return 0
+    if not _is_table_line(head) and not (fence_open and not timed_out):
+        ends = [m.end() for m in _SENTENCE_END.finditer(head)]
+        if ends:
+            return base + ends[-1]
+    if not timed_out:
+        return 0
+    if _is_table_line(head):
+        bar = head.rfind("|")
+        return base + bar + 1 if bar > 0 else 0
+    space = head.rfind(" ")
+    if space > 0:
+        return base + space + 1
+    if waited_ms >= 2 * hold_ms:
+        return len(pending)
+    return base + _last_cluster_cut(head)

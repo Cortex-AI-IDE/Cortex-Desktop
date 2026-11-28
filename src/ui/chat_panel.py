@@ -2923,8 +2923,11 @@ class DiffCard(CollapsibleCard):
         else:
             normalized = self._hunk_lines
         
-        # Build diff body with context (up to 4 lines between hunks)
-        self._render_diff_body(normalized, self.body_layout)
+        # Built on first expand: the card starts collapsed, and up to 300 rows
+        # (~1,200 widgets) built here froze the GUI 1.6-1.7 s per agent edit.
+        self._pending_rows = normalized
+        if not self._collapsed:
+            self._ensure_diff_body()
 
         # Register with state manager
         if self._edit_state:
@@ -3217,6 +3220,17 @@ class DiffCard(CollapsibleCard):
 
     def _apply_rejected_from_manager(self):
         pass
+
+    def _ensure_diff_body(self) -> None:
+        rows = getattr(self, '_pending_rows', None)
+        if rows is None:
+            return
+        self._pending_rows = None
+        self._render_diff_body(rows, self.body_layout)
+
+    def _on_expanded(self):
+        self._ensure_diff_body()
+        super()._on_expanded()
 
 
 def compact_activity() -> bool:
@@ -10122,6 +10136,7 @@ class ChatPanel(QWidget):
         self._deferred_scroll = False  # True if scroll-to-bottom needed after render
         bar = self.scroll.verticalScrollBar()
         bar.valueChanged.connect(self._on_scroll_value_changed)
+        bar.rangeChanged.connect(self._on_scroll_range_changed)
 
         # Empty state (ring + tagline), hidden once first message is added
         self._empty_state = EmptyState()
@@ -10797,7 +10812,6 @@ class ChatPanel(QWidget):
             _h_after = 0 if finalized else old_block.minimumHeight()
         except RuntimeError:
             _h_after = 0
-        self._note_seal(_h_before, _h_after, finalized)
         self._prose_blocks.append((old_block, prefix))
         if finalized:
             # Never merge across it at turn end, and never render it again.
@@ -10815,8 +10829,29 @@ class ChatPanel(QWidget):
             # The revealed part of the tail belongs on the new block now;
             # waiting for the next frame would blank it for one paint.
             self._flush_prose()
+        self._settle_seal_height(_h_before, _h_after, finalized)
         log.debug(f"[ChatPanel] Sealed prose block at {len(prefix)} chars, "
                   f"tail={len(tail)}, finalized={finalized}")
+
+    def _settle_seal_height(self, before: int, after: int, finalized: bool) -> None:
+        """Keep the column from shrinking at a seal.
+
+        The old block gives its tail to the new one; if the two together
+        come out shorter than the old block was, the column would shrink and
+        pinned text would drop. The new live block, which only grows during
+        a turn, starts that much taller instead, and fills it as text comes.
+        """
+        net = None
+        if not finalized:
+            try:
+                live = self._open_block
+                spacing = self._cur_msg._card_v.spacing() if self._cur_msg is not None else 0
+                net = after + spacing + live.minimumHeight() - before
+                if net < 0 and getattr(self, '_turn_active', False):
+                    live.setMinimumHeight(live.minimumHeight() - net)
+            except (AttributeError, RuntimeError):
+                net = None
+        self._note_seal(before, after, finalized, net)
 
     def _seal_render_old(self, old_block, prefix: str):
         """Final streaming render of a block being sealed, fitted to its text."""
@@ -10888,7 +10923,7 @@ class ChatPanel(QWidget):
     # Grow the live block two lines per height change, not one: each change re-lays out
     # card and scroll container, and that cost spaces renders. Safe because headroom
     # isn't given back mid-turn.
-    _STREAM_HEIGHT_STEP_LINES = 2
+    _STREAM_HEIGHT_STEP_LINES = 1
     # Stop at each line break: raw text and rendered markdown disagree (blank line
     # -> margin, heading grows), and a late render restyled 360 chars at once.
     # 40ms cap: 120ms held the next line four frames and read as a stall.
@@ -10908,6 +10943,12 @@ class ChatPanel(QWidget):
     # repainted the tail 30x/s (534 repaints in one turn). 6 held a finished
     # word off screen; 2 keeps coalescing without the visible stop.
     _RENDER_MIN_CHARS = 2
+    # "block": a heading, line, list item or table row appears whole; an
+    # unfinished line shows finished sentences, then whole words after
+    # _BLOCK_HOLD_MS (src/ui/stream_text.next_reveal_cut). "char": the older
+    # paced character reveal, which made slow models look like slow typing.
+    _REVEAL_UNIT = "block"
+    _BLOCK_HOLD_MS = 700.0
     # Even below the char threshold, never let styling lag longer than this: slow
     # trickle still resolves ~15x/s and a burst's last frame is rendered. 100ms of a
     # still frontier reads as a stall.
@@ -11512,6 +11553,31 @@ class ChatPanel(QWidget):
             n += 1
         return n
 
+    def _block_cut(self, pending: str) -> int:
+        """Whole units of ``pending`` to show now (see next_reveal_cut)."""
+        from src.ui.stream_text import next_reveal_cut
+        now = time.perf_counter()
+        since = getattr(self, '_unit_wait_since', 0.0) or now
+        self._unit_wait_since = since
+        visible = self._visible_prose()
+        fence_open = sum(1 for ln in visible.split("\n")
+                         if ln.lstrip().startswith(("```", "~~~"))) % 2 == 1
+        prev_line = visible.rstrip("\n").rsplit("\n", 1)[-1] if visible.endswith("\n") else ""
+        n = next_reveal_cut(pending, (now - since) * 1000.0, fence_open=fence_open,
+                            prev_line=prev_line, hold_ms=self._BLOCK_HOLD_MS)
+        if n > 0:
+            held_ms = (now - since) * 1000.0
+            sm = self._smooth_metrics()
+            sm["units"] += 1
+            sm["unit_chars"] += n
+            if not pending[:n].endswith("\n"):
+                sm["partial_flushes"] += 1
+            if held_ms > 50.0:
+                self._note_holdback(held_ms)
+                sm["hold_acc"] += held_ms
+            self._unit_wait_since = now if n < len(pending) else 0.0
+        return n
+
     def _flush_stream_append(self, paced: bool = True) -> None:
         """Paint one frame of the reveal: one insert, one height fit.
 
@@ -11523,7 +11589,12 @@ class ChatPanel(QWidget):
         block = self._open_block
         if not pending or block is None or self._open_kind != "prose":
             return
-        if paced and len(pending) < self._STREAM_DUMP_CHARS:
+        if paced and len(pending) < self._STREAM_DUMP_CHARS and self._REVEAL_UNIT == "block":
+            n = self._block_cut(pending)
+            if n <= 0:
+                self._arm_stream_timer()   # the head is still an unfinished unit
+                return
+        elif paced and len(pending) < self._STREAM_DUMP_CHARS:
             _interval = self._stream_frame_interval()
             n = self._reveal_chars_this_frame(_interval, len(pending))
             if n <= 0:
@@ -11549,7 +11620,9 @@ class ChatPanel(QWidget):
                 return
             if not getattr(self, '_t_first_paint', 0.0):
                 self._t_first_paint = time.perf_counter()
-            if paced:
+            if paced and self._REVEAL_UNIT == "block":
+                self._flush_prose_async()   # each move is a whole unit: always show it
+            elif paced:
                 # A render is a full setHtml rebuild whose cost grows with the tail; one per
                 # frame repainted ~30x/s and caused stream flash. Coalesce until enough text
                 # accumulated or the gap forces one, so styling never lags.
@@ -11753,7 +11826,8 @@ class ChatPanel(QWidget):
             "tick_last": 0.0, "ep_prev_step": 0, "tick_gaps": [],
             "snaps": 0, "snap_px_max": 0,
             "height_steps": 0, "height_step_px_max": 0,
-            "seals": 0, "finalized": 0, "seal_shrink_max": 0,
+            "seals": 0, "finalized": 0, "seal_net_min": 0,
+            "units": 0, "unit_chars": 0, "partial_flushes": 0, "hold_acc": 0.0,
         }
 
     def _smooth_metrics(self) -> dict:
@@ -11780,13 +11854,15 @@ class ChatPanel(QWidget):
         if sm["vis_last"] and not sm["prov_paused"]:
             start = sm["vis_last"] if sm["vis_had_pending"] else sm["arr_after_vis"]
             if start:
-                gap = (now - start) * 1000.0
+                # Time the reveal held an unfinished unit on purpose is not a stall.
+                gap = max(0.0, (now - start) * 1000.0 - sm["hold_acc"])
                 sm["worst_gap"] = max(sm["worst_gap"], gap)
                 if gap > 100.0:
                     sm["gaps_100"] += 1
         sm["vis_last"] = now
         sm["vis_had_pending"] = bool(getattr(self, '_stream_pending', ''))
         sm["arr_after_vis"] = 0.0
+        sm["hold_acc"] = 0.0
         sm["prov_paused"] = False
 
     # Per-event lines for scroll motion, snaps and seals; off by default
@@ -11831,14 +11907,17 @@ class ChatPanel(QWidget):
         sm["height_steps"] += 1
         sm["height_step_px_max"] = max(sm["height_step_px_max"], int(px))
 
-    def _note_seal(self, before: int, after: int, finalized: bool) -> None:
+    def _note_seal(self, before: int, after: int, finalized: bool, net=None) -> None:
+        """net: column change at the seal (old block + new block - old height).
+        The old block's own shrink is not a jump: its text moved below."""
         sm = self._smooth_metrics()
         sm["seals"] += 1
         sm["finalized"] += int(bool(finalized))
-        if not finalized:
-            sm["seal_shrink_max"] = max(sm["seal_shrink_max"], before - after)
+        if net is not None:
+            sm["seal_net_min"] = min(sm["seal_net_min"], int(net))
         if self._SCROLL_TRACE:
-            log.info(f"[SCROLL TRACE] seal before={before} after={after} finalized={finalized}")
+            log.info(f"[SCROLL TRACE] seal before={before} after={after} "
+                     f"finalized={finalized} net={net}")
 
     def _note_holdback(self, held_ms: float = 0.0, emoji: bool = False) -> None:
         sm = self._smooth_metrics()
@@ -11908,7 +11987,9 @@ class ChatPanel(QWidget):
             f"scroll_ticks={sm['ticks']} scroll_episodes={sm['episodes']} "
             f"episodes_per_s={episodes_per_s:.1f} reaccel_ticks={sm['reaccel']} "
             f"tick_p95_ms={tick_p95:.0f} snaps={sm['snaps']} snap_px_max={sm['snap_px_max']} "
-            f"seals={sm['seals']} finalized={sm['finalized']} seal_shrink_max_px={sm['seal_shrink_max']}"
+            f"seals={sm['seals']} finalized={sm['finalized']} seal_net_min_px={sm['seal_net_min']} "
+            f"reveal={self._REVEAL_UNIT} units={sm['units']} partial_flushes={sm['partial_flushes']} "
+            f"chars_per_update={(sm['unit_chars'] / sm['units']) if sm['units'] else 0:.0f}"
         )
 
     def _prewarm_text_engine(self) -> None:
@@ -12124,8 +12205,9 @@ class ChatPanel(QWidget):
         # whether it was the only thing repainting (see _PaintAudit).
         self._get_paint_audit().watch(self._open_block)
 
-        # Show "New messages" pill if user is scrolled up during streaming
-        if not self._scroll_locked and not getattr(self, '_rapid_insert_mode', False):
+        # "New messages" pill while the reader is scrolled up. The old guard
+        # (not locked) and the pill's own check (locked) never both held.
+        if self._scroll_locked and not getattr(self, '_rapid_insert_mode', False):
             self._show_new_msg_pill()
 
         # Make streaming cursor SOLID (not blinking) during active streaming
@@ -12774,6 +12856,7 @@ class ChatPanel(QWidget):
             self.todo_section.set_running(False)
         except (AttributeError, RuntimeError):
             _swallow("stop the todo spinners")
+        QTimer.singleShot(1500, self._end_follow_after_turn)
         try:
             if self._cur_msg is not None:
                 for _g in self._cur_msg.findChildren(ActivityGroup):
@@ -14709,6 +14792,10 @@ class ChatPanel(QWidget):
     # 200px step in ~150 ms and keeps the frontier within ~2 lines of the
     # bottom edge at the fastest measured stream (~900 px/s of code).
     _FOLLOW_EASE = 0.35
+    # "pin": the scrollbar's rangeChanged moves the view to the new bottom in
+    # the same layout pass that grew it. "glide": the older 16 ms ease-out,
+    # which restarted on every height step and pulsed 2-3 times a second.
+    _FOLLOW_MODE = "pin"
     # Snap the final pixels of the glide: at 0.35 easing each remaining pixel
     # costs a 16ms repaint of the whole chat column (~71% of stream paints),
     # moving a distance the eye can't track. Snapping looks identical.
@@ -14726,6 +14813,14 @@ class ChatPanel(QWidget):
         the real maximum on every tick and eases toward it, so the text
         above slides up continuously instead of jumping.
         """
+        if self._FOLLOW_MODE == "pin":
+            self._following = True
+            try:
+                bar = self.scroll.verticalScrollBar()
+                self._pin_to(bar, bar.maximum())
+            except RuntimeError:
+                _swallow("pin the view to the bottom")
+            return
         t = getattr(self, '_follow_timer', None)
         if t is None:
             t = self._follow_timer = QTimer(self)
@@ -14737,6 +14832,48 @@ class ChatPanel(QWidget):
         if not t.isActive():
             self._follow_last = None
             t.start()
+
+    def _pin_to(self, bar, value: int) -> None:
+        """Move the view without it reading as the user's scroll."""
+        cur = bar.value()
+        if value <= cur:
+            self._pin_last = cur
+            return
+        self._smooth_scrolling = True   # not a user scroll (see _on_scroll_value_changed)
+        try:
+            bar.setValue(value)
+        finally:
+            self._smooth_scrolling = False
+        self._pin_last = bar.value()
+        self._note_scroll_tick(self._pin_last - cur, self._pin_last, value)
+
+    def _on_scroll_range_changed(self, _lo: int, hi: int) -> None:
+        """While following, keep the bottom in view the moment it moves.
+
+        Runs inside the layout pass that changed the height, so the view
+        never trails the text and never needs to catch up. Only the
+        reader's own scroll (lock, or a value below our last pin) stops it.
+        """
+        if self._FOLLOW_MODE != "pin" or not getattr(self, '_following', False):
+            return
+        if self._scroll_locked or getattr(self, '_toggle_scroll_guard', False):
+            return
+        try:
+            bar = self.scroll.verticalScrollBar()
+            if bar.value() < getattr(self, '_pin_last', 0) - 2:
+                self._following = False   # the reader scrolled up: leave them there
+                return
+            self._pin_to(bar, hi)
+        except RuntimeError:
+            self._following = False
+
+    def _end_follow_after_turn(self) -> None:
+        # A timer callback: an exception here aborts the process under PyQt6.
+        try:
+            if not _sip_isdeleted(self) and not getattr(self, '_turn_active', False):
+                self._stop_follow()
+        except RuntimeError:
+            pass   # silent-ok: the panel was deleted before the timer fired
 
     def _stop_follow(self) -> None:
         self._following = False
