@@ -1100,6 +1100,11 @@ class CodeEditor(QPlainTextEdit):
             return
         
         # Format the code
+        try:
+            from src.core.code_formatter import get_code_formatter
+        except ImportError:
+            log.warning("Code formatter unavailable: src.core.code_formatter missing")
+            return
         formatter = get_code_formatter()
         result = formatter.format_code(code, self._language)
         

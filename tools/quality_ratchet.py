@@ -114,7 +114,9 @@ def main() -> int:
     }
     if args.update:
         payload = json.dumps(current, indent=2, sort_keys=True) + "\n"
-        BASELINE.write_text(payload, encoding="utf-8")
+        # newline="" keeps LF: write_text would otherwise translate to CRLF on
+        # Windows and flip every line of the committed baseline.
+        BASELINE.write_text(payload, encoding="utf-8", newline="\n")
         print(f"baseline updated: {len(current['ruff'])} lint keys, "
               f"{len(current['comments'])} comment keys")
         return 0

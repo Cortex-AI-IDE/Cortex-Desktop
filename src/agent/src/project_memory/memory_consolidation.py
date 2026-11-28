@@ -448,7 +448,7 @@ class MemoryConsolidator:
                     file_path = os.path.join(root, f)
                     try:
                         total_size += os.path.getsize(file_path)
-                    except:
+                    except Exception:
                         pass  # silent-ok: an unreadable file contributes no size
         return total_size
     
@@ -474,7 +474,7 @@ class MemoryConsolidator:
                     try:
                         import yaml
                         frontmatter = yaml.safe_load(parts[1]) or {}
-                    except:
+                    except Exception:
                         # Simple parsing fallback
                         for line in parts[1].split('\n'):
                             if ':' in line:

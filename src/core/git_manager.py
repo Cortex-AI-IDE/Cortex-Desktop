@@ -76,7 +76,7 @@ class GitManager(QObject):
                 creationflags=_NO_WINDOW
             )
             return result.returncode == 0
-        except:
+        except Exception:
             return False
             
     def set_repository(self, path: str) -> bool:

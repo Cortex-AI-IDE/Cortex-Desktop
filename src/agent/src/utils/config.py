@@ -567,7 +567,7 @@ def saveConfigWithLock(
     # Backup existing
     try:
         backupConfig(file)
-    except:
+    except Exception:
         # silent-ok: backupConfig catches its own failure and logs it, so this
         # only fires if the backup helper itself is missing.
         pass
@@ -629,7 +629,7 @@ def backupConfig(file: str) -> None:
         for oldBackup in allBackups[5:]:
             try:
                 os.unlink(os.path.join(backupDir, oldBackup))
-            except:
+            except Exception:
                 # silent-ok: the prune is cosmetic; one un-deletable file just
                 # leaves more than five backups on disk.
                 pass
@@ -687,7 +687,7 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                     backupFile = f'{file}.backup'
                     if os.path.exists(backupFile):
                         hasBackup = True
-                except:
+                except Exception:
                     # silent-ok: this only shapes one analytics field; False
                     # means "did not find one", which is also what a failed
                     # probe means.
@@ -726,11 +726,11 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                     if currentContent == backupContent:
                         alreadyBackedUp = True
                         break
-                except:
+                except Exception:
                     # silent-ok: one unreadable older backup just cannot match;
                     # the loop keeps looking and the copy below still happens.
                     pass
-        except:
+        except Exception:
             # silent-ok: we could not read the corrupted file to dedupe it, so
             # a second copy may be written; that costs disk, not data.
             pass
@@ -744,7 +744,7 @@ def getConfig(file: str, createDefault: Callable, throwOnInvalid: bool = False) 
                 import shutil
                 shutil.copy2(file, corruptedBackupPath)
                 logForDebugging(f'Corrupted config backed up to: {corruptedBackupPath}', level='error')
-            except:
+            except Exception:
                 # The corrupt file is about to be replaced by defaults, so a
                 # failed copy is the only chance to lose its contents. The
                 # earlier error line does not say the copy failed.
@@ -795,7 +795,7 @@ def findMostRecentBackup(file: str) -> Optional[str]:
         )
         if backups:
             return os.path.join(backupDir, backups[-1])
-    except:
+    except Exception:
         # silent-ok: an unreadable backup directory falls through to the legacy
         # location below, which is the pre-backup-dir layout.
         pass
@@ -813,7 +813,7 @@ def findMostRecentBackup(file: str) -> Optional[str]:
         legacyBackup = f'{file}.backup'
         if os.path.exists(legacyBackup):
             return legacyBackup
-    except:
+    except Exception:
         # silent-ok: returns None, and the caller already tells the user "No
         # backup file found for corrupted config", so the fact is not lost.
         pass
@@ -878,7 +878,7 @@ def getGlobalConfig() -> GlobalConfig:
         try:
             stat = os.stat(getGlobalCortexFile())
             stats = {'mtimeMs': stat.st_mtime * 1000, 'size': stat.st_size}
-        except:
+        except Exception:
             # stats stays None, so lastReadFileStats is None and the
             # stale-write check in saveConfigWithLock is skipped for this
             # session. A second instance's write then goes undetected.
@@ -900,7 +900,7 @@ def getGlobalConfig() -> GlobalConfig:
         
         startGlobalConfigFreshnessWatcher()
         return config
-    except:
+    except Exception:
         return migrateConfigFields(
             getConfig(getGlobalCortexFile(), createDefaultGlobalConfig)
         )
@@ -1039,7 +1039,7 @@ def getCurrentProjectConfig() -> ProjectConfig:
     if isinstance(projectConfig.get('allowedTools'), str):
         try:
             projectConfig['allowedTools'] = json.loads(projectConfig['allowedTools'])
-        except:
+        except Exception:
             projectConfig['allowedTools'] = []
     
     return projectConfig

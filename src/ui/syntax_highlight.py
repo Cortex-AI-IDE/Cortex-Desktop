@@ -86,8 +86,30 @@ def _sync_palette() -> None:
     globals().update(pal)
 
 
-# Default binding (dark) so the names always exist at import time.
-globals().update(_DARK_PALETTE)
+# Default binding (dark) so the names always exist at import time. Written out
+# key by key so static analysis sees them too; _sync_palette() re-points them at
+# the active theme through globals().update(pal).
+C_KEYWORD = _DARK_PALETTE["C_KEYWORD"]
+C_STRING = _DARK_PALETTE["C_STRING"]
+C_COMMENT = _DARK_PALETTE["C_COMMENT"]
+C_FUNCTION = _DARK_PALETTE["C_FUNCTION"]
+C_NUMBER = _DARK_PALETTE["C_NUMBER"]
+C_TYPE = _DARK_PALETTE["C_TYPE"]
+C_OPERATOR = _DARK_PALETTE["C_OPERATOR"]
+C_PROPERTY = _DARK_PALETTE["C_PROPERTY"]
+C_BUILTIN = _DARK_PALETTE["C_BUILTIN"]
+C_PUNCTUATION = _DARK_PALETTE["C_PUNCTUATION"]
+C_VARIABLE = _DARK_PALETTE["C_VARIABLE"]
+C_CONSTANT = _DARK_PALETTE["C_CONSTANT"]
+C_REGEX = _DARK_PALETTE["C_REGEX"]
+C_ESCAPE = _DARK_PALETTE["C_ESCAPE"]
+C_TAG = _DARK_PALETTE["C_TAG"]
+C_ATTR = _DARK_PALETTE["C_ATTR"]
+C_SELECTOR = _DARK_PALETTE["C_SELECTOR"]
+C_VALUE = _DARK_PALETTE["C_VALUE"]
+C_HEADING = _DARK_PALETTE["C_HEADING"]
+C_decorator = _DARK_PALETTE["C_decorator"]
+C_namespace = _DARK_PALETTE["C_namespace"]
 
 
 def _wrap(color: str, text: str, extra_style: str = "") -> str:

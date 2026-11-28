@@ -18,6 +18,7 @@ Wire your real loop by emitting AgentSignals from a QThread worker
 """
 
 from __future__ import annotations
+from typing import List, Optional
 import os
 import sys
 import re
