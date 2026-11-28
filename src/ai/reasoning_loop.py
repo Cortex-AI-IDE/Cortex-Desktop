@@ -15,6 +15,11 @@ MAX_DISTINCT = 24
 # normal reasoning rhythm (a line restated once for emphasis is common,
 # three times is not) and far before a loop fills the 120-line window.
 RUN_TRIP = 4
+# A short cycle ("OK. / Let me write. / Go. / Writing.") never repeats a line
+# back to back, so RUN_TRIP misses it and the window took 120 lines to trip
+# (2026-11-28: 179 s, 7,129 words). The same 2-8 lines three times running trips.
+CYCLE_MAX = 8
+CYCLE_REPEATS = 3
 # A line longer than this with no newline is judged as it stands, so a loop
 # that never emits a newline cannot hide in an unbounded partial line.
 _MAX_PARTIAL = 2000
@@ -54,6 +59,8 @@ class ReasoningLoopDetector:
         if self._run >= RUN_TRIP:
             self.tripped = True
         self._lines.append(key)
+        if self._cycles():
+            self.tripped = True
         self._counts[key] += 1
         if len(self._lines) > self._window:
             old = self._lines.popleft()
@@ -63,6 +70,19 @@ class ReasoningLoopDetector:
         if len(self._lines) == self._window and len(self._counts) <= self._max_distinct:
             self.tripped = True
         return self.tripped
+
+    def _cycles(self) -> bool:
+        """The last CYCLE_REPEATS * p lines are one p-line block repeated."""
+        lines = self._lines
+        n = len(lines)
+        for p in range(2, CYCLE_MAX + 1):
+            span = p * CYCLE_REPEATS
+            if n < span:
+                break
+            if all(lines[n - 1 - i] == lines[n - 1 - i - p] for i in range(span - p)):
+                if len(set(lines[n - i] for i in range(1, p + 1))) > 1:
+                    return True
+        return False
 
     def feed(self, chunk: str) -> bool:
         if self.tripped:

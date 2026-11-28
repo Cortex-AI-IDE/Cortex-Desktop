@@ -106,6 +106,34 @@ def _is_continuation(message: str) -> bool:
     return text.startswith("Continue the task") or text.startswith("[Question answer]")
 
 
+_DESTRUCTIVE_WORDS = (
+    "rm -rf", "rmdir /s", "del /f", "format ", "shutdown",
+    "taskkill", "net stop", "sc stop", "drop table", "drop database",
+    "truncate", "delete from",
+)
+_SEARCH_CMD = re.compile(r"\b(select-string|sls|grep|rg|findstr|ag|ack)\b")
+_QUOTED = re.compile(r'"[^"]*"|\'[^\']*\'')
+_PATTERN_ARG = re.compile(r"-(pattern|simplematch|e)\s+\S+")
+
+
+def destructive_keyword(cmd: str):
+    """The destructive word a shell command contains, or None.
+
+    A search command may name the words it looks for: Select-String -Pattern
+    "taskkill|shutdown" only reads (2026-11-28, five read-only searches
+    blocked with a "Permission Required" popup). For search commands the
+    quoted text and pattern arguments are ignored; every other command is
+    matched as written, so sqlite3 db "DELETE FROM t" is still caught.
+    """
+    text = (cmd or "").lower()
+    if _SEARCH_CMD.search(text):
+        text = _PATTERN_ARG.sub(" ", _QUOTED.sub('""', text))
+    for word in _DESTRUCTIVE_WORDS:
+        if word in text:
+            return word.strip()
+    return None
+
+
 def _todo_key(content: str) -> str:
     """Comparable form of a todo's text (tag stripped, case and spaces folded)."""
     return " ".join((content or "").replace(_BLOCKED_TAG, "").lower().split())
@@ -5847,6 +5875,7 @@ Required behavior:
             # Replies that announced a step ("checking X:") and stopped. Up to
             # two nudges per message; see _announced_but_stopped.
             _announce_nudges = 0
+            _loop_nudges = 0
 
             # ── Auto-continue: use pre-compacted messages from previous cycle ──
             _pre_compacted = self._auto_continue_compacted
@@ -6832,7 +6861,7 @@ Required behavior:
                                         log.warning(
                                             f"[BRIDGE] Reasoning loop on turn {turn + 1} "
                                             f"({len(turn_reasoning):,} chars of reasoning): "
-                                            f"hiding the rest of this turn's reasoning."
+                                            f"stopping the stream."
                                         )
                                         try:
                                             self._safe_emit(self.response_chunk,
@@ -6841,7 +6870,9 @@ Required behavior:
                                         except Exception:
                                             _swallow()
                                         _thought_started = False
-                                        continue
+                                        # Stop reading: the model kept looping for minutes after the
+                                        # trip while the card waited. The turn is retried with a nudge.
+                                        break
                                     # Thinking budget: bound thinking by token count, not time (Claude/Anthropic
                                     # standard). Over budget with no content or tool calls, force action.
                                     _reasoning_token_count += len(_reason_chunk) // 4  # approximate
@@ -7136,6 +7167,18 @@ Required behavior:
                             pending.append(_p)
 
                 # If no tool calls → check if we should force action or exit
+                if (not pending and _reasoning_loop.tripped and _loop_nudges < 2
+                        and not (turn_text or "").strip()):
+                    _loop_nudges += 1
+                    log.warning(f"[BRIDGE] Turn {turn + 1} ended in a reasoning loop, "
+                                f"nudging the model to act ({_loop_nudges}/2)")
+                    messages.append(PCM(role="user", content=(
+                        "Your reasoning got stuck repeating the same few lines, so it "
+                        "was stopped. Do not restate your plan. Take the next concrete "
+                        "step now: call the tool you need, or write the answer. Keep "
+                        "any reasoning to a few short lines."
+                    )))
+                    continue
                 if not pending:
 # Task completion verification: AI cannot exit unless it made mutations, all todos
 # are complete, OR it's a legitimate informational response.
@@ -9712,14 +9755,10 @@ Required behavior:
                 # Require approval for destructive actions
                 if _s.get("safety", "require_approval", default=True):
                     _cmd = str(args.get("command", "")).lower()
-                    _is_destructive = any(kw in _cmd for kw in (
-                        "rm -rf", "rmdir /s", "del /f", "format ", "shutdown",
-                        "taskkill", "net stop", "sc stop", "drop table", "drop database",
-                        "truncate", "delete from",
-                    ))
-                    if _is_destructive and tool_name in ("Bash", "PowerShell"):
+                    _hit = destructive_keyword(_cmd)
+                    if _hit and tool_name in ("Bash", "PowerShell"):
                         _msg = "Destructive command detected. Approval required in Settings → Safety & Permissions."
-                        log.warning(f"[SAFETY] Blocked destructive: {_cmd[:100]}")
+                        log.warning(f"[SAFETY] Blocked destructive ({_hit!r}): {_cmd[:500]}")
                         try:
                             from src.utils.notifications import notify_permission_required
                             notify_permission_required("Destructive command blocked, approval required")

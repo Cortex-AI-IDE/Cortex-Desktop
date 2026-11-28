@@ -8873,18 +8873,24 @@ class InputArea(QWidget):
             return False  # small paste, paste normally
 
         line_count = len(lines)
-        # A very large paste does not go into the prompt: it is saved as a
-        # file and attached, and the AI reads it in parts. Megabytes of text
-        # in the prompt is what made Cortex hang.
-        from src.ui.file_attach import PASTE_INLINE_MAX_CHARS, describe, save_large_paste
-        if len(text) > PASTE_INLINE_MAX_CHARS:
+        # A long paste becomes a .txt card, not a wall of text in the prompt,
+        # so input and sent bubble show a file. The model still gets the whole
+        # content: a small text file is sent inline with its path, a bigger one
+        # is read by the agent.
+        from src.ui.file_attach import (
+            PASTE_CARD_MIN_LINES,
+            PASTE_INLINE_MAX_CHARS,
+            describe,
+            save_large_paste,
+        )
+        if line_count > PASTE_CARD_MIN_LINES or len(text) > PASTE_INLINE_MAX_CHARS:
             saved = save_large_paste(text)
             if saved:
                 info = describe(saved)
                 if not info.get("refused"):
                     info["name"] = f"Pasted text ({line_count:,} lines)"
                     self._add_file_chip(info)
-                    log.info("[Paste] %d chars saved to %s and attached", len(text), saved)
+                    log.info("[Paste] %d lines saved to %s and attached", line_count, saved)
                     return True
         chip_text = f"Pasted ~{line_count} lines"
         # The chip owns the text. Paste twice and you get two chips, each

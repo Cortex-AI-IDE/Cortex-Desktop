@@ -126,9 +126,14 @@ def acquire_instance_lock() -> tuple[str, object | None]:
     """Take the exclusive single-instance lock on POSIX.
 
     Windows uses a named mutex in main.py; flock is its POSIX equivalent and
-    the only thing stopping a second Cortex from opening the same SQLite
-    database. The kernel drops it when the process dies, so a crash cannot
-    strand it. Returns (state, handle); see the LOCK_* constants.
+    is the only thing stopping a second Cortex from opening the same SQLite
+    database as the first. The kernel drops the lock when the process dies,
+    so a crash cannot strand it.
+
+    Returns (state, handle):
+      LOCK_ACQUIRED    this process owns the lock, keep `handle` alive
+      LOCK_HELD        another instance owns it, hand over and exit
+      LOCK_UNAVAILABLE locking not attempted (Windows) or failed to open
     """
     if sys.platform == "win32":
         return LOCK_UNAVAILABLE, None

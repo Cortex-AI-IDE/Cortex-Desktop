@@ -22,6 +22,7 @@ MAX_ATTACHMENTS = 20                    # per message
 INLINE_MAX_BYTES = 64 * 1024            # small text files go in whole
 INLINE_MAX_LINES = 1500
 PASTE_INLINE_MAX_CHARS = 100_000        # a bigger paste becomes a file
+PASTE_CARD_MIN_LINES = 10               # a paste over this many lines becomes a .txt card
 PASTE_DIR = os.path.join(os.path.expanduser("~"), ".cortex", "pasted")
 
 _TEXT_EXTS = {
