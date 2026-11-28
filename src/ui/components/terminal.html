@@ -488,11 +488,9 @@
         // Open the terminal in the container
         term.open(document.getElementById('terminal-container'));
         const _container = document.getElementById('terminal-container');
-        // Fit only when the container has a real size. A tab created in the
-        // background (the AI's "Cortex AI" tab) is hidden at this point: its
-        // container measures ~0 wide, a plain fit() left xterm 2 columns wide
-        // (every line wrapped every 2 characters), and nothing re-fitted it
-        // when the tab was shown, since showing a tab is not a window resize.
+        // Fit only when the container has a real size: a background tab
+        // measures ~0 wide and a plain fit() left xterm 2 columns wide;
+        // showing a tab is not a window resize, so nothing re-fitted it.
         function _safeFit() {
             if (!_container || _container.clientWidth < 50 || _container.clientHeight < 20) return false;
             fitAddon.fit();
@@ -501,11 +499,9 @@
         }
         window.__cxRefit = _safeFit;
         _safeFit();
-        // JetBrains Mono comes from Cortex's own files (src/ui/fonts.py) and
-        // may finish loading just after the terminal opened. xterm measures
-        // the cell size once, on a canvas, so it would keep the FALLBACK
-        // font's width. Re-assigning the family makes it re-measure; then
-        // refit so the column count matches the real cell width.
+        // xterm measures the cell size once, so a font that loads after
+        // open keeps the fallback width. Re-assign the family to force a
+        // re-measure, then refit so the column count matches.
         if (document.fonts && document.fonts.load) {
             document.fonts.load("13px 'JetBrains Mono'").then(function () {
                 try {
@@ -595,13 +591,9 @@
             }
         }
 
-        // Interactive echo must NOT wait for an animation frame.
-        // requestAnimationFrame is capped at the display refresh (~16ms)
-        // and is delayed further whenever the page is busy, that wait sat
-        // on top of the Python-side batching and was felt directly as
-        // keystroke/arrow-key lag. xterm.js already queues and renders on
-        // its own schedule, so small payloads go straight in; frame
-        // batching is kept only for bulk output bursts.
+        // Interactive echo must NOT wait for an animation frame: rAF is
+        // ~16ms and worse when busy, and that wait sat on top of Python
+        // batching as keystroke lag. Frame batching stays for bulk bursts.
         const _DIRECT_WRITE_MAX = 8192;
         let _queuedBytes = 0;
         function writeToTerm(text) {
@@ -619,12 +611,9 @@
         let _inputBuffer = '';
         let _inputTimer = null;
         function sendInput(data) {
-            // Keystrokes (arrows are 3 bytes: ESC [ A) go straight to the
-            // shell. The old unconditional setTimeout(1) is clamped by the
-            // browser to ~4ms and stretches to 10-30ms while the page is
-            // busy repainting the PREVIOUS keystroke, so holding Up/Down
-            // queued every repeat behind a timer. The timer path is kept
-            // only for bursts (paste), which is what it was for.
+            // Keystrokes go straight to the shell: setTimeout(1) is clamped
+            // to ~4ms and stretches to 10-30ms while busy, so holding Up/
+            // Down queued every repeat. The timer is kept for paste bursts.
             if (!_inputTimer && data.length <= 8 && window.pyTerminal) {
                 window.pyTerminal.receive_input(data);
                 return;
@@ -725,10 +714,9 @@
                 }
                 if (e.ctrlKey && e.code === 'KeyC') {
                     // No selection: send SIGINT EXPLICITLY. The old
-                    // `return true` left it to xterm's default onData path,
-                    // where the since-removed key-handler dedupe could
-                    // swallow a single-char event, field case: runserver could not be
-                    // stopped, ^C vanished with no trace in any log.
+                    // `return true` fell to xterm's default path where the
+                    // key-handler dedupe could swallow it (^C vanished with
+                    // no log, runserver would not stop).
                     if (window.pyTerminal) {
                         window.pyTerminal.js_log('Ctrl+C (no selection) -> sending \\x03 interrupt');
                         window.pyTerminal.receive_input('\x03');
@@ -749,13 +737,10 @@
                     return false;
                 }
                 
-                // Printable chars fall through to xterm, onData is the ONE
-                // input path. The old per-key
-                // interception here (send + block + dedupe flag in onData)
-                // raced under fast typing (flag cleared by the previous
-                // char's onData -> next char sent TWICE) and split input
-                // across two paths, which is how the 2026-07-30 breakage
-                // could kill Enter/arrows while typed letters still echoed.
+                // Printable chars fall through to xterm; onData is the ONE
+                // input path. The old per-key interception raced under fast
+                // typing (double sends) and is how the 2026-07-30 breakage
+                // killed Enter/arrows while letters still echoed.
             }
             return true;
         });
@@ -860,12 +845,10 @@
                     return;
                 }
                 if (_ignoreOnData) {
-                    // Do NOT re-arm here. Re-arming on every swallowed event
-                    // let key-repeat (arrows fire every ~30ms, inside the
-                    // 50ms window) extend the ignore forever: Enter/arrows/
-                    // history dead while typed letters still appeared -
-                    // field case 2026-07-30 15:0x, dev AND production. The
-                    // window expires on TIME, set only by real paste events.
+                    // Do NOT re-arm here: re-arming on every swallowed event
+                    // let key-repeat (arrows ~30ms) extend the ignore forever
+                    // (2026-07-30 field case). The window expires on TIME,
+                    // set only by real paste events.
                     return;
                 }
                 sendInput(data);
@@ -916,9 +899,8 @@
             
             // Connect Python -> JS (theme update).
             // Bug history: this ignored is_dark and always applied dark
-            // colors ("dark mode only"), the terminal stayed fully dark in
-            // light mode, header included. Light mode uses a light surface
-            // with DARK fonts and a light ANSI palette.
+            // colors, so the terminal stayed dark in light mode. Light mode
+            // uses a light surface with DARK fonts and a light ANSI palette.
             window.pyTerminal.update_theme.connect(function(is_dark) {
                 if (is_dark) {
                     document.body.classList.remove('light-theme');
@@ -949,12 +931,10 @@
                 } else {
                     document.body.classList.add('light-theme');
                     document.body.style.backgroundColor = '#f5f5f5';
-                    // ALL font colors must be DARK on the light surface.
-                    // Bug history: white/#555 + brightWhite/#a5a5a5 made most
-                    // shell output near-invisible -
-                    // PowerShell prints its regular output as white/brightWhite,
-                    // and pale gray on #f5f5f5 is unreadable. Every slot is now
-                    // a dark, high-contrast tone.
+                    // ALL font colors must be DARK on the light surface:
+                    // white/#555 + brightWhite/#a5a5a5 made PowerShell's
+                    // regular output (white/brightWhite) near-invisible on
+                    // #f5f5f5. Every slot is now a dark, high-contrast tone.
                     term.options.theme = {
                         background: '#f5f5f5',
                         foreground: '#1f2328',
@@ -997,13 +977,11 @@
             });
             document.getElementById('btn-clear').addEventListener('click', function() {
                 // clear() alone: it scrolls the buffer away and makes the
-                // CURRENT PROMPT the new first line. The old code followed it
-                // with ESC[2J ESC[H, which erased that prompt as well and put
-                // the cursor at the top - so the button left a blank screen
-                // with a blinking caret and no prompt, while the shell still
-                // believed its prompt was on screen. The right-click Clear
-                // never did the second step, which is why only the button
-                // showed it.
+                // CURRENT PROMPT the new first line. The old code followed
+                // it with ESC[2J ESC[H, which erased that prompt too and
+                // left a blank screen with a blinking caret while the shell
+                // still believed its prompt was on screen (the right-click
+                // Clear never did the second step, so only the button showed it).
                 term.clear();
             });
             document.getElementById('btn-restart').addEventListener('click', function() {
@@ -1019,10 +997,8 @@
 
             // Toggle dropdown open/close.
             // The panel is position: fixed (see CSS) so it is NOT clipped by
-            // the header's overflow: hidden. Place it under the button from the
-            // live rect, clamp to the viewport, and grow upward if there is no
-            // room below (the terminal header sits at the top of a tall panel,
-            // so there usually is, but stay safe on short windows).
+            // the header's overflow: hidden. Place it from the live rect,
+            // clamp to the viewport, grow upward if there is no room below.
             function _positionTermDropdown() {
                 const r = termSelectBtn.getBoundingClientRect();
                 const dh = termDropdown.offsetHeight;

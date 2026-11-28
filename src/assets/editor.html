@@ -1276,10 +1276,8 @@ var switchStopTimer = null;
 var SWITCH_STOP_MS = 0;  // No delay, instant tab switching
 
 // ---- Content set debounce: collapse rapid model.setValue() calls ----
-// Monaco's setValue() triggers background tokenization & syntax highlighting.
-// Calling setValue() in rapid succession (e.g. close-all → open file1 → open
-// file2) can crash Chromium on Windows because it hasn't finished processing
-// the first tokenization wave before the second hits.
+// Rapid setValue() (close-all → open file1 → open file2) crashes Chromium on
+// Windows: the second tokenization wave lands before the first finishes.
 var pendingSetContent = null;       // filePath of pending setEditorContent
 var setContentTimer = null;         // debounce/retry timer
 var SET_CONTENT_DEBOUNCE = 500;     // ms, long enough for tokenization to settle
@@ -1298,10 +1296,8 @@ var SETTING_TIMEOUT_MS = 5000;      // legacy default (dynamic override is used)
 var isRenderingMarkers = false;
 
 // ---- Startup warmup: suppress marker rendering until Chromium is stable ----
-// Chromium WebEngine on Windows 25H2 needs 30-60s to fully initialize its
-// multi-process GPU/compositor pipeline. Monaco's setModelMarkers() (squiggly
-// underlines for LSP diagnostics) is one of the most GPU-intensive operations
-// and crashes the render process if called before Chromium settles.
+// setModelMarkers() is GPU-heavy; called during Chromium's 30-60s pipeline
+// init on Windows 25H2 it crashes the render process.
 var MONACO_LOAD_TIME = 0;        // set in Monaco init callback
 var STARTUP_WARMUP_MS = 12000;   // 12s, marker suppression during warmup (reduced from 30s)
 
@@ -1431,10 +1427,8 @@ var _monacoBaseUrl = '__MONACO_VS_PATH__';
 __MONACO_LOADER_INLINE__
 
 // ── Monaco web worker configuration for QWebEngineView ──
-// Chromium blocks Workers from file:// origins. Monaco tries to create
-// new Worker("file:///…/workerMain.js") by default which silently fails.
-// Fix: use a Blob URL worker that importScripts() the real file (blob:
-// origins CAN import from file:// sources).
+// Chromium blocks file:// Workers; the default new Worker(...) silently fails,
+// so serve a Blob URL that importScripts() the real workerMain.js instead.
 window.MonacoEnvironment = {
     getWorkerUrl: function(moduleId, label) {
         try {
@@ -1488,11 +1482,9 @@ if (typeof require !== 'undefined') {
     editor = monaco.editor.create(document.getElementById('editor-container'), {
         value: '',
         language: 'plaintext',
-        // Honor a theme pushed BEFORE Monaco finished loading: setTheme()
-        // sets body.light-theme immediately, but can only call
-        // monaco.editor.setTheme once `editor` exists, so read the body
-        // class here instead of hardcoding dark. A theme picked in
-        // Settings -> Editor -> Theme wins over both (_cxThemeName).
+        // Honor a theme pushed BEFORE Monaco loaded: setTheme() needs
+        // `editor` to exist, so read the body class here. Settings ->
+        // Editor -> Theme wins over both (_cxThemeName).
         theme: _cxThemeName(),
         automaticLayout: true,
         // Settings -> Editor -> Tab size / Word wrap / Minimap arrive through
@@ -1538,12 +1530,9 @@ if (typeof require !== 'undefined') {
     // occasionally ignoring the lightbulb option at create() time.
     editor.updateOptions({ lightbulb: { enabled: false } });
 
-    // Settings -> Editor -> Font family / Font size, pushed by the editor
-    // panel (src/ui/fonts.py). Remembered in window.__cortexEditorFont so an
-    // editor that is recreated later starts with the same choice. Monaco
-    // measures character widths once; when the chosen font finishes loading
-    // after that, remeasureFonts() is what stops the cursor and selection
-    // drifting from the text.
+    // Settings -> Editor -> Font family / Size (src/ui/fonts.py) via
+    // window.__cortexSetEditorFont; remeasureFonts() after load stops the
+    // cursor and selection drifting when the chosen font arrives late.
     window.__cortexSetEditorFont = function (stack, size, family) {
         try {
             window.__cortexEditorFont = { stack: stack, size: size, family: family };
@@ -1558,11 +1547,9 @@ if (typeof require !== 'undefined') {
         } catch (e) { console.warn('[Editor] font not applied:', e); }
     };
 
-    // Settings -> Editor -> Tab size / Word wrap / Minimap, pushed by the
-    // editor panel (src/ui/editor_prefs.py). Remembered in
-    // window.__cortexEditorPrefs for editors created later. Tab size is a
-    // per-FILE option in Monaco: every open file gets it now, and every file
-    // opened later through onDidCreateModel (the one place all models pass).
+    // Settings -> Editor -> Tab size / Word wrap / Minimap
+    // (src/ui/editor_prefs.py) via window.__cortexSetEditorPrefs. Tab size
+    // is per-file; onDidCreateModel applies it to every model, current and new.
     function _cxApplyModelPrefs(model) {
         var p = window.__cortexEditorPrefs;
         if (!p || !model || (model.isDisposed && model.isDisposed())) return;
@@ -1585,17 +1572,11 @@ if (typeof require !== 'undefined') {
         } catch (e) { console.warn('[Editor] preferences not applied:', e); }
     };
 
-    // ── NUCLEAR OPTION: Disable ALL Monaco built-in diagnostics permanently ──
-    // Monaco's TypeScript/JavaScript language service runs in a web worker and
-    // produces red squiggly underlines INDEPENDENTLY from the editor's
-    // noSemanticValidation/noSyntaxValidation options (those only control display,
-    // not generation). The TS/JS worker ignores those flags entirely for JSX/TSX
-    // files and still fires diagnostics. The only reliable fix is to:
-    //   1. Disable diagnostics at the SOURCE (typescriptDefaults/javascriptDefaults)
-    //   2. Set up a PERSISTENT marker listener that nukes ANY marker that appears
-    //
-    // This applies to ALL languages, not just JS/TS, Cortex handles its own
-    // diagnostics via LSP (Pyright for Python) and custom providers.
+    // ── Disable ALL Monaco built-in diagnostics permanently ──
+    // The TS/JS worker emits markers ignoring noSemanticValidation /
+    // noSyntaxValidation (display-only flags), so disable at the source
+    // (typescriptDefaults/javascriptDefaults) and nuke any marker that appears.
+    // All languages: Cortex owns diagnostics via Pyright LSP and custom providers.
 
     // Layer 1: Disable Monaco's built-in TypeScript/JavaScript language service diagnostics
     try {
@@ -1696,11 +1677,9 @@ if (typeof require !== 'undefined') {
         }
     });
 
-    // ── Fix cursor jumping: force Monaco to recalculate char widths after web fonts load ──
-    // Monaco measures character widths at creation time. If "Cascadia Code" or "Fira Code"
-    // haven't loaded yet, it uses fallback font metrics (Consolas/Courier New). When the real
-    // font loads, character widths change but Monaco still uses stale measurements → cursor
-    // jumps 1-2 positions on arrow keys. Fix: wait for fonts, then force a full layout pass.
+    // ── Fix cursor jumping: recalc char widths after web fonts load ──
+    // Monaco measures at creation with fallback metrics; when the real font
+    // loads, stale widths make the cursor jump 1-2 positions. Force a layout pass.
     if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(function() {
             if (editor) {
@@ -1754,12 +1733,9 @@ if (typeof require !== 'undefined') {
       // 3s timeout for LSP requests (was 10s, too long, hover shows "Loading...")
     var _lastHoverResolve = null;  // Track last hover resolve to prevent leaks
 
-    // GUARD: provider registration must never kill the save bindings below.
-    // An exception here aborts the rest of this inline script, leaving
-    // saveCurrentFile / Ctrl+S / the DOM fallback unregistered while typing
-    // tracking (registered earlier) keeps working - the exact signature of
-    // the "Ctrl+S silently does nothing" incident (2026-08-21, two same-name
-    // styles.css tabs, large file: edits tracked, save dead, close-save ok).
+    // GUARD: an exception in provider registration aborts the rest of this
+    // inline script, leaving save bindings unregistered (2026-08-21 "Ctrl+S
+    // silently does nothing" incident: edits tracked, save dead).
     try {
     monaco.languages.registerCompletionItemProvider('*', {
         triggerCharacters: [],  // empty = only explicit Ctrl+Space, no auto-trigger
@@ -1919,16 +1895,12 @@ if (typeof require !== 'undefined') {
     });
 
     // ── Ctrl+S: Save current file ──
-    // Handled in Monaco directly (not PyQt menu) because QWebEngineView
-    // captures keyboard focus and the PyQt menu shortcut may never fire.
-    // This pushes fresh content synchronously to Python, avoiding the
-    // fragile async get_current_content callback pattern.
+    // Handled in Monaco (not the PyQt menu): QWebEngineView holds focus and
+    // swallows the key; content is pushed synchronously to Python.
     function saveCurrentFile() {
-        // WARN level so it reaches the Python log file (info maps to debug).
-        // Added after the 2026-08-21 incident where Ctrl+S died silently:
-        // if this line is absent from the log while saves fail, the key
-        // never reached the page; if present but no [Save] log follows,
-        // the QWebChannel call was dropped.
+        // WARN so it reaches the Python log (info maps to debug): after the
+        // 2026-08-21 silent Ctrl+S death, no [Save] line after this = the
+        // QWebChannel call was dropped; no line at all = key never arrived.
         console.warn('[Editor] Ctrl+S saveCurrentFile enter, active=' + activeFilePath);
         // CAPTURE activeFilePath IMMEDIATELY, prevents race condition where
         // a Python-triggered switchToFile changes activeFilePath mid-save,
@@ -1945,13 +1917,9 @@ if (typeof require !== 'undefined') {
         }
         var content = (_targetModel && _sm !== _targetModel) ? _targetModel.getValue() : _sm.getValue();
         // ── Allow empty content saves ──
-        // User may intentionally clear all content (Ctrl+A → Delete → Ctrl+S).
-        // Python side handles empty content correctly, trusts Monaco's response
-        // when the file has the white dot (was modified). The old empty guard
-        // BLOCKED the save entirely because QWebEngineView eats Ctrl+S and the
-        // Python QAction may never fire.
-        // verbose save log removed, was flooding error.txt
-        // Update JS cache immediately
+        // Clearing everything before Ctrl+S is legitimate; the old empty
+        // guard blocked the save, and QWebEngineView eats the key before the
+        // Python QAction. Verbose save log removed (flooded error.txt).
         if (openFiles[savingPath]) {
             openFiles[savingPath].content = content;
         }
@@ -1973,13 +1941,9 @@ if (typeof require !== 'undefined') {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveCurrentFile);
 
     // ── DOM-level Ctrl+S fallback (capture phase) ──
-    // Monaco's addCommand only fires while the editor TEXT AREA has focus.
-    // After using the right-click context menu (Format Document / Format
-    // Selection…) focus can sit on the menu overlay or page body, in that
-    // state Monaco's binding doesn't fire AND QWebEngineView swallows the key
-    // before the PyQt menu QAction sees it, so Ctrl+S silently did nothing
-    // until the file was closed and reopened (which restored editor focus).
-    // This capture-phase handler saves no matter where focus is in the page.
+    // Monaco's addCommand only fires while the editor has focus; after a
+    // context-menu action focus sits elsewhere and QWebEngineView swallows
+    // the key. This capture-phase handler saves wherever focus is.
     document.addEventListener('keydown', function(e) {
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey &&
             (e.key === 's' || e.key === 'S')) {
@@ -2251,11 +2215,9 @@ if (typeof require !== 'undefined') {
     MONACO_LOAD_TIME = Date.now();
     clearTimeout(_monacoLoadTimeout);
     _monacoRetryCount = 0;  // reset retry counter on success
-    // NOTE: Do NOT remove 'hidden' from editor-container here.
-    // Only show it when a file is actually opened (setEditorContent / switchToFile).
-    // Showing it on Monaco init causes the editor gutter (line "1" + cursor) to
-    // bleed through below the welcome logo when no file is open.
-    // Flush diagnostics once warmup ends, ensures markers appear without user action
+    // NOTE: Do NOT remove 'hidden' from editor-container here; only show it
+    // when a file opens (setEditorContent / switchToFile), else the gutter
+    // bleeds below the welcome logo. Flush diagnostics once warmup ends.
     setTimeout(function() {
         // LSP removed
     }, STARTUP_WARMUP_MS);
