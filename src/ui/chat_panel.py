@@ -6534,13 +6534,32 @@ def _paint_invocation_chips(doc, text: str) -> bool:
     return found
 
 
+class _HorizontalWheel(QObject):
+    """A vertical wheel scrolls the attachment strip sideways."""
+
+    def __init__(self, area):
+        super().__init__(area)
+        self._area = area
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Wheel:
+            d = ev.angleDelta()
+            step = d.y() or d.x()
+            if step:
+                bar = self._area.horizontalScrollBar()
+                bar.setValue(bar.value() - step // 2)
+                return True
+        return False
+
+
 class _FileCard(QFrame):
     """An attached file above the chat input, like Claude's: name, type badge
     ("PDF", "PY"), size, and a remove button. The full path is the tooltip."""
     remove_clicked = pyqtSignal()
 
-    def __init__(self, info: dict, parent=None, removable: bool = True):
+    def __init__(self, info: dict, parent=None, removable: bool = True, warn: bool = False):
         super().__init__(parent)
+        self._warn = warn
         self.setObjectName("fileCard")
         self.setFixedSize(168, 64)
         self.setToolTip(f"{info.get('path', '')}\n{info.get('size_text', '')}")
@@ -6565,7 +6584,7 @@ class _FileCard(QFrame):
         if not removable:
             close.hide()   # a sent message's card cannot be removed
         v.addLayout(top, 1)
-        bottom = QHBoxLayout()
+        self._bottom = bottom = QHBoxLayout()
         bottom.setSpacing(6)
         self._tag = tag = QLabel(info.get("badge", "FILE"))
         bottom.addWidget(tag)
@@ -6591,13 +6610,23 @@ class _FileCard(QFrame):
                 f"QPushButton {{ background:transparent; color:{T['muted']}; border:none;"
                 f" font-size:14px; padding:0; }}"
                 f"QPushButton:hover {{ color:{T['red']}; }}")
-            self._tag.setStyleSheet(
-                f"QLabel {{ color:{T['btn_text']}; background:{T['btn_bg']};"
-                f" border:1px solid {T['separator']}; border-radius:4px;"
-                f" padding:0px 5px; font-size:10px; font-weight:600; }}")
+            if getattr(self, '_warn', False):
+                self._tag.setStyleSheet(
+                    f"QLabel {{ color:{T['red']}; background:transparent;"
+                    f" border:1px solid {T['red']}; border-radius:4px;"
+                    f" padding:0px 5px; font-size:10px; font-weight:700; }}")
+            else:
+                self._tag.setStyleSheet(
+                    f"QLabel {{ color:{T['btn_text']}; background:{T['btn_bg']};"
+                    f" border:1px solid {T['separator']}; border-radius:4px;"
+                    f" padding:0px 5px; font-size:10px; font-weight:600; }}")
             self._size.setStyleSheet(f"color:{T['muted']}; font-size:10px;")
         except RuntimeError:
             _swallow("restyle a file card")
+
+    def add_thumb(self, widget) -> None:
+        """A small preview before the badge (pasted images)."""
+        self._bottom.insertWidget(0, widget)
 
 
 class SpellCheckInput(QTextEdit):
@@ -6907,13 +6936,33 @@ class InputArea(QWidget):
         outer.setContentsMargins(12, 4, 12, 4)
         outer.setSpacing(4)
 
-        # ── Chip row (shows pasted file/image chips) ──
-        self._chip_row = QWidget()
-        self._chip_layout = QHBoxLayout(self._chip_row)
+        # ── Attachment strip: files, pasted text, images ──
+        # A horizontal scroll strip at card height: many attachments used to
+        # run off the right edge, cut off, with no way to reach them.
+        self._chip_row = QScrollArea()
+        self._chip_row.setObjectName("chipStrip")
+        self._chip_row.setWidgetResizable(True)
+        self._chip_row.setFrameShape(QFrame.Shape.NoFrame)
+        self._chip_row.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._chip_row.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._chip_row.setFixedHeight(64 + 2 + 8)   # card + border + thin scrollbar
+        self._chip_row.setStyleSheet(
+            "QScrollArea#chipStrip, QScrollArea#chipStrip > QWidget > QWidget"
+            " { background:transparent; border:none; }"
+            "QScrollArea#chipStrip QScrollBar:horizontal { height:6px; background:transparent; }"
+            "QScrollArea#chipStrip QScrollBar::handle:horizontal"
+            " { background:rgba(127,127,127,0.35); border-radius:3px; min-width:24px; }"
+            "QScrollArea#chipStrip QScrollBar::add-line, QScrollArea#chipStrip QScrollBar::sub-line"
+            " { width:0; }")
+        _strip = QWidget()
+        self._chip_layout = QHBoxLayout(_strip)
         self._chip_layout.setContentsMargins(4, 0, 4, 0)
         self._chip_layout.setSpacing(6)
-        # Fixed-size file cards line up from the left instead of spreading out.
-        self._chip_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        # Fixed-size cards line up from the left instead of spreading out.
+        self._chip_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._chip_row.setWidget(_strip)
+        self._chip_wheel = _HorizontalWheel(self._chip_row)
+        self._chip_row.viewport().installEventFilter(self._chip_wheel)
         self._chip_row.setVisible(False)
         outer.addWidget(self._chip_row)
 
@@ -9101,65 +9150,67 @@ class InputArea(QWidget):
         self._chip_widgets.append(chip_data)
         self._chip_layout.addWidget(card)
         self._chip_row.setVisible(True)
+        self._scroll_chips_to_end()
         log.info("[Attach] %s (%s, %s, inline=%s)", info.get("path"), info.get("kind"),
                  info.get("size_text"), info.get("inline"))
         return chip_data
 
     def _add_chip(self, text: str, chip_type: str = "code", payload: str | None = None):
-        """Add an orange chip label to the chip row above input. Each chip has a trash button.
+        """Add a card for pasted text, an image, a video or a warning.
 
         `text` is the LABEL the user sees ("Pasted ~31 lines"). `payload` is
         the real content that label stands for, and it is what gets sent.
         Treating the label as the content is what made pasted blocks reach
-        the model as the literal words "Pasted ~31 lines".
+        the model as the literal words "Pasted ~31 lines". Every kind uses
+        the file card, so the row reads as one set of attachments.
 
         Returns the chip's data dict so the caller can update it later.
         """
-        chip_frame = QWidget()
-        chip_h = QHBoxLayout(chip_frame)
-        chip_h.setContentsMargins(0, 0, 0, 0)
-        chip_h.setSpacing(2)
-
-        chip_lbl = QLabel(text)
-        chip_lbl.setStyleSheet(
-            f"color:{T['orange']}; font-size:12px; font-weight:500; "
-            f"background:rgba(255,140,0,0.1); padding:3px 6px 3px 8px; "
-            f"border-radius:4px 0 0 4px;"
-        )
-        chip_h.addWidget(chip_lbl)
-
-        trash_btn = QPushButton("\U0001F5D1")
-        trash_btn.setFixedSize(22, 22)
-        trash_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        trash_btn.setStyleSheet(
-            f"QPushButton {{ background:rgba(255,140,0,0.15); color:{T['orange']}; border:none; "
-            f"font-size:12px; border-radius:0 4px 4px 0; padding:0; }}"
-            f"QPushButton:hover {{ background:rgba(248,81,73,0.2); color:{T['red']}; }}"
-        )
-        chip_h.addWidget(trash_btn)
+        warn = text.startswith("\u26a0")
+        name = text.lstrip("\u26a0").strip()
+        if warn:
+            info = {"name": name, "badge": "!", "size_text": "not attached", "path": name}
+        elif chip_type == "code":
+            info = {"name": "Pasted text", "badge": "TEXT",
+                    "size_text": text.replace("Pasted ", "", 1), "path": ""}
+        elif text.startswith("Video"):
+            info = {"name": name, "badge": "VID", "size_text": "", "path": name}
+        elif chip_type == "image":
+            info = {"name": name, "badge": "IMG", "size_text": "", "path": name}
+        else:
+            info = {"name": name, "badge": "NOTE", "size_text": "", "path": name}
+        card = _FileCard(info, warn=warn)
+        if chip_type == "code" and payload:
+            card.setToolTip(payload[:800] + ("\n…" if len(payload) > 800 else ""))
 
         chip_data = {"type": chip_type, "text": text, "payload": payload,
-                     "label": chip_lbl, "file": "", "lines": None,
-                     "widget": chip_frame}
-        if chip_type == "image":
+                     "label": card._name, "file": "", "lines": None,
+                     "widget": card}
+        if chip_type == "image" and not warn and not text.startswith("Video"):
             chip_data["index"] = self._image_count
             # Every paste path adds the image before its chip, so it is last.
             pasted = self._pasted_images[-1:] or [{}]
             path = save_pasted(pasted[0].get("data"))
             if path:
-                chip_h.insertWidget(0, ChatImageCard(path, box=QSize(56, 36), compact=True))
-        trash_btn.clicked.connect(lambda: self._remove_chip(chip_data))
+                card.add_thumb(ChatImageCard(path, box=QSize(40, 22), compact=True))
+        card.remove_clicked.connect(lambda: self._remove_chip(chip_data))
 
         self._chip_widgets.append(chip_data)
-        self._chip_layout.addWidget(chip_frame)
+        self._chip_layout.addWidget(card)
         self._chip_row.setVisible(True)
+        self._scroll_chips_to_end()
         return chip_data
+
+    def _scroll_chips_to_end(self) -> None:
+        """Show the card just added; it may be past the right edge."""
+        bar = self._chip_row.horizontalScrollBar()
+        QTimer.singleShot(0, lambda: bar.setValue(bar.maximum()))
 
     def _remove_chip(self, chip_data):
         """Remove a single chip."""
         # Remove from data lists
-        if chip_data["type"] == "image":
-            idx = chip_data.get("index", 0)
+        if chip_data["type"] == "image" and "index" in chip_data:
+            idx = chip_data["index"]
             self._pasted_images = [img for img in self._pasted_images if img["index"] != idx]
         # A code chip owns its content, so dropping it drops only that paste; the old
         # shared paste state was nulled and threw away every other block.
