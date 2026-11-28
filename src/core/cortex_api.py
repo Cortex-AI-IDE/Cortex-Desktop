@@ -676,20 +676,9 @@ class CortexAPIClient:
                    tools: list = None, ocr_pages: int = 0) -> Optional[Dict]:
         """Send a chat request through the server proxy (included models only).
 
-        Used for DeepSeek, MiMo, models that use Cortex subscription credits.
-        BYOK models (OpenAI, Qwen, etc.) should be called directly from the IDE.
-
-        Args:
-            model: Model ID (e.g. "deepseek-v4-pro-promo")
-            messages: Chat messages array
-            license_key: User's subscription license key
-            temperature: Sampling temperature
-            max_tokens: Max output tokens
-            tools: Tool definitions for function calling
-            ocr_pages: Number of OCR pages to process
-
-        Returns:
-            Response dict with choices, usage, and billing info, or None on error.
+        For DeepSeek/MiMo and other models on Cortex subscription credits; BYOK
+        models (OpenAI, Qwen, ...) are called directly from the IDE. Returns
+        the response dict with choices/usage/billing, or None on error.
         """
         payload = {
             "license_key": license_key,

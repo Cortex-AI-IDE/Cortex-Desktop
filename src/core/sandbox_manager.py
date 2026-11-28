@@ -164,26 +164,11 @@ class SandboxManager:
         return True, None
 
     def execute(self, command: str, cwd: Optional[str] = None, timeout: Optional[float] = None) -> SandboxResult:
-        """
-        Execute a command inside the sandbox.
+        """Run a command in the sandbox and return its SandboxResult.
 
-        The execution strategy depends on the backend:
-        - Docker: run in a container
-        - Restricted subprocess: run in a temp workspace
-        - Passthrough: run as-is with no isolation
-
-        Parameters
-        ----------
-        command : str
-            The shell command to execute.
-        cwd : str, optional
-            Working directory. Defaults to project root or sandbox workspace.
-        timeout : float, optional
-            Maximum execution time in seconds. Defaults to config timeout.
-
-        Returns
-        -------
-        SandboxResult
+        Strategy follows the backend: Docker in a container, restricted
+        subprocess in a temp workspace, passthrough with no isolation. cwd and
+        timeout default to the project root and the configured timeout.
         """
         if not self._config.enabled:
             # Passthrough mode, no sandboxing

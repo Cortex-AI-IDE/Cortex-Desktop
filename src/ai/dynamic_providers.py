@@ -1,35 +1,14 @@
 """
-dynamic_providers.py — providers defined on the server, driven by one generic class.
+dynamic_providers.py - server-defined providers, driven by one generic class.
 
-Why this exists
----------------
-Every provider used to need its own ``*_provider.py`` and a desktop release.
-Almost all of them (NVIDIA NIM, Groq-style gateways, a user's own vLLM /
-Ollama / LM Studio box) speak the same OpenAI chat-completions format, so
-what actually differs is data: base URL, auth header, model ids and limits.
-The server (``/api/v1/providers/sync/``) publishes that data; this module
-caches it; ``providers/dynamic_provider.py`` turns one entry into a live
-provider.
+Almost every provider speaks the OpenAI chat-completions format, so what differs
+is data: base URL, auth header, model ids and limits. The server publishes it,
+this module caches it, and providers/dynamic_provider.py turns one entry into a
+live provider. scope is "global" (admin) or "private" (the user's own).
 
-Two kinds of provider arrive here
----------------------------------
-* ``scope == "global"``  published by the Cortex admin, same for every user.
-* ``scope == "private"`` the signed-in user's own, synced across their devices.
-
-Keys never leave this machine. Each provider's key lives in KeyManager under
-``dyn_<slug>``. When a user adds a private provider, the IDE lists its
-models locally with that key and sends only the model ids to the server.
-
-Model ids
----------
-``dp/<slug>/<upstream id>``, e.g. ``dp/nvidia/meta/llama-3.3-70b-instruct``.
-Routing checks ``dp/`` before the generic "slash means OpenRouter" rule.
-
-Design rules (same as remote_models.py)
----------------------------------------
-1. Never depend on the network: the on-disk cache keeps working offline.
-2. Never block the GUI thread: fetches run on a daemon thread.
-3. A malformed entry is skipped, never allowed to break the dropdown.
+Keys never leave this machine: each lives in KeyManager under dyn_<slug>, and
+only model ids reach the server. Model ids are dp/<slug>/<upstream id>, checked
+before the "slash means OpenRouter" rule. The cache works offline.
 """
 from __future__ import annotations
 

@@ -1,24 +1,16 @@
 """Unified-diff rows for the editor's read-only diff view.
 
-Why this is not just ``difflib.unified_diff``: opening a diff from a chat card
-runs on the GUI thread, and for this repo's own files that cost 0.8-2.3 s
-(measured 2026-10-22: ``agent_bridge.py`` 17.7k lines, 1.93 s in
-``SequenceMatcher(autojunk=False)`` alone). ``autojunk=False`` disables the
-popular-line heuristic, so every blank line in the old text is compared with
-every blank line in the new one: quadratic in the number of blank lines, which
-large Python files have thousands of.
+Not just difflib.unified_diff: opening a diff from a chat card runs on the GUI
+thread and cost 0.8-2.3 s for this repo's own files (measured 2026-10-22,
+agent_bridge.py 17.7k lines, 1.93 s in SequenceMatcher(autojunk=False) alone),
+because autojunk=False compares every blank line with every other, which is
+quadratic in blank lines.
 
-So the diff runs in two stages:
-
-1. a coarse ``SequenceMatcher`` pass that keeps ``autojunk`` on (fast, but it
-   may treat a repeated blank line as junk and so cannot be trusted to place
-   ambiguous lines), then
-2. an exact ``autojunk=False`` re-diff of each gap the coarse pass left open.
-
-Gaps are small - they are the changed regions - so the exact stage is cheap,
-and a gap too large to be worth refining is left coarse rather than allowed to
-block the GUI. Rows are memoised on the two texts, so re-opening the same diff
-costs a hash.
+So the diff runs in two stages: a coarse pass with autojunk on, then an exact
+autojunk=False re-diff of each gap the coarse pass left open. Gaps are the
+changed regions, so the exact stage is cheap, and a gap too large to refine is
+left coarse rather than allowed to block the GUI. Rows are memoised on the two
+texts, so re-opening the same diff costs a hash.
 """
 
 from __future__ import annotations

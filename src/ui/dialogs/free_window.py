@@ -1,17 +1,10 @@
 """Show a full-page dialog (Settings, Project Health) as a free window.
 
-Both pages were opened with ``QDialog.exec()``, which makes them modal. GNOME
-(Mutter's ``attach-modal-dialogs``, on by default in Ubuntu) glues a modal
-dialog to its parent's title bar: it cannot be dragged on its own, travels
-with the IDE window when that moves, and resizing it fights the parent. On a
-small screen the 980x720 and 1020x700 minimums made it worse, since the page
-could not even be shrunk to fit.
-
-Shown non-modal instead, the page is an ordinary window: drag it anywhere,
-resize it from any edge, minimize or maximize it, and keep the IDE usable
-beside it. It keeps its parent, so it stays above the IDE and closes with it.
-
-Usage::
+QDialog.exec() made these modal, and GNOME (Mutter's attach-modal-dialogs)
+glues a modal dialog to its parent's title bar: not draggable, travels with the
+IDE, resizing fights the parent, and the 980x720 minimum could not be shrunk.
+Shown non-modal the page is an ordinary window. It keeps its parent, so it
+stays above the IDE and closes with it.
 
     from src.ui.dialogs.free_window import show_free
     show_free(dlg, parent=self)

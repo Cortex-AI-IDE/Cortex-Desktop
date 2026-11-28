@@ -54,22 +54,7 @@ def isModelFamilyAlias(model: str) -> bool:
 
 
 def modelBelongsToFamily(model: str, family: str) -> bool:
-    """
-    Check if a model belongs to a given family by checking if its name
-    contains the family identifier (with flexible formatting).
-
-    Args:
-        model: Full model ID or alias (e.g. 'cortex-opus-4-6-20250514')
-        family: Family identifier (e.g. 'opus', 'gpt4o')
-
-    Returns:
-        True if model belongs to the family
-
-    Example:
-        modelBelongsToFamily('cortex-opus-4-6', 'opus') → True
-        modelBelongsToFamily('gpt-4o-mini', 'gpt4o') → True
-        modelBelongsToFamily('cortex-sonnet-4-0', 'opus') → False
-    """
+    """True if the model name contains the family identifier (format-tolerant)."""
     normalizedModel = model.lower()
     normalizedFamily = family.lower()
 
@@ -118,21 +103,10 @@ def prefixMatchesModel(modelName: str, prefix: str) -> bool:
 
 
 def modelMatchesVersionPrefix(model: str, entry: str) -> bool:
-    """
-    Check if a model matches a version-prefix entry in the allowlist.
-    Supports shorthand like "opus-4-5" (mapped to "cortex-opus-4-5") and
-    full prefixes like "cortex-opus-4-5".
+    """True if the model matches a version-prefix allowlist entry.
 
-    Args:
-        model: Model ID to check
-        entry: Allowlist entry (e.g. 'opus-4-5' or 'cortex-opus-4-5')
-
-    Returns:
-        True if model matches the version prefix
-
-    Example:
-        modelMatchesVersionPrefix('cortex-opus-4-5-20251101', 'opus-4-5') → True
-        modelMatchesVersionPrefix('cortex-opus-4-5-20251101', 'cortex-opus-4-5') → True
+    Supports shorthand ("opus-4-5", mapped to "cortex-opus-4-5") and full
+    prefixes ("cortex-opus-4-5").
     """
     normalizedModel = model.lower()
 
@@ -150,22 +124,10 @@ def modelMatchesVersionPrefix(model: str, entry: str) -> bool:
 
 
 def familyHasSpecificEntries(family: str, allowlist: List[str]) -> bool:
-    """
-    Check if a family alias is narrowed by more specific entries in the allowlist.
-    When the allowlist contains both "opus" and "opus-4-5", the specific entry
-    takes precedence — "opus" alone would be a wildcard, but "opus-4-5" narrows
-    it to only that version.
+    """True when the allowlist narrows a family alias with a specific entry.
 
-    Args:
-        family: Family alias (e.g. 'opus')
-        allowlist: List of allowed models/aliases
-
-    Returns:
-        True if specific version entries exist for this family
-
-    Example:
-        familyHasSpecificEntries('opus', ['opus', 'opus-4-5']) → True
-        familyHasSpecificEntries('opus', ['opus']) → False
+    With both "opus" and "opus-4-5", the specific entry wins: "opus" alone
+    would be a wildcard, but "opus-4-5" narrows it to that version.
     """
     normalizedFamily = family.lower()
 
@@ -198,26 +160,18 @@ def isModelAllowed(
     Check if a model is allowed by the availableModels allowlist.
     If availableModels is not set, all models are allowed.
 
-    Matching tiers:
-      1. Family aliases ("opus", "sonnet", "haiku") — wildcard for entire family,
-         UNLESS more specific entries also exist (e.g., "opus-4-5").
-      2. Version prefixes ("opus-4-5", "cortex-opus-4-5") — any build of that version
-      3. Full model IDs ("cortex-opus-4-5-20251101") — exact match only
+    Matching tiers: family aliases ("opus", "sonnet", "haiku") are a wildcard
+    for the whole family unless more specific entries exist; version prefixes
+    ("opus-4-5") match any build of that version; full model IDs match exactly.
 
     Args:
-        model: Model ID or alias to check
-        availableModels: List of allowed models/aliases (None = all allowed)
+        model: Model ID or alias to check.
+        availableModels: List of allowed models/aliases (None = all allowed).
 
     Returns:
-        True if model is allowed
-
-    Examples:
-        isModelAllowed('cortex-opus-4-6', ['opus']) → True (family wildcard)
-        isModelAllowed('cortex-opus-3-5', ['opus', 'opus-4-5']) → False (narrowed)
-        isModelAllowed('gpt-4o', ['gpt-4o', 'cortex-sonnet']) → True
-        isModelAllowed('cortex-sonnet-4', None) → True (no restrictions)
+        True if model is allowed.
     """
-    # No restrictions — all models allowed
+    # No restrictions - all models allowed
     if availableModels is None:
         return True
 
@@ -265,22 +219,7 @@ def getAllowedModelsFromConfig(
     availableModels: Optional[List[str]] = None,
     allAvailableModels: Optional[List[str]] = None,
 ) -> List[str]:
-    """
-    Get list of all model IDs that match the allowlist.
-
-    Args:
-        availableModels: Allowlist from settings
-        allAvailableModels: Complete list of all possible model IDs
-
-    Returns:
-        List of allowed model IDs
-
-    Example:
-        getAllowedModelsFromConfig(
-            ['opus'],
-            ['cortex-opus-4-6', 'cortex-sonnet-4-0', 'gpt-4o']
-        ) → ['cortex-opus-4-6']
-    """
+    """Model IDs from allAvailableModels that the allowlist matches."""
     if availableModels is None:
         return allAvailableModels or []
 
@@ -294,24 +233,7 @@ def getAllowedModelsFromConfig(
 
 
 def validateAllowlist(allowlist: List[str]) -> dict:
-    """
-    Validate an allowlist configuration and return stats.
-
-    Args:
-        allowlist: List of allowed models/aliases
-
-    Returns:
-        Dict with validation info
-
-    Example:
-        validateAllowlist(['opus', 'gpt-4o', 'gemini-2.0-flash'])
-        → {
-            'valid': True,
-            'families': ['opus'],
-            'specific': ['gpt-4o', 'gemini-2.0-flash'],
-            'count': 3
-          }
-    """
+    """Validate an allowlist and return {'valid', 'families', 'specific', 'count'}."""
     families = []
     specific = []
 

@@ -1,49 +1,12 @@
-"""
-Per-project code health scanner (EXPERIMENTAL).
+"""Per-project code health scanner.
 
-Builds a health map of the currently opened project: every source file and
-its symbols become graph nodes, intra-project imports become edges, and each
-node is classified BROKEN / WARNING / AFFECTED / NEW / HEALTHY.
-
-Design notes
-------------
-* Per-project isolation: the cache lives at ``<project>/.cortex/health_map.json``,
-  the same directory the semantic index and memory already use. Switching
-  projects therefore switches maps for free - there is no shared global state.
-
-* BOM safety (important): reading a source file with ``encoding="utf-8"`` and
-  handing it to ``ast.parse`` raises
-  ``SyntaxError: invalid non-printable character U+FEFF`` for every file that
-  carries a UTF-8 byte-order mark. On the Cortex repo itself that is 54 files,
-  i.e. a completely healthy project would report 54 BROKEN nodes. All reads
-  here go through ``utf-8-sig``, which strips the BOM if present and behaves
-  identically if it is not.
-
-* Signal over noise: an unresolved intra-project import is only reported when
-  the import is NOT wrapped in ``try/except``. This codebase deliberately uses
-  guarded optional imports (``try: from x import y / except ImportError: ...``),
-  and flagging those would bury the real problems.
-
-* Reuse: symbol extraction delegates to ``SymbolExtractor`` from
-  ``codebase_index`` rather than reimplementing the AST visitor. The parse step
-  is owned here on purpose - ``CodebaseIndex._index_file`` swallows SyntaxError
-  and returns False, which discards exactly the detail this feature exists to
-  surface.
-
-* Scope: deep analysis covers Python (AST), JSON, HTML (tag balance), YAML,
-  TOML and CSS (brace/comment balance) - all with stdlib or already-declared
-  dependencies. JavaScript, TypeScript and Markdown are counted and listed but
-  not parsed; there is no stdlib JS parser, and shelling out to ``node`` would
-  make the health map differ between machines. The payload says so explicitly
-  in ``notes`` rather than implying coverage it does not have.
-
-* Severity rule: BROKEN means the file cannot be parsed by its own grammar at
-  all (Python SyntaxError, invalid JSON/YAML/TOML). WARNING means it parses but
-  is structurally defective (unresolved import, unclosed HTML tag, unbalanced
-  CSS brace). Keeping that line consistent is what stops the map crying wolf.
-
-This module is imported lazily and gated behind ``CORTEX_HEALTH_MAP`` so that
-setting ``CORTEX_HEALTH_MAP=0`` removes the feature entirely at runtime.
+Every source file and its symbols become graph nodes, intra-project imports
+become edges, and each node is BROKEN / WARNING / AFFECTED / NEW / HEALTHY. The
+map lives at <project>/.cortex/health_map.json, so switching projects switches
+maps. BOM trap: reads use utf-8-sig, because utf-8 makes ast.parse raise on
+every file with a byte-order mark (54 in this repo). Parsing is owned here, not
+delegated to CodebaseIndex._index_file, which swallows SyntaxError and discards
+the detail this feature exists to surface. Loaded lazily behind CORTEX_HEALTH_MAP.
 """
 
 from __future__ import annotations
@@ -407,8 +370,7 @@ def _base_simple_name(node: ast.expr) -> str:
 
     ``NodeVisitor`` -> ``NodeVisitor``, ``ast.NodeVisitor`` -> ``NodeVisitor``,
     ``Generic[T]`` -> ``Generic``, ``metaclass(...)`` -> the called name.
-    Returns ``""`` for anything unrecognised (star-args, literals), which the
-    caller drops.
+    Returns ``""`` for anything unrecognised.
     """
     while True:
         if isinstance(node, ast.Name):
@@ -427,11 +389,9 @@ def _base_simple_name(node: ast.expr) -> str:
 class _HTMLTagBalance(HTMLParser):
     """Track HTML tag nesting so unclosed/mismatched tags can be reported.
 
-    ``HTMLParser`` is deliberately forgiving and never rejects malformed
-    markup - it tokenises and moves on. Balance therefore has to be tracked
-    explicitly. ``script``/``style`` bodies need no special handling: the
-    stdlib parser already switches to CDATA mode for them, so their contents
-    are never mistaken for tags.
+    HTMLParser is deliberately forgiving and never rejects malformed markup, so
+    balance has to be tracked explicitly. script/style bodies need no special
+    handling: the stdlib parser already switches to CDATA mode for them.
     """
 
     def __init__(self) -> None:
@@ -568,12 +528,10 @@ def _collect_imports(
 ) -> List[Tuple[str, int, bool]]:
     """Return [(dotted_name, lineno, is_guarded)] for every import in the tree.
 
-    Relative imports are resolved against ``package`` - the package of the
-    importing module - exactly as Python does, so ``from ..base import T`` in
-    ``pkg/sub/use.py`` becomes ``pkg.base``. They used to be dropped outright,
-    which silently emptied the import graph for every relatively-imported
-    module: no edge was drawn, so the module looked imported by nothing, and a
-    broken relative import could never be reported.
+    Relative imports are resolved against ``package`` exactly as Python does, so
+    ``from ..base import T`` in ``pkg/sub/use.py`` becomes ``pkg.base``. They
+    used to be dropped, which silently emptied the import graph for every
+    relatively-imported module.
     """
     out: List[Tuple[str, int, bool]] = []
     pkg_parts = package.split(".") if package else []
@@ -609,12 +567,10 @@ _MAX_STRING_MODULES_PER_FILE = 300
 def _collect_string_modules(tree: ast.AST) -> List[str]:
     """Return every string literal shaped like a dotted module path.
 
-    Providers and tools are loaded with ``importlib.import_module`` from
-    strings such as ``"src.ai.providers.deepseek_provider"``, so no import
-    statement names them and they looked imported by nothing. Shape alone
-    is not evidence (``"os.path"``, ``"editor.font_size"``), so these are
-    candidates: ``_resolve_edges`` keeps one only when it is exactly a
-    project module.
+    Providers and tools are loaded with ``importlib.import_module`` from strings
+    such as ``"src.ai.providers.deepseek_provider"``, so no import statement
+    names them. Shape alone is not evidence, so these are candidates: an edge is
+    kept only when one is exactly a project module.
     """
     out: List[str] = []
     seen: Set[str] = set()
@@ -637,14 +593,9 @@ _QUOTED_RE = re.compile(r"""['"]([^'"\n]+)['"]""")
 def _dynamic_prefix(node: ast.expr) -> str:
     """Literal head of a name this code builds at runtime, or ``""``.
 
-    Only shapes that append a runtime suffix qualify:
-
-    * ``f"on_{event}"`` -> ``"on_"`` (leading literal part of the joined string)
-    * ``"on_" + event`` -> ``"on_"`` (literal left side of the concatenation)
-
-    A plain constant (``getattr(o, "on_file_open")``) returns ``""``: that name
-    is already visible to the token census, so treating it as a prefix would
-    exempt every method sharing its opening characters for no reason.
+    Only shapes that append a runtime suffix qualify: ``f"on_{event}"`` and
+    ``"on_" + event`` both yield ``"on_"``. A plain constant returns ``""`` so
+    it is not exempted as a prefix.
     """
     if isinstance(node, ast.JoinedStr):
         head = ""
@@ -665,13 +616,10 @@ def _dynamic_prefix(node: ast.expr) -> str:
 def _collect_dispatch_prefixes(tree: ast.AST) -> List[str]:
     """Name prefixes this module passes to ``getattr``/``hasattr``.
 
-    ``PluginManager.broadcast_event`` does
-    ``getattr(plugin, f"on_{event_name}")``, so ``Plugin.on_file_open`` is
-    invoked on every call and yet its name never appears at a call site. No
-    static count can see that, so the dead-code pass exempts methods starting
-    with a collected prefix. Prefixes shorter than
-    ``_MIN_DISPATCH_PREFIX`` characters are dropped: a one- or two-character
-    head (``f"{a}{b}"``) would exempt almost everything.
+    ``getattr(plugin, f"on_{event_name}")`` invokes a method whose name never
+    appears at a call site, so the dead-code pass exempts methods starting with
+    a collected prefix. Prefixes shorter than ``_MIN_DISPATCH_PREFIX`` are
+    dropped, since a one- or two-character head would exempt almost everything.
     """
     prefixes: Set[str] = set()
     for node in ast.walk(tree):
@@ -692,10 +640,8 @@ def _is_stub_body(node: ast.AST) -> bool:
     """True when a function body does nothing but declare a contract.
 
     A docstring followed by ``pass``, ``...`` or ``raise NotImplementedError``
-    says "implement this elsewhere" - it is overridden by a subclass or by
-    third-party plugin code, so removing it removes the contract rather than
-    dead weight. Any other statement means there is real behaviour and the
-    usual unused check applies.
+    says "implement this elsewhere" (a subclass or plugin overrides it), so
+    removing it removes the contract rather than dead weight.
     """
     body = list(getattr(node, "body", []))
     if not body:
@@ -745,11 +691,9 @@ def _collect_stub_methods(tree: ast.AST) -> List[str]:
 def _spec_path_refs(spec_text: str, py_rels: Set[str]) -> Set[str]:
     """Project ``.py`` files a PyInstaller spec names by path.
 
-    Runtime hooks and entry scripts are listed by path, never imported:
-    ``os.path.join(ROOT, 'src', 'utils', 'runtime_hook_certifi.py')``. On a
-    line naming a ``.py`` literal, the quoted segments ending at it are
-    joined and kept only when they spell an existing project file exactly,
-    so a bare filename shared by two modules matches neither.
+    Runtime hooks and entry scripts are listed by path, never imported. On a
+    line naming a ``.py`` literal, the quoted segments ending at it are joined
+    and kept only when they spell an existing project file exactly.
     """
     refs: Set[str] = set()
     for line in spec_text.splitlines():
@@ -772,13 +716,10 @@ def _spec_path_refs(spec_text: str, py_rels: Set[str]) -> Set[str]:
 def _collect_submodule_imports(tree: ast.AST, package: str = "") -> List[str]:
     """Return ``X.name`` for every ``from X import name``.
 
-    ``from pkg import helper`` and ``from . import a`` import *modules*, but
-    ``_collect_imports`` records only ``pkg``, so the edge landed on
-    ``pkg/__init__.py`` and ``helper.py`` looked imported by nothing. Whether a
-    name is a submodule or an attribute (``from pkg import CONST``) is unknown
-    here, so these are candidates: ``_resolve_edges`` draws an edge only when
-    one is exactly a project module, and the missing-import check never sees
-    them, so a guess that is really an attribute cannot become a warning.
+    ``from pkg import helper`` imports a *module*, but ``_collect_imports``
+    records only ``pkg``, so ``helper.py`` looked imported by nothing. Whether a
+    name is a submodule or an attribute is unknown here, so these are
+    candidates: an edge is drawn only when one is exactly a project module.
     """
     out: List[str] = []
     pkg_parts = package.split(".") if package else []
@@ -1142,12 +1083,10 @@ class ProjectHealthScanner:
     def _scan_css(self, fh: FileHealth, source: str) -> None:
         """Brace and comment balance for CSS/SCSS.
 
-        There is no stdlib CSS parser and a real one is out of scope, so this
-        checks only what actually breaks a stylesheet in practice: an unbalanced
-        ``{``/``}`` (which silently swallows every rule after it) and an
-        unterminated ``/* */`` comment. Quoted strings are skipped so that
-        ``content: "}"`` is not misread as a closing brace. Anything needing
-        real CSS grammar is intentionally not judged.
+        No stdlib CSS parser exists and a real one is out of scope, so this
+        checks only what breaks a stylesheet in practice: an unbalanced ``{``/``}``
+        and an unterminated ``/* */``. Quoted strings are skipped so
+        ``content: "}"`` is not misread as a closing brace.
         """
         fh.deep = True
         depth = 0
@@ -1321,12 +1260,9 @@ class ProjectHealthScanner:
     def _ancestor_roots(fh: "FileHealth") -> List[str]:
         """Dotted names of the packages enclosing ``fh``, innermost first.
 
-        A project that puts one of its own subdirectories on ``sys.path``
-        (this one adds ``src/agent/src``, see runtime_hook_agent_path.py)
-        imports from it as top level: ``from utils.tokens import x``. Such a
-        root is always an ancestor of the importing file, so these are the
-        candidate roots. ``fh.module`` is the package itself for an
-        ``__init__.py`` and the module otherwise.
+        A project that puts one of its own subdirectories on ``sys.path`` (this
+        one adds ``src/agent/src``) imports from it as top level, so such a root
+        is always an ancestor of the importing file. These are the candidates.
         """
         parts = fh.module.split(".") if fh.module else []
         if not fh.rel.endswith("__init__.py"):
@@ -1339,13 +1275,10 @@ class ProjectHealthScanner:
     ) -> Optional[str]:
         """Resolve an import that missed from the project root against ``roots``.
 
-        Only names of two or more segments qualify. A single segment is where
-        a stdlib name meets a project file of the same name - ``import types``
-        next to ``utils/memory/types.py`` - and Python 3 never resolves that
-        to the sibling, so matching it would invent an edge. Two segments
-        (``utils.tokens``) name a package and a module inside it, which a
-        stdlib collision essentially never does. The nearest root wins, as
-        it would on a ``sys.path`` searched innermost-first.
+        Only names of two or more segments qualify: a single segment is where a
+        stdlib name meets a project file of the same name (``import types`` next
+        to ``utils/memory/types.py``), which Python 3 never resolves to the
+        sibling. The nearest root wins, as on a ``sys.path``.
         """
         parts = dotted.split(".")
         if len(parts) < 2:
@@ -1375,22 +1308,12 @@ class ProjectHealthScanner:
 
     @staticmethod
     def _known_prefixes(modules: Dict[str, str]) -> Set[str]:
-        """Every dotted prefix of every known module name.
+        """Every dotted prefix of every known module (a.b.c -> a, a.b, a.b.c).
 
-        ``a.b.c`` contributes ``a``, ``a.b`` and ``a.b.c``.
-
-        This is deliberately NOT the same question ``_resolve_module`` answers.
-        ``_resolve_module`` walks prefixes longest-first to find *which file* an
-        import points at, so ``from pkg.gone import thing`` happily resolves to
-        ``pkg/__init__.py`` - correct for drawing an edge, but it hides a
-        genuinely missing submodule. Deciding whether an import is *broken*
-        needs the stricter test: the dotted name must itself be a module, or a
-        package that contains one.
-
-        Prefix membership (rather than exact membership) is what keeps implicit
-        namespace packages working: a directory ``pkg/gone/`` holding modules
-        but no ``__init__.py`` is never itself a known module, yet
-        ``from pkg.gone import thing`` is perfectly valid Python.
+        Stricter than _resolve_module, which walks prefixes longest-first and so
+        hides a missing submodule: deciding if an import is BROKEN needs the
+        dotted name to be a real module. Prefix (not exact) membership keeps
+        implicit namespace packages working.
         """
         prefixes: Set[str] = set()
         for mod in modules:
@@ -1435,45 +1358,10 @@ class ProjectHealthScanner:
     def _analyze_dead_code(self) -> Dict[str, Any]:
         """Find orphan files and never-referenced functions/classes/variables.
 
-        Heuristic, zero-dependency, and deliberately conservative:
-
-        * **Usage census over ALL text.** Every scanned file (Python, JS,
-          HTML, CSS, JSON, YAML, Markdown, shell) plus build/config extras
-          (``.spec``, ``.cfg``, ``.ini``, ``.txt``) is tokenised with a plain
-          identifier regex over the RAW text, and occurrences are summed per
-          name across the whole project. This is what keeps Qt bridge slots
-          called from JavaScript, and modules named in ``cortex.spec`` or in
-          ``importlib.import_module("...")`` strings, from being reported
-          dead. A defined name is reported unused only when its total
-          occurrence count equals its number of definition sites.
-        * **Exemptions.** Test symbols (anything under ``tests/``, ``test_*``
-          functions, ``Test*`` classes, ``pytestmark``) are collected by
-          pytest, never called explicitly. Framework-contract methods
-          (``do_GET``, Qt event handlers, ``run``, unittest hooks - see
-          ``_FRAMEWORK_NAMES``) are invoked by the framework itself.
-          Dispatch-by-name methods are exempt too, but only inside classes
-          that actually derive from the dispatching base: ``visit_*`` in an
-          ``ast.NodeVisitor`` subclass, ``handle_*`` in an ``HTMLParser``
-          subclass - the framework looks the name up at runtime, so no call
-          site exists anywhere. File-object protocol methods (``seekable``,
-          ``writelines``, ...) are exempt when defined as methods, since the
-          consumer calls them through the protocol. Dunder names are
-          protocol, not user references. All of these are skipped.
-        * **Orphan files.** Python modules with no incoming import edge AND
-          whose filename stem is mentioned in no other file's text, minus
-          conventional entry points (``main.py``, ``conftest.py``, test files,
-          anything with an ``if __name__ == "__main__"`` guard, files under
-          ``tests/``/``scripts/``/``examples/`` etc.). The stem-mention rule
-          catches dynamic loading: providers registered as
-          ``"src.ai.providers.x_provider"`` strings, PyInstaller hooks named
-          in ``cortex.spec``, and nested source trees whose internal imports
-          do not resolve from the project root.
-        * Broken files are skipped: their symbol list is unreliable.
-
-        Remaining blind spots (documented in the payload note): names built
-        at runtime by string concatenation (``f"{name}_provider"`` where the
-        full stem appears nowhere) and ``from x import *`` can still hide
-        real usage.
+        Conservative: every scanned file plus build/config extras is tokenised
+        with an identifier regex over RAW text, so Qt slots called from JS and
+        modules named in a spec or import_module() string are not flagged. A
+        name counts unused only when its occurrences equal its definition sites.
         """
         py = [
             fh
@@ -1961,11 +1849,6 @@ class ProjectHealthScanner:
         Only dotted names whose first segment matches a top-level directory or
         module in this project are considered, so ``import numpy`` is never
         flagged. Guarded (try/except) imports are skipped by design.
-
-        Resolution here is strict (see ``_known_prefixes``): ``from pkg.gone
-        import thing`` is a WARNING when ``pkg`` exists but ``pkg.gone`` does
-        not, even though a longest-prefix match would have pointed the import at
-        ``pkg/__init__.py``.
         """
         out: List[Dict[str, Any]] = []
         if not self._files:

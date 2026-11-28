@@ -1,21 +1,12 @@
-"""Relaunching Cortex, one implementation, shared by every caller.
+"""Relaunching Cortex, shared by every caller. Carries two easy-to-lose fixes:
 
-This logic was written for the Settings theme switch and carries two fixes
-that are easy to lose if a second copy is ever written by hand:
-
-  1. Frozen build: sys.executable is Cortex.exe and there is NO main.py on
-     disk (it is bundled inside the exe). The original code ran
-     Popen([exe, "src/main.py"]), passing a nonexistent argument, so the
-     INSTALLED app never came back up. A frozen relaunch must be the exe
-     ALONE.
-
-  2. Single-instance mutex race: the outgoing process holds
-     "Global\\CortexAIAgentIDE_v1" for the ~4s it takes to flush memory and
-     the database on shutdown. A new instance started before that sees
-     ERROR_ALREADY_EXISTS, foregrounds the DYING window, and exits itself -
-     the restart silently cancels and the user is left with no app. The
-     relauncher therefore WAITS on this exact pid rather than guessing a
-     delay.
+1. Frozen build: sys.executable is Cortex.exe with no main.py on disk, so the
+   relaunch must be the exe ALONE. The old Popen([exe, "src/main.py"]) passed a
+   nonexistent argument and the installed app never came back up.
+2. Single-instance mutex race: the dying process holds the mutex for ~4s while
+   it flushes memory and the DB, so a new instance started too early
+   foregrounds the dying window and exits. The relauncher waits on the exact
+   pid instead of guessing a delay.
 """
 from __future__ import annotations
 

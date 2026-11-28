@@ -1,22 +1,14 @@
-"""
-test_integrity.py, §4.4 Test-Integrity Check (agent_loop addendum v1.1).
+"""Cheap, always-on, zero-LLM guard against the classic agent cheat.
 
-The classic agent cheat: make the suite green by deleting the failing test,
-weakening its assertions, or skipping it. The Verifier Gate (verifier.py)
-can't see this, passing tests still pass. Milestone 3's reviewer (§5.1)
-catches it too, but only after the suite is already green, which can be
-several iterations too late, and costs a full LLM call.
+Deleting or weakening the failing test to make the suite green. The verifier
+gate cannot see it (passing tests still pass) and the reviewer catches it only
+after the suite is green. This is git diff + regex, run in VERIFY before test
+results are interpreted, comparing the iteration's commit against the previous
+checkpoint. On violation the commit is reverted immediately.
 
-This is the cheap, always-on, zero-LLM first line of defense: git diff +
-regex, run in VERIFY before test results are even interpreted. It compares
-the iteration's commit against the previous checkpoint (or the loop's
-base_commit for iteration 1). On a violation, the commit is reverted
-immediately, the actor never even gets credit for the "green" result.
-
-Deliberately dumb on purpose (per the addendum): a plain regex count over
-two blobs will occasionally flag a legitimate refactor as "assertions
-weakened." That's the correct trade-off, a false positive costs one
-bounced iteration; a false negative costs a gutted test suite.
+Deliberately dumb: a regex count over two blobs occasionally flags a legitimate
+refactor as "assertions weakened". A false positive costs one bounced
+iteration; a false negative costs a gutted test suite.
 """
 
 from __future__ import annotations

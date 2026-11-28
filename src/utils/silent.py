@@ -1,39 +1,13 @@
 """One line of evidence for an exception that used to be swallowed.
 
-Extracted from ``src/main.py`` when ``src/main_window.py`` needed the same two
-helpers. It lives in ``src/utils`` rather than in an entry point because both
-files use it and a third will.
-
-**Import-time cost is deliberately zero.** ``main.py`` imports this before Qt
-exists and before the logger can open a file, so nothing here touches ``src``
-or PyQt6 at module level. The logger is resolved lazily on first use, and if
-that lookup fails the caller still gets an exception rather than a new one.
-
-Two helpers, because there are two genuinely different situations:
-
-``bootstrap_warn``
-    The logger does not exist yet. Appends to ``~/.cortex/logs/bootstrap.log``
-    using only ``os``, so it works during startup and inside a frozen build.
-
-``warn_once``
-    The logger exists, but the call site is in a timer or a per-item loop.
-    Reports the first occurrence only. An unguarded ``exc_info=True`` on a
-    broken call in a tight loop is what produced this project's tool-activity
-    freeze: thousands of log lines and a stalled GUI thread.
-
-``swallow``
-    The same rule as ``warn_once`` but the *key is derived, not typed*. It
-    reads its own call site off the stack, so the log line already contains
-    ``file:line in function`` and cannot drift from the code the way a
-    hand-written key does. This is what the 300-odd best-effort handlers in
-    ``chat_panel`` and ``agent_bridge`` use: when one of them starts failing
-    for real, the log says exactly which line, without anyone having to have
-    guessed the right words in advance.
-
-Both ``warn_once`` and ``swallow`` are designed to be called from inside an
-``except`` block whose whole job is to keep the app alive, so **neither may
-raise**. A failure inside the reporter must not become the failure being
-reported.
+Shared by main.py and main_window.py, with zero import-time cost on purpose:
+main.py imports this before Qt and before the logger can open a file, so
+nothing here touches src or PyQt6 at module level. bootstrap_warn appends to
+~/.cortex/logs/bootstrap.log using only os; warn_once reports a site once (an
+unguarded exc_info=True in a tight loop caused this project's tool-activity
+freeze); swallow keys off the stack, so its line carries file:line in function
+and cannot drift. None may raise: a failure in the reporter must not become the
+failure being reported.
 """
 
 from __future__ import annotations
@@ -119,32 +93,14 @@ def swallow(
     once: bool = True,
     logger: Optional[logging.Logger] = None,
 ) -> str:
-    """Report the exception currently being handled, naming its exact site.
+    """Report the exception being handled, naming its exact site.
 
-    Call with no arguments from any ``except`` block whose intent is "the app
-    keeps going". The log line carries ``file:line in function``, the exception
-    type and its message, so a handler that starts failing for real is
-    traceable without having predicted what would break.
+    Call with no args from an except block whose intent is "the app keeps
+    going". The line carries file:line in function plus the exception type and
+    message, so a handler that starts failing for real stays traceable.
 
-    Parameters
-    ----------
-    reason:
-        Optional short phrase for what was attempted, e.g.
-        ``"restyle after delete"``. Keep it to a few words: the location is
-        already in the line.
-    level:
-        ``DEBUG`` by default. A tolerated failure is not a warning; raise it
-        at the individual call site only when the consequence deserves it.
-    once:
-        Report the first occurrence per source line per process. This is what
-        keeps a broken handler inside a paint or streaming loop from flooding
-        the log, which is the failure mode ``warn_once`` exists to prevent.
-
-    Returns
-    -------
-    The formatted line that was logged, or ``""`` when already seen (or when
-    there was no active exception). Returning it keeps this testable without
-    reaching into the logger.
+    Returns the logged line, or "" when already seen (or no active exception);
+    returning it keeps this testable.
     """
     exc = sys.exc_info()[1]
     filename, lineno, func = _call_site(2)
@@ -177,22 +133,11 @@ def warn_once(
 ) -> str:
     """Log ``message`` once per ``key`` for the lifetime of the process.
 
-    Parameters
-    ----------
-    key:
-        Stable site name, e.g. ``"main_window.theme_push"``. Prefixing with the
-        module makes a log line traceable back to the file that produced it.
-    message:
-        What failed and what it cost the user. Read on its own, months later,
-        in a log file with no stack context around it.
-    level:
-        ``DEBUG`` for a call site whose failure is tolerated by design.
+    key: stable site name, e.g. "main_window.theme_push", so a log line is
+    traceable. message: what failed and what it cost the user, read months
+    later with no stack context. level: DEBUG for a tolerated failure.
 
-    Returns
-    -------
-    The formatted line that was logged, or ``""`` when the key was already
-    seen. Returning it keeps the function usable in a test without reaching
-    into the logger.
+    Returns the logged line, or "" when the key was already seen.
     """
     if key in _warned:
         return ""

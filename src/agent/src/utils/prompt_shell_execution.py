@@ -13,23 +13,10 @@ async def executeShellCommandsInPrompt(
     slashCommandName: str,
     shell: Optional[str] = None,
 ) -> str:
-    """
-    Execute inline shell commands in prompt content.
-    
-    Processes patterns like:
-    - !`command` - inline command execution
-    - ```! commands ``` - block command execution
-    
-    For security, MCP skills never execute shell commands (handled by caller).
-    
-    Args:
-        text: Markdown content potentially containing shell commands
-        context: Tool use context (unused in stub)
-        slashCommandName: Name of the slash command for logging
-        shell: Shell to use ('bash', 'powershell', etc.)
-        
-    Returns:
-        Content with shell commands executed and replaced with output
+    """Run inline shell commands in prompt content.
+
+    Handles !`command` and ```! blocks ```, replacing each with its output.
+    MCP skills never execute shell commands (the caller handles that).
     """
     import re
     import subprocess

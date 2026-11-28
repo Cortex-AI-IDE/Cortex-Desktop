@@ -1,18 +1,11 @@
 """The small "Update available" pill: what to offer on each platform.
 
-Every platform asks the same endpoint, /api/v1/version/check/, and the admin
-panel's Versions page decides what it says. Where the update comes from differs:
-
-    windows  the Microsoft Store. The server reports update_available=False on
-             purpose (an older client would try to download the Store page), so
-             the versions are compared here, and this only ever opens the Store.
-    linux    the download page on cortex-ide.app, once the server has the .deb
-             and .rpm for that version.
-    macos    nothing until the server publishes a macOS release ("0.0.0" until
-             then), and the same download page after that.
-
-Nothing here installs anything: a Store app that updates itself fails
-certification, and the Linux packages install from the website.
+Every platform asks /api/v1/version/check/; where the update comes from
+differs. Windows: the Microsoft Store (the server reports
+update_available=False on purpose so older clients do not download the Store
+page, so versions are compared here). Linux: the download page once the server
+has the .deb/.rpm. macOS: nothing until a release is published. Nothing here
+installs anything; a Store app that self-updates fails certification.
 """
 from __future__ import annotations
 

@@ -101,26 +101,11 @@ class ProblemEventData(EventData):
 class ComponentEventBus(QObject):
     """
     Central event hub for cross-component communication.
-    
+
     Usage:
-        # Get singleton instance
         event_bus = get_event_bus()
-        
-        # Subscribe to events
-        event_bus.subscribe(EventType.PROBLEMS_DETECTED, self.on_problems_detected)
-        
-        # Publish events
-        event_bus.publish(
-            EventType.PROBLEMS_DETECTED,
-            ProblemEventData(
-                source_component="problems_panel",
-                severity="error",
-                message="Syntax error detected",
-                file_path="/path/to/file.py",
-                line=42,
-                error_count=1
-            )
-        )
+        event_bus.subscribe(EventType.PROBLEMS_DETECTED, self.on_problems)
+        event_bus.publish(EventType.PROBLEMS_DETECTED, ProblemEventData(...))
     """
     
     # Generic event signal

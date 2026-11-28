@@ -1,27 +1,17 @@
 """Which Chrome the AI's browser tools use, and handing sign-ins to the user.
 
-Owner request, 2026-11-05: chrome-devtools-mcp launched its OWN Chrome, an
-empty profile started with automation switches, so Chrome showed "controlled
-by automated test software", none of the user's logins were there, and
-Cloudflare-style checks on dashboards refused it. The user wants the AI to
-work in their normal, signed-in Chrome, the way Claude in Chrome does.
+chrome-devtools-mcp used to launch its OWN Chrome, an empty profile with
+automation switches, so Chrome showed "controlled by automated test software",
+no logins were present, and Cloudflare-style checks refused it.
 
-Two parts:
+Mode ("own" / "separate", settings browser.ai_browser): in "own" mode the
+server starts with --autoConnect and attaches to the Chrome the user already
+runs (144+), after they enable remote debugging once at
+chrome://inspect/#remote-debugging. The user's mcp.json is never edited.
 
-* Mode ("own" / "separate", settings browser.ai_browser). In "own" mode
-  chrome-devtools-mcp is started with --autoConnect: it attaches to the
-  Chrome the user already runs (Chrome 144+), after the user turns on remote
-  debugging once at chrome://inspect/#remote-debugging. Nothing is launched,
-  no automation switches are set, and the user's profile and logins are
-  used. The user's mcp.json is never edited; an explicit connection option
-  in it (--browserUrl, --wsEndpoint, --userDataDir, ...) always wins.
-
-* Handover. When a browser tool lands on a sign-in page, a security check
-  (Cloudflare "Verify you are human") or a 2-step code, the agent stops and
-  a chat card asks the user to finish it in Chrome and press Continue. The
-  AI never types passwords or codes and never tries to get past a check.
-  This is not a way around bot detection: the person signs in, in their own
-  browser, and the AI carries on from there.
+Handover: when a browser tool hits a sign-in page or a security check, the
+agent stops and a chat card asks the user to finish it in Chrome. The AI never
+types passwords or codes and never tries to get past a check.
 """
 from __future__ import annotations
 

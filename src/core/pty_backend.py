@@ -1,25 +1,14 @@
 """One pseudo-terminal interface for every platform Cortex runs on.
 
-Windows gets a real terminal from pywinpty (ConPTY). macOS and Linux have one
-in the standard library, so this module exposes the same small surface for
-both and callers stop caring which platform they are on:
+Windows gets a real terminal from pywinpty (ConPTY); macOS and Linux have one
+in the standard library. Both branches expose the same small surface
+(spawn/read/write/isalive/pid/setwinsize/terminate), and only the Windows branch
+imports pywinpty, so importing this module is safe everywhere.
 
-    pty = PtyProcess.spawn(cmd, cwd=..., env=..., dimensions=(rows, cols))
-    pty.read(n)            -> str, raises EOFError when the shell is gone
-    pty.write("ls\\r")
-    pty.isalive()          -> bool
-    pty.pid
-    pty.setwinsize(rows, cols)
-    pty.terminate(force=False)
-
-Only the Windows branch imports pywinpty and only the POSIX branch imports
-pty/termios/fcntl, so importing this module is safe everywhere.
-
-Why this exists: `src/core/terminal_session.py` and
-`src/ui/components/xterm_terminal.py` both used `winpty.PtyProcess` directly
-and gated their whole PTY path on that import succeeding. On macOS the import
-fails, so the AI's shared shell never started and the visible terminal fell
-back to QProcess, which cannot run vim, less or a REPL.
+Why it exists: terminal_session.py and xterm_terminal.py both used
+winpty.PtyProcess directly and gated their PTY path on that import, so on macOS
+the AI's shared shell never started and the visible terminal fell back to
+QProcess, which cannot run vim, less or a REPL.
 """
 import errno
 import os

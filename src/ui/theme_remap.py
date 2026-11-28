@@ -1,26 +1,15 @@
 """Carry widget stylesheets across a live theme switch.
 
-Most widgets build their stylesheet once, from the theme tokens of the
-moment (f"color:{T['text']}; ..."), and keep that string. A live switch
-then leaves them in the old theme until Cortex restarts: the context bar,
-todo section, slash-command popup, live-preview bar, splitters, labels in
-dialogs that were open at the time, and so on (39 widgets in a fresh window
-on 2026-10-07, more with a longer chat).
+Most widgets build their stylesheet once from the theme tokens of the moment
+and keep that string, so a live switch leaves them in the old theme until
+restart (39 widgets in a fresh window on 2026-10-07). Instead of a retheme hook
+in each class, this walks every widget, finds the old theme's colours in its
+own stylesheet, and substitutes the new value for the same token.
 
-Instead of a retheme hook in every one of those classes, this pass walks
-every widget, finds the old theme's colours in its own stylesheet, and puts
-in the new theme's value for the same token.
-
-Only a stale widget is touched: one whose stylesheet holds at least one
-colour that exists in the old palettes and nowhere in the new ones. A widget
-that already themed itself can still contain colours the old palette also
-uses (the light menu popup is #ffffff, which is a dark-theme text token),
-and remapping those turned the File menu dark on the first try.
-
-One old colour can belong to several tokens that differ in the new theme
-(a grey that is both a border and muted text), so the choice looks at the
-property it sits in: `color:` prefers text tokens, `background:` surface
-tokens, `border:` border tokens. Ties go to the token most keys agree on.
+Only a stale widget is touched: one whose stylesheet holds a colour present in
+the old palettes and nowhere in the new ones. One old colour can map to several
+tokens, so the choice looks at the property it sits in: `color:` prefers text
+tokens, `background:` surface, `border:` border.
 """
 from __future__ import annotations
 

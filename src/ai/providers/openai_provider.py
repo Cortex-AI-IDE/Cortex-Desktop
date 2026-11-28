@@ -272,22 +272,14 @@ class OpenAIProvider(BaseProvider):
                     tools: Optional[List[Dict[str, Any]]] = None,
                     retry_callback: Any = None,
                     **kwargs: Any) -> Generator[str, None, None]:
-        """Stream chat completion, yields text, __REASONING_DELTA__: and __TOOL_CALL_DELTA__: chunks.
+        """Stream a chat completion, yielding text and __REASONING_DELTA__: /
+        __TOOL_CALL_DELTA__: chunks.
 
-        Now with retry logic matching DeepSeek reliability.
-        Transient errors (timeouts, rate limits, server errors) are
-        retried automatically; non-transient errors are yielded as
-        error text so the agent_bridge can react appropriately.
-
-        CRITICAL: Reasoning content (delta.reasoning_content) is routed to
-        __REASONING_DELTA__: chunks. The agent_bridge routes these to the
-        brain-icon thought card UI via tool_activity(type="thinking").
-        Without this, model thinking/reasoning would leak into the main
-        chat text or be completely lost. Matches DeepSeek pattern.
-
-        CRITICAL: Tool-call arguments are INCREMENTAL deltas from the
-        SDK. Each __TOOL_CALL_DELTA__ yield MUST contain ONLY the raw
-        per-delta arguments, NOT the full accumulated string.
+        Transient errors are retried; non-transient ones are yielded as error
+        text for agent_bridge to handle. Reasoning content goes to
+        __REASONING_DELTA__: so the bridge can route it to the thought card;
+        otherwise it leaks into chat text or is lost. Each __TOOL_CALL_DELTA__
+        carries ONLY the raw per-delta arguments, never the accumulated string.
         """
         # Accept max_retries from kwargs (set by agent_bridge when tools are active)
         _override_retries = int(kwargs.get("max_retries", self._max_retries))

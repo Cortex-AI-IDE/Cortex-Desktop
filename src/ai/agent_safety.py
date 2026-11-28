@@ -561,20 +561,14 @@ class AgentSafetyGuard:
     def register_tool_result(self, tool_name: str, args: Any, result: Any = None) -> None:
         """Register a SUCCESSFUL tool call. Called from the bridge funnel.
 
-        BUG history: this method existed but had NO caller. Consequences,
-        both measured in one evening's log (2026-07-29 23:0x-23:5x):
-        - searches were never registered, so check_search_before_edit
-          warned 'SEARCH REQUIRED' on every large-file edit even right
-          after the model ran the demanded Grep, 40 times;
-        - the agent's own Edit/Write bumped the file's mtime with the
-          read record never refreshed, so every follow-up edit warned
-          'STALE READ', 76 times. The model treats those as real errors
-          and reroutes file changes through throwaway shell/python
-          scripts (the exact anti-pattern the doom-loop fix targets).
-
+        Had no caller once, and the log (2026-07-29) showed the cost: searches
+        were never registered, so check_search_before_edit warned 'SEARCH
+        REQUIRED' 40 times even right after the demanded Grep; and the agent's
+        own Edit/Write bumped the file mtime with the read record unrefreshed,
+        so every follow-up edit warned 'STALE READ' 76 times. The model treats
+        those as real errors and reroutes edits through throwaway shell scripts.
         Reads are NOT registered here: the Read dispatcher calls
-        register_file_read directly with partial-read details this
-        funnel does not have, and re-registering would clobber them.
+        register_file_read with partial-read details this funnel lacks.
         """
         # P4: a successful Write/Edit is the freshest possible knowledge
         # of the file, the agent authored the current content. Refresh

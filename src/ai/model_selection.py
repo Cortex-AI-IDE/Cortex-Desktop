@@ -1,23 +1,14 @@
 """Single source of truth for "which model runs this turn".
 
-Cortex is fully BYOK: there is no Cortex-owned chat model. Every turn runs
-on whatever the user picked, and the only two questions this module answers
-are:
+Cortex is fully BYOK: there is no Cortex-owned chat model, so every turn runs on
+whatever the user picked. This module answers two questions: what did the user
+pick (ai.model_id, written by the chat and Models & Providers dropdowns), and
+what does "Auto" mean? Auto is not a model: it means the last concrete pick,
+stored in ai.last_model_id, falling back to DEFAULT_MODEL_ID on a fresh install.
 
-1. What did the user pick?  (``ai.model_id`` in settings, written by the
-   chat panel dropdown and by the Models & Providers dropdown.)
-2. What does "Auto" mean?   Auto is not a model and never was. It means
-   "the model the user last picked in either dropdown". That last concrete
-   pick is stored in ``ai.last_model_id``. A fresh install has no last pick,
-   so Auto falls back to :data:`DEFAULT_MODEL_ID`.
-
-Before this module existed the same decision was made in five places with
-five different answers (``gpt-5.4`` in two places,
-``deepseek-chat`` in the Auto handler, ``deepseek-v4-pro`` in the failover
-map, ``deepseek-v4-flash`` in the provider helper), and picking "Auto" in a
-dropdown overwrote the user's saved model with a hardcoded one. All call
-sites now resolve through :func:`resolve_model_id` and record picks through
-:func:`record_selection`.
+Before this module the decision was made in five places with five answers, and
+picking "Auto" overwrote the user's saved model with a hardcoded one. All call
+sites now resolve through resolve_model_id and record through record_selection.
 """
 
 from __future__ import annotations

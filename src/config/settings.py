@@ -381,30 +381,17 @@ class Settings:
         node[path[-1]] = value
 
     def _merged_with_disk(self) -> dict | None:
-        """What a save writes: this instance's touched leaves, over the file
-        as it is now. None when a save must not happen at all.
+        """What a save writes: this instance's touched leaves over the file
+        as it is now, or None when a save must not happen at all.
 
-        A save used to dump the whole in-memory tree, and every instance
-        carries the tree it loaded at startup. Two Cortexes at once (a dev
-        run next to the installed build, both on ~/.cortex) then play
-        last-writer-wins with whole files: whichever saves last reverts
-        every key the other changed since it started. That is how provider
-        toggles came back as the server defaults after a restart even
-        though every click had saved correctly - the click was fine, a
-        stale sibling overwrote it afterwards.
-
-        Leaves this instance never touched are therefore copied from the
-        current file; only leaves it did touch come from memory. Keys only
-        one side knows (new defaults, foreign keys from another version)
-        survive from whichever side has them.
-
-        When the live read is refused the merge falls back to the last copy
-        this instance read, so a refusal costs freshness at worst. If there
-        is no earlier copy AND a file is sitting there, None says "do not
-        write": dumping memory would delete the provider activation list,
-        the recents and the window geometry, none of which this instance has
-        ever seen. Returning None is deliberate - the caller turns it into
-        "stay dirty and retry", not into a failed save.
+        A save used to dump the whole in-memory tree, so two Cortexes on
+        ~/.cortex played last-writer-wins and whichever saved last reverted the
+        other's keys (how provider toggles came back as defaults). Untouched
+        leaves now copy from the current file. When the live read is refused the
+        merge falls back to the last copy this instance read; with no earlier
+        copy AND a file present, None says "do not write", since dumping memory
+        would delete the provider list, recents and window geometry. The caller
+        turns None into "stay dirty and retry", not a failed save.
         """
         base = json.loads(json.dumps(self._data))
         disk = self._read_disk()
@@ -499,29 +486,17 @@ class Settings:
         """Put payload on disk. None on success, else the error that stopped it.
 
         Two ways to write, and the second is tried inside the SAME attempt
-        because they are refused for different reasons:
-
-        * a sibling temp file renamed over settings.json. Crash safe, and it
-          never leaves half a file, so it is the first choice. But it has to
-          CREATE a file and then MOVE it, and on this machine the create is
-          the fragile half: the user's own console on 2026-10-13 shows the
-          create being refused, over and over, on every save -
-
-              [Settings] Could not save settings after 5 attempts: [Errno 13]
-              Permission denied: '...\\.cortex\\settings.json.tmp6728'
-
-          Note the name in that message: the TEMP, not settings.json. The
-          rename itself also needs FILE_SHARE_DELETE on the destination,
-          which a plain Python reader in the other Cortex does not grant.
-
-        * a plain truncating write to settings.json. Needs neither a new file
-          nor a rename, and was measured to succeed on the same machine at
-          the moment the atomic path was refused.
+        because they fail for different reasons. A sibling temp file renamed
+        over settings.json is crash safe and leaves no half file, but it must
+        CREATE a file and then MOVE it, and the create is the fragile half:
+        the console shows the temp being refused with Errno 13 on every save,
+        while the rename also needs FILE_SHARE_DELETE on the destination. A
+        plain truncating write needs neither, and was measured to succeed at
+        the moment the atomic path was refused.
 
         The fallback used to hang off the rename alone, so a refused temp
-        ended the save before the fallback was ever reached - and the change
-        was lost even though the direct write would have worked. That is the
-        bug behind "my provider toggles come back as MiMo + DeepSeek".
+        ended the save before the fallback was reached and the change was lost
+        even though the direct write would have worked.
         """
         atomic_error = None
         try:

@@ -1,42 +1,18 @@
 """Persistent shell sessions shared by the AI and the Terminal panel.
 
-The shell is PowerShell in a ConPTY on Windows, and bash on Linux / zsh on
-macOS in a POSIX pseudo-terminal; `src/core/pty_backend.py` hides the
-difference. The integration script differs per platform, the protocol does not.
+PowerShell in a ConPTY on Windows, bash/zsh in a POSIX pty elsewhere
+(pty_backend.py hides the difference). The Bash tool used to start a fresh
+non-interactive powershell per call with no stdin, so state was lost and
+anything prompting for input (ssh, y/n, password) hung until timeout; it now
+types into a real ConPTY shell shown as a "Cortex AI" tab.
 
-The AI's Bash tool used to start a fresh `powershell -NonInteractive -Command`
-for every call, with no stdin. Nothing carried over between calls (`cd`,
-variables, `$env:` changes, an activated venv), and anything that asked for
-input (ssh, a y/n question, a password) hung until the timeout. Now the AI
-types into a real ConPTY shell that is shown as a "Cortex AI" terminal tab,
-where the user can watch and type too.
-
-How the end of a command and its exit code are known: the shell starts with a
-small integration script (the same approach as terminal shell integration, OSC 633):
-
-    ESC ] 633 ; C BEL             command accepted, its output starts
-    ESC ] 633 ; D ; <code> BEL    command finished (written by the prompt)
-    ESC ] 633 ; P ; Cwd=<dir> BEL current directory (written by the prompt)
-
-xterm.js ignores these sequences; this module parses them.
-
-Handing over to the user: while an AI command runs, a quiet last line that
-looks like a prompt (password, yes/no, "press any key", ...) raises
-`on_input_needed`. For a password or a question the command's clock stops
-until the user answers, and the AI cannot type into the session.
-
-Background commands (servers, watchers): `run(background=True)` returns after
-a short startup window and leaves the command running in its tab; the next AI
-command gets another session. `read_background` / `kill_background` follow it.
-
-SSH: `ssh user@host` with no remote command leaves the session inside a remote
-shell ("remote mode"). The markers above do not exist there, so each command is
-followed by `printf` of a one-time token plus `$?`, and its end is that token.
-While a session is remote, AI commands always go to it, never to this machine.
-
-Keystrokes typed into the tab go straight to the PTY. They are never logged,
-stored, or added to the AI's output, and a password prompt does not echo, so
-the captured output never contains the password.
+Command end and exit code come from an OSC 633 script (633;C starts output,
+633;D;<code> ends it, 633;P;Cwd=<dir> reports the directory). A quiet prompt-
+like last line raises on_input_needed and the command clock stops until the
+user answers. run(background=True) returns after a startup window and leaves
+the command running. ssh with no remote command enters remote mode, where each
+command is followed by a one-time token plus $?. Keystrokes go straight to the
+PTY, are never logged, and a password prompt does not echo.
 """
 import base64
 import itertools
@@ -408,24 +384,17 @@ _SUDO_RE = re.compile(r"(^|[\s;&|(`$])sudo\b")
 
 
 def _remote_line(command: str, nonce: str, sudo_reprompt: bool = True) -> str:
-    """The line typed into a remote POSIX shell: the command, then a token
-    with its exit code. The token is assembled by printf, so the echo of the
-    typed line never contains it.
+    """The line typed into a remote POSIX shell: the command, then a printf-built
+    token carrying its exit code (so the echo never contains the token).
 
-    sudo remembers a password for ~15 minutes. With `sudo_reprompt`, a
-    command that uses sudo first drops that memory (`sudo -k`), so sudo asks
-    the user again: the AI can never ride on a password typed earlier.
-
-    The command always runs through `eval`. Field case, 2026-11-05 13:33, in
-    a tab the user lent: the agent sent `git rev-parse HEAD; ...;
-    (Get-FileHash x).Hash`. bash parses a whole line before running any of
-    it, so that one PowerShell fragment threw the line away, token included,
-    and the run sat silent until its timeout. Inside eval a syntax error is
-    just exit code 2 and the token still prints.
-
-    Pagers are switched off for the command (not for the user's shell): a
-    pager waits for a key on a terminal, Ctrl+C does not close less, and the
-    tab then never shows a prompt again, so every later command was "busy"."""
+    sudo remembers a password ~15 min; with sudo_reprompt the command drops that
+    memory first (`sudo -k`) so the AI can never ride an earlier password. The
+    command runs through `eval` because bash parses a whole line before running
+    any of it: a stray PowerShell fragment (field case 2026-11-05) threw the
+    line and its token away and the run sat silent until timeout, while inside
+    eval a syntax error is just exit code 2. Pagers are disabled for the
+    command, since a pager waits for a key and the tab then never shows a
+    prompt again."""
     cmd = command.strip().rstrip(";").rstrip()
     tail = f"; printf '\\n{_REMOTE_FMT}\\n' D{nonce} \"$?\""
     if (not cmd or "\n" in cmd or "\r" in cmd or "\t" in cmd or len(cmd) > 1500):

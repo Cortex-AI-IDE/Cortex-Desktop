@@ -61,25 +61,14 @@ def getModelOptions(
     categories: Optional[List[str]] = None,
 ) -> List[ModelOption]:
     """
-    Generate complete model picker option list for Cortex IDE.
+    Generate the complete model picker option list for Cortex IDE.
 
     Args:
-        availableModels: Optional allowlist from settings (None = all models)
-        categories: Optional category filter (e.g., ['recommended', 'coding'])
+        availableModels: Optional allowlist from settings (None = all models).
+        categories: Optional category filter, e.g. ['recommended', 'coding'].
 
     Returns:
-        List of ModelOption dicts for UI picker
-
-    Example:
-        getModelOptions()
-        → [
-            {'value': 'deepseekv4pro', 'label': 'DeepSeek V4 Pro', ...},
-            {'value': 'gpt54', 'label': 'GPT-5.4', ...},
-            ...
-          ]
-
-        getModelOptions(categories=['coding'])
-        → [Codex, DeepSeek Coder options]
+        List of ModelOption dicts for the UI picker.
     """
     options: List[ModelOption] = [
         getDeepSeekV4ProOption(),

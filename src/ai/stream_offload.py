@@ -1,49 +1,12 @@
 """Run a provider's blocking stream generator off the asyncio event loop.
 
-Every provider exposes ``chat_stream()`` as an ordinary synchronous generator
-built on ``requests``. ``_call_llm`` used to iterate it directly:
-
-    for chunk in provider.chat_stream(...):
-        ...
-
-which runs ``session.post()`` and ``iter_lines()`` *inside an event-loop
-callback*. The whole agent loop therefore stops for as long as the socket read
-takes, and on 2026-09-09 that was 154 seconds:
-
-    asyncio\\events.py:94 in _run
-      agent_bridge.py:2548  _handle_chat
-      agent_bridge.py:5818  _call_llm
-      alibaba_provider.py:471 chat_stream
-        requests\\sessions.py:712 post
-          ssl.py:1138 read          <- blocked here, loop dead
-
-Two user-visible consequences, both in that day's log:
-
-* Prompts sent during the stall were accepted by the UI and never ran. They
-  logged ``process_message task_id=...`` and then nothing - no ``provider=``,
-  no ``Agentic turn`` - because the coroutine that would start them could not
-  be scheduled.
-* Stop did nothing. ``stop_generation`` only sets a flag, and the flag is read
-  inside the per-chunk loop body. With zero chunks received the body never ran
-  once, so three presses of Stop were ignored and "Stream interrupted by stop
-  request" appeared 107 seconds after the first one.
-
-``aiter_offloaded`` fixes both. The generator runs on a worker thread and
-chunks arrive over a queue, so the event loop stays free; and the consumer
-wakes every ``poll_interval`` seconds to re-check ``should_stop``, so Stop
-takes effect even when the provider has sent nothing at all.
-
-What this does NOT do is make a stalled request finish faster. The worker
-thread stays blocked in the socket read until the provider's own timeout
-expires; it is simply a thread now, not the event loop. Aborting the in-flight
-request itself needs the provider to close its response object, which is a
-separate change.
-
-Cost, measured over 20,000 chunks: 0.084 ms per chunk against 0.0001 ms for
-the old direct iteration, almost all of it the per-chunk ``wait_for`` timer
-that makes the stop poll possible. At 100 chunks/second that is ~8 ms of CPU
-per second of streaming, so it was not worth trading for a fast path that
-skips the timer while the queue is non-empty.
+Providers expose chat_stream() as a sync generator over requests; iterating it
+on the loop blocked the loop for 154s inside ssl read (2026-09-09), so prompts
+sent during the stall never ran and Stop did nothing (the stop flag is read in
+the per-chunk body, and zero chunks arrived). aiter_offloaded runs the
+generator on a worker thread and the consumer wakes every poll_interval to
+re-check should_stop. It does not make a stalled request finish sooner; the
+worker stays blocked until the provider's own timeout.
 """
 
 import asyncio

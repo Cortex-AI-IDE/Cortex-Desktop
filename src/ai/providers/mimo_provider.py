@@ -1,30 +1,15 @@
 """
-Xiaomi MiMo Provider - Supports MiMo-V2.5 model family
+Xiaomi MiMo provider - the MiMo-V2.5 model family.
 
-MiMo-V2.5 is Xiaomi's latest model family from platform.xiaomimimo.com:
-- MiMo-V2.5-Pro: 1.02T-param MoE (42B active), 1M context, 128K output
- , Long-horizon agentic coding, autonomous agent loops
-- MiMo-V2.5: Full-modal (text/image/video/audio), 1M context, 128K output
- , Multimodal agentic perception & workflows
+MiMo-V2.5-Pro is a 1.02T-param MoE (42B active) with 1M context and 128K output,
+built for long-horizon agentic coding; MiMo-V2.5 is full-modal (text, image,
+video, audio) with the same context. API: OpenAI-compatible chat completions at
+https://api.xiaomimimo.com/v1/chat/completions.
 
-API: OpenAI-compatible chat completions
-
-  Endpoint: https://api.xiaomimimo.com/v1/chat/completions
-  (Anthropic-compatible endpoint also available at /anthropic, not used by this provider)
-
-Pricing (per 1M tokens, overseas, cache-miss / cached / output):
-  mimo-v2.5-pro: $1.00 / $0.20 / $3.00
-  mimo-v2.5:     $0.40 / $0.08 / $2.00
-  (Long-context >256K surcharge applies to pro and v2.5)
-  Cache write is currently free.
-
-Env vars:
-  MIMO_API_KEY                    , API key from platform.xiaomimimo.com
-                                      (sk-* = pay-as-you-go, tp-* = token plan)
-  CORTEX_MIMO_MAX_RETRIES         , int, default 4
-  CORTEX_MIMO_CONNECT_TIMEOUT_SEC , float, default 20.0
-  CORTEX_MIMO_READ_TIMEOUT_SEC    , float, default 120.0
-  CORTEX_MIMO_TOOL_READ_TIMEOUT_SEC, float, default 180.0
+Pricing per 1M tokens (overseas, cache-miss / cached / output): pro $1.00 /
+$0.20 / $3.00, v2.5 $0.40 / $0.08 / $2.00, with a long-context surcharge past
+256K. Env: MIMO_API_KEY (sk-* pay-as-you-go, tp-* token plan), plus
+CORTEX_MIMO_MAX_RETRIES and the connect/read/tool-read timeout vars.
 """
 from src.ai.providers.usage_parse import cached_tokens_from
 import os

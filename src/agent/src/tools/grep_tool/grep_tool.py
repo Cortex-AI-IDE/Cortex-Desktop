@@ -232,24 +232,13 @@ class GrepLines(list):
 
 
 async def ripgrep(args: List[str], cwd: str, signal: Optional[asyncio.Event] = None) -> List[str]:
-    """
-    Execute ripgrep command and return results.
+    """Run ripgrep and return its output lines.
 
-    Args:
-        args: Command line arguments for ripgrep
-        cwd: Working directory
-        signal: Optional cancellation signal
-
-    Returns:
-        List of output lines. When the Python engine was used instead of
-        ripgrep, the list is a ``GrepLines`` carrying the reason in ``notice``.
-
-    Raises:
-        RipgrepTimeoutError: If search times out
-        RipgrepPatternError: If the pattern is not a valid regex. This is
-            re-raised instead of falling back, because the Python engine
-            cannot run the pattern either and an empty result would read as
-            "no matches" for a search that never happened.
+    When the Python engine ran instead, the list is a GrepLines carrying the
+    reason in ``notice``. Raises RipgrepTimeoutError on timeout and
+    RipgrepPatternError on an invalid regex (re-raised rather than falling
+    back, since an empty result would read as "no matches" for a search that
+    never ran).
     """
     import sys as _sys
 

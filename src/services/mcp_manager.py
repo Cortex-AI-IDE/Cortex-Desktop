@@ -1,28 +1,13 @@
-"""
-mcp_manager.py, Model Context Protocol client manager
-=======================================================
+"""MCP client manager: connects external servers and exposes their tools.
 
-Connects Cortex to external MCP servers (databases, APIs, SaaS tools…) and
-exposes their tools to the agent as regular tool definitions.
+The `mcp` SDK is asyncio-based and the agent loop is not, so a daemon thread
+owns a private asyncio loop; every public method here is sync and thread-safe.
+Tools are namespaced `mcp__<server>__<tool>` as OpenAI-style schemas.
 
-Design:
-  - Config uses the INDUSTRY-STANDARD mcp.json format, so any server
-    README's config snippet works as-is:
-        {"mcpServers": {"postgres": {"command": "npx", "args": [...]}}}
-    Global config:  ~/.cortex/mcp.json
-    Project config: <project>/.cortex/mcp.json   (overrides same names)
-  - The official `mcp` SDK is asyncio-based; Cortex's agent loop is not.
-    A dedicated daemon thread runs a private asyncio loop; every public
-    method here is SYNCHRONOUS and thread-safe.
-  - Each connected server's tools are namespaced `mcp__<server>__<tool>`
-    and returned as OpenAI-style schemas, the agent treats them exactly
-    like built-in tools (including the permission/autonomy gate).
-  - Failures NEVER crash the app: a broken server shows status="error"
-    with the message in Settings → MCP Servers.
-  - A project's config file is UNTRUSTED INPUT, it arrives inside a git
-    clone. A server declared there does not launch until the user approves
-    it, and approvals are stored in ~/.cortex/mcp_trust.json, never in the
-    project itself, so a repository cannot approve its own commands.
+Config is standard mcp.json (global ~/.cortex/mcp.json, per-project overrides).
+A project config arrives inside a git clone, so it is untrusted: a server it
+declares will not launch until the user approves it, and approvals live in
+~/.cortex/mcp_trust.json so a repo cannot approve its own commands.
 """
 
 from __future__ import annotations
@@ -77,16 +62,10 @@ def _sanitize(name: str) -> str:
 def tool_input_schema(tool: Any) -> Optional[Dict[str, Any]]:
     """The JSON schema a tool declares for its arguments, or None.
 
-    The MCP Python SDK renamed this field from ``inputSchema`` to
-    ``input_schema`` (pydantic ``model_fields`` on the installed version:
-    name, title, description, input_schema, ...). Reading only the old name
-    returned None for every tool, so every MCP tool was advertised to the model
-    with ``{"type": "object", "properties": {}}``: no parameter names at all.
-    The tools still ran because the model guessed from the description and the
-    validation error, which is why this stayed invisible for so long.
-
-    Both spellings are read, newest first, and a pydantic model is dumped to a
-    plain dict because that is what the OpenAI-style definition needs.
+    Trap: the MCP SDK renamed ``inputSchema`` to ``input_schema``; reading only
+    the old name returned None for every tool, so every MCP tool was advertised
+    with no parameter names and the model had to guess them. Both spellings are
+    read (newest first); a pydantic model is dumped to a plain dict.
     """
     for attr in ("input_schema", "inputSchema"):
         schema = getattr(tool, attr, None)
@@ -170,14 +149,9 @@ def _foreign_global_configs():
 def _shadow_scope(original_scope: str, project_root: Optional[str]) -> str:
     """Scope to write a cortex-owned shadow of an inherited server at.
 
-    A shadow only works if it is read AFTER the entry it hides.
-    load_configs() reads foreign global, cortex global, foreign project,
-    then cortex project, so a project-scoped foreign server can only be
-    shadowed from project scope. Writing it globally, as this used to,
-    left it overwritten and still running.
-
-    Falls back to global when no project is open, since a project-scoped
-    write would have nowhere to go.
+    A shadow only works if it is read AFTER the entry it hides, and load_configs
+    reads cortex project last, so a project-scoped foreign server can only be
+    shadowed from project scope. Falls back to global when no project is open.
     """
     if original_scope == "project" and project_root:
         return "project"
@@ -185,25 +159,13 @@ def _shadow_scope(original_scope: str, project_root: Optional[str]) -> str:
 
 
 def _resolve_command(command: str) -> str:
-    """Absolute path to `command`, so Windows can actually launch it.
+    """Resolve `command` to an absolute path so Windows can launch it.
 
-    Every MCP server README says `"command": "npx"`, and on Windows that is
-    not an executable: npm installs `npx.cmd`. CreateProcess does no PATHEXT
-    lookup, so asyncio's create_subprocess_exec raises
-
-        FileNotFoundError: [WinError 2] The system cannot find the file specified
-
-    which anyio wraps as "unhandled errors in a TaskGroup (1 sub-exception)",
-    the message the user sees with the real cause discarded. npx, uvx, bunx
-    and pnpm dlx are all shims, so this broke essentially every documented
-    MCP server on Windows while working on Linux and macOS.
-
-    shutil.which() does apply PATHEXT and returns the full path with the real
-    extension. Resolving here rather than at config time keeps the user's
-    file readable and portable: the config still says `npx`.
-
-    Left alone if it is already a path, or if nothing is found, so the
-    original error still surfaces rather than being masked.
+    MCP READMEs all say `"command": "npx"`, but Windows has no such executable
+    (npm installs npx.cmd) and CreateProcess does no PATHEXT lookup, so
+    create_subprocess_exec raised WinError 2, which anyio buried as "unhandled
+    errors in a TaskGroup". shutil.which() applies PATHEXT. Left as-is when
+    already a path or not found, so the real error still surfaces.
     """
     if not command or os.sep in command or (os.altsep and os.altsep in command):
         return command
@@ -460,13 +422,10 @@ def _unknown_arguments(schema: Optional[Dict[str, Any]],
                        args: Dict[str, Any]) -> List[str]:
     """Argument names the tool's schema does not declare.
 
-    Servers built on zod or pydantic DROP undeclared keys silently. That is
-    how a screenshot "of an element" kept coming back as the whole viewport:
-    the model passed `selector`, Playwright's parameter is `target`, the key
-    vanished and the call did something else without a word. Refusing the
-    call with the valid names turns a silent wrong result into a one-step fix.
-
-    Returns [] when the schema allows extra keys or declares no properties.
+    Servers built on zod/pydantic DROP undeclared keys silently: a screenshot
+    "of an element" kept coming back as the whole viewport because the model
+    passed `selector` and Playwright's parameter is `target`. Refusing the call
+    with the valid names turns a silent wrong result into a one-step fix.
     """
     if not isinstance(schema, dict) or not args:
         return []
@@ -632,19 +591,12 @@ class McpServerConfig:
 class _ProjectTrust:
     """Which project-supplied MCP servers this user has approved.
 
-    `<project>/.cortex/mcp.json` and the other per-project files ride along
-    inside a git clone, so the command they name is untrusted input: opening
-    a folder would otherwise be enough to make Cortex launch whatever that
-    folder asked for. Two properties matter here and both are deliberate:
-
-      - the store lives in ~/.cortex, never in the project, so a repository
-        cannot grant itself trust;
-      - entries are keyed by the full command signature, so editing the
-        command, its arguments or its env re-arms the gate rather than
-        inheriting the earlier approval.
-
-    Mirrors the workspace-trust model other editors use for exactly this
-    threat, and stays inside Cortex's own folder.
+    A project mcp.json rides inside a git clone, so the command it names is
+    untrusted: opening a folder would otherwise launch whatever that folder
+    asked for. The store lives in ~/.cortex, never in the project, so a repo
+    cannot grant itself trust; and entries are keyed by the full command
+    signature, so editing the command, args or env re-arms the gate instead of
+    inheriting the earlier approval.
     """
 
     def __init__(self, path: Optional[Path] = None):
@@ -812,17 +764,12 @@ class MCPManager:
             return {}
 
     def load_configs(self) -> Dict[str, McpServerConfig]:
-        """Every MCP config Cortex can see, merged.
+        """Every MCP config Cortex can see, merged (later wins on a name clash).
 
-        Load order (later wins on a name clash):
-            1. ~/.cursor/mcp.json, ~/.claude.json, desktop client (global, foreign)
-            2. ~/.cortex/mcp.json                                  (global, ours)
-            3. <project>/.cursor/mcp.json, <project>/.mcp.json     (project, foreign)
-            4. <project>/.cortex/mcp.json                          (project, ours)
-
+        Order: foreign global, cortex global, foreign project, cortex project.
         So a project entry beats a global one, and Cortex's own file always
-        beats another tool's - which is what lets the user disable an
-        inherited server from Settings without editing another tool's file.
+        beats another tool's, which lets the user disable an inherited server
+        from Settings without editing another tool's file.
         """
         configs: Dict[str, McpServerConfig] = {}
         for path, src in _foreign_global_configs():
@@ -1234,15 +1181,9 @@ class MCPManager:
                        ) -> Tuple[bool, str, List[Tuple[str, str]]]:
         """Execute an MCP tool. Returns (success, text, images).
 
-        `images` is a list of (mime_type, base64_data). They used to be
-        replaced by a placeholder string, so a screenshot tool's actual
-        screenshot never reached the model - it saw a sentence saying an
-        image existed and went hunting for the file on disk instead.
-
-        Every failure is logged. MCP errors never reached cortex.log before,
-        so a run that failed five times in a row left only "1 tool call(s)"
-        lines behind. Argument NAMES are logged, never values: a value can be
-        anything the user typed, including a password into a form field.
+        `images` is a list of (mime_type, base64_data): they used to be replaced
+        by a placeholder string, so a screenshot tool's screenshot never reached
+        the model. Every failure is logged; argument NAMES only, never values.
         """
         args = _scratch_file_args(qualified_name.split("__")[-1], args or {},
                                   self._project_root)
@@ -1458,18 +1399,11 @@ class MCPManager:
                      delete_files: bool = True) -> Dict[str, Any]:
         """Remove a server for real, not hide it.
 
-        The ✕ in Settings used to remove only Cortex's own entry, and for a
-        server inherited from another tool (Claude Code's ~/.claude.json,
-        Cursor's mcp.json) it wrote a disabled copy into ~/.cortex/mcp.json -
-        so the server stayed listed as "disabled", stayed in the other tool's
-        file, and its downloaded package (63 MB for one context7 copy) stayed
-        in the npm cache.
-
-        Now: every Cortex entry for it goes (including those disabled
-        copies); with other_tools, its entry in the other tools' files goes
-        too, after a backup of each file to ~/.cortex/backups/; with
-        delete_files, its npx download folders go, unless another configured
-        server still runs the same package.
+        Trap: the Settings X used to remove only Cortex's own entry, so a server
+        inherited from another tool stayed listed as "disabled" with its package
+        in the npm cache. Now: every Cortex entry goes; with other_tools, the
+        other tools' entries too (after a backup); with delete_files, its npx
+        download folders, unless another server still runs the same package.
         """
         plan = self.removal_plan(name)
         cfg = self.load_configs().get(name)

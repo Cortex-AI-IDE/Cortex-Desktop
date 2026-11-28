@@ -1,36 +1,14 @@
 """
-telegram_monitor.py, run notifications and inbound prompts over Telegram
-=======================================================================
+telegram_monitor.py - run notifications and inbound prompts over Telegram.
 
-Two directions, and they are not symmetrical.
+Outbound reports run on this module's worker thread, so a slow network cannot
+reach the GUI thread. Inbound is off by default (telegram.inbound.enabled); a
+message in the paired chat can start a run or answer a question, but never
+approve a permission card, since approvals happen in Cortex on the computer.
 
-Outbound: Cortex reports runs. Everything that can block (DNS, TLS, a 429, a
-dead bot) runs on this module's own worker thread, so a slow network cannot
-reach the GUI thread.
-
-Inbound: a message typed in the *paired* chat only becomes a prompt when the
-user turned it on in Settings (``telegram.inbound.enabled``, off by default).
-It can start a run, and it can answer a question the agent asked (a reply
-carries the same power as a prompt, so the same switch governs both). It can
-never approve a permission card: approvals happen in Cortex, on the computer.
-That asymmetry is the whole security model, so keep it when extending this
-file.
-
-The GUI side calls exactly one thing, ``enqueue``. It builds no string, parses
-no JSON, runs no regex and raises nothing: the queue is bounded and the oldest
-event is dropped when it is full. Formatting, HTTP and retry state all live on
-the worker. That is the rule in plan 5.5, and it is the shape of two previous
-freezes in this codebase.
-
-No PyQt here on purpose. Tests drive it headless, and the service layer must
-not depend on a running QApplication. An inbound prompt leaves through the
-``on_prompt`` callback, which the GUI side turns into a queued Qt signal.
-
-Usage:
-    from src.services.telegram_monitor import TelegramMonitor
-    monitor = TelegramMonitor()
-    monitor.start()
-    monitor.enqueue({"kind": "started"})
+The GUI calls only enqueue: no string building, JSON parsing or regex on that
+path, and a full queue drops its oldest event. No PyQt here, so tests run
+headless.
 """
 
 from __future__ import annotations
@@ -1624,19 +1602,12 @@ class TelegramMonitor:
     def send_photo(self, path, caption: str = "", timeout: float = PHOTO_TIMEOUT_S) -> dict:
         """Send one image file to the paired chat. Never raises, never hangs.
 
-        Deliberately *not* queued. The event queue exists for status updates
-        that may be dropped when busy; an image is something a caller asked for
-        and is waiting on, so its outcome is returned to that caller.
-
-        The upload runs on a short-lived daemon thread and is abandoned after
-        ``timeout``, so a socket that never answers cannot wedge the agent's
-        tool loop or a Settings button. Every failure comes back as a dict
-        rather than an exception:
-
-            {"ok": bool, "message_id": int | None, "reason": str}
-
-        ``reason`` is empty on success and a sentence a person can act on
-        otherwise. Nothing about the token is ever included.
+        Deliberately NOT queued: the event queue is for droppable status, but an
+        image is awaited by its caller, so the outcome returns to it. The upload
+        runs on a short-lived daemon thread, abandoned after timeout so a silent
+        socket cannot wedge the tool loop or a Settings button. Returns
+        {"ok": bool, "message_id": int | None, "reason": str}; reason is empty on
+        success and a plain sentence otherwise. The token is never included.
         """
 
         def _fail(reason: str) -> dict:

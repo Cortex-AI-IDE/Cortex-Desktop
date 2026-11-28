@@ -130,26 +130,19 @@ def resolveAlias(alias: str) -> Optional[str]:
 
 def resolveOrPassthrough(modelInput: str) -> str:
     """
-    Resolve alias to full model ID, or return the input unchanged if it is
-    already a full model ID (not an alias).
+    Resolve an alias to a full model ID, or return the input unchanged if it is
+    already a full model ID.
 
-    Server-published aliases (admin-editable, fetched by remote_models) are
-    consulted first, then the built-in ALIAS_MAP below - the same layering
-    used for limits, pricing, provider and thinking. Remote wins on conflict
-    since the admin owns the published list; the built-in map stays as the
-    offline fallback so behaviour is unchanged when the server was never
-    reached.
+    Server-published aliases (from remote_models) are consulted first, then the
+    built-in ALIAS_MAP, the same layering used for limits, pricing, provider and
+    thinking. Remote wins on conflict since the admin owns the published list;
+    the built-in map is the offline fallback.
 
     Args:
-        modelInput: Alias or full model ID
+        modelInput: Alias or full model ID.
 
     Returns:
-        Canonical model ID
-
-    Example:
-        resolveOrPassthrough('opus')               -> 'anthropic/claude-opus-4.8'
-        resolveOrPassthrough('anthropic/claude-opus-4.8')
-                                                   -> 'anthropic/claude-opus-4.8'
+        Canonical model ID.
     """
     try:
         from src.ai.remote_models import get_remote_alias

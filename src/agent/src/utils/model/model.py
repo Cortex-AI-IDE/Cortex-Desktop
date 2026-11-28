@@ -97,24 +97,10 @@ def get_runtime_main_loop_model(
     main_loop_model: Optional[str] = None,
     exceeds_200k_tokens: bool = False,
 ) -> str:
-    """
-    Determine which model to use for the current main loop turn.
+    """Pick the model for the current main-loop turn.
 
-    Mirrors TS getRuntimeMainLoopModel().
-
-    Resolution order:
-    1. If 'plan' permission mode and the context exceeds 200k tokens, use the
-       configured large-context model
-    2. Fall back to mainLoopModel from toolUseContext options
-    3. Default to CORTEX_MODEL
-
-    Args:
-        permission_mode: Tool permission mode ('agree', 'plan', 'browse', etc.)
-        main_loop_model: Model configured in toolUseContext options
-        exceeds_200k_tokens: True if context exceeds 200k tokens
-
-    Returns:
-        Model identifier for the current turn
+    Order: plan mode with context over 200k uses the large-context model; else
+    main_loop_model from toolUseContext; else CORTEX_MODEL.
     """
     if exceeds_200k_tokens and permission_mode == "plan":
         # Large context + plan mode: stick to a model with the wider window

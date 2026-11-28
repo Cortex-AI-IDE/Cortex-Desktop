@@ -1,26 +1,12 @@
 """Normalize attached images to formats vision APIs actually accept.
 
-Field failure (log 14:31, two images attached, Grok via OpenRouter):
-
-    xAI: Downloaded response does not contain a valid JPG, PNG, WebP,
-    or ICO image.  (HTTP 400, the whole request died)
-
-The intake accepted ANY image extension and, when Qt could not rasterize
-the file, forwarded the RAW bytes with mimes like image/gif, image/bmp,
-image/avif, image/svg+xml, formats most vision APIs reject outright. One
-bad image then 400s the entire request.
-
-Policy here: providers only ever see PNG / JPEG / WebP.
-  * those three pass through, after MAGIC-BYTE sniffing, because a .jpg
-    that actually holds PNG bytes (mislabeled downloads are common) must be
-    sent with the mime of its CONTENT, not its filename
-  * anything Qt can decode (gif, bmp, ico, tiff...) is transcoded to PNG
-  * anything Qt cannot decode (avif/heic without plugins, svg) is REFUSED
-    with a reason, a clear "not attached" beats a guaranteed API error
-    after the user has already typed their prompt
-
-Separate module (no QtWebEngine imports) so tests can import it, the
-chat panel itself cannot be imported once a QApplication exists.
+Intake used to accept any image extension and forward raw bytes with mimes
+like image/gif, which xAI rejected (HTTP 400, "does not contain a valid JPG,
+PNG, WebP, or ICO image") and killed the whole request. Policy: providers only
+see PNG/JPEG/WebP. Those three pass through after magic-byte sniffing (a .jpg
+holding PNG bytes is sent as PNG). Anything Qt can decode (gif, bmp, ico,
+tiff) is transcoded to PNG; anything it cannot (avif/heic without plugins, svg)
+is refused with a reason. No QtWebEngine imports, so tests can import it.
 """
 from __future__ import annotations
 

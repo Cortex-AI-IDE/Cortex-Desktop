@@ -30,21 +30,14 @@ from src.utils.logger import get_logger
 log = get_logger("key_manager")
 
 class KeyManager:
-    """
-    Manages API keys.
+    """Manages API keys.
 
-    Storage priority:
-    1. OS Keyring (Windows Credential Manager, macOS Keychain, Linux Secret
-       Service) — PRIMARY
-    2. Encrypted file (~/.cortex/keys.enc) — BACKUP
-    3. Auto-re-prompt on failure
-    
-    Security:
-    - Keys encrypted with AES-256-GCM
-    - Master key from the OS keystore; a machine-derived fallback is only
-      used to unlock an existing vault, never to create a new one
-    - Random salt per encryption
-    - Rate limiting on decryption attempts
+    Storage: OS keyring first (Windows Credential Manager, macOS Keychain,
+    Linux Secret Service), encrypted file (~/.cortex/keys.enc) as backup, and
+    an auto-re-prompt on failure. Keys are AES-256-GCM with a random per-
+    encryption salt and rate-limited decryption. The master key comes from the
+    OS keystore; a machine-derived fallback only ever unlocks an existing
+    vault, never creates a new one.
     """
     
     # Security constants
@@ -211,22 +204,17 @@ class KeyManager:
         return kdf.derive(master_secret.encode('utf-8'))
 
     def _resolve_master_secret(self) -> tuple:
-        """
-        Choose the master secret, and say where it came from.
+        """Choose the master secret and report its source.
 
-        Only the OS keystore holds something that is actually secret, so it
-        is the only source that protects the vault. The machine fingerprint
-        (COMPUTERNAME, USERNAME, PROCESSOR_IDENTIFIER, home directory) is
-        public data, and a key derived from it makes keys.enc reversible by
-        anyone who copies keys.enc and keys.salt. It is therefore used in
-        exactly two cases, both loud:
-
-          * an existing vault already sits on disk and must stay readable;
-          * the owner explicitly opted in with CORTEX_ALLOW_INSECURE_KEYSTORE=1.
-
-        Otherwise the master key is random and never leaves this process, so
-        Cortex writes no vault at all rather than filling one with ciphertext
-        that only looks encrypted.
+        Only the OS keystore holds something actually secret, so it is the only
+        source that protects the vault. The machine fingerprint (COMPUTERNAME,
+        USERNAME, PROCESSOR_IDENTIFIER, home dir) is public, and a key derived
+        from it makes keys.enc reversible by anyone who copies keys.enc and
+        keys.salt. It is used in exactly two loud cases: an existing vault must
+        stay readable, or the owner opted in with
+        CORTEX_ALLOW_INSECURE_KEYSTORE=1. Otherwise the key is random and never
+        leaves the process, so Cortex writes no vault rather than one filled
+        with ciphertext that only looks encrypted.
         """
         keystore_secret = self._get_os_keyring_secret()
         if keystore_secret:

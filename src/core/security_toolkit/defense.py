@@ -1,25 +1,16 @@
 """
-defense.py -- blue-team scanning for the code you actually own.
+defense.py - blue-team scanning for the code you own.
 
-The offensive modules in this package answer "what can be reached from
-outside?". This module answers the other half: "what is wrong in here?".
-It reads local source, configuration and lockfiles, so it needs no scope
-declaration and opens no sockets.
+The offensive modules answer "what can be reached from outside?"; this answers
+"what is wrong in here?". It reads local source, config and lockfiles, so it
+needs no scope declaration and opens no sockets.
 
-Three jobs:
-
-  scan_secrets        Find credentials committed into the tree. Pattern
-                      matches plus a Shannon-entropy check, because the
-                      dangerous ones are the keys with no recognisable
-                      prefix, and a pure regex list always misses those.
-  check_hardening     Configuration-level problems that ship by accident:
-                      an uncommitted .env, DEBUG left on, a wildcard CORS
-                      policy, a default framework secret key, raw SQL built
-                      by string formatting, verify=False.
-  audit_dependencies  Known CVEs in the installed dependency set, via
-                      pip-audit / npm audit / safety when they are present.
-
-All three are read-only. Nothing here writes, installs or mutates.
+scan_secrets finds committed credentials by pattern plus a Shannon-entropy
+check, since the dangerous keys are the ones with no recognisable prefix.
+check_hardening catches config shipped by accident (uncommitted .env, DEBUG on,
+wildcard CORS, default framework secret, raw SQL from string formatting,
+verify=False). audit_dependencies reports known CVEs via pip-audit / npm audit /
+safety when present. All three are read-only.
 """
 
 from __future__ import annotations

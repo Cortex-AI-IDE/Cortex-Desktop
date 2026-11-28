@@ -1,24 +1,13 @@
 """
-Alibaba Cloud Model Studio (DashScope) Provider, Qwen family.
+Alibaba Cloud Model Studio (DashScope) provider, Qwen family.
 
-Uses the OpenAI-compatible endpoint of Alibaba Cloud Model Studio
-(International / Singapore region, ap-southeast-1):
+Uses the OpenAI-compatible endpoint of Model Studio (Singapore,
+ap-southeast-1): https://dashscope-intl.aliyuncs.com/compatible-mode/v1, with
+the key from DASHSCOPE_API_KEY (stored in Windows Credential Manager).
 
-    https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-
-Docs:
-    https://modelstudio.console.alibabacloud.com/  (API / costing-balance tabs)
-
-API key:
-    Set DASHSCOPE_API_KEY via Settings → Models & Providers (stored in Windows Credential Manager).
-
-Model tiers exposed (latest 1M-context only):
-    • Flagship + Vision , qwen3.8-max
-    • Reasoning         , qwen3.7-max
-    • Agentic + Vision  , qwen3.7-plus
-
-Performance: Uses requests.Session() for connection pooling (same as MiMo/DeepSeek).
-Manual SSE parsing for streaming, no OpenAI SDK overhead.
+Exposes the latest 1M-context tiers only: qwen3.8-max (flagship, vision),
+qwen3.7-max (reasoning), qwen3.7-plus (agentic, vision). Uses
+requests.Session() for connection pooling and manual SSE parsing, no OpenAI SDK.
 """
 from src.ai.providers.usage_parse import cached_tokens_from
 

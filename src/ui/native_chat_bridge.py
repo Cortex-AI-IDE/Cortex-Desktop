@@ -1,19 +1,9 @@
-"""
-native_chat_bridge.py, Adapter: agent_bridge signals → AgentSignals
-====================================================================
+"""Adapter: agent_bridge signals -> AgentSignals for the native ChatPanel.
 
-Translates the existing agent_bridge.py signal format into the AgentSignals
-format that ChatPanel (native PyQt6) expects.
-
-Signal mapping:
-  bridge.response_chunk(str)        → parse thinking tags → thinking_delta / text_delta
-  bridge.response_complete(str)     → turn_done
-  bridge.tool_activity(name,info,status) → tool_start / tool_end
-  bridge.file_creating_started(path)    → file_creating
-  bridge.file_edited_diff(path,old,new) → file_diff
-  bridge.file_operation_completed(id,path,content,op) → file_done
-  bridge.thinking_started()         → (handled via tags in response_chunk)
-  bridge.thinking_stopped()         → (handled via tags in response_chunk)
+Maps bridge.response_chunk -> parse thinking tags -> thinking_delta/text_delta,
+response_complete -> turn_done, tool_activity -> tool_start/tool_end,
+file_creating_started -> file_creating, file_edited_diff -> file_diff,
+file_operation_completed -> file_done.
 """
 
 from __future__ import annotations

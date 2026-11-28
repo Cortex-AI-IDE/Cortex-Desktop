@@ -1,6 +1,5 @@
-# Post-sampling hooks run after the model produces a response.
-# They can inspect, modify, or log the response before it is used.
-# This stub provides the execute_post_sampling_hooks() interface
+# Post-sampling hooks run after the model produces a response, and can
+# inspect, modify or log it before use. This stub provides the interface.
 from typing import Any, Dict, List, Optional
 
 __all__ = ["execute_post_sampling_hooks"]
@@ -17,26 +16,12 @@ async def execute_post_sampling_hooks(
     """
     Execute post-sampling hooks after a model response.
 
-    Mirrors TS executePostSamplingHooks() exactly.
-
-    Post-sampling hooks run asynchronously (fire-and-forget via ensure_future)
-    in query.py, so this is awaited for its side effects only.
-
-    Stub: no-op. In production, hooks would:
-    - Inspect the model's response for policy violations
-    - Log response metadata for analytics
-    - Inject additional context if needed
-    - Trigger side effects (notifications, webhooks, etc.)
-
-    Args:
-        messages: Full message history (user + assistant)
-        system_prompt: Current system prompt
-        user_context: User context dict
-        system_context: System context dict
-        tool_context: Tool use context
-        query_source: Source of the query
+    Mirrors TS executePostSamplingHooks(). Hooks run fire-and-forget via
+    ensure_future in query.py, so this is awaited for side effects only.
+    Stub: no-op; in production hooks would inspect the response for policy
+    violations and trigger side effects such as notifications.
     """
     # TODO: implement post-sampling hook system
-    # This is a fire-and-forget in production (called via asyncio.ensure_future)
-    # so returning None is correct, side effects happen during the call.
+    # Fire-and-forget in production (called via asyncio.ensure_future), so
+    # returning None is correct and side effects happen during the call.
     pass

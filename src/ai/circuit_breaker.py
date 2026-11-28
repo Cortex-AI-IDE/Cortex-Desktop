@@ -19,24 +19,18 @@ log = get_logger("circuit_breaker")
 
 
 class ToolCircuitBreaker:
-    """
-    Tracks per-tool failure counts and disables tools after a threshold.
+    """Per-tool failure counts; disables a tool after a threshold.
 
-    Features:
-      - Consecutive failure counting with configurable threshold
-      - Tool disable/enable tracking
-      - Repetitive call limiting (total calls, not just failures)
-      - Auto-recovery when a disabled tool succeeds
-      - Expected-error reset (file-not-found etc. should not trip breaker)
-      - Search tools (Grep, Glob, SemanticSearch) get higher limits for deep exploration
+    Counts consecutive failures, limits total repetitive calls, auto-recovers
+    when a disabled tool succeeds, and resets on expected errors (file-not-found
+    should not trip the breaker). Search tools (Grep, Glob, SemanticSearch) get
+    higher limits for deep exploration.
 
     Usage:
-
         cb = ToolCircuitBreaker(threshold=3, repetitive_limit=50)
-        cb.record_call("Read", success=True)        # resets counter
-        cb.record_call("Bash", success=False)        # increments
+        cb.record_call("Read", success=True)
         if cb.is_disabled("Bash"):
-            # inform LLM not to call it
+            ...  # tell the LLM not to call it
     """
 
     # Search/exploration tools get much higher limits, deep codebase

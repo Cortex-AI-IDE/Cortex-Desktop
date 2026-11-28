@@ -1,15 +1,9 @@
 """Compact oversized diff blocks in cortex.db timeline_json.
 
-Why this exists
----------------
-Diffs used to store every unchanged line as context, and re-edits of the same
-file appended without a cap. One styles.css diff block reached 5,627,791
-entries (244MB), pushing a single conversation's timeline_json to 258MB. Every
-restore then paid ~8.7s of json.loads plus ~1.3s of SQLite read before a single
-widget was built, which is what made the app feel permanently slow.
-
-chat_panel.py now caps this at write time. This script repairs rows written
-before that fix.
+Diffs used to keep every unchanged line and append on each re-edit; one
+styles.css block reached 5.6M entries (244MB), pushing a conversation's
+timeline_json to 258MB and costing ~8.7s of json.loads per restore. chat_panel
+now caps this at write time; this repairs rows written before that fix.
 
 Run with Cortex CLOSED:
     python tools/compact_timeline_db.py            # report only

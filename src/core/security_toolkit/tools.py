@@ -1,26 +1,13 @@
-"""
-tools.py -- the single entry point the Cortex agent calls.
+"""The single entry point the Cortex agent calls for security scanning.
 
-Why one tool rather than five: every extra tool schema is permanent context
-cost and another thing for the model to pick between. `SecurityScan` with an
-`action` enum is one schema that covers the whole toolkit, and the enum makes
-the available capabilities visible to the model in one place.
-
-THE ONE RULE THAT MATTERS HERE
-------------------------------
-The `scope` action is READ-ONLY. There is deliberately no action that writes
-the scope file, and this is not an oversight.
-
-If the agent could declare its own scope, the scope gate would be decorative:
-a model that had been talked into scanning something by a poisoned file could
-simply declare that target first and then scan it, and the whole control
-would collapse into a prompt instruction. The gate only means something when
-the thing being gated cannot open it. Scope is changed by the human, in
-.cortex/security/scope.json or through Cortex's own settings UI.
-
-Output budget: an agent turn must not be handed 100 KB of JSON. render_report
-produces a compact text block capped well below the context limit, because a
-huge tool result on the GUI thread is a freeze waiting to happen.
+One tool, not five: every extra schema is permanent context cost and another
+thing to choose between, so SecurityScan with an `action` enum covers the whole
+toolkit. The `scope` action is READ-ONLY by design: if the agent could declare
+its own scope the gate would be decorative, since a model talked into scanning
+something by a poisoned file could just declare that target. Scope is changed
+by the human, in .cortex/security/scope.json or the settings UI. render_report
+caps its output well below the context limit, since a huge tool result on the
+GUI thread is a freeze waiting to happen.
 """
 
 from __future__ import annotations

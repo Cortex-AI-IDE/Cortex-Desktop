@@ -398,22 +398,16 @@ class CortexDatabase:
     # CHAT HISTORY OPERATIONS
     
     def create_conversation(self, conversation_id: str, project_path: str, title: str = None) -> str:
-        """Create a new conversation, or refresh an existing row's title.
+        """Create a conversation, or refresh an existing row's title.
 
-        Refuses to INSERT a row with an empty project_path. Every lookup
-        (get_latest_conversation, get_conversation_heads, the History list)
-        matches on project_path, so such a row is unreachable the moment it is
-        written: the chat it belongs to "vanishes" from the UI while its
-        messages sit in the DB under no project. The live database carried 221
-        of them, written by the agent's immediate-save path when it ran before
-        `set_project_root`:
-            create_conversation(project_path=getattr(self, "_project_root", "") or "", ...)
-        On the next start the restore found nothing for the project, created a
-        fresh empty conversation, and the panel opened blank.
-
-        An EXISTING row still keeps its project_path: the INSERT is OR IGNORE
-        and the UPDATE is scoped to the same project_path, so a late save that
-        does not know the project cannot re-stamp the row it failed to find.
+        Refuses to INSERT an empty project_path: every lookup matches on
+        project_path, so such a row is unreachable the moment it is written and
+        its chat "vanishes" from the UI while the messages sit in the DB under
+        no project (the live DB carried 221, written by the agent's
+        immediate-save path before set_project_root). An EXISTING row keeps its
+        project_path: the INSERT is OR IGNORE and the UPDATE is scoped to the
+        same project_path, so a late save cannot re-stamp a row it failed to
+        find.
         """
         now = int(datetime.now().timestamp() * 1000)
         title = title or f"Chat {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -550,28 +544,19 @@ class CortexDatabase:
         return message_id[0] or 0
     
     def get_messages(self, conversation_id: str, limit: int = 100) -> List[ChatMessage]:
-        """Get messages for a conversation, the MOST RECENT `limit`,
-        returned in chronological (oldest→newest) order.
+        """Get messages for a conversation, the MOST RECENT `limit`, in
+        chronological (oldest to newest) order.
 
-        Bug history: this used `ORDER BY timestamp ASC LIMIT ?`, which
-        returns the OLDEST `limit` messages. Every caller (agent context
-        restore, crash recovery, exports) wants the newest window, the
-        agent restore used limit=20, so once a conversation grew past 20
-        messages the AI was rehydrated with stale day-old turns and
-        "forgot" everything recent after an IDE restart. The inner DESC
-        query selects the newest `limit` rows; the outer SELECT re-sorts
-        them chronologically. `id` is the tiebreaker because timestamps
-        have second resolution, rapid turns saved in the same second
-        would otherwise restore in scrambled order.
+        This used ORDER BY timestamp ASC LIMIT ?, which returns the OLDEST
+        limit messages. The agent restore uses limit=20, so past 20 messages
+        the AI was rehydrated with stale turns and "forgot" recent ones after a
+        restart. The inner DESC query selects the newest rows; the outer SELECT
+        re-sorts them. `id` breaks ties, since timestamps have second
+        resolution and rapid turns would otherwise restore scrambled.
 
-        CRITICAL: Flushes the write queue before reading to prevent the
-        save/load race condition. Without this, messages saved via the
-        debounced write queue (add_message with immediate=False) may not
-        yet be committed to SQLite when get_messages reads, causing
-        messages to appear missing on chat restore.
-
-        Skipped during restore, no writes are pending and the flush would
-        block the UI for no benefit.
+        Flushes the write queue before reading, so messages saved through the
+        debounced queue are committed before the read; skipped during restore,
+        where no writes are pending.
         """
         if not self._restoring:
             # Read-your-writes barrier: must flush SYNCHRONOUSLY before the

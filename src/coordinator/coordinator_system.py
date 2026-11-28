@@ -1,18 +1,10 @@
-"""
-Multi-agent coordinator system for Cortex IDE.
+"""Multi-agent coordinator for Cortex IDE.
 
-Manages the full coordination workflow:
-- Worker spawning and lifecycle
-- Vision-first sequential coordination
-- Parallel research workers
-- Result aggregation and synthesis
-- Scratchpad-based cross-worker communication
-
-This is the main orchestration engine that connects:
-- coordinator_prompt.py (system prompts)
-- agent_context.py (worker prompt building)
-- agent_tools.py (tool filtering)
-- image_processing.py (image pipeline)
+Owns worker spawning and lifecycle, vision-first sequential coordination,
+parallel research workers, result aggregation/synthesis, and scratchpad-based
+cross-worker communication. Connects coordinator_prompt.py (system prompts),
+agent_context.py (worker prompts), agent_tools.py (tool filtering) and
+image_processing.py (image pipeline).
 """
 
 import logging
@@ -150,22 +142,15 @@ class CoordinationResult:
 
 
 class CoordinationEngine:
-    """Main multi-agent coordination engine.
+    """Multi-agent coordination engine.
 
-    Orchestrates the full workflow:
-    1. Classify task and determine execution strategy
-    2. Spawn appropriate workers (sequential or parallel)
-    3. Collect and aggregate results
-    4. Synthesize into final response
-    
-    Usage:
+    Classifies the task, spawns sequential or parallel workers, aggregates
+    their results, then synthesizes a final response.
+
         engine = CoordinationEngine(project_path="/path/to/project")
-        result = engine.coordinate(
-            text="Fix the null pointer error",
-            images=[...],
-            mode="performance",
-            call_llm=my_llm_function
-        )
+        result = engine.coordinate(text="Fix the null pointer error",
+                                   images=[...], mode="performance",
+                                   call_llm=my_llm_function)
     """
     
     def __init__(self, project_path: str = None, session_id: str = None):

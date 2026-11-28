@@ -1,18 +1,12 @@
 """Ranked keyword search over the skill library.
 
-With 251 skills the old search, a raw substring test over
-`name + description`, leaving cards in alphabetical order, stopped working:
-
-  * "3d website" matched NOTHING. The skill is `3d-website-architect`, and a
-    space is not a hyphen.
-  * "seo audit" matched nothing for the same reason.
-  * "responsive" found the right skill but left it 40 rows down, because
-    matches were only hidden, never reordered.
-  * tags were never searched at all.
-
-This module fixes all four: separators are equivalent, every term must match
-(AND), matches are RANKED, and tags count. Pure functions, no Qt, so both
-the Skills browser and the "/" menu can share one behaviour.
+With 251 skills, the old substring test over name+description broke down:
+"3d website" and "seo audit" matched nothing (the skill is
+3d-website-architect; a space is not a hyphen), "responsive" left the right
+skill 40 rows down because matches were hidden, never reordered, and tags were
+never searched. Here separators are equivalent, every term must match (AND),
+matches are ranked, and tags count. Pure functions, no Qt, so the Skills
+browser and the "/" menu share one behaviour.
 """
 from __future__ import annotations
 

@@ -1,20 +1,13 @@
 """Which paths the agent may touch outside the open project.
 
-Owner's rules (2026-09-15):
-1. The open project: full access.
-2. Cortex's own folder, ~/.cortex, and everything under it: full access.
-   Cortex's tool-output cache (%APPDATA%/Cortex) is Cortex's own storage too.
-3. Anything else: no access, except a path the user wrote in the chat (or
-   attached). That exact file, or that folder when a folder was given, may
-   be read. It may be changed only when the user asks for a change: the
-   same message asks to edit/fix/update it, or a later message does and
-   names the file. The parent folder is never granted by a file path.
-The bundled skills folder is readable (skills read their own references).
-
-Grants last for the current conversation; a project or conversation switch
-clears them. Only the user's own messages create grants, never file
-contents, tool output or web pages. With no project open nothing is
-restricted, since there is no project to scope to.
+Rules (owner, 2026-09-15): the open project is full access; Cortex's own
+folder ~/.cortex and its tool-output cache (%APPDATA%/Cortex) are full access;
+anything else is no access except a path the user wrote in the chat, and that
+exact file (or folder) may be READ, and changed only when the user asks for a
+change. A file path never grants its parent folder. The bundled skills folder
+is readable. Grants last for the current conversation and clear on a project or
+conversation switch; only the user's own messages create them, never file
+contents, tool output or web pages.
 """
 
 from __future__ import annotations

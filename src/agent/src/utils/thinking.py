@@ -137,24 +137,9 @@ THINKING_LOOP_DETECTION_BUDGET = 32_000
 
 
 def get_provider_thinking_config(provider: str) -> dict:
-    """Get centralized thinking config for a provider.
-    
-    Checks settings.json first for user overrides, falls back to
-    PROVIDER_THINKING_DEFAULTS.
-    
-    Args:
-        provider: LLM provider name (openai, mimo, deepseek, alibaba)
-    
-    Returns:
-        Dict with provider-specific thinking configuration
-    
-    Examples:
-        >>> cfg = get_provider_thinking_config("openai")
-        >>> cfg["reasoning_effort"]
-        'medium'
-        >>> cfg = get_provider_thinking_config("alibaba")
-        >>> cfg["thinking_budget"]
-        4096
+    """Centralized thinking config for a provider.
+
+    settings.json overrides win; otherwise PROVIDER_THINKING_DEFAULTS.
     """
     try:
         from src.config.settings import get_settings
@@ -299,22 +284,7 @@ ADAPTIVE_THINKING_MODELS = {
 
 
 def model_supports_thinking(provider: str, model_name: str) -> bool:
-    """
-    Check if a specific model supports extended thinking/reasoning.
-    
-    Args:
-        provider: LLM provider (openai, mimo, deepseek, alibaba)
-        model_name: Model identifier (e.g., "gpt-5.5", "mimo-v2.5-pro")
-    
-    Returns:
-        True if model supports extended thinking
-    
-    Examples:
-        >>> model_supports_thinking("openai", "gpt-5.5")
-        True
-        >>> model_supports_thinking("mimo", "mimo-v2.5-pro")
-        True
-    """
+    """True if the model supports extended thinking/reasoning."""
     provider = provider.lower()
     model_name = model_name.lower()
 
@@ -347,25 +317,7 @@ def model_supports_thinking(provider: str, model_name: str) -> bool:
 
 
 def model_supports_adaptive_thinking(provider: str, model_name: str) -> bool:
-    """
-    Check if a model supports ADAPTIVE thinking (AI decides when to think).
-    
-    Adaptive thinking is more advanced - the model automatically decides
-    when reasoning is needed, saving tokens on simple questions.
-    
-    Args:
-        provider: LLM provider
-        model_name: Model identifier
-    
-    Returns:
-        True if model supports adaptive thinking
-    
-    Examples:
-        >>> model_supports_adaptive_thinking("openai", "gpt-5.5")
-        True
-        >>> model_supports_adaptive_thinking("mimo", "mimo-v2.5-pro")
-        True
-    """
+    """True if the model decides for itself when to reason (saves tokens)."""
     provider = provider.lower()
     model_name = model_name.lower()
     
@@ -383,23 +335,7 @@ def model_supports_adaptive_thinking(provider: str, model_name: str) -> bool:
 
 
 def get_recommended_thinking_config(provider: str, model_name: str) -> Optional[ThinkingConfig]:
-    """
-    Get recommended thinking configuration for a model.
-    
-    Args:
-        provider: LLM provider
-        model_name: Model identifier
-    
-    Returns:
-        Recommended ThinkingConfig or None if model doesn't support thinking
-    
-    Examples:
-        >>> config = get_recommended_thinking_config("openai", "o3-mini")
-        >>> config.type
-        'adaptive'
-        >>> config.budget_tokens
-        1000
-    """
+    """Recommended ThinkingConfig for the model, or None if it cannot think."""
     if not model_supports_thinking(provider, model_name):
         return None
     
@@ -473,22 +409,7 @@ def _get_thinking_budget_by_model(provider: str, model_name: str) -> int:
 # Provider Information
 
 def get_provider_thinking_info(provider: str) -> dict:
-    """
-    Get thinking capability information for a provider.
-    
-    Args:
-        provider: LLM provider name
-    
-    Returns:
-        Dict with thinking support details
-    
-    Examples:
-        >>> info = get_provider_thinking_info("openai")
-        >>> info["feature_name"]
-        'Extended Thinking'
-        >>> info["supports_thinking"]
-        True
-    """
+    """Thinking capability details for a provider (feature name, support flags)."""
     provider_info = {
         "openai": {
             "feature_name": "Reasoning Effort",

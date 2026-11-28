@@ -1,20 +1,7 @@
-"""Single source of truth for the Cortex version and the build channel.
+"""Single source of truth for the version and the build channel.
 
-Before this module the version was copy-pasted into four places and had
-already drifted apart:
-
-    cortex_setup.iss   "2.9.5"   correct
-    src/main.py        "2.9.5"   correct
-    src/core/cortex_api.py "2.8.5"   FOUR releases stale, and this is the
-                                 value sent as X-Cortex-Version on every API
-                                 call, so the server believed every user was
-                                 on 2.8.5
-    build.ps1          "2.7.0"   stale
-
-Shipping to a second channel (Microsoft Store) would have added a fifth
-copy. Everything now reads the version from here, and the build script
-derives both the installer name and the MSIX manifest version from this one
-value, so the two channels can never disagree about what "2.9.6" means.
+Before this module the value was copy-pasted into four places and had
+already drifted, so the API sent a stale X-Cortex-Version. Read it here.
 """
 from __future__ import annotations
 
@@ -22,14 +9,12 @@ VERSION = "3.0.82"
 
 
 def to_msix_version(version: str = VERSION) -> str:
-    """Convert a release version to the MSIX 4-part form.
+    """Return the MSIX four-part form of version, for example 3.0.82.0.
 
-    MSIX requires exactly four numeric parts, and the Store REJECTS any
-    submission whose fourth part (revision) is not 0, Microsoft reserves
-    it. So 3.0.71 -> 3.0.71.0.
+    The Store rejects any revision other than 0.
 
-    Raises ValueError on a malformed version so a bad value fails at build
-    time rather than after a Store upload.
+    Raises:
+        ValueError: if version has a non-numeric or out-of-range part.
     """
     text = str(version).strip()
     if not text:
@@ -37,8 +22,7 @@ def to_msix_version(version: str = VERSION) -> str:
     parts = text.split(".")
     numbers = []
     for part in parts[:3]:
-        # An empty part means a typo like "3..0" or a trailing dot, reject it
-        # rather than silently shipping a version nobody intended.
+        # Reject a typo like "3..0" instead of shipping a version nobody meant.
         if not part.isdigit():
             raise ValueError(f"non-numeric version part {part!r} in {version!r}")
         value = int(part)
@@ -53,9 +37,7 @@ def to_msix_version(version: str = VERSION) -> str:
 MSIX_VERSION = to_msix_version()
 
 
-# Build channel: "web" (cortex-ide.app, self-updating), "store" (MSIX,
-# Microsoft updates), "dev" (from source). build.ps1 generates
-# src/_build_info.py for each build; missing means running from source.
+# build.ps1 writes src/_build_info.py per build; missing means source run.
 try:
     from src._build_info import CHANNEL as _CHANNEL  # type: ignore[import-not-found]
 except Exception:

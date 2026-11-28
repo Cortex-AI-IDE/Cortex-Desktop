@@ -1,27 +1,13 @@
 """Decide whether Cortex may start, from the SAVED session alone.
 
-Cortex requires a login. The dangerous way to enforce that is to ask the
-server at startup: the day cortex-ide.app is slow, unreachable, or mid-deploy,
-every paying user is locked out of an editor that would otherwise work
-offline. So the gate never touches the network. It reads what login already
-wrote to ~/.cortex/auth.json and answers one question: has this machine been
-signed in?
+Asking the server at startup would lock every paying user out of an editor that
+works offline the day cortex-ide.app is slow or mid-deploy, so the gate never
+touches the network. It reads ~/.cortex/auth.json: no token means BLOCK and
+show the login window (unless the user chose "Skip for now"); a token in date
+means ALLOW; a token expired means ALLOW and refresh in the background.
 
-    no token at all            -> BLOCK, show the login window
-                                  (unless the user chose "Skip for now"
-                                  before: then main.py opens Cortex without
-                                  an account, see was_skipped())
-    token present, in date     -> ALLOW
-    token present, expired     -> ALLOW, and refresh in the background
-
-The expired case is deliberate. A refresh token that is a minute stale is not
-a security event, and refusing to open would punish the user for our clock,
-their flight, or a dropped connection. The access token is still checked by
-the server on every API call, so an actually-revoked session fails there -
-which is the right place for it to fail.
-
-Qt-free on purpose: this is the decision, not the dialog, and it is the part
-worth having tests for.
+The expired case is deliberate: a minute-stale refresh token is not a security
+event. The server still checks the access token on every API call. Qt-free.
 """
 from __future__ import annotations
 

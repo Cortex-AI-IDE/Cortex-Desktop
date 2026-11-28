@@ -63,23 +63,11 @@ def substituteArguments(
     appendIfNoPlaceholder: bool = True,
     argumentNames: Optional[List[str]] = None,
 ) -> str:
-    """
-    Substitute argument placeholders in content.
-    
-    Supports:
-    - $ARGUMENTS - full arguments string
-    - $ARGUMENTS[0], $ARGUMENTS[1] - indexed arguments
-    - $0, $1 - shorthand for indexed arguments
-    - $name - named arguments (when argumentNames provided)
-    
-    Args:
-        content: Template content with placeholders
-        args: Arguments string from user
-        appendIfNoPlaceholder: If True, append args if no placeholder found
-        argumentNames: List of named arguments from frontmatter
-        
-    Returns:
-        Content with placeholders substituted
+    """Substitute argument placeholders in content.
+
+    Supports $ARGUMENTS (full string), $ARGUMENTS[n] and $n (indexed), and
+    $name (named, when argumentNames is given). If no placeholder is present
+    and appendIfNoPlaceholder is True, the args are appended.
     """
     if not args:
         # Remove any $ARGUMENTS placeholders if no args provided

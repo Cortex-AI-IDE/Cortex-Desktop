@@ -10,23 +10,13 @@ from typing import List
 
 
 def group_messages_by_api_round(messages: List[dict]) -> List[List[dict]]:
-    """
-    Groups messages at API-round boundaries.
-    
-    A boundary fires when a NEW assistant response begins (different
-    message.id from the prior assistant). For well-formed conversations
-    this is an API-safe split point, the API contract requires every
-    tool_use to be resolved before the next assistant turn, so pairing
-    validity falls out of the assistant-id boundary.
-    
-    For malformed inputs (dangling tool_use after resume/truncation) the
-    fork's ensure_tool_result_pairing repairs the split at API time.
-    
-    Args:
-        messages: List of message dicts with 'type' and 'message' keys
-        
-    Returns:
-        List of message groups (one per API round)
+    """Split messages at API-round boundaries (one group per round).
+
+    A boundary is where a new assistant response begins (different message.id).
+    For well-formed conversations that is API-safe, since the API contract
+    requires every tool_use resolved before the next assistant turn. For
+    malformed input (a dangling tool_use after resume/truncation),
+    ensure_tool_result_pairing repairs the split at API time.
     """
     groups = []
     current = []

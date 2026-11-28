@@ -1,39 +1,10 @@
-"""Spreadsheet -> JSON model reader for the in-editor grid preview.
+"""Spreadsheet -> JSON model reader for the read-only editor grid preview.
 
-Pure Python (no Qt). Runs on a worker thread from main_window and produces a
-JSON-serialisable model that editor.html renders as a Google-Sheets-like,
-strictly read-only grid:
-
-  {
-    "name":  "file.xlsx",
-    "sheets": [
-      {
-        "name": "Sheet1",
-        "rows": [ [cell, cell, ...], ... ],     # cell = str OR dict
-        "merges": [{"r":0,"c":0,"rs":1,"cs":2}, ...],
-        "n_rows": 12, "n_cols": 8,
-        "trunc_rows": false, "trunc_cols": false
-      }, ...
-    ],
-    "formulas": {"evaluated": 3, "fallback": 1}
-  }
-
-A cell is a plain string when it carries no styling; otherwise a dict:
-  {"t": text, "bg": "#1F4E78", "fg": "#FFFFFF", "b": 1, "i": 1,
-   "al": "l"|"c"|"r", "fx": 1}
-"fx" marks a cell whose displayed text is the *formula itself* (the value
-could not be computed) so the UI can render it muted.
-
-Why this module exists (field bugs it fixes):
-  * openpyxl data_only=True returns None for formula cells that were never
-    cached (file saved by a script) -> the old viewer showed BLANK cells
-    where Excel shows numbers. Here a small safe AST evaluator computes
-    common formulas (=B2*2, =SUM(B2:B9), IF/ROUND/...) so the grid shows
-    values like Excel; anything exotic falls back to showing the formula
-    text instead of nothing.
-  * The old viewer stacked every sheet into one long page. The model keeps
-    sheets separate so the UI can offer Excel-like bottom tabs.
-  * The old viewer dropped fill/font/merge info. The model carries it.
+Pure Python, no Qt, worker thread. A cell is a string, or a dict when styled:
+{"t", "bg", "fg", "b", "i", "al", "fx"}. A small AST evaluator covers =B2*2,
+=SUM(B2:B9), IF and ROUND, since openpyxl data_only=True returns None for
+never-cached formula cells and the old viewer showed blanks where Excel shows
+numbers.
 """
 
 from __future__ import annotations

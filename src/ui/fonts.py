@@ -1,23 +1,17 @@
 """Cortex's bundled typefaces: Inter for the interface, JetBrains Mono for code.
 
-Before this module Cortex shipped no font files. The design tokens named
-Geist and JetBrains Mono, neither was installed, and every surface silently
-fell back to Segoe UI and Consolas. The fonts now live in src/assets/fonts/
-(SIL Open Font License 1.1, licence texts alongside) and reach both halves of
-the UI from here:
+Cortex used to ship no font files: the tokens named Geist and JetBrains Mono,
+neither was installed, and every surface silently fell back to Segoe UI and
+Consolas. The fonts now live in src/assets/fonts/ (SIL Open Font License 1.1)
+and reach both halves of the UI from here: native Qt widgets through
+QFontDatabase.addApplicationFont (register_qt_fonts), and every WebEngine page
+through one script on the shared profile that adds @font-face rules and the
+--font-ui / --font-mono variables (install_web_fonts), since Chromium does not
+see Qt-registered fonts.
 
-* Native Qt widgets (the chat panel, menus, dialogs) through
-  QFontDatabase.addApplicationFont - see register_qt_fonts().
-* Every Qt WebEngine page (editor, sidebar, terminal, Settings, Project
-  Health, diagrams) through one script on the shared default profile that adds
-  @font-face rules and the --font-ui / --font-mono variables - see
-  install_web_fonts(). Chromium does not see fonts registered with Qt, so the
-  pages need their own @font-face.
-
-Naming, measured on Windows: Qt registers the variable Inter file as
-"Inter Variable" - a request for plain "Inter" resolves to Tahoma. The stacks
-below therefore list both: "Inter" is the name the @font-face rules give it
-inside web pages, "Inter Variable" is the name Qt knows.
+Naming, measured on Windows: Qt registers the variable Inter file as "Inter
+Variable", so a request for plain "Inter" resolves to Tahoma. The stacks below
+list both names.
 """
 from __future__ import annotations
 

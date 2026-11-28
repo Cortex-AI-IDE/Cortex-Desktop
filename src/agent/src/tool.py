@@ -126,20 +126,14 @@ async def validate_tool_input(
 ) -> Optional[Dict[str, Any]]:
     """Run a tool's optional ``validate_input`` hook before it does any work.
 
-    Returns the hook's refusal dict (``{"result": False, "message": ...}``) when
-    the input must be rejected, otherwise ``None`` meaning "go ahead".
-
-    The hook is optional and its shape is not uniform across tools, so all three
-    variants found in the tree are supported:
-
-    * ``validate_input(inp)``                    - glob, grep, semantic search
-    * ``validate_input(inp, context)``           - file edit, file write
-    * ``validate_input(self, inp, context=None)`` - file read (instance method)
-
-    A hook that raises is logged and treated as "no opinion" rather than
-    propagated. These guards had never been dispatched at all, so failing closed
-    on a validator bug would turn a latent defect into a tool that never runs.
-    The log line is the evidence that the guard did not execute.
+    Returns the refusal dict (``{"result": False, "message": ...}``) when the
+    input must be rejected, else None meaning "go ahead". Three hook shapes
+    exist in the tree and all are supported: ``validate_input(inp)``,
+    ``validate_input(inp, context)``, and
+    ``validate_input(self, inp, context=None)`` (instance method). A hook that
+    raises is logged and treated as "no opinion", not propagated: these guards
+    had never been dispatched at all, so failing closed on a validator bug
+    would turn a latent defect into a tool that never runs.
     """
     hook = getattr(tool, "validate_input", None)
     if hook is None or not callable(hook):

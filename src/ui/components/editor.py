@@ -1,5 +1,5 @@
 """
-Code Editor Component, QPlainTextEdit with line numbers, syntax highlighting,
+Code editor component: QPlainTextEdit with line numbers, syntax highlighting,
 current-line highlight, and auto-indent.
 """
 import ast

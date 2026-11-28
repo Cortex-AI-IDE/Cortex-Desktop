@@ -1,38 +1,13 @@
-"""GPU compatibility detection for the WebEngine software-rendering fallback.
+"""GPU detection for the WebEngine software-rendering fallback.
 
-Why this exists
----------------
-On some older machines (Windows 10/11 office PCs, AMD chipsets are the
-classic case) Chromium cannot obtain a usable GPU context. Every WebEngine
-surface — sidebar.html, editor.html, terminal.html, memory_management.html,
-settings — paints BLANK/dark while the Python side looks perfectly healthy:
-pages report loadFinished, bridges connect, nothing raises. Only the pixels
-are missing.
+On some machines Chromium cannot get a GPU context and every WebEngine surface
+paints blank while Python looks healthy. The fix is SwiftShader, decided BEFORE
+QApplication exists because QTWEBENGINE_CHROMIUM_FLAGS is read once at init, so
+this module is Qt-free and main.py imports it first.
 
-The fix is SwiftShader (CPU rendering), but it must be decided BEFORE
-QApplication exists, because QTWEBENGINE_CHROMIUM_FLAGS is read once at
-WebEngine initialisation. So this module is Qt-free: main.py imports it
-before any PyQt6 import. Never add a Qt import here.
-
-Decision order (first match wins):
-  1. CORTEX_SOFTWARE_RENDERING=1 in the environment   -> software
-  2. settings.json ui.rendering_mode = software|gpu   -> explicit user choice
-  3. legacy settings.json ui.software_rendering=true  -> software
-  3b. a crash on a native (Chromium GPU) thread in    -> software, this
-      the last 7 days (crash_fallback)                    launch; the window
-                                                          then asks to keep it
-  4. Automatic hardware detection:
-       - ONLY Microsoft Basic Display/Render adapters  -> software
-         (no real driver installed, GPU rendering is guaranteed to fail)
-       - AMD/ATI adapter with a driver older than 2017 -> software
-         (the driver cohort reported blank on; modern AMD drivers are fine)
-       - only Intel adapters, driver older than 2017   -> software
-         (same failure, see classify_gpus)
-  5. Default                                          -> gpu
-
-Anything uncertain stays on GPU: the runtime WebGL probe in
-src/ui/render_health.py catches machines this heuristic cannot see, and
-offers the same fix with evidence instead of guessing.
+First match wins: CORTEX_SOFTWARE_RENDERING=1, ui.rendering_mode, legacy
+ui.software_rendering, a native-thread crash in 7 days, then hardware detection
+(Basic Display adapters, AMD/Intel drivers older than 2017).
 """
 from __future__ import annotations
 

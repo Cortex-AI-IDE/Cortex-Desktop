@@ -1,27 +1,15 @@
 """Workspace trust: does the user trust the authors of the folder they opened?
 
-Opening a folder is enough for Cortex to act on what is inside it: source
-the project's venv activate script, list (and offer) the MCP servers its
-config names, run git, whose repository config can name programs of its own
-(core.fsmonitor, hooks), and hand the AI the project's skills and .cortex
-rules as instructions. That is fine for the user's own code and dangerous
-for a repository cloned from somewhere else, so the first open of a folder
-asks, the way other editors do, and an untrusted folder opens in Restricted
-Mode:
+Opening a folder is enough for Cortex to act on what is inside it: source the
+project venv, offer the MCP servers its config names, run git (whose repo
+config can name programs of its own), and hand the AI the project's skills and
+.cortex rules. Fine for the user's own code, dangerous for a cloned repository.
+So the first open asks, and an untrusted folder opens in Restricted Mode: no
+venv activation, no project MCP servers, no project skills or rules in the
+prompt, no automatic git, and every shell command and edit asks first.
 
-  - no venv activation,
-  - no project MCP servers (not started, not offered),
-  - no project skills or .cortex rules/context in the AI prompt,
-  - git does not run on its own, and any git Cortex or its terminals run
-    has hooks and fsmonitor switched off,
-  - every shell command and every edit the agent makes asks first.
-
-The decisions live in ~/.cortex/workspace_trust.json, never inside the
-project, so a repository cannot mark itself trusted. Trusting a folder also
-trusts everything under it (the "trust the parent folder" option).
-
-A folder with no decision yet counts as restricted: the guards below run
-before the prompt has been answered, and the safe answer there is "not yet".
+Decisions live in ~/.cortex/workspace_trust.json, never inside the project, so
+a repository cannot mark itself trusted. No decision yet counts as restricted.
 """
 from __future__ import annotations
 

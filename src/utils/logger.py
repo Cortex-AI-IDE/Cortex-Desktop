@@ -198,20 +198,12 @@ class _StderrFilter:
 
 def install_stderr_filter():
     """Install the stderr filter. Safe to call multiple times.
-    
-    Three layers, the last two Windows only:
-    1. Python-level: wraps sys.stderr to drop noise from Python logging calls.
-       Runs on every platform.
-    2. FD-level: redirects OS fd 2 through a filtered pipe to catch Qt C++ warnings
-       (QTextHtmlParser, JSON message object) that bypass Python's stderr entirely.
-    3. stdout-level: redirects OS fd 1 to catch QWebChannel JSON protocol messages
-       ("type": 3, etc.) written to stdout by Qt's C++ layer.
 
-    Layers 2 and 3 replace a process-wide file descriptor, so on POSIX they also
-    swallow print() and every child process's output. Both were written for the
-    Windows build, where Qt's C++ layer bypasses Python's streams entirely.
-    POSIX gets the Python-level wrapper plus install_qt_message_filter(), which
-    drops the same Qt C++ warnings without redirecting a descriptor.
+    Three layers: a Python-level sys.stderr wrapper (all platforms), plus two
+    fd-level redirects (fd 2 and fd 1) that catch Qt C++ warnings and
+    QWebChannel JSON written straight to a descriptor, bypassing Python. The
+    fd layers are Windows-only on purpose: replacing a process-wide descriptor
+    on POSIX would also swallow print() and every child process's output.
     """
     import sys as _sys
     import os as _os
@@ -304,19 +296,13 @@ _DROP_QT = tuple(dict.fromkeys(_StderrFilter._DROP + [
 def install_qt_message_filter():
     """Drop Qt C++ noise through Qt's own hook, on every platform.
 
-    Layers 2 and 3 of install_stderr_filter() exist because Qt's C++ layer
-    writes straight to fd 2 and never calls Python's sys.stderr, so the
-    Python-level wrapper cannot see those messages. That is true, but
-    replacing a process-wide descriptor is a blunt way to fix it: on POSIX
-    it also swallows print() and every child process's output.
-
-    qInstallMessageHandler() is the supported hook for exactly this. Every
-    qtDebug/qtWarning/qtCritical reaches the callable below *before* it
-    touches any descriptor, so nothing is redirected: print(), child
-    processes and shell pipelines all keep working.
-
-    Call after QApplication exists. Safe to call more than once. A failure
-    here must never block startup, so the whole body is guarded.
+    The fd-level layers of install_stderr_filter() catch messages Qt writes
+    straight to fd 2, but replacing a process-wide descriptor also swallows
+    print() and child output on POSIX. qInstallMessageHandler() is the
+    supported hook: every qtDebug/qtWarning/qtCritical reaches it before
+    touching a descriptor, so nothing is redirected. Call after QApplication
+    exists; safe to call more than once, and guarded so it can never block
+    startup.
     """
     try:
         from PyQt6 import QtCore
@@ -488,22 +474,9 @@ def get_logger(name: str = "cortex") -> logging.Logger:
 
 # ── Log search utility ──
 def search_logs(keyword: str, hours: int = 1, level: str = None, max_results: int = 100) -> list:
-    """Search recent logs for a keyword.
-    
-    Args:
-        keyword: Text to search for (case-insensitive)
-        hours: How many hours back to search (default 1)
-        level: Filter by level (ERROR, WARNING, INFO, DEBUG) or None for all
-        max_results: Max results to return
-    
-    Returns:
-        List of matching log lines
-    
-    Example:
-        from src.utils.logger import search_logs
-        errors = search_logs("ERROR", hours=2)
-        memory_logs = search_logs("MEMORY.md", hours=1)
-        bridge_logs = search_logs("BRIDGE", level="WARNING")
+    """Return matching log lines from the last ``hours``, newest files first.
+
+    keyword is case-insensitive; level filters to one level or None for all.
     """
     import glob as _glob
     

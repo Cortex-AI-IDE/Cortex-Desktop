@@ -141,23 +141,14 @@ class AutonomyDecision:
 
 
 class AutonomyManager:
-    """
-    Manages autonomy levels and safety gates for the agent.
+    """Autonomy levels and safety gates for the agent.
 
-    Determines whether each tool action requires user permission
-    based on the current autonomy level and the tool's risk category.
+    Decides whether a tool action needs user permission, from the current level
+    and the tool's risk category.
 
-    Usage
-    -----
-    mgr = AutonomyManager()
-    mgr.set_level(AutonomyLevel.AUTO)
-    decision = mgr.check_action("Bash", {"command": "ls -la"})
-    if decision.requires_permission:
-        # show permission prompt
-        pass
-    else:
-        # execute directly
-        pass
+        mgr = AutonomyManager()
+        mgr.set_level(AutonomyLevel.AUTO)
+        decision = mgr.check_action("Bash", {"command": "ls -la"})
     """
 
     def __init__(self, initial_level: AutonomyLevel = AutonomyLevel.ASK):

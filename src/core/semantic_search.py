@@ -26,9 +26,9 @@ except ImportError:
 def _pack_embedding(embedding):
     """Store embeddings as packed float32, not Python float lists.
 
-    A 2560-dim embedding as a list of Python floats costs ~80KB (24-byte
-    float objects + pointers); packed float32 is 10KB. At 1500+ indexed
-    files that is the difference between ~125MB and ~15MB of RAM.
+    A 2560-dim embedding as a list of Python floats costs ~80KB (24-byte float
+    objects plus pointers); packed float32 is 10KB. At 1500+ indexed files that
+    is ~125MB against ~15MB of RAM.
     """
     if _HAS_NUMPY:
         return _np.asarray(embedding, dtype=_np.float32)
@@ -102,9 +102,8 @@ class SemanticSearch:
     
     def _check_embeddings_access(self) -> bool:
         """Check if user has access to embeddings (subscription required).
-        
-        Cached for 5 minutes to avoid repeated network calls.
-        Falls back to hash if subscription check fails.
+        Cached for 5 minutes to avoid repeated network calls, falling back to
+        the hash if the subscription check fails.
         """
         import time as _time
         now = _time.time()
@@ -145,34 +144,29 @@ class SemanticSearch:
     def _within_root(self, file_path: str) -> bool:
         """Is ``file_path`` inside this project's root?
 
-        Separator-aware, so ``cortex_opensource_old`` is not accepted as a
-        child of ``cortex_opensource``, which a plain ``startswith(root)``
-        would do. Case-insensitive on Windows via :func:`os.path.normcase`.
+        Separator-aware, so ``cortex_opensource_old`` is not accepted as a child
+        of ``cortex_opensource``, which a plain startswith(root) would do.
+        Case-insensitive on Windows via os.path.normcase.
 
         Deliberately no filesystem access: this runs once per cache entry on
-        every search, and ``Path.resolve()`` there would be thousands of
-        syscalls per query. Keys written by :meth:`index_file` are already
-        resolved.
+        every search, and Path.resolve() would be thousands of syscalls per
+        query. Keys written by index_file are already resolved.
         """
         return self._path_within(file_path, self._root_norm)
 
     def _prune_outside_root(self) -> int:
         """Drop cache and metadata entries that belong to another project.
 
-        The index is per-project (``<root>/.cortex/semantic_index``) and it
-        used to be trusted blindly. ``index_project`` only added and updated
-        keys and never removed one, so an index that had ever been seeded with
-        a parent or sibling tree kept those rows through every rebuild,
-        ``force=True`` included. Measured in this repo before the fix: 1700 of
-        3619 rows pointed at ``cortex_desktop`` while the index belonged to
-        ``cortex_opensource``, and searches returned that code with high
-        scores.
+        The index is per-project (<root>/.cortex/semantic_index) and used to be
+        trusted blindly: index_project only added and updated keys, so an index
+        ever seeded with a parent or sibling tree kept those rows through every
+        rebuild, force=True included. Measured here before the fix: 1700 of
+        3619 rows pointed at cortex_desktop while the index belonged to
+        cortex_opensource, and searches returned that code with high scores.
 
-        Pruning at load makes search honest immediately. Pruning again before
-        a rebuild is what removes the rows from disk on the next save.
-
-        Returns:
-            How many entries were dropped, so the caller can report it.
+        Pruning at load makes search honest immediately; pruning again before a
+        rebuild is what removes the rows from disk on the next save. Returns
+        how many entries were dropped.
         """
         foreign = [
             key for key in self.embeddings_cache if not self._within_root(key)
@@ -200,14 +194,11 @@ class SemanticSearch:
 
     def index_file(self, file_path: str, force: bool = False) -> bool:
         """
-        Index a single file.
-        
+        Index a single file. Returns True if successfully indexed.
+
         Args:
-            file_path: Path to file
-            force: Force re-index even if already indexed
-        
-        Returns:
-            True if successfully indexed
+            file_path: Path to file.
+            force: Force re-index even if already indexed.
         """
         if not self.embeddings_provider:
             return False
@@ -351,35 +342,15 @@ class SemanticSearch:
     def index_project(self, force: bool = False,
                       max_files: Optional[int] = None,
                       max_seconds: Optional[float] = None) -> Dict[str, int]:
-        """
-        Index entire project.
+        """Index the project, incrementally by default (new/changed files by
+        mtime); force=True rebuilds all. Rate-limits between API calls so the
+        single-threaded Django dev server is not flooded.
 
-        Incremental by default, only re-embeds files that are new or changed
-        (mtime differs from stored value). Use force=True for full rebuild.
-
-        PERFORMANCE: Adds rate limiting between API calls to prevent flooding
-        the Django dev server (single-threaded). Saves index periodically.
-
-        Args:
-            force: Force re-index all files
-            max_files: Stop after embedding this many files (None = no limit).
-                Counts files actually embedded, not files visited, so skipped
-                and unchanged files stay free. Used to bound a foreground heal
-                of entries that came from another embedding model: on a large
-                project that heal took one tool call 19 minutes, which looks
-                like a hang and blocks whatever called it.
-            max_seconds: Stop once this much wall-clock time has been spent in
-                the embedding loop (None = no limit). A file costs one network
-                round-trip (~3.3s through the subscription proxy on this
-                machine), so a count cap alone still scales with how slow the
-                network is that day. Both caps are checked; whichever hits
-                first wins. ``max_files`` alone turned "bounded" into
-                "bounded at 82s" on a bad connection.
-
-        Returns:
-            Statistics dict. ``capped`` is True when either cap stopped it,
-            ``stop_reason`` names which one, and ``total_candidates`` is how
-            many files the walk found, so a caller can report what is pending.
+        max_files counts files actually embedded, and bounds a foreground heal
+        of entries from another embedding model (that took 19 minutes and
+        looked like a hang). max_seconds bounds wall-clock too, since a count
+        cap alone still scales with network speed. Returns stats; ``capped`` is
+        True when a cap stopped it, ``stop_reason`` names which.
         """
         import time as _time
         log.info(f"Starting project indexing{'(force)' if force else ''}...")
@@ -675,25 +646,18 @@ class SemanticSearch:
     def _extract_code_content(self, content: str, file_path: str) -> str:
         """Extract meaningful content from a source file for embedding.
 
-        The goal is to capture enough of the file's *semantics* so that a
-        vector embedding can distinguish "this file handles authentication"
-        from "this file renders a spinner widget".  Previous implementation
-        only kept ``def``/``class`` headers + 4 lines, which threw away
-        imports, constants, assignments, function bodies, and string literals
-        — the very things that carry topical meaning.  The fix keeps those
-        while still capping total length so we don't embed entire 14 K-line
-        files.
+        The goal is to capture enough of the file's semantics that an embedding
+        can tell "this file handles authentication" from "this file renders a
+        spinner". The previous version kept only def/class headers plus 4
+        lines, throwing away imports, constants, assignments, bodies and string
+        literals, which are what carry topical meaning.
 
-        Strategy per language family:
-        - **Python (.py)**: keep module docstring, imports, top-level
-          assignments, class/def signatures + first N body lines, and any
-          string literal or comment that looks like documentation.
-        - **Web (.js/.ts/.jsx/.tsx/.html/.css)**: keep imports/exports,
-          function/arrow-function headers, class definitions, HTML tag
-          structure, CSS selectors, and substantial comments.
-        - **Markdown (.md)**: keep full text (already topical).
-        - **Everything else**: keep anything that isn't blank or purely
-          punctuation.
+        Python keeps the module docstring, imports, top-level assignments,
+        class/def signatures with the first body lines, and docstring-like
+        strings and comments. Web files keep imports/exports, function and
+        arrow headers, classes, tag structure, CSS selectors and substantial
+        comments. Markdown keeps full text; everything else keeps any non-blank
+        line. Total length is capped so a 14K-line file is not embedded whole.
         """
         ext = Path(file_path).suffix.lower()
         lines = content.split('\n')
@@ -892,21 +856,14 @@ class SemanticSearch:
         return (self.index_dir / "index.npy", self.index_dir / "index.meta.json")
 
     def save_index(self):
-        """Save index to disk (atomic, tmp file + os.replace).
+        """Save the index to disk atomically (tmp file + os.replace).
 
-        Bug history: a direct json.dump truncated the target first, so a
-        crash mid-write left corrupt JSON that failed with 'Expecting
-        delimiter' on every startup afterwards.
-
-        The vectors are written as ONE float32 matrix (index.npy), not JSON.
-        As JSON every float became a Python object and then text: measured on
-        a real 1,922-file index, 106 MB written in 2.7 s, with the GIL
-        contended and ~5 million temporary floats to collect throughout. Saves
-        run every 60 s while indexing, including during a chat turn (the
-        agent's SementicSearch tool indexes), and 23 of the 26 UI freezes
-        logged between 2026-09-28 and 2026-10-02 fell within 3 s of one -
-        the chat stopped mid-answer for 1.5-2.3 s. The same index is 19.7 MB
-        and 30 ms this way.
+        A direct json.dump truncated the target first, so a crash mid-write left
+        corrupt JSON that failed with "Expecting delimiter" on every later
+        startup. Vectors go as one float32 matrix (index.npy), not JSON: as JSON
+        a real 1,922-file index was 106MB and 2.7s of GIL-contended work, and 23
+        of 26 logged UI freezes fell within 3s of a save. Same index is 19.7MB
+        and 30ms this way.
         """
         self.index_dir.mkdir(parents=True, exist_ok=True)
         keys = list(self.embeddings_cache)

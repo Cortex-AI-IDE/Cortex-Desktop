@@ -46,21 +46,10 @@ ADMIN_TRUSTED_SOURCES: Set[str] = {
 
 
 def isSourceAdminTrusted(source: Optional[str]) -> bool:
-    """
-    Whether a customization's source is admin-trusted under strictPluginOnlyCustomization.
-    
-    Use this to gate frontmatter-hook registration and similar per-item checks
-    where the item carries a source tag but the surface's filesystem loader already ran.
-    
-    Pattern at call sites:
-        allowed = not isRestrictedToPluginOnly(surface) or isSourceAdminTrusted(item.source)
-        if item.hooks and allowed:
-            register(...)
-    
-    Args:
-        source: The source identifier
-        
-    Returns:
-        True if source is admin-trusted
+    """True when a customization's source is admin-trusted.
+
+    Gates frontmatter-hook registration and similar per-item checks, used as
+    ``allowed = not isRestrictedToPluginOnly(surface) or
+    isSourceAdminTrusted(item.source)``.
     """
     return source is not None and source in ADMIN_TRUSTED_SOURCES

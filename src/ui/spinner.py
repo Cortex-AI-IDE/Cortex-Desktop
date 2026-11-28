@@ -1,33 +1,16 @@
 """
-spinner.py, 15 animated tool spinners for Cortex IDE
-======================================================
+spinner.py - 15 animated tool spinners for Cortex IDE.
 
-All native Qt (QPainter + QTimer). No assets, no dependencies.
+All native Qt (QPainter + QTimer), no assets or dependencies.
 
     from src.ui.spinner import spinner_for
-    sp = spinner_for("read", size=16)
-    sp = spinner_for("terminal", size=16, color="#ff6900")
+    sp = spinner_for("read", size=16); sp.start(); sp.stop()
 
-    sp.start()
-    sp.stop()
-    sp.set_color("#hex")
-
-Factory mapping:
-    read                        → ArcSpinner       (blue)   sweeping arc with fade tail
-    list_dir / directory        → StackSpinner     (blue)   lines sweeping in from left
-    edit                        → OrbitSpinner     (green)  dual-dot counter-orbit
-    write / create_file         → PenSpinner       (green)  pen writing + ink trail
-    grep                        → BarsSpinner      (purple) equaliser bars
-    glob                        → ScatterSpinner   (purple) dots scatter/contract
-    search / codebase_search    → RadarSpinner     (purple) radar sweep with fade trail
-    semantic_search             → NeuralSpinner    (purple) vector space + similarity links
-    terminal / bash / command   → DotsSpinner      (orange) 3-dot chase
-    web_search                  → PulseRing        (cyan)   concentric rings expanding
-    web_fetch                   → DownloadSpinner  (cyan)   arrow descending with pulse
-    thinking / thought          → GridSpinner      (violet) 4×4 breathing grid
-    task                        → CheckSpinner     (amber)  rows filling sequentially
-    team                        → NodesSpinner     (coral)  triangle nodes pulsing
-    * (fallback)                → GridSpinner      (violet)
+read -> ArcSpinner, list_dir -> StackSpinner, edit -> OrbitSpinner, write ->
+PenSpinner, grep -> BarsSpinner, glob -> ScatterSpinner, search -> RadarSpinner,
+semantic_search -> NeuralSpinner, terminal -> DotsSpinner, web_search ->
+PulseRing, web_fetch -> DownloadSpinner, thinking -> GridSpinner, task ->
+CheckSpinner, team -> NodesSpinner, anything else -> GridSpinner.
 """
 
 import math

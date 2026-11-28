@@ -142,24 +142,10 @@ class FileManager(QObject):
             self.file_read_complete.emit(filepath, content)
     
     def read_range(self, filepath: str, start_line: int, end_line: int, use_cache: bool = True) -> str | None:
-        """
-        ULTRA-FAST line range reading with multi-level caching.
-        Enhanced with performance metrics from lazy_loading_demo.py
-        
-        PERFORMANCE HIERARCHY (fastest to slowest):
-        1. Range cache hit → INSTANT (<1ms)
-        2. Full file cache hit → FAST (~2-5ms to extract range)
-        3. Small file read → MEDIUM (~10-20ms)
-        4. Large file mmap → SLOW but optimized (~50-100ms)
-        
-        Args:
-            filepath: Path to file
-            start_line: Start line (1-indexed)
-            end_line: End line (inclusive)
-            use_cache: Use cached content if available
-        
-        Returns:
-            Content for lines start_line to end_line
+        """Return lines start_line..end_line (1-indexed, inclusive).
+
+        Range cache hit is instant; then full-file cache, small-file read, and
+        large-file mmap, in that order of speed.
         """
         import time
         start_time = time.time()
@@ -238,21 +224,12 @@ class FileManager(QObject):
     
     def read(self, filepath: str, use_cache: bool = True, async_load: bool = False,
              lazy_load: bool = False, viewport_start: int = 1, viewport_size: int = 100) -> str | None:
-        """
-        Read a text file with MAXIMUM performance optimizations.
+        """Read a text file, checking the cache first.
 
-        Args:
-            filepath: Path to file
-            use_cache: If True, check cache first (instant if cached)
-            async_load: If True, load in background (non-blocking)
-            lazy_load: If True, only load visible viewport (caller must opt-in)
-            viewport_start: First visible line (for lazy loading)
-            viewport_size: Number of lines to load (default 100)
-
-        NOTE: Previously this method auto-enabled lazy_load for files >512KB
-        even when the caller explicitly passed lazy_load=False. This caused the
-        editor to show only the first 100 lines of large files. The auto-override
-        has been removed, callers get exactly what they ask for.
+        lazy_load limits the read to a viewport (caller must opt in). It is no
+        longer auto-enabled for files over 512KB even when the caller passed
+        False, which used to make the editor show only the first 100 lines of
+        large files: callers now get exactly what they ask for.
         """
         # Check cache first for instant access
         if use_cache:

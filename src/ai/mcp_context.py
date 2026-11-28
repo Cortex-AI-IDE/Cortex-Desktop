@@ -1,23 +1,16 @@
 """Keeping long MCP (browser) sessions moving and their context small.
 
-Two findings from the 2026-10-19 / 10-20 chrome-devtools sessions:
+Two findings from the 2026-10-19 chrome-devtools sessions. First, browser work
+did not count as progress: auto-continue only continues a cycle that made
+progress, and progress meant Write / Edit / Bash / PowerShell, so a task driven
+by click / fill / navigate_page made "0 mutations" and stopped after cycle 1 of
+5 with todos pending. is_mcp_action tells real MCP actions from reads.
 
-1. Browser work did not count as progress. Auto-continue keeps a long task
-   going only when a cycle made progress, and progress meant Write / Edit /
-   Bash / PowerShell. A task driven by click / fill / navigate_page made
-   "0 mutations", so it stopped after cycle 1 of 5 with todos still pending
-   and waited for the user to press Resume (00:20:51 and 00:24:37 on 10-20).
-   `is_mcp_action` tells real MCP actions from reads.
-
-2. Stale page snapshots filled the context. chrome-devtools returns the page's
-   accessibility tree ("## Latest page snapshot") from take_snapshot and from
-   many actions; one was 187,737 chars, 35 of them added ~325K chars in an
-   hour, and the conversation grew from 88K to 207K tokens inside one task.
-   Only the newest snapshot describes the page; every older one is out of date
-   (its element uids are invalid after the page changes).
-   `prune_stale_snapshots` keeps the newest in full and cuts the older ones
-   to a one-line note, keeping whatever the tool said before the snapshot
-   ("Successfully clicked on the element").
+Second, stale page snapshots filled the context: chrome-devtools returns the
+page's accessibility tree from take_snapshot and many actions, one was 187,737
+chars, and 35 of them added ~325K chars in an hour. Only the newest snapshot
+describes the page, so prune_stale_snapshots keeps it in full and cuts the older
+ones to a one-line note, keeping whatever the tool said before the snapshot.
 """
 from __future__ import annotations
 

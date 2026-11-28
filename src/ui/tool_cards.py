@@ -1164,21 +1164,15 @@ def _first_question(data: dict) -> dict:
 
 
 class TodoCard(ToolCardBase):
-    """Tasks, the plan a TodoWrite call just wrote.
+    """Tasks: the plan a TodoWrite call just wrote.
 
-    Field report 2026-10-22: a TodoWrite row drew nothing usable. Three links
-    in the chain were missing at once, not one:
-
-    1. the activity name the bridge emits is "todo_write"
-       (agent_bridge._TOOL_TO_ACTIVITY_NAME), absent from _TOOL_NAME_MAP;
-    2. no TodoCard existed in TOOL_CARDS, so the key fell to GenericCard;
-    3. _build_activity_info had no "todo_write" branch, so the payload was the
-       generic {"raw": ...} fallback, and GenericCard reads only
-       path/query/command/url. Result: the bare string "todo_write".
-
-    This card is the per-call record of the plan. The live Tasks panel above
-    the input is a different widget (secondary_ui.TodoSection) fed by the
-    todos_updated signal, so a broken row here did NOT stop the panel working.
+    A TodoWrite row once drew nothing usable because three links were missing
+    at once: "todo_write" was absent from _TOOL_NAME_MAP, no TodoCard existed
+    in TOOL_CARDS (so it fell to GenericCard), and _build_activity_info had no
+    branch for it, so the payload was the generic {"raw": ...} and GenericCard
+    printed the bare string "todo_write". The live Tasks panel above the input
+    is a different widget (secondary_ui.TodoSection, fed by todos_updated), so
+    a broken row here never stopped the panel working.
     """
 
     _MAX_ROWS = 12

@@ -931,26 +931,14 @@ class CortexMainWindow(QMainWindow):
         QTimer.singleShot(0, self._deferred_show)
 
     def _deferred_show(self):
-        """Show the window in ONE step, no normal→maximized resize jump.
+        """Show the window in ONE step, no normal->maximized resize jump.
 
-        Previously this called showNormal() first, then showMaximized() 500ms later.
-        That caused a 3-phase visual glitch: partial → dark areas → full.
-        Now we go directly to the final state (maximized or normal) in one call.
-
-        The loading overlay (created in _build_ui) covers the entire window
-        so the user sees a clean dark splash → full UI transition.
-
-        This avoids ACCESS VIOLATION crashes that happen when show() is called
-        during __init__ while child widgets (spinners, webengine, overlays) are
-        still being constructed by Qt's internal C++ layer.
-
-        CRITICAL z-order fix: The main window is shown FIRST, THEN the overlay
-        is re-raised on top. If we raise the overlay BEFORE showNormal(), the
-        DWM z-order recomposition during showNormal() can briefly flash the
-        main window content for exactly 1 frame, the "blink" users see.
-        Showing the window first (hidden behind overlay) and then asserting
-        the overlay's topmost position AFTER composition is complete
-        eliminates the race condition entirely.
+        showNormal() then showMaximized() 500ms later caused a 3-phase glitch
+        (partial, dark, full), so this goes straight to the final state; the
+        loading overlay covers the window meanwhile. Also avoids ACCESS
+        VIOLATION crashes from calling show() during __init__. z-order: the
+        window is shown FIRST, then the overlay re-raised, so DWM does not flash
+        the window content for one frame (the "blink" users see).
         """
         try:
 # Hide first DWM presents: between first present and Qt's backing-store flush,
@@ -1101,15 +1089,12 @@ class CortexMainWindow(QMainWindow):
     def _hide_startup_overlay(self, force: bool = False):
         """Hide the full-window startup overlay.
 
-        Triggered by first user interaction (mouse/keyboard) or the 15s
-        safety timeout. Interaction-triggered hides are GATED on the editor
-        webview being ready: QWebEngineView shows Chromium's light-gray
-        placeholder surface until its first real composite, so removing the
-        dark overlay any earlier flashes gray across the whole client area
-        (frame-by-frame video evidence: 2 gray frames at the exact moment
-        of the first mouse move during boot). Until ready, re-poll instead
-        of hiding; the safety timer passes force=True so the overlay can
-        never be stuck.
+        Triggered by first user interaction or a 15s safety timeout.
+        Interaction hides are GATED on the editor webview being ready:
+        QWebEngineView shows Chromium's light-gray placeholder until its first
+        real composite, so removing the dark overlay earlier flashes gray across
+        the client area (2 gray frames at the first mouse move during boot).
+        Until ready it re-polls; the safety timer passes force=True.
         """
         if not hasattr(self, '_startup_overlay') or not self._startup_overlay:
             return
@@ -1344,20 +1329,14 @@ class CortexMainWindow(QMainWindow):
                        f"title bar theme not applied on show: {e}")
 
     def _apply_title_bar_theme(self, is_dark: bool):
-        """Apply the native Windows title bar theme via DWM API.
+        """Apply the native Windows title bar theme via the DWM API.
 
-        Uses DWMWA_USE_IMMERSIVE_DARK_MODE only, avoids capsule fragment
-        artifacts caused by DWMWA_CAPTION_COLOR/DWMWA_BORDER_COLOR.
-        Bug history 1: this was dark-only with a run-once guard, so in light
-        mode the window kept a black native title bar above a light UI.
-        Bug history 2: the guard only tracked the THEME, not the native
-        handle, if Qt recreated the window (new HWND), the attribute was
-        gone but the guard said "already applied" and skipped. The guard
-        now re-applies whenever the HWND changed.
-        Bug history 3: Windows does NOT reliably repaint the caption of an
-        already-visible window when this attribute changes, the title bar
-        visually kept the OLD theme until a minimize/restore. The
-        SetWindowPos(SWP_FRAMECHANGED) nudge forces the repaint now.
+        Uses DWMWA_USE_IMMERSIVE_DARK_MODE only, avoiding capsule fragments from
+        DWMWA_CAPTION_COLOR/DWMWA_BORDER_COLOR. Traps fixed here: dark-only with
+        a run-once guard left a black bar over a light UI; the guard tracked only
+        the theme, not the HWND, so a recreated window was skipped; and Windows
+        does not repaint a visible caption on attribute change, so the
+        SetWindowPos(SWP_FRAMECHANGED) nudge forces it now.
         """
         try:
             # Never call winId() before show: it creates a raster native window that Qt must
@@ -1449,27 +1428,8 @@ class CortexMainWindow(QMainWindow):
     def _set_theme(self, theme: str, previous=None):
         """Switch theme at RUNTIME, fully, with no restart.
 
-        Called from the memory manager (Settings → Appearance → Theme picker)
-        and from internal theme toggle shortcuts.
-
-        The panels re-theme themselves first (BATCH 2-4: chat restyle, JS
-        data-theme pushes to the editor, terminal, sidebar and memory
-        manager), so what the user looks at flips within ~100ms. Then:
-
-        BATCH 5 gives the new theme's QSS to everything EXCEPT the chat:
-        dialogs, menus, splitters, the status bar and windows opened later.
-        The app-wide QSS is not re-applied: its cost grows with the chat
-        (5.6-6.0s on the user's 8,873-widget session, enough for "python3 is
-        not responding"), and the chat re-themes itself.
-
-        BATCH 6, once the chat reports theme_settled, fixes widgets that
-        baked old-theme token colours into their own stylesheet (context
-        bar, todo section, slash popup, live-preview bar...).
-        See src/ui/theme_remap.py for both.
-
-        ── AUDIT LOGGING ──
-        Every batch logs its wall-clock duration and RAM at entry/exit.
-        Tag: [THEME-AUDIT], grep for this tag in cortex.log to see the full trace.
+        Trap: the app-wide QSS is NOT re-applied, its cost grows with the chat
+        (5.6-6.0s on an 8,873-widget session, enough for "not responding").
         """
         import time as _time
         import os as _os
@@ -1522,17 +1482,8 @@ class CortexMainWindow(QMainWindow):
         def _defer_qss_apply():
             """Update the active theme without the app-wide QSS reapply.
 
-            QApplication.setStyleSheet() forces Qt to re-polish every widget,
-            including 4 embedded QWebEngineView panels (sidebar, editor/chat,
-            terminal, memory manager). Measured on this machine: 75+ REAL
-            SECONDS, total IDE freeze, confirmed via [THEME-AUDIT] logs even
-            after cutting chat widget count 126->37 (proves widget count was
-            not the dominant cost, the WebEngineView re-polish is).
-            Each panel already re-themes itself independently via BATCH 2/3/4
-            below (data-theme JS pushes, per-widget restyle), those are the
-            ONLY mechanism now. The full QSS still applies once at next
-            startup via _apply_initial_theme(), so native Qt chrome (menus,
-            toolbars) picks up the new theme on restart.
+            Trap: QApplication.setStyleSheet() re-polishes every widget,
+            measured at 75+ real seconds with the WebEngineView panels.
             """
             t0 = _time.perf_counter()
             log.info(f"[THEME-AUDIT] BATCH-1 state-only  START  RAM={_ram():.1f}%")
@@ -2152,13 +2103,7 @@ class CortexMainWindow(QMainWindow):
         # Help
         help_menu = mb.addMenu("Help")
         # Every menu item must work: dead template entries (Automations, Local Environments,
-        # Worktrees, Start Trace Recording) were stubs that only logged. Pro offer entry
-        # stays reachable for free accounts so skipping the startup card isn't a dead end;
-        # _refresh_pro_offer_visibility hides it once the server says subscribed.
-        self._pro_offer_action = self._add_action(
-            help_menu, "Upgrade to Cortex Pro…", self._show_pro_offer, "")
-        help_menu.aboutToShow.connect(self._refresh_pro_offer_visibility)
-        help_menu.addSeparator()
+        # Worktrees, Start Trace Recording) were stubs that only logged.
         self._add_action(help_menu, "Cortex Documentation", self._open_documentation, "")
         self._add_action(help_menu, "What's New", self._show_whats_new, "")
         # Channels differ: exe downloads/verifies/installs; MSIX may only hand the user to
@@ -2689,16 +2634,11 @@ class CortexMainWindow(QMainWindow):
     def _apply_webview_menu_theme(self):
         """Re-theme the right-click menus inside every QWebEngineView.
 
-        Chromium raises a real QMenu for these, not page HTML, so no CSS
-        in editor.html / sidebar.html / terminal.html /
-        memory_management.html can reach them. They inherit the app-wide
-        QSS, which a live switch used to skip (once measured at 75+s under
-        RAM pressure), so they kept painting the STARTUP dark card with dark
-        text over a light page. _set_theme() now re-applies that QSS too
-        (BATCH 5); this keeps the menus right in the meantime.
-
-        Same treatment as the menu bar and status bar above: cheap
-        per-widget restyles instead of an app-wide reapply.
+        Chromium raises a real QMenu for these, not page HTML, so no CSS in
+        editor.html / sidebar.html / terminal.html / memory_management.html can
+        reach them. They inherit the app-wide QSS, which a live switch used to
+        skip, so they kept painting the startup dark card with dark text over a
+        light page. Same cheap per-widget restyle as the menu and status bars.
         """
         from src.ui.native_menu import theme_native_menus
         for attr in ('_ai_chat', '_sidebar', '_webview_panel',
@@ -3327,20 +3267,10 @@ class CortexMainWindow(QMainWindow):
             log.warning(f"[AUTO-EDIT] Failed to reload {filepath}: {e}")
 
     def _on_agent_file_generated(self, filepath: str, _content: str = ""):
-        """Slot for agent file_generated signal, routes through throttled pump (priority=False).
+        """Slot for agent file_generated, routed through the throttled pump.
 
-        Agent Write tools can create many files in a single turn. Opening them all with
-        priority=True would flood QWebChannel with simultaneous model.setValue() IPC
-        calls, crashing Chromium's render process on Windows 25H2.
-
-        Using priority=False routes them through the warmup throttle
-        (10s spacing during first 60s, 1.5s after), preventing the crash.
-
-        IMPORTANT: reload=True ensures that when the AI modifies an already-open file,
-        the Monaco editor gets fresh content from disk instead of showing stale cached text.
-
-        ONLY refreshes files that are ALREADY open in the editor.
-        Does NOT create new tabs for files the user didn't open.
+        Trap: opening many files at once with priority=True floods QWebChannel
+        with model.setValue() IPC and crashes Chromium's render process.
         """
         try:
             filepath = os.path.normpath(filepath)
@@ -3685,22 +3615,11 @@ class CortexMainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"Could not open image: {e}")
 
     def _open_pdf_file(self, filepath: str):
-        """Open .pdf INSIDE the web editor (editor.html), like images/sheets.
+        """Open .pdf inside the web editor (editor.html), like images/sheets.
 
-        PROGRESSIVE rendering: shows a loading skeleton immediately, then
-        renders pages in batches off the GUI thread (pypdfium2 / PDFium) and
-        appends them to the preview as they complete. First 3 pages appear in
-        ~200-400ms instead of waiting for all 50 pages to rasterize.
-
-        FIX 2026-08-16: the PDF engine import moved OFF the GUI thread.  The
-        old "probe on GUI thread so we can warn" caused a 38.7s freeze because
-        the native import blocks on OneDrive-dehydrated files and frozen
-        builds.
-
-        Engine swapped PyMuPDF -> pypdfium2 on 2026-10-21 for licensing:
-        PyMuPDF is AGPL-3.0, which would make every shipped binary AGPL.
-        pypdfium2 is Apache-2.0 / BSD-3-Clause and its PDFium renderer is
-        functional and licence-compatible with GPL v3.
+        Progressive: loading skeleton, then pages rendered in batches off the
+        GUI thread. Engine is pypdfium2, not PyMuPDF, for licensing (Apache-2.0
+        vs AGPL-3.0).
         """
         import threading
         import json as _json
@@ -3784,15 +3703,9 @@ class CortexMainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"Could not open PDF: {e}")
 
     def _render_pdf_progressive(self, filepath: str, bridge, gen: int = 0):
-        """Render PDF pages in progressive batches, emitting a signal after
-        each batch so the UI shows content incrementally instead of waiting
-        for all pages. Runs on a WORKER thread - must NOT touch Qt widgets.
-
-        Batch strategy:
-          - First batch: 3 pages (fast initial display, ~200-400ms)
-          - Subsequent batches: 5 pages each (background fill)
-          - JPEG quality 72 (smaller payload, faster base64 transfer)
-          - Target width 900px (good readability, faster rasterization)
+        """Render PDF pages in progressive batches, emitting a signal per batch
+        so the UI shows content incrementally. Runs on a WORKER thread - must
+        NOT touch Qt widgets.
         """
         import base64
         import html as _html_mod
@@ -3900,13 +3813,9 @@ class CortexMainWindow(QMainWindow):
     def _open_office_file(self, filepath: str):
         """Open Office documents inside the IDE, parsing OFF the GUI thread.
 
-        openpyxl.load_workbook on a 10-sheet Calc.xlsx is ~0.5s (far worse for
-        OneDrive-dehydrated files), and this used to run on the GUI thread on
-        every open AND on every file-watcher reload when the agent saved the
-        sheet - so the UI froze and blanked repeatedly (field log:
-        _open_office_file frozen ~2s, "Office file opened internally" firing
-        back to back). The document is now parsed on a worker thread: the tab
-        opens instantly with a placeholder and fills in when parsing finishes.
+        Trap: openpyxl.load_workbook is slow (far worse on OneDrive-dehydrated
+        files); running it on the GUI thread froze the UI on every open and
+        every watcher reload.
         """
         from PyQt6.QtWidgets import QTextEdit
         try:
@@ -4219,17 +4128,13 @@ class CortexMainWindow(QMainWindow):
         """Return git HEAD content for a tracked file.
 
         Args:
-          allow_blocking: run git inline even on the GUI thread. Set this for
-            a single explicit user action (one CHANGES row click). The
-            deferral below exists to protect the bulk path, which resolves
-            every row on every AI edit; a click is one file, and returning
-            None there painted the whole file green until the next click.
+          allow_blocking: run git inline even on the GUI thread. Set for a
+            single explicit user action (one CHANGES row click); the bulk path
+            defers to a worker instead.
 
         Returns:
-          - str content from HEAD when the file is tracked
-          - "" when the file is untracked inside a git repo (all lines are adds)
-          - None when git is unavailable / not a repo / resolution failed
-            (caller should keep the AI-edit original chain)
+          str content from HEAD when tracked; "" when untracked inside a repo
+          (all lines are adds); None when git is unavailable / not a repo.
         """
         try:
             root = self._changes_project_root(file_path)
@@ -4477,27 +4382,12 @@ class CortexMainWindow(QMainWindow):
     _WORKTREE_READ_TIMEOUT = 0.15
 
     def _read_worktree_content(self, file_path: str, fallback: str = "") -> str:
-        """Current on-disk file content, else fallback (latest AI payload).
+        """Current on-disk content, else fallback (the latest AI payload).
 
-        The read happens on a worker thread with a bounded wait, because this
-        runs on the GUI thread on every AI edit (20 times in one session) and
-        the files live under OneDrive. Normally it costs a fraction of a
-        millisecond, but on 2026-09-09 at 16:25:49 one call blocked the GUI
-        thread for 1.7s inside io.open() - the agent had just written that file
-        and OneDrive was syncing it, on a machine with 0.4GB free:
-
-            main_window.py:4647 _on_file_edited_diff_for_js
-              main_window.py:4047 _read_worktree_content
-                pathlib read_text -> io.open        <- frozen here
-
-        The file is not slow; it has a bad tail under contention. A timeout
-        turns a 1.7s freeze into a 150ms one and gives up on the disk value,
-        which the caller already treats as optional: `fallback` is the content
-        the agent just wrote.
-
-        Trade-off worth knowing: on timeout a deferred/staged edit will show
-        the AI payload rather than the real worktree bytes, so the timeout is
-        logged at WARNING instead of passing silently.
+        Trap: runs on the GUI thread, and files live under OneDrive, where a
+        read can block for seconds while a file syncs. The read runs on a
+        worker with a bounded wait; on timeout it logs at WARNING and returns
+        the fallback.
         """
         import threading
 
@@ -4874,18 +4764,10 @@ class CortexMainWindow(QMainWindow):
     def _compute_diff_counts(self, original: str, modified: str):
         """Return (additions, deletions) line counts between two file versions.
 
-        Memoized on content. _push_changes_to_sidebar rebuilds EVERY row on
-        every AI edit, but one edit changes one file: the other rows are
-        diffed again to reach the answer they already had. Measured on this
-        repo 2026-09-19, difflib alone: chat_panel 14.7 ms, agent_bridge
-        16.8 ms, main_window 10.6 ms -> ~271 ms of GUI thread per edit on a
-        30-row list, and it grows with the list, so a long turn gets slower
-        the more files it touches. Both UI stalls that day (14:16:31 and
-        15:00:13, ~1.8 s) sampled inside this rebuild.
-
-        The result depends on nothing but the two strings, so a hit is
-        exactly what difflib would have returned. Length is carried beside
-        the hash so a hash collision cannot swap two files' counts.
+        Memoized on content: _push_changes_to_sidebar rebuilds EVERY row on
+        every AI edit, so uncached difflib cost ~271 ms of GUI thread per edit
+        on a 30-row list and grew with the list. Length is carried beside the
+        hash so a collision cannot swap two files' counts.
         """
         import difflib
         key = self._diff_counts_key(original, modified)
@@ -5025,21 +4907,11 @@ class CortexMainWindow(QMainWindow):
         _log.info(f"[Diff] Removed {len(gone)} CHANGES entries whose file no longer exists")
 
     def _refresh_changes_background(self):
-        """Project open: show the CHANGES list now, git baselines after.
+        """Project open: show the CHANGES list now, warm git baselines after.
 
-        Every CHANGES row asks git for the file's HEAD version (git show,
-        50-80 ms each in kingchef). That cache lives in memory, so on every
-        start the whole list ran git on the GUI thread: 7.7 s of frozen
-        window at 2026-09-13 20:27 (stack in _git_baseline_from_git). Now the
-        list is drawn at once from the stored originals, a worker thread
-        warms the git cache, and the list is redrawn from it.
-
-        The first draw also skips the worktree reads and line counts: with
-        no cache yet, each of 100 rows read its file (OneDrive, up to 150 ms
-        a row) and ran difflib on the GUI thread, 1.3-9 s of frozen boot
-        screen on every start (2026-10-23 log, stack in
-        _read_worktree_content). The rows show without counts until the
-        worker has warmed all three caches, then the redraw is cache hits.
+        Trap: every row asks git for its HEAD version (50-80ms each) and the
+        cache is in-memory, so a start used to freeze the GUI thread for 7.7s
+        (2026-09-13). The first draw skips worktree reads and line counts.
         """
         import threading as _thr
         import time as _t
@@ -5322,15 +5194,10 @@ class CortexMainWindow(QMainWindow):
     def _on_file_edited_diff_for_js(self, file_path: str, original: str, new_content: str):
         """Store AI-edit diff and refresh the CHANGES panel.
 
-        Baseline rule (must match Source Control / git):
-          - Tracked file  → original = git HEAD content (full uncommitted span)
-          - Untracked     → original = "" (entire file is additions)
-          - No git / fail → keep first AI-edit original (A) across A→B→C
-          - modified      → latest worktree / AI content (C)
-
-        Evidence 2026-09-08: without HEAD baseline, git showed main_window
-        +228/-33 while CHANGES only showed +8/-0 because original was the
-        already-edited disk snapshot from a later micro-edit.
+        Baseline rule (must match Source Control / git): tracked file ->
+        git HEAD content; untracked -> "" (all additions); no git / fail ->
+        keep the first AI-edit original across A->B->C; modified -> latest
+        worktree / AI content.
         """
         # Ignore no-op edits to prevent false "modified" cards/files in UI.
         if (original or "") == (new_content or ""):
@@ -5872,19 +5739,10 @@ class CortexMainWindow(QMainWindow):
     def _on_new_chat_requested(self):
         """The user confirmed New Chat. In order:
 
-        1. a reply still running is stopped, and what it already sent is
-           allowed to land in THIS chat;
-        2. this chat is captured: its timeline written to the history DB now,
-           and its memory snapshot outline written to .cortex/memory/ now;
-        3. the switch: output still in flight from the stopped reply is muted
-           (NativeChatBridge.mute), the panel is cleared, a new conversation
-           starts;
-        4. the AI summary of the snapshot (short + long-term memory merged)
-           finishes in the background, while the user is in the new chat.
-
-        Leftover text in the new chat came from step 1 and 3 missing: the
-        reply was never stopped, and its next chunk opened a fresh message
-        in the cleared panel.
+        1. stop a running reply, letting what it already sent land in THIS chat;
+        2. capture this chat: timeline to the history DB, memory snapshot;
+        3. switch: mute in-flight output, clear the panel, start a new chat;
+        4. finish the AI summary of the snapshot in the background.
         """
         if getattr(self, '_new_chat_saving', False):
             log.info("[NewChat] already switching, ignoring duplicate request")
@@ -8215,19 +8073,9 @@ class CortexMainWindow(QMainWindow):
     def _apply_panel_order(self, sidebar: str = None, chat: str = None):
         """Put the three main panels in the order the settings ask for.
 
-        Settings -> Appearance -> Interface has two edge choices: the sidebar
-        side and the chat panel side. They are resolved together in
-        src/ui/layout_positions.py and applied in one pass, because separate
-        "move mine to the edge" handlers would undo each other: whichever ran
-        second would land at a fixed index and overwrite the first one's
-        position.
-
-        The editor+terminal block has no setting of its own; it fills whatever
-        space the two edges leave.
-
-        Existing widgets are MOVED, never recreated: three QWebEngineViews take
-        part, and a re-parented webview keeps its page, its Monaco state and
-        the running terminal.
+        Trap: widgets are MOVED, never recreated - three QWebEngineViews take
+        part, and a re-parented webview keeps its page, Monaco state and
+        running terminal.
         """
         sp = getattr(self, '_main_splitter', None)
         side = getattr(self, '_sidebar', None)
@@ -8589,25 +8437,11 @@ class CortexMainWindow(QMainWindow):
             self._find_replace_dialog.activateWindow()
 
     def _rename_file(self):
-        """Rename, on F2: the Explorer's selection, or the open editor file.
+        """F2: rename the Explorer selection, else the open editor file.
 
-        F2 is a window-wide QAction shortcut (see the Edit menu), and Qt
-        resolves a shortcut before the key event reaches any widget, so the
-        sidebar's own eventFilter never sees this key. That makes this method
-        the one place that has to decide which half of the window the user
-        meant.
-
-        It used to decide with `self._sidebar.is_explorer_focused()`, a stub
-        that always returned False. The sidebar branch was dead code, so every
-        F2 went on to rename whichever file happened to be open in the editor;
-        with a folder selected nothing was open to rename, so the key silently
-        did nothing. That is why renaming a FOLDER appeared broken while files
-        appeared to work.
-
-        The sidebar now answers for itself: rename_selected_item() asks the
-        page what is highlighted and reports whether the page even had the
-        keyboard. When it did not, it calls back into
-        _rename_open_editor_file, so the editor behaviour is unchanged.
+        Trap: F2 is a window-wide QAction shortcut, so Qt resolves it before the
+        key reaches the sidebar's eventFilter. This is the one place that
+        decides which half of the window the user meant.
         """
         sidebar = getattr(self, "_sidebar", None)
         if sidebar is not None and sidebar.rename_selected_item(
@@ -10137,16 +9971,10 @@ class CortexMainWindow(QMainWindow):
     def _is_lost_update(baseline, on_disk, content) -> bool:
         """Would writing `content` discard someone else's work?
 
-        Pure decision, split out from the dialog so it can be tested.
-        A real conflict needs ALL THREE:
-          1. disk changed since we loaded  (someone else edited it)
-          2. what we're writing != disk    (the save isn't a no-op)
-          3. what we're writing != baseline (the USER actually edited)
-        Condition 3 is the fix for the false alarm: pressing Ctrl+F5 (Run)
-        saves the buffer even when the user typed nothing. If the buffer
-        still equals what was loaded, the user has no work to lose, writing
-        the stale copy would only clobber the AI's edit for no reason, so
-        this is NOT a user conflict. The caller reloads from disk instead.
+        A real conflict needs ALL THREE: disk changed since we loaded, what we
+        write != disk, and what we write != baseline (the USER actually
+        edited). Condition 3 avoids the false alarm when Ctrl+F5 saves an
+        untouched buffer.
         """
         if baseline is None or on_disk is None:
             return False                          # nothing to compare against
@@ -10345,30 +10173,6 @@ class CortexMainWindow(QMainWindow):
                 raise RuntimeError("No project open for indexing")
         return self._codebase_index
 
-    def _show_pro_offer(self):
-        """Reopen the Pro offer card on demand (Help menu, force=True)."""
-        try:
-            from src.ui.dialogs.subscription_offer import maybe_show_offer
-            maybe_show_offer(self, force=True)
-        except Exception as e:
-            log.warning(f"[ProOffer] menu open failed: {e}")
-
-    def _refresh_pro_offer_visibility(self):
-        """Hide 'Upgrade to Cortex Pro…' for accounts that already have it.
-
-        has_subscription() answers from the saved account copy and is
-        offline-tolerant, so merely opening the Help menu never blocks on
-        the network and never locks anyone out.
-        """
-        try:
-            from src.core.cortex_api import get_api_client
-            subscribed = bool(get_api_client().has_subscription())
-        except Exception:
-            subscribed = False
-        action = getattr(self, "_pro_offer_action", None)
-        if action is not None:
-            action.setVisible(not subscribed)
-
     def _show_about(self):
         _app_version = QApplication.instance().applicationVersion() or "2.8.6"
         _body = ("<h2>Cortex AI IDE</h2>"
@@ -10527,15 +10331,9 @@ class CortexMainWindow(QMainWindow):
         """
         Native diagnostics surface for the security audit trail.
 
-        This is the live reader for ``SecurityAuditLogger.get_events`` and
-        ``verify_integrity``: both are called here and nowhere else in the
-        tree, which is exactly why the health report flagged them as unused.
-        Keeping them as real methods (rather than exempting or deleting) is
-        the point - the audit trail is append-only without a reader, and the
-        hash chain is unverifiable without the integrity check.
-
-        UI: a plain QDialog with a read-only table so it works even when the
-        WebEngine panels are blank. No new build artifact, no new route.
+        Trap: this is the live reader for SecurityAuditLogger.get_events and
+        verify_integrity; both are called nowhere else, which is why the health
+        report flagged them as unused. Do not delete them.
         """
         from datetime import datetime as _dt
         from PyQt6.QtWidgets import (
@@ -10829,14 +10627,9 @@ class CortexMainWindow(QMainWindow):
 
     def _emergency_shutdown_save(self) -> None:
         """Save agent state + trigger chat persistence immediately.
-        
-        Called from closeEvent, nativeEvent (WM_ENDSESSION), and signal handlers.
-        Idempotent, safe to call multiple times.
-        
-        FIXED v2: Three-layer save strategy to eliminate chat loss on IDE restart:
-        1. JS bridge save (fast path, works if WebChannel is alive)
-        2. Python direct save (reliable, works even if WebChannel is torn down)
-        3. DB flush (guarantees SQLite write queue is emptied)
+
+        Called from closeEvent, nativeEvent (WM_ENDSESSION), and signal
+        handlers. Idempotent, safe to call multiple times.
         """
         if getattr(self, '_shutdown_save_done', False):
             return
@@ -11844,18 +11637,12 @@ class CortexMainWindow(QMainWindow):
             log.debug(f'[MainWindow] Suppressed error: {e}')
 
     def _reenable_sidebar_refresh(self):
-        """Clear the sidebar AI-suppression flag and catch up on any file
-        changes that were suppressed while the agent worked.
+        """Clear the sidebar AI-suppression flag and catch up on suppressed
+        file changes.
 
-        MUST run on every response_complete, unconditionally. BUG history:
-        this logic lived only inside _do_ai_task_complete, which sits behind
-        the notification chain, _on_chat_rendering_done early-returns when
-        _pending_notification_response is None (already consumed by one of
-        ChatPanel's three _rendering_done_cb call sites, or never set for
-        the turn). One skipped notification left _sidebar._ai_active stuck
-        True FOREVER, so every subsequent watcher event was suppressed and
-        the Explorer never auto-refreshed again ("File watcher: refreshing
-        sidebar" appeared 0 times in cortex.log).
+        MUST run on every response_complete, unconditionally: it used to live
+        behind the notification chain, and one skipped notification left
+        _sidebar._ai_active stuck True so the Explorer never auto-refreshed.
         """
         try:
             if not (hasattr(self, '_sidebar') and self._sidebar):

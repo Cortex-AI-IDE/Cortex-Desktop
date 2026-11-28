@@ -1,25 +1,12 @@
 """Files attached to a chat message: limits, what the model receives, and how.
 
-Why this exists (owner request 2026-11-22): pasting a file copied in
-Explorer, a `file:///C:/.../plan.pdf` URL or a dropped file put the raw path
-into the input as text, and a very large paste went into the prompt whole,
-which made Cortex hang. Claude Desktop shows a card instead (name, a "PDF"
-badge) and keeps big files out of the prompt. This module is that policy;
-chat_panel draws the card.
-
-What the model gets for each attachment:
-  * a small text/code file  -> its content, fenced, with the full path
-    (cheap, and the model can answer at once)
-  * anything else (PDF, Word, Excel, big logs, binaries, folders)
-                            -> the full path, type and size only, and an
-    instruction to open it with the Read tool, which reads PDFs and pages
-    long files without flooding the prompt
-The full path in the message is also what lets the agent read a file outside
-the project (src/ai/path_access.py grants paths the user wrote).
-
-Limits, close to Claude's: 30 MB per file, 20 attachments per message.
-
-Qt-free so it can be tested on its own.
+A pasted path or dropped file used to land in the input as raw text, and a big
+paste went into the prompt whole and hung Cortex. A small text/code file is now
+sent as fenced content with its full path; anything else (PDF, Office, big
+logs, binaries, folders) is sent as path/type/size plus an instruction to open
+it with the Read tool, which pages long files without flooding the prompt. The
+full path is also what lets the agent read outside the project (path_access.py).
+Limits: 30 MB per file, 20 attachments per message. Qt-free for testing.
 """
 from __future__ import annotations
 

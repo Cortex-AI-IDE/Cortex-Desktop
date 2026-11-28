@@ -1,59 +1,15 @@
-"""The full-screen window Cortex shows when nobody is signed in.
+"""The full-screen sign-in window shown when nobody is signed in.
 
-Shown before the main window exists, so it cannot use anything the IDE sets
-up. That is exactly why it must not hardcode a palette either: the first
-thing a user sees has to look like the product they configured, not like a
-different app that happens to share the logo.
-
-  colours    read from the SAME source the rest of Cortex reads, in this
-             order:
-               1. Settings -> Appearance -> Color theme. A named theme
-                  (Tokyo Night, Dracula, High Contrast Light, ...) carries
-                  its own `ui` palette in src/ui/color_themes.py, so those
-                  values are used directly.
-               2. Otherwise "Cortex (Dark / Light / System)", resolved from
-                  the saved mode through src/ui/tokens.py, which is what
-                  main.py already pointed at the saved theme before this
-                  dialog is built.
-             Nothing here is a literal colour. The old version painted
-             #141417 / #06b6d4 regardless of settings, so a Tokyo Night or
-             Light+ user met a dark grey sign-in card that belonged to no
-             theme at all.
-
-  contrast   every text colour is composited onto the surface it actually
-             sits on and nudged until it clears WCAG AA (4.5:1). Tokens are
-             authored for the app's own surfaces, and this screen puts text
-             on a canvas, a card and a button, so the pairing has to be
-             checked rather than assumed. The button's label colour is
-             chosen from the accent's luminance: a mid-blue accent needs
-             white ink, a yellow or lilac accent needs near-black.
-
-  wordmark   the brand rule, matching the site's lockup: the emblem sits
-             left of a two-line wordmark, "Cortex" at weight 700 with tight
-             tracking over "AI IDE" at weight 700 with wide tracking. The
-             emblem is sized against the two-line block, not against the
-             window, so the mark reads as part of the word rather than a
-             picture above a caption. The mark file is chosen by the
-             background it sits on: brand_mark_dark.png is the LIGHT-ink
-             mark (its name is the background, not the colour).
-
-  emblem     scaled at the window's device pixel ratio, so it stays crisp on
-             a HiDPI screen instead of being upsampled from logical pixels.
-
-  canvas     a faint dot grid, the same visual language as an editor's
-             canvas. It is drawn at 10% of the text colour, which is
-             visible structure on an empty screen and disappears once the
-             card is in front of it.
-
-One way in: the browser OAuth loopback flow. The password is typed on the web
-page and never here, so this window carries no credential fields at all.
-auth_manager still exposes login_with_credentials() for the memory manager's
-own prompt, but this gate does not call it: the server's
-/api/v1/auth/login/credentials/ endpoint answers 401 for credentials the
-website accepts, so a form here could never have succeeded.
-
-Closing the window without signing in returns Rejected and main.py exits.
-That is the point of the gate.
+Built before the main window, so it reads colours from the same source as
+everything else: the named theme from Settings if set, else the Cortex mode
+main.py resolved into tokens. The old version painted #141417 / #06b6d4
+regardless, so a Tokyo Night or Light user met a card from no theme. Text
+colours are composited onto their surface and nudged to WCAG AA; the button
+label follows the accent's luminance. brand_mark_dark.png is the LIGHT-ink
+mark (the name is the background, not the ink), scaled at the device pixel
+ratio. The password is typed on the web page in the OAuth loopback flow, so
+there are no credential fields here. Closing without signing in returns
+Rejected and main.py exits, which is the point of the gate.
 """
 from __future__ import annotations
 

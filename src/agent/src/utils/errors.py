@@ -62,23 +62,11 @@ class TeleportOperationError(Exception):
 
 
 class TelemetrySafeError(Exception):
-    """
-    Error with a message that is safe to log to telemetry.
-    Use the long name to confirm you've verified the message contains no
-    sensitive data (file paths, URLs, code snippets).
-    
-    Single-arg: same message for user and telemetry
-    Two-arg: different messages (e.g., full message has file path, telemetry doesn't)
-    
-    Example:
-        # Same message for both
-        raise TelemetrySafeError('MCP server "slack" connection timed out')
-        
-        # Different messages
-        raise TelemetrySafeError(
-            'MCP tool timed out after 5000ms',  # Full message for logs/user
-            'MCP tool timed out'                 # Telemetry message
-        )
+    """An error whose message is safe to log to telemetry.
+
+    The long name confirms you checked the message for sensitive data (paths,
+    URLs, code). One arg: same message for user and telemetry. Two args: the
+    second is the telemetry-safe variant, e.g. when the full one holds a path.
     """
     
     def __init__(self, message: str, telemetry_message: Optional[str] = None):
@@ -193,24 +181,11 @@ def is_enoent(e: Any) -> bool:
 
 
 def is_fs_inaccessible(e: Any) -> bool:
-    """
-    True if the error means the path is missing, inaccessible, or
-    structurally unreachable, use in catch blocks after fs operations to
-    distinguish expected "nothing there / no access" from unexpected errors.
-    
-    Covers:
-        ENOENT   , path does not exist
-        EACCES   , permission denied
-        EPERM    , operation not permitted
-        ENOTDIR  , a path component is not a directory (e.g. a file named
-                    `.cortex` exists where a directory is expected)
-        ELOOP    , too many symlink levels (circular symlinks)
-    
-    Args:
-        e: The error value
-        
-    Returns:
-        True if error indicates filesystem inaccessibility
+    """True when the error means the path is missing or unreachable.
+
+    Use in catch blocks after fs operations to tell "nothing there / no access"
+    from a real bug. Covers ENOENT, EACCES, EPERM, ENOTDIR (a file where a dir
+    is expected) and ELOOP (circular symlinks).
     """
     # Check errno code
     code = get_errno_code(e)

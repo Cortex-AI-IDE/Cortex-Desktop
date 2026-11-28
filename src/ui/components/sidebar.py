@@ -442,23 +442,15 @@ class SidebarWidget(QWidget):
             pass
 
     def _delete_paths(self, paths):
-        """Delete one or more paths, then rebuild the file tree ONCE.
+        """Delete paths, then rebuild the file tree ONCE.
 
-        Two things used to go wrong here and together they froze the window
-        for as long as 13.7s on a multi-select delete (cortex.log 2026-08-24):
-
-        1. onDelete()'s result was discarded, so a delete that FAILED still
-           emitted file_deleted and ran the whole post-delete teardown. A
-           directory held open by another process is never removed, yet the
-           log said "File deleted", the entry stayed in the tree, and the
-           user deleted it again, paying the same cost every attempt.
-        2. That teardown ends in a full file-tree rebuild, so selecting N
-           items rebuilt the tree N times on the GUI thread. Over a browser
-           profile directory of ~600 entries per item, each pass is seconds
-           of native Chromium work with the event loop blocked, which is why
-           the stall stacks bottom out in app.exec() with no Python frames.
-
-        So: honour the result, and collapse N rebuilds into one deferred one.
+        Two bugs made a multi-select delete freeze the window up to 13.7s
+        (cortex.log 2026-08-24): onDelete()'s result was discarded, so a failed
+        delete still ran the full teardown (the entry stayed but the log said
+        "File deleted", and the user retried, paying the cost again); and that
+        teardown ends in a full tree rebuild, so N items rebuilt the tree N
+        times on the GUI thread. Honour the result, and collapse N rebuilds
+        into one deferred one.
         """
         from PyQt6.QtCore import QTimer
         from PyQt6.QtWidgets import QMessageBox

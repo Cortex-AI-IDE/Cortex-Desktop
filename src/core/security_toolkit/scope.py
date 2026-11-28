@@ -1,38 +1,10 @@
-"""
-scope.py -- the authorization gate for every active security action.
+"""Authorization gate for every active security action.
 
-Cortex ships tools that open sockets against a target and send probe payloads.
-That is a real capability, so it gets a real control: nothing runs against a
-host the owner has not explicitly declared. This module is the single
-chokepoint. Every network-touching function in this package calls
-ScopeGuard.check() before it resolves a name or opens a connection.
-
-The gate lives in CODE, not in a prompt. A model that has been talked into
-"just scan this one extra IP" by a poisoned file still hits this function and
-still gets a ScopeViolation, because the refusal is an exception raised before
-any syscall, not a sentence in a system prompt.
-
-Scope file -- .cortex/security/scope.json (project) or ~/.cortex/security/scope.json:
-
-    {
-      "authorized": true,
-      "note": "own lab VM, Juice Shop on 3000",
-      "expires": "2026-12-31",
-      "targets": ["127.0.0.1", "10.0.2.15", "juice-shop.local", "*.lab.internal"]
-    }
-
-Defaults, and the reasoning for each:
-
-  loopback (127.0.0.0/8, ::1, localhost)  allowed with no declaration. It is
-      this machine, which is unambiguously the owner's.
-  private LAN ranges (10/8, 172.16/12, 192.168/16)  DENIED by default. They
-      are usually the owner's own network, but they are also the office, the
-      university and the coffee shop. Declaring them is one line.
-  link-local / cloud metadata (169.254.0.0/16, fd00:ec2::254,
-      metadata.google.internal)  DENIED unconditionally. These hand out cloud
-      IAM credentials. There is no legitimate reason for a desktop IDE to
-      probe them, so no scope declaration can re-enable them.
-  everything else  DENIED until declared.
+Every network-touching function calls ScopeGuard.check() before resolving a
+name or opening a socket, so nothing runs against a host not declared in
+.cortex/security/scope.json. The gate lives in code, not a prompt: a model
+talked into scanning an extra IP still gets a ScopeViolation. Loopback is
+allowed; private LAN, link-local and cloud metadata stay denied.
 """
 
 from __future__ import annotations

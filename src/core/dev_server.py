@@ -1,33 +1,14 @@
 """Own a project's dev server so the Live Preview panel can show a real app.
 
-W7. The panel could already render a local ``.html`` file, but not a
-Vite/Next/Django app, so a UI change the agent made was unverified unless a
-human started the server by hand. This module owns the process; the panel only
-has to display a URL.
+The panel could render a local .html file but not a Vite/Next/Django app, so a
+UI change went unverified unless a human started the server. This module owns
+the process; the panel only displays a URL.
 
-Three things make this harder than ``Popen(command)``:
-
-**Port discovery.** The server picks the port, not us: Vite answers 5173,
-CRA and Next 3000, Django 8000. Reading it off stdout is the fast path and
-covers all of those, but output is usually buffered when stdout is a pipe
-rather than a tty, so the line can sit in the pipe well after the socket is
-already listening. The fallback asks the OS which ports the child's own
-process tree is listening on, which is true from the moment ``accept()`` is
-open and needs no cooperation from the server's logging.
-
-**Process tree.** On Windows ``npm run dev`` is a ``cmd.exe`` shim over
-``node.exe``; terminating the shim leaves the real server orphaned and still
-holding the port, so the next start fails with EADDRINUSE for no visible
-reason. Both branches kill the whole tree, via psutil, which is already a
-dependency.
-
-**Output capture.** stdout and stderr are drained on daemon threads into a
-bounded buffer. A full pipe blocks the child, and a server blocked on log
-output is indistinguishable from a server that is slow to boot.
-
-No Qt in this module on purpose: everything except the process handle is a
-pure function, so the port and command detection are testable without a
-``QApplication`` (the rule W1 sets for every extracted module).
+Three traps: the server picks the port (read from stdout, falling back to the
+OS's listening ports for the child's tree, since piped output is often
+buffered); on Windows ``npm run dev`` is a cmd.exe shim over node.exe, so the
+whole tree must be killed or the next start hits EADDRINUSE; and stdout/stderr
+are drained on daemon threads, since a full pipe blocks the child.
 """
 
 from __future__ import annotations

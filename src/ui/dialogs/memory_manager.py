@@ -308,17 +308,10 @@ class MemoryManagerBridge(QObject):
     def searchSkills(self, query: str):
         """Rank skills for `query`, best first, as a JSON list of names.
 
-        Delegates to src.ui.skill_search, the same ranking the rest of the
-        app uses, rather than a second implementation in JavaScript. That
-        one is tuned against the real library: every term must match
-        (typing more words narrows), matches are on word boundaries so
-        'dit' does not hit 'audit', separators are folded so '3d website'
-        finds '3d-website-architect', and a whole-query phrase in the name
-        outranks any per-term total.
-
-        Only names travel back. The page already holds the skill objects,
-        so this reorders what it has and keeps the toggle states it knows,
-        instead of shipping the whole list on every keystroke.
+        Delegates to src.ui.skill_search, the same ranking the rest of the app
+        uses, rather than a second JS implementation. Only names travel back:
+        the page reorders what it already holds instead of receiving the whole
+        list on every keystroke.
         """
         import json
         try:
@@ -793,13 +786,9 @@ scope: project
     def setTheme(self, theme: str):
         """Switch the entire IDE theme (dark/light/system).
 
-        Called from JS when the user clicks a theme option in
-        Settings → Appearance → Theme picker.
-
-        Bug history: this whitelisted only ("dark", "light"), so selecting
-        "System" silently coerced to "dark" before it ever reached
-        _set_theme() / ThemeManager, "System" mode was unreachable and
-        always forced dark regardless of the actual OS preference.
+        Called from JS when the user clicks a theme option in Appearance.
+        Trap: it once whitelisted only ("dark", "light"), so "System" was
+        coerced to "dark" before reaching _set_theme() and was unreachable.
         """
         theme = theme if theme in ("dark", "light", "system") else "dark"
         log.info(f"[MemoryManager] setTheme called: {theme}")
@@ -888,14 +877,9 @@ scope: project
     def getModelGroups(self) -> str:
         """JSON model groups for the Settings > Default Model dropdown.
 
-        Same source the chat panel dropdown iterates (get_model_groups()),
-        which prefers the server-published list from remote_models and falls
-        back to the built-in MODEL_GROUPS offline. Without this slot the
-        settings page showed a static HTML option list frozen at build
-        time, so models added from the admin panel never appeared here.
-
-        Returns "[]" on any failure; the JS then keeps whatever options
-        the HTML shipped with, so the dropdown still works offline.
+        Same source the chat panel dropdown iterates (get_model_groups()), which
+        prefers the server-published list and falls back to MODEL_GROUPS offline.
+        Returns "[]" on failure so the JS keeps the HTML-shipped options.
         """
         try:
             import json as _json
@@ -1056,14 +1040,11 @@ scope: project
     def refreshServerData(self, kind: str):
         """Fetch fresh server data on a WORKER thread, then signal the page.
 
-        kind="account" → one get_profile() fetch, merged into api.user_info,
-        then emits ("auth", …) and ("profile", …) payloads.
-        kind="usage"   → get_usage_summary() into the usage cache, then
-        emits ("usage", …).
-
-        The emitted payloads are produced by the same (now cache-only) sync
-        getters the page already renders from, so the JS needs no new
-        parsing, it just re-runs its existing loaders on the signal."""
+        kind="account" -> one get_profile() fetch, then emits ("auth", ...) and
+        ("profile", ...). kind="usage" -> get_usage_summary() into the usage
+        cache, then emits ("usage", ...). The payloads come from the same
+        cache-only getters the page already renders from.
+        """
         def _work():
             try:
                 from src.core.cortex_api import get_api_client
@@ -1289,19 +1270,12 @@ scope: project
 
     @pyqtSlot(result=str)
     def listProviders(self) -> str:
-        """Every row of the Settings → Provider API Keys panel, in one shape.
+        """Every row of the Settings -> Provider API Keys panel, in one shape.
 
-        Built-ins first (in the published display order), then the user's own
-        and server-published providers. The page used to hand-write eight
-        ``<div>``s in HTML for the built-ins and build only the dynamic ones
-        at runtime, so a provider added in the admin panel needed a desktop
-        release before it had a row, and the two halves drifted - the
-        hand-written one carried its own logo colours, signup URLs and
-        default-on switches, duplicated from the server and from
-        model_registry.py.
-
-        The key itself is NOT returned: the page asks for it through
-        getApiKey(keyName) like every other row.
+        Built-ins first (published order), then user and server-published
+        providers. The page used to hand-write the built-in rows in HTML and
+        build only the dynamic ones at runtime, so the two halves drifted. The
+        key itself is NOT returned; the page asks via getApiKey(keyName).
         """
         import json
         try:
@@ -1365,18 +1339,10 @@ scope: project
     def getApiKeyStatuses(self, providers: str) -> str:
         """Stored keys for many providers in ONE call, keyed by key name.
 
-        Opening Settings -> Models & Providers used to ask getApiKey() once
-        per provider row: N web-channel round trips, each a separate
-        GUI-thread slot call, and on Linux each one also re-read and re-parsed
-        keys.enc, because ``_get_os_keyring_key()`` is a no-op there and every
-        lookup falls through to the file. The cost of opening the panel was
-        therefore paid per provider, so a provider added in the admin panel
-        made every open slower. This answers the same question in one pass.
-
-        The values are exactly what getApiKey() returns for that name: the
-        masked hint, never the key. A name that is unknown or absent comes
-        back as an empty string rather than missing, so no row can be left in
-        the "editing" state by a mismatch.
+        Opening Models & Providers used to ask getApiKey() once per row: N
+        web-channel round trips, and on Linux each also re-read and re-parsed
+        keys.enc. Values are exactly what getApiKey() returns (the masked hint,
+        never the key); an unknown name comes back as "" rather than missing.
         """
         import json
         names: object = []
@@ -2195,20 +2161,13 @@ class MemoryManagerDialog(QDialog):
     def _call_js(self, js: str, callback=None) -> None:
         """Send JS to the page, queueing until it is loaded.
 
-        Most runJavaScript() call sites here had no _page_loaded guard at all:
-        a call made before load simply evaporated (the page's functions did not
-        exist yet), leaving the panel showing stale state with nothing logged.
-        Routing every call through here makes delivery survive load timing.
-
-        `callback`, when given, receives the JS result, same contract as
-        runJavaScript(js, callback). BUG HISTORY: the first version of this
-        helper took only `js`, but two call sites (_try_push_state and the
-        theme-apply result logger) pass a result callback; every open of the
-        Memory Manager then crashed with "takes 2 positional arguments but 3
-        were given" in a retry loop. Result-callback calls cannot be queued
-        (there is no result to deliver before the page exists), so before
-        load they are dropped, both such call sites already guard on
-        _page_loaded and retry by themselves.
+        Most runJavaScript() sites had no _page_loaded guard, so a call made
+        before load evaporated (the page's functions did not exist yet) and the
+        panel showed stale state with nothing logged. `callback`, when given,
+        receives the result, same contract as runJavaScript(js, callback).
+        Result-callback calls cannot be queued (there is no result to deliver
+        before the page exists), so before load they are dropped; both such
+        call sites guard on _page_loaded and retry themselves.
         """
         if not getattr(self, '_view', None):
             return

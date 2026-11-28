@@ -1,22 +1,15 @@
 """Turn one assistant answer into Telegram-safe HTML.
 
-The phone receives the same string the chat panel renders, and that string is
-Markdown. Telegram renders none of it: a "Files changed" table arrived as
-``| File | change |`` with a literal ``|---|---|`` separator underneath, so a
-small screen showed a wall of pipes where a list belonged.
+The phone receives the same Markdown string the chat panel renders, and Telegram
+renders none of it: a "Files changed" table arrived as pipes with a literal
+separator underneath, a wall of pipes where a list belonged.
 
-Three things are done here:
-
-* Markdown becomes the HTML Telegram actually understands (``<b>``, ``<i>``,
-  ``<code>``, ``<pre>``, ``<a>``, ``<s>``).
-* A table becomes a header line and one bullet per row. Telegram has no table
-  support at all, so a table has to change shape, not just gain styling.
-* The answer is cut into messages that each end with balanced tags, because
-  Telegram counts the tags themselves against its 4096-character limit and a
-  split inside ``<pre>`` is rejected outright.
-
-Every chunk can also be flattened back to plain text with :func:`plain_of`, so
-a rejected entity never costs the user an answer.
+Three jobs: Markdown becomes the HTML Telegram understands (<b>, <i>, <code>,
+<pre>, <a>, <s>); a table becomes a header line and one bullet per row, since
+Telegram has no table support; and the answer is cut into messages that each end
+with balanced tags, because Telegram counts tags against its 4096-character
+limit and a split inside <pre> is rejected outright. plain_of flattens any chunk
+back to plain text, so a rejected entity never costs the user an answer.
 """
 
 from __future__ import annotations

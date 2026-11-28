@@ -1,17 +1,10 @@
-"""
-spinner_overlay.py, Blocking overlay with animated spinner for Cortex IDE
-============================================================================
+"""Blocking overlay with an animated spinner for Cortex IDE.
 
-Shows a semi-transparent dark overlay with a spinner and status text
-during critical operations (memory save, compaction, etc.) to prevent
-user interaction and provide visual feedback.
-
-Usage:
-    from src.ui.spinner_overlay import SpinnerOverlay
+Shows a semi-transparent dark overlay with a spinner and status text during
+critical operations (memory save, compaction) to block interaction.
 
     overlay = SpinnerOverlay(parent_widget)
     overlay.show_overlay("Compacting conversation...", spinner_key="thought")
-    # ... do work ...
     overlay.hide_overlay()
 """
 

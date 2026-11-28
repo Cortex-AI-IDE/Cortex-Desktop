@@ -900,21 +900,15 @@ class WebviewPanel(QWidget):
         self._safe_run_js(js)
 
     def switch_to_file(self, file_path: str):
-        """Switch the editor tab to an already-open file WITHOUT re-sending content.
-        
-        This avoids a model.setValue() call through QWebChannel, which is the
-        primary crash trigger during Chromium's startup warmup phase.
-        
-        If the file is still in the open queue (pending JS delivery), the content
-        is flushed IMMEDIATELY so the JS side has it before switchToFile runs.
-        Without this, switchToFile silently fails (openFiles[path] is undefined)
-        and the editor keeps showing the previous file's content.
-        
-        GUARD: If the file was tracked in _open_files but NEVER delivered to JS
-        (e.g. session restore warmup, page crash recovery), fall back to a full
-        open_file() call that sends content.  Without this, switchToFile() on the
-        JS side sees openFiles[path] === undefined and returns silently, the
-        editor stays on the previous file's content (Race Condition #1).
+        """Switch to an already-open file WITHOUT re-sending its content.
+
+        Avoids a model.setValue() through QWebChannel, the main crash trigger
+        during Chromium warmup. If the file is still queued for JS delivery its
+        content is flushed first, otherwise switchToFile silently fails
+        (openFiles[path] undefined) and the editor keeps the previous content.
+        If the file was tracked in _open_files but never delivered (session
+        restore warmup, page crash recovery), it falls back to a full open_file
+        that sends content, for the same reason.
         """
         if file_path not in self._open_files:
             log.warning(f"[WebviewPanel] switch_to_file: {file_path} not in _open_files")

@@ -155,22 +155,12 @@ def find_actual_string(file_content: str, search_string: str) -> Optional[str]:
 # QUOTE STYLE PRESERVATION
 
 def preserve_quote_style(old_string: str, actual_old_string: str, new_string: str) -> str:
-    """
-    When old_string matched via quote normalization (curly quotes in file,
-    straight quotes from model), apply the same curly quote style to new_string
-    so the edit preserves the file's typography.
-    
-    Uses a simple open/close heuristic: a quote character preceded by whitespace,
-    start of string, or opening punctuation is treated as an opening quote;
-    otherwise it's a closing quote.
-    
-    Args:
-        old_string: The original search string (with straight quotes)
-        actual_old_string: The actual string found in file (may have curly quotes)
-        new_string: The replacement string to apply quote styling to
-        
-    Returns:
-        new_string with appropriate curly quote styling applied
+    """Apply the file's curly-quote style to new_string.
+
+    Used when old_string matched via quote normalization (curly in file,
+    straight from the model), so the edit keeps the file's typography. Quote
+    direction is a simple heuristic: a quote after whitespace, string start, or
+    opening punctuation is an opening quote, otherwise a closing one.
     """
     # If they're the same, no normalization happened
     if old_string == actual_old_string:
@@ -352,22 +342,10 @@ def get_patch_for_edits(
     file_contents: str,
     edits: List[FileEdit],
 ) -> Dict[str, Any]:
-    """
-    Applies a list of edits to a file and returns the patch and updated file.
-    Does not write the file to disk.
-    
-    NOTE: The returned patch is to be used for display purposes only - it has spaces instead of tabs
-    
-    Args:
-        file_path: Path to the file
-        file_contents: Current file contents
-        edits: List of edits to apply
-        
-    Returns:
-        Dictionary with 'patch' (StructuredPatchHunk[]) and 'updatedFile' (str)
-        
-    Raises:
-        ValueError: If edits cannot be applied
+    """Apply edits to file_contents and return patch + updated file, no write.
+
+    The returned patch is display-only: it uses spaces instead of tabs. Raises
+    ValueError if an edit cannot be applied.
     """
     updated_file = file_contents
     applied_new_strings: List[str] = []

@@ -66,21 +66,14 @@ def _shrink_image_b64(fmt: str, b64: str) -> "Tuple[str, str]":
 
 
 def build_image_data_uri(raw: str) -> "Optional[str]":
-    """Return a data: URI for a base64 image, or None if it is not one.
+    """Data: URI for a base64 image, or None if it is not a valid one.
 
-    Single source of truth for turning an attachment into something a vision
-    endpoint accepts. This logic used to be copy-pasted in four places
-    (both branches of _format_messages_for_provider, the history serializer in
-    agent_bridge, and mimo_provider, which did not sniff at all and simply
-    stamped image/png on everything). Each copy defaulted to PNG for data it
-    could not identify, so an SVG read by the Read tool went out as
-    data:image/png containing XML. Alibaba answered HTTP 400 "The image format
-    is illegal and cannot be opened" and xAI "Downloaded response does not
-    contain a valid JPG, PNG, WebP, or ICO image", and because the attachment
-    sat in conversation history it failed every later request too.
-
-    Returning None means "drop this attachment": one weaker answer is far
-    better than a request that cannot succeed at all.
+    Single source of truth, previously copy-pasted in four places, each
+    defaulting to PNG for unidentified data, so an SVG read by the Read tool
+    went out as data:image/png containing XML. Alibaba and xAI then rejected the
+    request, and because the attachment sat in history it failed every later
+    request too. None means "drop this attachment": one weaker answer beats a
+    request that can never succeed.
     """
     if not raw:
         return None
@@ -419,24 +412,15 @@ class BaseProvider(ABC):
 
     @staticmethod
     def _strip_orphaned_tool_messages(normalized: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove any 'tool' message that isn't a real response to an immediately
-        preceding assistant 'tool_calls' entry, every OpenAI-compatible API
-        (DeepSeek, Anthropic's compat endpoint, OpenRouter) hard-rejects these
-        with HTTP 400: "Messages with role 'tool' must be a response to a
-        preceding message with 'tool_calls'".
+        """Drop 'tool' messages that don't answer an immediately preceding
+        assistant 'tool_calls'. Every OpenAI-compatible API 400s on these.
 
-        BUG history: this used to be three near-identical copies (one per
-        provider file), and each only did PASS 1 below, it stripped
-        `tool_calls` off an assistant message when some of its calls went
-        unanswered, but left that message's ALREADY-matching tool responses in
-        the list untouched. Once the parent's tool_calls was popped, those
-        surviving tool messages pointed at an assistant message that no longer
-        declared tool_calls, so they became orphans themselves and
-        DeepSeek/Anthropic 400'd anyway ("role 'tool' must be a response to a
-        preceding message with 'tool_calls'"). Pass 1 also never caught a
-        standalone 'tool' message with no assistant parent at all, e.g.
-        history truncation trimming the assistant turn but leaving its tool
-        responses behind.
+        Used to be three near-identical copies, each doing PASS 1 only: it
+        stripped tool_calls off an assistant message with unanswered calls but
+        left that message's already-matching tool responses behind, so those
+        became orphans pointing at an assistant with no tool_calls and the API
+        rejected the turn anyway. Pass 1 also missed a standalone 'tool' message
+        whose assistant parent was trimmed by history truncation.
         """
         # Pass 1: an assistant's tool_calls needs ALL ids answered in the immediately
         # following contiguous tool messages or the API rejects the turn; strip

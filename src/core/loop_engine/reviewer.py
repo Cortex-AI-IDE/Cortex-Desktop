@@ -1,26 +1,12 @@
-"""
-reviewer.py, Milestone 3: maker/checker separation (agent_loop.md §5).
+"""Maker/checker separation: the model that wrote the change never approves it.
 
-The rule: the model that wrote the change never approves the change.
-Enforced structurally here, not by prompt:
-
-  1. Hard-coded auto-rejects run in CODE, before any model call (§5.1):
-     - a changed file outside scope.allow_paths (when allow_paths is set)
-     - a deny_paths violation
-     - a deleted test file, or a test file whose assertion count dropped
-       (the classic cheat: "fix" tests by deleting them, the verifier
-       can't catch this, since deleted assertions can't fail)
-     - a secret-looking string added in the diff
-  2. Only if none of those trip does a review request go to a model that
-     is, wherever possible, a DIFFERENT provider/model than whatever did
-     the editing (actor_model), see pick_reviewer_model().
-  3. The model must return strict JSON (ReviewResult). If it can't be
-     parsed, that FAILS CLOSED (approved=False), a broken reviewer must
-     never be silently treated as "no objections".
-
-This step is what verify()'s green path was missing: without it, a passing
-test suite was the end of the loop, even if the agent got there by
-deleting the failing test.
+Enforced structurally, not by prompt. Hard-coded auto-rejects run first (file
+outside scope.allow_paths, deny_paths violation, deleted test file or dropped
+assertion count, secret-looking string in the diff), then a review request goes
+to a different provider/model where possible. Unparseable reviewer output FAILS
+CLOSED (approved=False), so a broken reviewer never reads as "no objections".
+Without this, a passing suite ended the loop even if the agent deleted the
+failing test to get there.
 """
 
 from __future__ import annotations

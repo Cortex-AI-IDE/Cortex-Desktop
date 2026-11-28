@@ -1,25 +1,17 @@
 """
 Web-based Project Health dialog for Cortex IDE (EXPERIMENTAL).
 
-Hosts a QWebEngineView that renders ``src/ui/html/health_map/health_map.html``
-and exposes a small QWebChannel bridge onto
-:mod:`src.core.project_health`.
+Hosts a QWebEngineView rendering src/ui/html/health_map/health_map.html and
+exposes a small QWebChannel bridge onto src.core.project_health. It mirrors
+MemoryManagerDialog deliberately: same page subclass, same channel binding, same
+"queue JS until loaded" helper and timed state push with retries, because those
+exist for real failures (white flash on cold start, runJavaScript evaporating
+before load, Chromium refusing file:// subresources under setHtml without a
+baseUrl).
 
-The dialog deliberately mirrors ``MemoryManagerDialog``: same page subclass,
-same channel binding, same "queue JS until the page is loaded" helper, same
-timed state push with retries. Those pieces exist because of real failures
-(white flash on cold start, runJavaScript evaporating before load, Chromium
-refusing file:// subresources under setHtml without a baseUrl) and a new
-webview dialog that skips them reproduces every one of those bugs.
-
-Threading
----------
-A scan of a large project parses thousands of files. Doing that inside a
-pyqtSlot would block the GUI thread and freeze the whole IDE window, so the
-slot returns immediately with ``{"pending": true}`` and the real payload
-arrives over the ``dataChanged`` signal from a worker thread. PyQt queues a
-signal emitted from a non-GUI thread onto the receiver's thread, so the slot
-that touches the webview still runs on the GUI thread.
+A scan parses thousands of files, so the slot returns {"pending": true} at once
+and the payload arrives over dataChanged from a worker thread; PyQt queues that
+signal onto the GUI thread, so the slot touching the webview stays safe.
 """
 
 from __future__ import annotations
@@ -117,22 +109,15 @@ class HealthMapBridge(QObject):
         return get_scanner(self._root)
 
     def cached_payload(self) -> str:
-        """Return the last payload built this session, or "" if there is none.
+        """Last payload built this session, or "" if none.
 
-        NOTE: this is deliberately NOT the on-disk cache. The file at
-        ``<project>/.cortex/health_map.json`` stores per-file parse results
-        (mtime, status, symbols, imports, problems) keyed by relative path -
-        it has no ``nodes``/``edges``/``symbols`` arrays, because those are
-        derived: edges need the whole module table to resolve against, and
-        AFFECTED needs the resolved graph to BFS over. Serialising the
-        rendered payload as well would duplicate every fact in the file and
-        give the two copies a chance to disagree.
-
-        Reopening the panel is still fast without it: ``scan(force=False)``
-        re-stats each file and reuses every unchanged entry from that cache,
-        so a second open walks the tree and rebuilds the graph without
-        re-parsing anything. What this in-memory copy adds is an instant
-        first paint when the dialog is reopened within one IDE session.
+        Deliberately NOT the on-disk cache: <project>/.cortex/health_map.json
+        stores per-file parse results keyed by path, not the rendered
+        nodes/edges/symbols, which are derived (edges need the whole module
+        table, AFFECTED needs the graph to BFS). Serialising both would
+        duplicate every fact and let the copies disagree. This in-memory copy
+        just gives an instant first paint when the dialog reopens in one
+        session; scan(force=False) already reuses unchanged entries.
         """
         return self._last_payload
 

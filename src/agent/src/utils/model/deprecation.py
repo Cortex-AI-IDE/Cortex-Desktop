@@ -135,23 +135,18 @@ def getDeprecatedModelInfo(
     """
     Check if a model is deprecated and get its deprecation info.
 
+    Server-published deprecations win for models the server knows, the same
+    layering used for limits, pricing, provider, thinking and aliases; the
+    built-in table is the offline fallback and still covers legacy ids that are
+    not in the server catalog.
+
     Args:
-        modelId: Full model ID string (e.g. 'claude-3-opus-20240229')
-        provider: Optional provider name. If not provided, checks all providers.
+        modelId: Full model ID string (e.g. 'claude-3-opus-20240229').
+        provider: Optional provider name; checks all providers when omitted.
 
     Returns:
-        DeprecationInfo with retirement date if deprecated, or {isDeprecated: False}
-
-    Example:
-        getDeprecatedModelInfo('claude-3-opus-20240229', 'anthropic')
-        → {
-            'isDeprecated': True,
-            'modelName': 'Claude 3 Opus',
-            'retirementDate': 'January 5, 2026'
-          }
-
-        getDeprecatedModelInfo('claude-sonnet-4-20250514')
-        → {'isDeprecated': False}
+        DeprecationInfo with the retirement date when deprecated, else
+        {'isDeprecated': False}.
     """
     # Server-published deprecations win for models the server knows — the
     # same layering used for limits, pricing, provider, thinking and aliases.
@@ -210,23 +205,7 @@ def getModelDeprecationWarning(
     modelId: Optional[str],
     provider: Optional[APIProvider] = None,
 ) -> Optional[str]:
-    """
-    Get a deprecation warning message for a model, or None if not deprecated.
-
-    Args:
-        modelId: Model ID to check (e.g. 'claude-3-opus-20240229')
-        provider: Optional provider name for provider-specific warnings
-
-    Returns:
-        Warning message string, or None if model is not deprecated
-
-    Example:
-        getModelDeprecationWarning('claude-3-opus-20240229', 'anthropic')
-        → '⚠ Claude 3 Opus will be retired on January 5, 2026. Consider switching to a newer model.'
-
-        getModelDeprecationWarning('claude-sonnet-4-20250514')
-        → None
-    """
+    """Deprecation warning for a model, or None if it is not deprecated."""
     if not modelId:
         return None
 

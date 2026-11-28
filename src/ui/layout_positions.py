@@ -43,23 +43,11 @@ def normalise_default(default: object) -> str:
 
 
 def panel_order(sidebar: object = LEFT, chat: object = LEFT) -> Tuple[str, ...]:
-    """Left-to-right panel order for the three panels.
+    """Left-to-right order of the three panels.
 
-    +---------+-------+---------------------------+
-    | sidebar | chat  | result (left -> right)    |
-    +---------+-------+---------------------------+
-    | left    | left  | sidebar, chat, editor     |
-    | left    | right | sidebar, editor, chat     |
-    | right   | left  | chat, editor, sidebar     |
-    | right   | right | editor, chat, sidebar     |
-    +---------+-------+---------------------------+
-
-    The sidebar keeps its outer edge, the chat panel hugs whichever side it
-    was given, and the editor+terminal block fills the space between them.
-    No combination asks two panels for the same slot, so there is never an
-    impossible "chat on the right and editor on the right" state.
-
-    The result is always a permutation of :data:`PANELS`.
+    The sidebar keeps its outer edge, the chat panel hugs whichever side it was
+    given, and the editor+terminal block fills the space between. Always a
+    permutation of PANELS, so no two panels ever claim the same slot.
     """
     side = normalise_position(sidebar)
     chat_side = normalise_position(chat)

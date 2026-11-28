@@ -1,32 +1,15 @@
 """
-Cortex security toolkit -- offensive and defensive security testing.
+Cortex security toolkit - offensive and defensive security testing.
 
-Two halves, one gate:
+Offensive (recon, web_probe) runs active testing against a declared target,
+gated by ScopeGuard so an undeclared host is refused before a socket opens.
+Defensive (defense) scans local source for committed secrets, hardening
+mistakes and dependency CVEs.
 
-  Offensive (recon, web_probe)  Active testing against a target. Everything
-                                goes through ScopeGuard, so a host that has
-                                not been declared by the user is refused
-                                before a socket is opened.
-  Defensive (defense)           Local scanning of your own source: committed
-                                secrets, hardening mistakes, dependency CVEs,
-                                and any local SAST engine that is installed.
-
-Entry point for the agent: tools.security_tool(). It is exposed as the
-single `SecurityScan` tool, with an `action` enum, so the whole toolkit costs
-one schema in the model's context.
-
-The scope gate is enforced in code. It cannot be changed by the agent: see
-the module docstring in tools.py for why that is deliberate.
-
-Quick manual use:
-
-    from src.core.security_toolkit import security_tool
-
-    security_tool("scope")                          # what am I allowed to test
-    security_tool("scan_code", target=r"C:\\proj")   # defensive sweep
-    security_tool("scan_ports", target="127.0.0.1") # loopback is allowed by default
-    security_tool("scan_web", target="http://localhost:3000")
-    security_tool("report", report_format="html")    # client-ready document
+The agent's entry point is tools.security_tool(), exposed as the single
+`SecurityScan` tool with an `action` enum, so the toolkit costs one schema.
+The scope gate is enforced in code and cannot be changed by the agent; see
+tools.py for why.
 """
 
 from src.core.security_toolkit.finding import (

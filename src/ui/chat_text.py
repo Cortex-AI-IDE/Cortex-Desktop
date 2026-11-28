@@ -458,21 +458,16 @@ _FENCE_HEAD_KEYWORDS = frozenset({
 
 
 def _mermaid_fence_body_ok(code: str) -> bool:
-    """Return True when a fenced body is diagram syntax rather than prose.
+    """True when a fenced body is diagram syntax rather than prose.
 
-    Defence in depth: even inside a genuine ```mermaid fence, prose stays a
-    code block. Showing the author's text is right; drawing it is not.
-
-    Deliberately permissive about body shape, because an edge-less flowchart
-    and a mindmap are both valid mermaid. Only the ambiguous heads are checked,
-    and only for syntax mermaid itself requires:
-
-    * ``graph`` / ``flowchart`` must carry a direction token, which mermaid
-      requires anyway. "graph is a data structure" is rejected.
-    * ``timeline`` / ``gantt`` / ``pie`` / ``journey`` / ``mindmap`` are also
-      ordinary English words, so anything after them must be empty or ``title``.
-      "timeline is decisive: spec fixed" is rejected, ``pie title Pets`` is not.
-    * every other declared diagram type is trusted as written.
+    Even inside a real ```mermaid fence, prose stays a code block: showing the
+    author's text is right, drawing it is not. Permissive about body shape
+    (an edge-less flowchart and a mindmap are both valid mermaid); only the
+    ambiguous heads are checked, and only for syntax mermaid requires. graph /
+    flowchart need a direction token ("graph is a data structure" is rejected);
+    timeline/gantt/pie/journey/mindmap are ordinary English words, so what
+    follows must be empty or "title" ("timeline is decisive" rejected, "pie
+    title Pets" kept); every other declared type is trusted.
     """
     lines = [ln.strip() for ln in code.splitlines() if ln.strip()]
     if not lines:

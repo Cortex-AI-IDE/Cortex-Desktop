@@ -1,32 +1,13 @@
 """Detect WebEngine panels that load but never paint, and offer the fix.
 
-Why this exists
----------------
-On some machines (older office PCs with old Intel drivers are the classic
-case) Chromium cannot obtain a GPU context. Every WebEngine surface, the
-sidebar, editor, terminal and settings pages, comes up BLANK/dark while the
-rest of the app behaves normally and the logs look healthy: pages report
-loadFinished, bridges connect, nothing raises. Only the pixels are missing.
+On some machines Chromium cannot get a GPU context, so every web panel comes up
+blank while the logs look healthy. Cortex ships a software-rendering fallback,
+but it is opt-in and a user staring at a blank panel has no way to know.
 
-Cortex ships a software-rendering fallback for exactly this, but it is
-opt-in, and a user staring at a blank panel has no way to know it exists.
-Worse, the owner cannot reasonably test every affected machine.
-
-So the app checks itself: once, a few seconds after startup, it grabs the
-WebEngine widgets and asks whether they actually painted anything. If they
-did not, it says so in plain language and offers to switch on compatibility
-rendering and restart. Native Qt dialogs do not use WebEngine, so the
-prompt is visible even when every web panel is blank.
-
-Deliberately conservative
--------------------------
-- Runs once per launch, never in a loop.
-- Requires EVERY checked widget to be blank. One blank panel can be
-  legitimate (an empty editor, a page mid-load); all of them blank at once
-  is the failure signature.
-- Skips entirely when software rendering is already on.
-- Never switches silently: a false positive would only cost speed, but the
-  user still decides.
+So the app checks itself once, a few seconds after startup, asking the
+WebEngine widgets whether they painted anything. If not, it offers
+compatibility rendering plus a restart. It runs once per launch, requires EVERY
+checked widget to be blank, and never switches silently.
 """
 from __future__ import annotations
 

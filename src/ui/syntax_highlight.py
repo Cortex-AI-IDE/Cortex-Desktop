@@ -536,21 +536,13 @@ _GENERIC_TOKEN_RE = re.compile(
 
 
 def _highlight_generic(code: str) -> str:
-    """Generic highlighting: strings and comments only.
+    """Highlight strings and comments only; ``code`` is already HTML-escaped.
 
-    ``code`` is already HTML-escaped by ``highlight_code``.  Tokens are
-    collected over that escaped text and emitted in ONE pass, the same way the
-    language-specific path works.
-
-    Bug history (fixed 2026-10-22): this used to escape, wrap quoted strings,
-    then run the ``#`` comment regex over the HTML it had just produced.  The
-    ``#`` of the hex colour in ``style="color:#00ceb9"`` started a bogus
-    comment span, so EVERY language-less fenced block containing a quoted
-    string rendered visible garbage on screen::
-
-        NAME = #00ceb9">'v'
-
-    and the doubled escaping turned ``&``/``<`` into ``&amp;amp;``/``&amp;lt;``.
+    Tokens are collected over the escaped text and emitted in one pass. The old
+    version wrapped strings and then ran the ``#`` comment regex over its own
+    HTML, so the ``#`` in style="color:#00ceb9" opened a bogus comment span and
+    every language-less block with a quoted string rendered visible garbage
+    (NAME = #00ceb9">'v'), with doubled escaping turning & and < into entities.
     """
     _sync_palette()  # colors must come from the ACTIVE theme
     if not code:
@@ -584,21 +576,10 @@ def _highlight_generic(code: str) -> str:
 
 
 def highlight_code(code: str, lang: str = "") -> str:
-    """Apply syntax highlighting to code. Returns HTML with inline styles.
+    """Highlight code, returning HTML with inline styles.
 
-    Uses a token-first approach: all tokens are collected with positions first,
-    then HTML is generated in a single pass. This prevents HTML tags from being
-    re-processed by subsequent regex patterns.
-
-    Style:
-    - Keywords: italic (purple)
-    - Type keywords: bold+italic (yellow-green)
-    - Types: bold (yellow-green)
-    - Functions: normal (blue)
-    - Strings: normal (teal)
-    - Comments: italic (muted)
-    - Builtins: red
-    - Numbers: peach
+    Token-first: all tokens are collected with positions, then HTML is emitted
+    in one pass, so tags are never re-processed by later regex patterns.
     """
     lang = lang.lower().strip()
     if not code:

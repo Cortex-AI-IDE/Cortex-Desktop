@@ -245,21 +245,16 @@ def _extract_code_fences_for_streaming(text: str) -> tuple[str, dict[str, str]]:
     return text, _map
 
 def _restore_code_fences(html: str, fence_map: dict[str, str]) -> str:
-    """Splice styled <pre> blocks back into HTML, replacing sentinels.
+    """Splice styled <pre> blocks back in, replacing sentinels.
 
-    A fenced block is BLOCK-level, but the sentinel is a bare text token: when
-    it sits alone on its line mistune wraps it in ``<p>«FENCE0»</p>``, and a
-    plain string replace produced ``<p><pre>…</pre></p>``.  Qt's rich text
-    engine cannot nest a block inside a paragraph, so it flattened the code
-    block into the surrounding prose: the fence rendered as inline text with
-    no card, border or scroll area ("the code block displays like plan
-    instead of a pre card", reported 2026-10-22).  A fence that shares a
-    paragraph with prose (``` right after a sentence, no blank line) flattened
-    the same way.
-
-    Paragraphs holding a sentinel are therefore rebuilt: the paragraph is
-    closed before the block, and any prose after it is reopened in its own
-    paragraph.  Sentinels outside a paragraph still get the plain replace.
+    A fence is block-level but its sentinel is bare text, so alone on a line
+    mistune wraps it in <p>«FENCE0»</p>; a plain replace then produced
+    <p><pre>...</pre></p>, and Qt cannot nest a block in a paragraph, so it
+    flattened the code block into the prose and the fence rendered as inline
+    text with no card or scroll area (reported 2026-10-22). A fence sharing a
+    paragraph with prose flattened the same way. Paragraphs holding a sentinel
+    are therefore rebuilt: closed before the block, prose after it reopened in
+    its own paragraph.
     """
     if not html or not fence_map:
         return html

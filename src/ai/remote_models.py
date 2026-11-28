@@ -1,37 +1,11 @@
 """
-remote_models.py — server-published model list, layered over the built-in one.
+remote_models.py - server-published model list, layered over the built-in one.
 
-Why this exists
----------------
-Every new model used to mean editing four files by hand (model_registry,
-model_limits, model_pricing, modelAllowlist), then cutting a desktop release
-so users could see it. This module lets the server publish models instead:
-add a row in the admin, and clients pick it up on their next launch.
-
-Design rules, in priority order
--------------------------------
-1. **The server is the only source of the catalog.** There is no bundled
-   snapshot and no hand-written list in this build: the provider directory
-   and the model groups both arrive from ``GET /api/v1/models/config/``.
-   A bundled copy was tried and then removed - it froze the directory at
-   build time, which is exactly the staleness this module exists to end,
-   and it let a desktop keep showing providers an admin had switched off.
-2. **Never touch the GUI thread.** The fetch runs on a daemon thread. The UI
-   reads whatever is cached at the moment it builds the dropdown.
-3. **Survive restarts offline.** A successful fetch is written to a disk
-   cache, so the second launch on a plane still shows server models. A first
-   launch with no network shows an empty dropdown with a "sign in to sync"
-   hint instead of a fabricated list - an honest empty beats a wrong list.
-4. **A malformed row can never crash the dropdown.** Every entry is validated
-   and skipped individually if wrong.
-
-What this can and cannot deliver
---------------------------------
-Publishing works for models that ride a provider's existing request shape —
-any new ``deepseek/*`` id through OpenRouter, say, since the provider passes
-the id straight through. A model needing new client code (new provider, new
-auth, a new request parameter) still needs a release; the server marks those
-with ``min_ide_version`` so older builds never see them.
+The server is the only source of the catalog, so adding a model is an admin row
+rather than a desktop release. Fetches run on a daemon thread and cache to disk,
+so an offline restart still lists server models. Entries are validated one by
+one, so a malformed row cannot break the dropdown. Models needing new client
+code still need a release; the server marks those with min_ide_version.
 """
 
 from __future__ import annotations

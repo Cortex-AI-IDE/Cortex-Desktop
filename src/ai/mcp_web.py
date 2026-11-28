@@ -1,23 +1,17 @@
 """Which connected MCP tools can search or read the web.
 
-Built-in WebSearch/WebFetch need a Cortex subscription or a search key. MCP
-tools never do: a user who connects their own search server (Brave, Tavily,
-Exa, Perplexity, Firecrawl, Jina, fetch, ...) holds the key in that server's
-own mcp.json entry. When the built-in tool is blocked, the bridge redirects
-the model to these tools instead of showing the subscription card.
+Built-in WebSearch/WebFetch need a Cortex subscription or a search key; MCP
+tools never do, since the user holds the key in that server's own mcp.json
+entry. When the built-in tool is blocked, the bridge redirects the model to
+these tools instead of showing the subscription card.
 
 The old test was a substring match for search/fetch/crawl/browse/extract on
-``mcp__<server>__<tool>``. It missed real search servers
-(``mcp__perplexity-ask__perplexity_ask``, ``mcp__jina__read_url``) and caught
-local ones (``mcp__filesystem__search_files``, ``mcp__github__search_code``),
-so the model could be sent to search the web with a file search, or shown
-the subscription card while the user's own search server sat connected.
-
-Matching is on whole words of the name now, a local word (file, code, repo,
-...) vetoes, and the result is ordered search first, page readers next,
-browser automation last, so the first tool named is the one to try.
-
-No Qt and no bridge here (the W1 rule).
+mcp__<server>__<tool>. It missed real search servers
+(mcp__perplexity-ask__perplexity_ask, mcp__jina__read_url) and caught local
+ones (mcp__filesystem__search_files, mcp__github__search_code), so the model
+could be sent to search the web with a file search. Matching is on whole words
+now, a local word (file, code, repo) vetoes, and the result is ordered search
+first, page readers next, browser automation last. No Qt and no bridge here.
 """
 
 from __future__ import annotations

@@ -1,22 +1,15 @@
 """
-Smart Diff Algorithm - Word-level diff computation.
+Smart Diff Algorithm - word-level diff computation.
 
-Computes character/word-level differences between two text versions.
-
-Key features:
-- Tokenizes text into words, whitespace, and symbols
-- Uses difflib for efficient sequence matching
-- Returns ranges of changed regions (not full rendered output)
-- Works with any text (code, markdown, plain text)
+Computes character/word-level differences between two text versions: tokenizes
+into words, whitespace and symbols, matches sequences with difflib, and returns
+ranges of changed regions rather than rendered output. Works on code, markdown
+and plain text.
 
 Usage:
-    from utils.diff_algorithm import compute_word_diff
-    
     changes = compute_word_diff("old code", "new code")
-    # Returns: {
-    #   'removed_ranges': [(start, end), ...],  # Character positions in old text
-    #   'added_ranges': [(start, end), ...],     # Character positions in new text
-    # }
+    # {'removed_ranges': [(start, end), ...],   # positions in old text
+    #  'added_ranges': [(start, end), ...]}     # positions in new text
 """
 
 import logging
@@ -78,25 +71,18 @@ def compute_word_diff(
     change_threshold: float = 0.5
 ) -> dict:
     """
-    Compute word-level differences between two text versions.
-
-    Identifies exactly which character ranges were added or removed.
+    Compute word-level differences between two text versions, identifying
+    exactly which character ranges were added or removed.
 
     Args:
-        old_text: Original text (before edit)
-        new_text: Modified text (after edit)
-        change_threshold: If more than this fraction changed (0.0-1.0),
-                         return empty ranges (too different for word-level diff)
-    
+        old_text: Original text (before edit).
+        new_text: Modified text (after edit).
+        change_threshold: If more than this fraction changed (0.0-1.0), return
+            empty ranges, since the texts are too different for a word diff.
+
     Returns:
-        Dictionary with:
-        - 'removed_ranges': List of (start, end) tuples for removed text in old_text
-        - 'added_ranges': List of (start, end) tuples for added text in new_text
-        
-    Example:
-        >>> result = compute_word_diff("hello world", "hello there")
-        >>> result['removed_ranges']  # [(6, 11)] - "world" removed
-        >>> result['added_ranges']    # [(6, 11)] - "there" added
+        Dict with 'removed_ranges' and 'added_ranges', each a list of
+        (start, end) tuples.
     """
     # Tokenize both texts
     old_tokens = tokenize(old_text)

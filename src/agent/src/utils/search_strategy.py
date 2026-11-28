@@ -1,19 +1,9 @@
-"""
-Search Strategy Module, Adaptive, task-aware search guidance.
+"""Adaptive, task-aware search guidance.
 
-Replaces the old "search everything aggressively" approach with an
-adaptive strategy that scales search depth to task complexity:
-
-  Simple fix        -> 1-2 searches, 2-3 files
-  Bug investigation  -> 3-5 searches, 4-6 files
-  Feature addition   -> 4-6 searches, 5-8 files
-  Architecture change -> 5-8 searches, 8+ files
-
-Key principles:
-  - Start targeted, expand only if needed
-  - Semantic search for "find related code", grep for "find specific pattern"
-  - STOP searching once you have enough context to act confidently
-  - Never re-read files you already have in context
+Scales search depth to complexity (simple fix: 1-2 searches; architecture
+change: 5-8) and starts targeted, expanding only if needed. Semantic search for
+"find related code", grep for a specific pattern. Stop once you have enough to
+act, and never re-read files already in context.
 """
 
 SEARCH_STRATEGY_INSTRUCTION = """

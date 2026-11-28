@@ -199,22 +199,11 @@ def compact_if_needed(
     state: Optional[AutoCompactState] = None,
     keep_recent: int = DEFAULT_KEEP_RECENT,
 ) -> Tuple[List[Any], bool]:
-    """
-    Run the two-tier compaction pipeline:
-    1. Always try micro-compact first (cheap, clears old tool results)
-    2. If still over threshold, run full compact (LLM summarization)
-    
-    Args:
-        messages: Current message list
-        estimated_tokens: Estimated token count
-        context_budget: Total context budget
-        compact_fn: Function to call for full compaction (bridge._compact_messages)
-        PCM_class: The ChatMessage class for creating new messages
-        state: Auto-compact tracking state
-        keep_recent: How many recent tool results to keep in micro-compact
-    
-    Returns:
-        (possibly_compacted_messages, was_compacted)
+    """Run the two-tier compaction pipeline.
+
+    Always try micro-compact first (cheap, clears old tool results); if still
+    over threshold, run full compact (LLM summarization). Returns
+    (possibly_compacted_messages, was_compacted).
     """
     if not state:
         state = AutoCompactState()

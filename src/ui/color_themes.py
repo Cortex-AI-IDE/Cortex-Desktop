@@ -1,24 +1,16 @@
 """Settings -> Appearance -> Color theme: one theme for the whole of Cortex.
 
-"cortex" (the default) is Cortex's own look, following Dark / Light / System.
-Any other choice is a well-known editor theme applied everywhere:
-
-* Web pages (Settings, sidebar, Project Health, the editor's tab bar, the
-  terminal header) - live. One script on the shared WebEngine profile adds a
-  <style id="cortex-color-theme"> that overrides each page's colour
-  variables; switching rewrites it in the open pages.
-* The code editor - live, when Editor -> Theme is "auto" it follows this.
-* The terminal - live, through xterm's own 16-colour theme.
-* Native Qt (chat panel, menus, dialogs, status bar) - live too. Their
-  colours come from the token palettes in tokens.py, baked into stylesheets
-  when each widget is built. A switch points the palettes at the theme
-  (apply_native) and then runs the dark/light switch pipeline - the chat's
-  batched re-theme, the scoped QSS, the inline remap - with the previous
-  palette as the colour source (main_window._apply_color_theme_live). At
-  startup the palettes are set before any widget exists.
+"cortex" (the default) is Cortex's own look, following Dark / Light / System;
+any other choice is a well-known editor theme applied everywhere. Web pages get
+a <style id="cortex-color-theme"> on the shared WebEngine profile that
+overrides each page's colour variables, rewritten live on switch. The editor
+follows it when Editor -> Theme is "auto", the terminal through xterm's
+16-colour theme, and native Qt through the token palettes in tokens.py: a
+switch points the palettes at the theme (apply_native) then runs the dark/light
+pipeline with the previous palette as the colour source.
 
 A theme is dark or light (`base`); choosing one also switches Cortex to that
-mode, so everything not covered by a colour override still matches.
+mode, so anything not covered by an override still matches.
 """
 from __future__ import annotations
 

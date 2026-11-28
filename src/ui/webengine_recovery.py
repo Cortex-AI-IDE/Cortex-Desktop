@@ -1,35 +1,12 @@
 """Bring a WebEngine panel back after Chromium's render process dies.
 
-Why this exists
----------------
-``src/main.py`` runs Chromium with ``--renderer-process-limit=1``, so every
-internal page (sidebar.html, editor.html, terminal.html, settings) is served
-by ONE shared renderer process. That is deliberate: each extra renderer costs
-100-150MB and every page Cortex loads is its own local UI.
+main.py runs Chromium with --renderer-process-limit=1, so every internal page
+shares one renderer. When it dies every panel loses its pixels at once (the
+"whole app is blank" report) while the native chat keeps working. Chromium only
+restarts the renderer on the next navigation, so a panel comes back only if
+something reloads it; the editor did, the sidebar and terminal only logged.
 
-The side effect is the failure signature users report as "the whole app is
-blank": when that one process dies, every panel loses its pixels at the same
-moment, while the native Qt chat panel keeps working normally. Chromium
-restarts the renderer lazily, on the next navigation, so a panel only comes
-back if something asks it to reload.
-
-That is where the panels disagreed:
-
-* ``webview_panel.py`` (editor.html) has reloaded itself since 2.8, so the
-  editor recovered on its own after a few seconds.
-* ``sidebar.py`` only logged the crash, so the sidebar stayed blank until the
-  app was restarted.
-* ``xterm_terminal.py`` only logged it too, so the terminal stayed blank.
-
-Hence the report "sidebar and terminal blank, editor blank for a moment and
-then it loaded". This module gives every panel the same bounded recovery.
-
-Bounded on purpose
-------------------
-Reloading is one shot per crash, at most ``max_attempts`` times in a row, and
-the budget resets on the next successful load. A panel that cannot render for
-a driver reason would otherwise reload forever; that case belongs to
-``render_health.py``, which offers compatibility (software) rendering.
+Recovery is bounded: one reload per crash, at most max_attempts in a row.
 """
 from __future__ import annotations
 

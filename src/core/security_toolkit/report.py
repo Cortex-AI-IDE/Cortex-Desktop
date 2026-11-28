@@ -1,28 +1,12 @@
-"""
-report.py -- turns scan findings into a document you can hand to a client.
+"""Turn scan findings into a document you can hand to a client.
 
-The rest of this package answers "is there a problem?". This module answers
-"what do I send the person who hired me?". A scan dump is not a deliverable,
-so the renderer adds the four things a client actually reads for:
-
-  Who      the engagement block: client, assessment reference, assessor and
-           the authorization the work was performed under. A report that does
-           not name its authorization is a liability, not a deliverable.
-  How bad  severity counts and a single risk score, so the reader knows what
-           to fix first without reading forty findings.
-  Proof    each finding carries where it was found, why it matters and the
-           raw evidence, so the reader can reproduce every claim. Findings
-           that could not be confirmed are labelled as such rather than
-           quietly presented as fact.
-  The fix  a concrete remediation per finding, because "you have an SQL
-           injection" without "use parameterized queries" is a complaint.
-
-Two output formats, same content: Markdown for a repo or a ticket, and a
-self-contained HTML file (inline CSS, no network requests) for emailing.
-
-Nothing here talks to the network and nothing here decides anything about
-scope. It renders findings that some other module already produced, which
-keeps reporting usable on a code scan that never touched a network.
+The rest of the package answers "is there a problem?"; this answers "what do I
+send the person who hired me?". Adds what a client reads for: the engagement
+block (client, reference, assessor, and the authorization the work ran under),
+severity counts and one risk score, per-finding location/rationale/evidence
+with unconfirmed findings labelled, and a remediation each. Two formats, same
+content: Markdown and a self-contained HTML file (inline CSS, no network).
+Renders findings others produced; it decides nothing about scope.
 """
 
 from __future__ import annotations

@@ -20,25 +20,9 @@ class ChatStore:
     """
     Manages chat persistence for the native ChatPanel.
 
-    Timeline format per turn:
-    {
-        "turn_id": str,
-        "messages": [
-            {"role": "user", "content": "..."},
-            {"role": "assistant", "parts": [
-                {"type": "thinking", "text": "..."},
-                {"type": "prose", "text": "..."},
-                {"type": "tool_group", "tools": [
-                    {"tool_type": "read", "data": {...}, "status": "ok"},
-                    ...
-                ]},
-                {"type": "edited_files", "files": [
-                    {"filename": "...", "added": N, "removed": N, "hunk_lines": [...]},
-                    ...
-                ]},
-            ]}
-        ]
-    }
+    Timeline format per turn: {"turn_id", "messages": [{"role", "content"},
+    {"role": "assistant", "parts": [{"type": "thinking"|"prose"|"tool_group"|
+    "edited_files", ...}]}]}.
     """
 
     def __init__(self, db_connection=None):

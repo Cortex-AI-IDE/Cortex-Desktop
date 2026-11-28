@@ -1,20 +1,13 @@
 """Where a partial file read should stop, so it stops on a structural break.
 
-When the agent reads a file with ``offset``/``limit``, the cut can land in the
-middle of a function. This snaps the end to the nearest definition instead, so
-the model always receives whole units.
-
-Extracted from ``agent_bridge`` (W1) for two reasons. It is pure: no Qt, no
-bridge state, no I/O, so it can be tested without a ``QApplication``. And it had
-a real defect that nothing could see while it lived inside a 17,000-line class:
-every reference went through a class name that no longer exists
-(``AgentBridge._BOUNDARY_PATTERNS``), so each call raised ``NameError`` and the
-snapping never happened. Nothing failed, because the enclosing tool wrapper
-turns any exception into an error result.
-
-Snapping is deliberately regex-based rather than a real parser: it runs on
-whatever language the file is in, including ones with no parser here, and it
-only needs a good-enough structural guess within a small window.
+A read with offset/limit can cut mid-function; this snaps the end to the
+nearest definition so the model gets whole units. Pure (no Qt, no bridge, no
+I/O), so it is testable without a QApplication. It lived inside the
+17,000-line bridge where a defect stayed invisible: every reference used a
+class name that no longer existed (AgentBridge._BOUNDARY_PATTERNS), so each
+call raised NameError and snapping never happened, silently, because the tool
+wrapper turns any exception into an error result. Regex-based on purpose: it
+runs on any language, including ones with no parser here.
 """
 
 from __future__ import annotations

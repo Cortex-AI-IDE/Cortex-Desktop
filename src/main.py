@@ -967,10 +967,6 @@ def main():
     _profile("window_created")
     # window.show() is now called in __init__
 
-    # No Pro offer card at startup (removed 2026-10-20, owner decision): it opened
-    # over the IDE on every free-account launch. Still available on request via
-    # Help -> Upgrade to Pro (subscription_offer.maybe_show_offer(force=True)).
-
     # SHUTDOWN HARDENING, Emergency save on force-kill / crash
     
     _shutdown_saved = False  # Prevent double-save

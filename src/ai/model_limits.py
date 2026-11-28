@@ -1,21 +1,10 @@
-"""
-model_limits.py
----------------
-Multi-LLM model context-window registry for Cortex IDE.
+"""Per-model context-window registry.
 
-Provides get_model_limits(model_id) which returns a ModelLimits dataclass with:
-  - context_window    : total input context window (tokens)
-  - max_output_tokens : safe max generation tokens for this model
-  - max_tool_result_chars : per-tool-result character cap  (≈ 5 % of context)
-  - max_hist_chars        : per-history-message character cap (≈ 8 % of context)
-  - max_turns             : agentic loop turn limit (scales with context budget)
-
-All downstream constants in agent_bridge.py are derived from these values so that
-every supported LLM is handled gracefully without hardcoded magic numbers.
-
-Supported families (auto-detected by model_id substring matching):
-  DeepSeek · OpenAI GPT · Claude (OpenRouter) · Gemini (OpenRouter)
-  Qwen / SiliconFlow · MiMo · Z.ai GLM
+get_model_limits(model_id) -> ModelLimits(context_window, max_output_tokens,
+max_tool_result_chars, max_hist_chars, max_turns). Downstream constants in
+agent_bridge.py derive from these, so every supported model is handled without
+hardcoded magic numbers. Families are auto-detected by substring match:
+DeepSeek, OpenAI GPT, Claude, Gemini, Qwen/SiliconFlow, MiMo, Z.ai GLM.
 """
 
 from __future__ import annotations
@@ -45,23 +34,13 @@ class ModelLimits:
         self._derive()
 
     def _derive(self) -> None:
-        """
-        Budget allocation (all figures in tokens, converted to chars at 4 ch/tok):
+        """Split the context window into per-purpose character caps.
 
-          system_prompt_reserve  =   2 000 tokens  (fixed overhead)
-          output_reserve         =   max_output_tokens
-          budget                 =   context_window - system_prompt_reserve - output_reserve
-
-          tool_results_share     =  30 % of budget  (up to 8 calls / turn)
-          history_share          =  40 % of budget  (up to 20 messages)
-          file_read_share        =  15 % of budget  (single file max)
-
-          per_tool_result cap    =  tool_results_share / 6        (comfortable headroom)
-          per_hist_message cap   =  history_share     / 10
-          per_file_read cap      =  file_read_share (single file)
-
-        Hard floors/ceilings are applied so tiny models still work and huge
-        models don't allow impractically large slices.
+        budget = context_window - 2000 system reserve - max_output_tokens;
+        then 30% to tool results (~8 calls/turn), 40% to history (~20
+        messages), 15% to a single file read. Per-item caps divide those
+        further for headroom. Hard floors/ceilings keep tiny and huge models
+        usable.
         """
         CHARS_PER_TOKEN = 4
         SYSTEM_RESERVE  = 2_000          # tokens
@@ -230,25 +209,10 @@ def get_model_limits(model_id: str) -> ModelLimits:
     """
     Return ModelLimits for the given model_id.
 
-    Matching is case-insensitive substring search through _REGISTRY in order.
-    Falls back to a 500K / 8K default for unknown models.
-
-    OpenRouter model IDs (e.g. "anthropic/claude-opus-4.8") are matched first
-    by their full path, then by their short name suffix, so direct-API and
-    OpenRouter routing always share the same budget limits.
-
-    Usage::
-
-        limits = get_model_limits("anthropic/claude-haiku-4.5")
-        response = provider.chat_stream(
-            messages,
-            model=model_id,
-            max_tokens=limits.max_output_tokens,
-            ...
-        )
-        # In _execute_single_tool:
-        if len(result_str) > limits.max_tool_result_chars:
-            result_str = result_str[:limits.max_tool_result_chars] + "... [truncated]"
+    Matching is a case-insensitive substring search through _REGISTRY in order,
+    falling back to a 500K / 8K default for unknown models. OpenRouter ids
+    (e.g. "anthropic/claude-opus-4.8") match first by full path, then by short
+    name suffix, so direct-API and OpenRouter routing share the same budgets.
     """
     if not model_id:
         return _DEFAULT_LIMITS

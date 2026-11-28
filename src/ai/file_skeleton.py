@@ -1,32 +1,12 @@
 """
-file_skeleton.py
-----------------
-Generate compact structural skeletons of source files for LLM context.
+file_skeleton.py - compact structural skeletons of source files for LLM context.
 
-Instead of reading an entire 3,000+ line file (which wastes tokens and risks
-context overflow), this module extracts only the structural elements:
-  - Imports
-  - Class definitions (with bases)
-  - Function/method signatures (with decorators)
-  - Top-level constants and assignments
+Instead of reading a 3,000+ line file, this extracts only imports, class
+definitions, function signatures with decorators, and top-level constants,
+typically 5-10% of the original, so the model can locate the section it needs
+and read it with offset/limit.
 
-The skeleton is typically 5-10% of the original file size, saving 90-95% of
-tokens while giving the LLM enough information to locate the exact section
-it needs to read with offset/limit.
-
-Supported languages:
-  - Python (.py)
-  - JavaScript / TypeScript (.js, .ts, .jsx, .tsx)
-  - Java (.java)
-  - C / C++ (.c, .cpp, .h, .hpp)
-  - Go (.go)
-  - Rust (.rs)
-  - HTML (.html, .htm)
-  - CSS / SCSS / LESS (.css, .scss, .less)
-
-Usage:
-    from src.ai.file_skeleton import generate_skeleton
-    skeleton = generate_skeleton("/path/to/large_file.py")
+Python, JS/TS, Java, C/C++, Go, Rust, HTML and CSS/SCSS/LESS are supported.
 """
 
 import os

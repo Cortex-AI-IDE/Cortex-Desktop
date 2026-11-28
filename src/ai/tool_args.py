@@ -1,21 +1,11 @@
 """Check a tool call's arguments against the tool's own schema before it runs.
 
-W15. Every tool ships a JSON schema in ``_TOOL_SCHEMAS`` and nothing read it
-before the handler did: each handler took ``args.get(name, default)`` and used
-whatever arrived. A wrong-type argument therefore failed deep inside, or did not
-fail at all. The MCP path proved the shape of the bug: a screenshot asked for
-with ``selector`` instead of ``target`` came back as the whole viewport with no
-error, because the undeclared key was silently dropped.
-
-Three spellings are *deliberately* tolerated by handlers and are normalised here
-rather than rejected, because models really do emit them and the handlers carry
-comments saying so:
-
-    Edit / Write   "path"    -> "file_path"   (agent_bridge.py:11197, :11634)
-    Grep           "include" -> "glob"        (agent_bridge.py:12681)
-
-Pure functions, no Qt and no bridge, so the seam and its edge cases are testable
-on their own.
+Every tool ships a JSON schema in ``_TOOL_SCHEMAS`` and nothing read it before
+the handler did, so a wrong-type argument failed deep inside or silently: an
+MCP screenshot asked for with ``selector`` instead of ``target`` returned the
+whole viewport with no error. Three shorthands models really emit are
+normalised, not rejected: Edit/Write "path"->"file_path", Grep
+"include"->"glob". Pure functions, no Qt, so the seam is testable on its own.
 """
 
 from __future__ import annotations

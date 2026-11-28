@@ -1,20 +1,12 @@
 """Turn a provider's HTTP error body into text a person can read in the chat.
 
-DeepSeek and Anthropic both answer a bad request with JSON, and the providers
-used to put that JSON straight into the error the chat displays:
-
-    DeepSeek API HTTP 400: 400 Client Error: Bad Request for url: ... |
-    {"error":{"message":"The supported API model names are ...", ...}}
-
-The chat's final cleaner (chat_text.strip_all_control_tags, Pass 8) deletes
-anything shaped like a JSON object with a "message" key, so all the user saw
-was `{"error":}` - the one sentence that said what was wrong was the part
-that got removed.
-
-readable_api_error() pulls that sentence out. The error `type` and `code` are
-kept alongside it because agent_bridge matches phrases such as
-'context_length_exceeded' in error text to trigger recovery; dropping them
-would break that. The full raw body still goes to the log.
+Providers put the raw JSON body into the displayed error, and the chat's final
+cleaner (strip_all_control_tags Pass 8) deletes anything shaped like a JSON
+object with a "message" key, so the user saw only `{"error":}` and lost the one
+sentence saying what was wrong. readable_api_error() pulls that sentence out.
+The error `type` and `code` are kept because agent_bridge matches phrases like
+'context_length_exceeded' in error text to trigger recovery. Full body still
+goes to the log.
 """
 from __future__ import annotations
 

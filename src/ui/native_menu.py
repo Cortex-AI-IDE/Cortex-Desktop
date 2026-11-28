@@ -1,33 +1,11 @@
 """Theme the native menus Chromium raises inside a QWebEngineView.
 
-Right-clicking inside a web view produces a real QMenu, not page HTML, so
-nothing in editor.html, sidebar.html, terminal.html or
-memory_management.html can style it. CSS cannot reach it.
-
-Those menus inherit the app-wide QSS, which IS theme-aware. The problem is
-WHEN that QSS was last applied: _apply_initial_theme is deliberately the
-only place QApplication.setStyleSheet() runs, once at startup, because
-re-polishing every QWebEngineView was measured at 75+s under RAM
-pressure. So after a live switch to light, every native menu kept
-painting the STARTUP dark card with dark text over a light page.
-
-Two mechanisms here, because the first one alone could not be verified:
-
-  apply_menu_theme()   puts the rules on the view, relying on Qt
-                       cascading a widget stylesheet down to menus
-                       parented under it.
-
-  install_menu_watcher()  styles each QMenu directly, the moment Qt
-                       parents it, reading the theme in effect right
-                       then. This does not depend on the cascade
-                       reaching the menu, nor on when the app-wide QSS
-                       ran.
-
-The watcher is additive and cannot break the menu: it only sets a
-stylesheet on a menu that already exists. Taking over the context-menu
-event instead (setContextMenuPolicy + createStandardContextMenu) was
-rejected, since the view's internal render widget can swallow that event
-and the result would be no menu at all.
+A right-click produces a real QMenu, which no page HTML or CSS can style. Those
+menus inherit the app-wide QSS, but it is applied once at startup (re-polishing
+every view cost 75+s under RAM pressure), so after a live switch to light they
+kept painting the startup dark card. apply_menu_theme() relies on Qt cascading
+a widget stylesheet to menus; install_menu_watcher() styles each QMenu directly
+when Qt parents it.
 """
 from __future__ import annotations
 

@@ -271,20 +271,11 @@ def split_inline_tables(text: str) -> str:
 def stitch_orphan_table_rows(text: str) -> str:
     """Reattach a table row separated from its table by blank lines.
 
-    Markdown table parsing requires contiguous `|...` rows. Models often emit a
-    trailing summary row after one or more blank lines, e.g.:
-
-        | Files   | 20 ... |
-
-        | Changes | +974 / -2,371 |
-
-    The blank line(s) break the table, so the last row renders as raw text with
-    visible pipes. This removes ALL consecutive blank lines that sit strictly
-    between two pipe rows, but NOT when the following row begins a new table
-    (i.e. it is itself followed by a dash separator), so genuinely separate
+    Markdown needs contiguous pipe rows, but models emit a summary row after a
+    blank line, so it renders as raw text with visible pipes. This removes all
+    blank lines strictly between two pipe rows, EXCEPT when the following row
+    starts a new table (it is itself followed by a dash separator), so separate
     tables are never merged.
-
-    Also handles multiple blank lines (e.g., 2-3 blank lines between data rows).
     """
     lines = text.split('\n')
     n = len(lines)
@@ -352,21 +343,11 @@ def normalize_blank_line_before_table(text: str) -> str:
 
 
 def normalize_dash_separator_tables(text: str) -> str:
-    """Convert tables using dash-only separators (like ------ ) to proper pipe format.
+    """Convert dash-only separator tables to proper pipe format.
 
-    Detects: header row with pipes but no leading |, optional blank lines,
-    a dash-only separator line, then data rows with leading |.
-
-    Example input:
-        Biggest Changes | File | Added |
-
-        ------------------------------
-        | main_window.py | +1,113 | -17 |
-
-    Example output:
-        | Biggest Changes | File | Added |
-        |------|------|------|
-        | main_window.py | +1,113 | -17 |
+    Detects a header row with pipes but no leading |, optional blank lines, a
+    dash-only separator line, then data rows with leading |, and rewrites the
+    separator as |---|---|.
     """
     lines = text.split('\n')
     result: list[str] = []

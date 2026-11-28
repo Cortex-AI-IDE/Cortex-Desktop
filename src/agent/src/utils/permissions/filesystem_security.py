@@ -1,23 +1,14 @@
 """
 Filesystem security and permission system for Cortex AI IDE.
 
-Provides comprehensive file safety validation, dangerous file/directory detection,
-path traversal prevention, and permission decision framework for AI agent file operations.
+Provides file safety validation, dangerous file/directory detection, path
+traversal prevention, and the permission decision framework for AI agent file
+operations. Provider-agnostic, so it works with Anthropic, OpenAI, Gemini,
+DeepSeek, Groq and SiliconFlow alike.
 
-Multi-LLM Support: Works with all providers (Anthropic, OpenAI, Gemini, DeepSeek,
-Groq, SiliconFlow) as it's provider-agnostic security logic.
-
-Phases:
-- Phase 1: Dangerous file/directory lists + path safety validation
-- Phase 2: Permission decision framework (deny/ask/allow)
-- Phase 3: Internal path allowances and working directory scoping
-
-Example:
-    >>> from filesystem_security import is_path_safe_for_edit
-    >>> is_path_safe_for_edit('/home/user/project/main.py')
-    {'safe': True}
-    >>> is_path_safe_for_edit('/home/user/.bashrc')
-    {'safe': False, 'message': 'Dangerous file: .bashrc', 'reason': 'dangerous_file'}
+Phases: dangerous file/directory lists and path safety validation; the
+permission decision framework (deny/ask/allow); internal path allowances and
+working-directory scoping.
 """
 
 import logging
@@ -69,23 +60,10 @@ DANGEROUS_DIRECTORIES: set[str] = {
 # Phase 1: Path Safety Utilities
 
 def normalize_case_for_comparison(path: str) -> str:
-    """
-    Normalizes a path for case-insensitive comparison.
-    
-    Prevents bypassing security checks using mixed-case paths on case-insensitive
-    filesystems (macOS/Windows) like `.cOrTeX/Settings.locaL.json`.
-    
-    We always normalize to lowercase regardless of platform for consistent security.
-    
-    Args:
-        path: The path to normalize
-        
-    Returns:
-        The lowercase path for safe comparison
-        
-    Example:
-        >>> normalize_case_for_comparison('.cOrTeX/Settings.json')
-        '.cortex/settings.json'
+    """Lowercase a path so case-insensitive filesystems cannot bypass a check.
+
+    Always lowercased on every platform, so `.cOrTeX/Settings.locaL.json` on
+    macOS/Windows cannot slip past a comparison.
     """
     return path.lower()
 
@@ -123,37 +101,13 @@ def contains_path_traversal(path: str) -> bool:
 # Phase 1: Windows Path Pattern Detection
 
 def has_suspicious_windows_path_pattern(path: str) -> bool:
-    """
-    Detects suspicious Windows path patterns that could bypass security checks.
-    
-    These patterns include:
-    - NTFS Alternate Data Streams (e.g., file.txt::$DATA or file.txt:stream)
-    - 8.3 short names (e.g., GIT~1, CORTEX~1, SETTIN~1.JSON)
-    - Long path prefixes (e.g., \\\\?\\C:\\..., \\\\.\\C:\\...)
-    - Trailing dots and spaces (e.g., .git., .cortex , .bashrc...)
-    - DOS device names (e.g., .git.CON, settings.json.PRN, .bashrc.AUX)
-    - Three or more consecutive dots (e.g., .../file.txt, path/.../file)
-    - UNC paths (e.g., \\\\server\\share, //server/share)
-    
-    When detected, these paths should always require manual approval to prevent
-    bypassing security checks through path canonicalization vulnerabilities.
-    
-    Why Check on All Platforms?
-    While these patterns are primarily Windows-specific, NTFS filesystems can be
-    mounted on Linux and macOS (e.g., using ntfs-3g). On these systems, the same
-    bypass techniques would work.
-    
-    Args:
-        path: The path to check for suspicious patterns
-        
-    Returns:
-        True if suspicious Windows path patterns are detected
-        
-    Example:
-        >>> has_suspicious_windows_path_pattern('file.txt::$DATA')
-        True
-        >>> has_suspicious_windows_path_pattern('/home/user/main.py')
-        False
+    """Detect Windows path patterns that could bypass a security check.
+
+    Covers NTFS alternate data streams (file.txt::$DATA), 8.3 short names
+    (GIT~1), long-path prefixes, trailing dots/spaces, DOS device names
+    (.git.CON), 3+ consecutive dots, and UNC paths. Any hit needs manual
+    approval, since canonicalization can otherwise slip it past. Checked on
+    every platform: NTFS mounts on Linux/macOS via ntfs-3g behave the same.
     """
     # Check for UNC paths (on all platforms for defense-in-depth)
     # Examples: \\\\server\\share, \\\\foo.com\\file, //server/share
@@ -206,22 +160,9 @@ def has_suspicious_windows_path_pattern(path: str) -> bool:
 # Phase 1: Dangerous File/Directory Detection
 
 def is_dangerous_file_to_auto_edit(path: str) -> Optional[str]:
-    """
-    Check if a file is dangerous to auto-edit without explicit permission.
-    
-    Checks against DANGEROUS_FILES list with case-insensitive matching.
-    
-    Args:
-        path: File path to check
-        
-    Returns:
-        Reason string if dangerous, None if safe
-        
-    Example:
-        >>> is_dangerous_file_to_auto_edit('/home/user/.bashrc')
-        'Dangerous configuration file: .bashrc'
-        >>> is_dangerous_file_to_auto_edit('/home/user/main.py')
-        None
+    """Return a reason when the file is dangerous to auto-edit, else None.
+
+    Matches DANGEROUS_FILES case-insensitively (e.g. .bashrc).
     """
     absolute_path = expand_path(path)
     file_name = os.path.basename(absolute_path)
@@ -237,23 +178,10 @@ def is_dangerous_file_to_auto_edit(path: str) -> Optional[str]:
 
 
 def is_dangerous_directory_to_auto_edit(path: str) -> Optional[str]:
-    """
-    Check if path is within a dangerous directory.
-    
-    Checks all path segments against DANGEROUS_DIRECTORIES with case-insensitive
-    matching. Special case: .cortex/worktrees/ is allowed (structural path).
-    
-    Args:
-        path: Path to check
-        
-    Returns:
-        Reason string if dangerous, None if safe
-        
-    Example:
-        >>> is_dangerous_directory_to_auto_edit('/home/user/.git/config')
-        'Path contains dangerous directory: .git'
-        >>> is_dangerous_directory_to_auto_edit('/home/user/.cortex/worktrees/proj')
-        None  # .cortex/worktrees is allowed
+    """Return a reason when path sits in a dangerous directory, else None.
+
+    Every path segment is checked case-insensitively against
+    DANGEROUS_DIRECTORIES. .cortex/worktrees/ is a deliberate exception.
     """
     absolute_path = expand_path(path)
     path_segments = absolute_path.split(os.sep)
@@ -281,34 +209,19 @@ def is_dangerous_directory_to_auto_edit(path: str) -> Optional[str]:
 
 def check_path_safety_for_auto_edit(path: str) -> dict:
     """
-    Checks if a path is safe for auto-editing (acceptEdits mode).
-    
-    Returns information about why the path is unsafe, or {safe: True} if all checks pass.
-    
-    This function performs comprehensive safety checks including:
-    - Suspicious Windows path patterns (NTFS streams, 8.3 names, long path prefixes, etc.)
-    - Dangerous files (.bashrc, .gitconfig, .git/, .vscode/, .idea/, etc.)
-    - Path traversal attempts
-    
-    IMPORTANT: This function checks the original path AND resolved symlink paths
-    to prevent bypasses via symlinks pointing to protected files.
-    
+    Check whether a path is safe for auto-editing (acceptEdits mode).
+
+    Covers suspicious Windows path patterns (NTFS streams, 8.3 names, long path
+    prefixes), dangerous files (.bashrc, .gitconfig, .git/, .vscode/, .idea/)
+    and path traversal. Checks the original path AND its resolved symlink paths,
+    so a symlink to a protected file cannot bypass the check.
+
     Args:
-        path: The path to check for safety
-        
+        path: The path to check for safety.
+
     Returns:
-        Dictionary with:
-        - safe: True if path is safe
-        - message: Reason if unsafe (only present when safe=False)
-        - reason: Category of issue (only present when safe=False)
-        
-    Example:
-        >>> check_path_safety_for_auto_edit('/home/user/project/main.py')
-        {'safe': True}
-        >>> check_path_safety_for_auto_edit('/home/user/.bashrc')
-        {'safe': False, 'message': '...', 'reason': 'dangerous_file'}
-        >>> check_path_safety_for_auto_edit('file.txt::$DATA')
-        {'safe': False, 'message': '...', 'reason': 'windows_pattern'}
+        Dict with `safe`; when unsafe it also carries `message` and `reason`
+        (one of dangerous_file, windows_pattern, ...).
     """
     # Get all paths to check (original + symlink resolved paths)
     paths_to_check = get_paths_for_permission_check(path)
@@ -374,21 +287,10 @@ def is_path_safe_for_edit(path: str) -> dict:
 
 
 def get_paths_for_permission_check(path: str) -> list[str]:
-    """
-    Get all path variants to check for permission validation.
-    
-    Returns both the original path and symlink-resolved path to prevent
-    bypasses where a symlink points to a protected file.
-    
-    Args:
-        path: The path to expand
-        
-    Returns:
-        List of path variants to check (original + resolved)
-        
-    Example:
-        >>> get_paths_for_permission_check('/home/user/link_to_config')
-        ['/home/user/link_to_config', '/home/user/actual_config']
+    """Return the original path plus its symlink-resolved form.
+
+    Both are checked so a symlink pointing at a protected file cannot bypass
+    validation.
     """
     absolute_path = expand_path(path)
     paths = [absolute_path]
@@ -459,33 +361,13 @@ def check_read_permission(
     working_directories: list[str] | None = None,
     mode: str = 'default',
 ) -> PermissionDecision:
-    """
-    Check if read permission should be granted for a path.
-    
-    Permission check order:
-    1. Windows path patterns (security)
-    2. Path traversal detection (security)
-    3. Internal path allowances (session memory, plans, etc.)
-    4. Dangerous files/directories (security)
-    5. Working directory allowance
-    6. Default: ask for permission
-    
-    Args:
-        path: File path to check
-        working_directories: List of allowed working directories
-        mode: Permission mode ('default', 'acceptEdits', 'auto')
-        
-    Returns:
-        Permission decision dictionary with:
-        - behavior: 'allow', 'deny', or 'ask'
-        - message: Reason for decision (when behavior != 'allow')
-        - reason: Category of decision
-        
-    Example:
-        >>> check_read_permission('/home/user/project/main.py')
-        {'behavior': 'allow', 'reason': 'working_directory'}
-        >>> check_read_permission('/home/user/.bashrc')
-        {'behavior': 'ask', 'message': '...', 'reason': 'dangerous_file'}
+    """Decide read permission for a path.
+
+    Checked in order: Windows path patterns, path traversal, internal-path
+    allowances (session memory, plans), dangerous files/directories,
+    working-directory allowance, then ask by default. Returns a decision dict
+    with `behavior` ("allow"/"deny"/"ask") plus `message`/`reason` when not
+    "allow".
     """
     # Get all paths to check
     paths_to_check = get_paths_for_permission_check(path)
@@ -544,30 +426,13 @@ def check_write_permission(
     working_directories: list[str] | None = None,
     mode: str = 'default',
 ) -> PermissionDecision:
-    """
-    Check if write permission should be granted for a path.
-    
-    Permission check order:
-    1. Windows path patterns (security)
-    2. Path traversal detection (security)
-    3. Internal editable paths (plans, scratchpad)
-    4. Safety checks (dangerous files/directories)
-    5. Working directory allowance (only in acceptEdits mode)
-    6. Default: ask for permission
-    
-    Args:
-        path: File path to check
-        working_directories: List of allowed working directories
-        mode: Permission mode ('default', 'acceptEdits', 'auto')
-        
-    Returns:
-        Permission decision dictionary
-        
-    Example:
-        >>> check_write_permission('/home/user/project/main.py', mode='acceptEdits')
-        {'behavior': 'allow', 'reason': 'working_directory'}
-        >>> check_write_permission('/home/user/.gitconfig')
-        {'behavior': 'ask', 'message': '...', 'reason': 'dangerous_file'}
+    """Decide write permission for a path.
+
+    Checked in order: Windows path patterns, path traversal, internal editable
+    paths (plans, scratchpad), safety checks on dangerous files/directories,
+    working-directory allowance (acceptEdits mode only), then ask by default.
+    Returns a decision dict with `behavior` plus `message`/`reason` when not
+    "allow".
     """
     # Get all paths to check
     paths_to_check = get_paths_for_permission_check(path)
@@ -651,21 +516,10 @@ def is_path_in_working_directories(path: str, working_directories: list[str]) ->
 # Phase 3: Internal Path Allowances
 
 def check_editable_internal_path(path: str) -> PermissionDecision:
-    """
-    Check if path is an internal path that can be edited without permission.
-    
-    Internal editable paths include:
-    - Session plan files
-    - Scratchpad directory
-    - Agent memory files
-    - Auto memory files
-    - Launch config (.cortex/launch.json)
-    
-    Args:
-        path: Path to check
-        
-    Returns:
-        Permission decision - 'allow' if matched, 'passthrough' to continue checking
+    """Allow edits to Cortex-internal paths (plans, scratchpad, memory,
+    auto-memory, .cortex/launch.json) without permission.
+
+    Returns 'allow' when matched, else 'passthrough' so callers keep checking.
     """
     absolute_path = expand_path(path)
     normalized_path = os.path.normpath(absolute_path)
@@ -710,26 +564,9 @@ def check_editable_internal_path(path: str) -> PermissionDecision:
 
 
 def check_readable_internal_path(path: str) -> PermissionDecision:
-    """
-    Check if path is an internal path that can be read without permission.
-    
-    Internal readable paths include:
-    - Session memory directory
-    - Project directory
-    - Session plan files
-    - Tool results directory
-    - Scratchpad directory
-    - Project temp directory
-    - Agent memory files
-    - Auto memory files
-    - Tasks directory
-    - Teams directory
-    
-    Args:
-        path: Path to check
-        
-    Returns:
-        Permission decision - 'allow' if matched, 'passthrough' to continue checking
+    """Allow reads from Cortex-internal dirs (memory, project, scratchpad).
+
+    Returns 'allow' when matched, else 'passthrough' so callers keep checking.
     """
     absolute_path = expand_path(path)
     normalized_path = os.path.normpath(absolute_path)

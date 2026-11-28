@@ -1,25 +1,17 @@
 """
-edit_impact.py, Cross-file breakage detection for AI edits.
+edit_impact.py - cross-file breakage detection for AI edits.
 
-THE PROBLEM (reported from real usage): the AI edits file A and removes or
-renames a function/class. File A itself still compiles (py_compile passes -
-the syntax is valid), so nothing complains at edit time. But file B still
-does `from a import removed_function`, and Python only discovers that at
-IMPORT time, i.e. when the user actually runs the project
-(`python manage.py runserver`). By then the AI has long moved on and
-"forgotten" that other files imported the symbol it deleted.
+The AI edits file A and removes or renames a function. File A still compiles, so
+nothing complains at edit time, but file B still does `from a import
+removed_function` and Python only finds out at import, when the user runs the
+project.
 
-THE FIX: deterministic, no code execution, runs in the edit dispatcher -
-1. Syntax gate: compile() the new content; a syntax error is reported
-   immediately in the tool result (py_compile-equivalent, in-process).
-2. AST diff: parse old and new content, collect TOP-LEVEL function/class
-   names, compute what was REMOVED by this edit.
-3. Reverse-dependency scan: for each removed symbol, search the project's
-   other .py files for imports/usages of it and name the exact files+lines.
-
-The result string is appended to the Edit/Write ToolResult message, so the
-model is told in the SAME TURN: "you removed `foo` from a.py but b.py:12
-still imports it, fix the caller too." No runtime surprise later.
+The fix is deterministic and executes no code: compile() the new content so a
+syntax error is reported in the tool result; AST-diff old and new for top-level
+function/class names to find what this edit removed; then scan the project's
+other .py files for imports or uses of each removed symbol and name the exact
+files and lines. The result is appended to the Edit/Write ToolResult, so the
+model is told in the same turn to fix the caller too.
 """
 
 from __future__ import annotations

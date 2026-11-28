@@ -1,18 +1,10 @@
-"""
-Dynamic Adaptive Timeout Strategy for Cortex IDE.
+"""Context-aware timeouts, replacing hardcoded ones.
 
-Replaces hardcoded timeouts with context-aware timeout calculation
-based on task complexity, model size, and operation type.
+Scales by task complexity, model size and operation type: simple reads/edits
+need less time, multi-file refactors more, larger models more. Auto-compaction
+is given room so it is not rushed.
 
-Philosophy:
-  - Timeouts should adapt to the work being done, not be one-size-fits-all
-  - Simple reads/edits need less time; complex multi-file refactors need more
-  - Larger models (128K-200K context) need more time to process
-  - Auto-compaction should not rush the AI, give proper breathing room
-
-Usage:
-    from src.utils.timeout_strategy import get_timeout, TimeoutContext
-
+    from src.utils.timeout_strategy import get_timeout
     timeout = get_timeout(tool_count=5, has_commands=True, context_budget=200000)
 """
 

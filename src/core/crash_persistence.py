@@ -1,24 +1,13 @@
 """
-crash_persistence.py, Crash-resilient chat persistence
-========================================================
+crash_persistence.py - crash-resilient chat persistence.
 
-IMMEDIATELY saves every user prompt and AI response to SQLite.
-If the IDE crashes at C level (segfault, DWM crash, etc.), the
-data is already committed to the WAL file, nothing is lost.
+Saves every user prompt and AI response to SQLite immediately, so a C-level
+crash (segfault, DWM crash) loses nothing: the data is already in the WAL.
 
-Design:
-  - Synchronous writes with IMMEDIATE=True (bypasses write queue)
-  - Each save is a standalone transaction, no batching, no debounce
-  - User message saved BEFORE the AI agent sees it
-  - AI response saved ON turn completion (full prose content)
-  - SQLite WAL mode ensures crash-safe writes
-
-Usage:
-    from src.core.crash_persistence import get_crash_store
-
-    store = get_crash_store()
-    store.save_user_message(conv_id, "Fix the bug in main.py")
-    store.save_assistant_response(conv_id, "I found the bug...")
+Synchronous writes with IMMEDIATE=True, one standalone transaction each, no
+batching or debounce. The user message is saved BEFORE the agent sees it, and
+the AI response on turn completion. SQLite WAL mode makes the writes
+crash-safe.
 """
 
 from __future__ import annotations

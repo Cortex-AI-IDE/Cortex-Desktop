@@ -15,26 +15,18 @@ _builders: Optional[MCPSkillBuilders] = None
 def registerMCPSkillBuilders(builders: MCPSkillBuilders) -> None:
     """
     Register the MCP skill builders.
-    
-    Write-once registry for the loadSkillsDir functions that MCP skill
-    discovery needs. This module is a dependency-graph leaf: it imports nothing
-    but types, so both mcpSkills and loadSkillsDir can depend on it
-    without forming a cycle.
-    
-    The non-literal dynamic-import approach ("await import(variable)") fails at
-    runtime in Bun-bundled binaries, the specifier is resolved against the
-    chunk's /$bunfs/root/… path, not the original source tree, yielding "Cannot
-    find module './loadSkillsDir.js'". A literal dynamic import works in bunfs
-    but dependency-cruiser tracks it, and because loadSkillsDir transitively
-    reaches almost everything, the single new edge fans out into many new cycle
-    violations in the diff check.
-    
-    Registration happens at loadSkillsDir module init, which is eagerly
-    evaluated at startup via the static import from commands, long before
-    any MCP server connects.
-    
+
+    Write-once registry for the loadSkillsDir functions MCP skill discovery
+    needs. This module imports nothing but types, so mcpSkills and
+    loadSkillsDir can both depend on it without a cycle.
+
+    A non-literal dynamic import ("await import(variable)") fails at runtime in
+    Bun-bundled binaries, since the specifier resolves against the chunk's
+    /$bunfs/root/ path; a literal one works but dependency-cruiser tracks it and
+    fans out into many new cycle violations.
+
     Args:
-        builders: Dictionary containing createSkillCommand and parseSkillFrontmatterFields
+        builders: Dict with createSkillCommand and parseSkillFrontmatterFields.
     """
     global _builders
     _builders = builders

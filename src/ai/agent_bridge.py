@@ -98,11 +98,9 @@ _TERMINAL_OUT_MAX = 4000
 def _is_continuation(message: str) -> bool:
     """A message that carries on the current task instead of starting a new one.
 
-    The Resume card sends "Continue the task from where we left off", the
-    interrupted-run card "Continue the task.", and a late question answer
-    "[Question answer] ...". Only the second used to match, so Resume reset
-    the edit count (finished todos were then BLOCKED) and dropped the open
-    questions.
+    Trap: the Resume card, the interrupted-run card ("Continue the task.") and a
+    late answer ("[Question answer] ...") must all match; when only one did,
+    Resume reset the edit count and blocked finished todos.
     """
     text = (message or "").lstrip()
     return text.startswith("Continue the task") or text.startswith("[Question answer]")
@@ -124,8 +122,7 @@ def _todo_is_implementation(content: str) -> bool:
     """True when completing this todo should require a file mutation.
 
     Prefix-matched, lowercased. An empty todo counts as implementation: the
-    guard is a cheat detector, and a blank task has no read-only verb to
-    justify it.
+    guard is a cheat detector, and a blank task has no read-only verb.
     """
     text = (content or "").strip().lower()
     if not text:
@@ -315,9 +312,8 @@ _AUTO_MODE_WRITE_TOOLS = frozenset({
 class _SkipSemantic(Exception):
     """Control-flow marker: skip the semantic index update for this call.
 
-    Raised and caught within _create_context_checkpoint when a GUI-thread
-    caller (shutdown) asks for a checkpoint without the blocking embedding
-    network call.
+    Raised and caught in _create_context_checkpoint when a GUI-thread caller
+    (shutdown) asks for a checkpoint without the blocking embedding network call.
     """
 
 
@@ -398,18 +394,9 @@ def _msg_to_dict(msg) -> dict:
 def _sanitize_tool_call_messages(messages: list) -> list:
     """Strip orphaned tool_calls from assistant messages.
 
-    DeepSeek (and other OpenAI-compatible APIs) require that every
-    assistant message with ``tool_calls`` is immediately followed by
-    one ``tool`` role message per ``tool_call_id``.  When chat history
-    is loaded from SQLite, truncated, or context-shifted, those tool
-    responses can be missing, causing a hard 400 error.
-
-    This function walks the message list and removes the ``tool_calls``
-    key from any assistant message whose tool responses are missing,
-    converting it to a plain text assistant message so the API accepts
-    it.
-
-    Accepts both dict and ChatMessage dataclass objects.
+    OpenAI-compatible APIs require each assistant message with ``tool_calls`` to
+    be followed by one ``tool`` message per id; truncated or context-shifted
+    history can miss them and hard-400. Accepts dict and ChatMessage objects.
     """
     if not messages:
         return messages
@@ -542,15 +529,9 @@ class ChatMessage:
 def _keep_newest_image(messages, drop_all=False):
     """The message list to SEND: images only on the newest message that has any.
 
-    ``drop_all`` leaves out every image too, for a request the provider refused
-    because it could not read one (see the "download multimodal file" retry).
-
-    Every image in the conversation used to go out with every step and every
-    new prompt. Measured 2026-09-12 on qwen3.8-flash: text alone answered in
-    ~1s, each image added ~13-29s before the first token, and a new prompt
-    that re-sent three old screenshots (7.9MB) had not answered after 37s, so
-    the user stopped it. Older images are replaced by a one-line note; the
-    stored history is left untouched (this returns copies).
+    ``drop_all`` also leaves out every image, for a request the provider refused
+    because it could not read one. Trap: sending every image on every step added
+    ~13-29s per image before first token. Stored history is untouched.
     """
     def _imgs(m):
         _i = m.get("images") if isinstance(m, dict) else getattr(m, "images", None)
@@ -1018,18 +999,11 @@ class _ContextBudgetTracker:
 
 
 class CortexToolContext:
-    """
-    Expanded context with MODEL-AWARE FILE READ LIMITS.
-    
-    CRITICAL: Prevents context overflow by capping file reads based on
-    model context window. Large files MUST be read in chunks.
-    
-    Includes:
-    - Model-aware file reading limits (prevents context overflow)
-    - Context budget tracking (monitors cumulative token usage)
-    - File state tracking (read/modified files)
-    - LRU file read dedup cache
-    - App state management, Wait/resume, MCP/Auth hooks
+    """Tool context with model-aware file read limits.
+
+    Caps reads to the model's context window so large files must be read in
+    chunks. Also tracks context budget, file state, an LRU read-dedup cache,
+    app state, Wait/resume, and MCP/Auth hooks.
     """
 
 # LRU File Read Cache constants
@@ -1291,18 +1265,9 @@ def _get_destructive_warning(command: str) -> 'Optional[str]':
 def _extract_affected_paths(command: str) -> List[str]:
     """Extract the REAL file/dir targets of a delete command.
 
-    Used for the permission-card display AND post-execution deletion
-    verification, so it must be PRECISE. The old greedy version grabbed
-    PowerShell cmdlets ($(...), Write-Output, Get-Date…) as "paths", which
-    produced false "[VERIFY] Deletion may have failed" lines that made the AI
-    retry the same delete over and over and finally tell the user to delete
-    manually.
-
-    Strategy:
-      1. Split the command into segments on shell separators (; | && & `n).
-      2. Only look at segments that actually contain a delete verb.
-      3. From those, take non-flag tokens that name a file/dir.
-    Windows backslash paths are preserved (shlex posix=False).
+    Used for the permission card AND deletion verification, so it must be
+    PRECISE: the old greedy version grabbed PowerShell cmdlets as "paths",
+    producing false "Deletion may have failed" lines and a retry loop.
     """
     import re as _re
 
@@ -1361,14 +1326,8 @@ _DELETE_VERB_RE = re.compile(
 def _is_delete_command(command: str) -> bool:
     """True only when a delete verb sits in command position.
 
-    Matching the verb ANYWHERE made the redirect fire on commands that merely
-    mention a delete: ``grep -ri TODO src/`` (the ``-ri`` flag), a Python
-    one-liner whose script text contains the word, a path with ``del`` in it.
-    The caller then replaced the whole command with a trash command built from
-    whatever paths it could salvage, which for ``grep -ri TODO src/`` means
-    trashing ``src/``. With the PowerShell path that only produced a parse
-    error; once the Trash path worked, the same misfire becomes real data
-    loss, so the verb has to be checked at the start of a shell segment.
+    Trap: matching the verb ANYWHERE fired the trash redirect on commands that
+    merely mention a delete (``grep -ri TODO src/``), trashing ``src/``.
     """
     return bool(_DELETE_VERB_RE.search(command or ""))
 
@@ -1376,9 +1335,9 @@ def _is_delete_command(command: str) -> bool:
 def _is_safe_trash_target(abs_path: str, cwd: Optional[str] = None) -> bool:
     """False for targets whose removal would wreck the workspace or the system.
 
-    Refuses the filesystem root, the home directory, the working directory,
-    and any ANCESTOR of it. A relative ``.`` in the salvaged path list resolves
-    to the project root, and trashing that takes the whole project with it.
+    Refuses the filesystem root, the home directory, the working directory and
+    any ANCESTOR of it: a relative ``.`` in the salvaged path list resolves to
+    the project root, and trashing that takes the whole project with it.
     """
     try:
         target = os.path.abspath(abs_path)
@@ -1425,13 +1384,11 @@ def _build_recycle_bin_command(abs_paths: List[str]) -> str:
 
 
 def _build_trash_command(abs_paths: List[str]) -> str:
-    """Build a shell command that sends each path to the desktop Trash
-    (recoverable) instead of permanently deleting it.
+    """Build a shell command that sends each path to the desktop Trash.
 
-    Uses `gio trash` (glib), the freedesktop trash API. Files land in
-    ~/.local/share/Trash and can be restored from any file manager. Callers
-    must only use this when `gio` is on PATH: without it the rewrite would
-    just fail, which is worse than letting the original command run.
+    Uses `gio trash` (freedesktop API), landing files in ~/.local/share/Trash.
+    Callers must only use this when `gio` is on PATH: without it the rewrite
+    would just fail, worse than letting the original command run.
     """
     import shlex as _shlex
     parts = []
@@ -1461,13 +1418,9 @@ def _build_recovery_delete_command(abs_paths: List[str]) -> Optional[str]:
 def _shell_argv(command: str, platform: Optional[str] = None) -> List[str]:
     """argv that runs `command` in this platform's shell.
 
-    Windows keeps PowerShell so .ps1 files execute (cmd.exe pops a
-    file-association dialog for them). Linux and macOS get bash, or /bin/sh
-    when bash is not installed. This used to be an unconditional
-    `powershell.exe` argv, which does not exist off Windows, so every command
-    died with a file-not-found error before it ran.
-
-    `platform` is injectable so tests can check both branches on one host.
+    Windows keeps PowerShell so .ps1 files execute; Linux/macOS get bash, or
+    /bin/sh when bash is absent. `platform` is injectable so tests can check
+    both branches on one host.
     """
     if (platform or sys.platform) == 'win32':
         return ['powershell.exe', '-ExecutionPolicy', 'Bypass',
@@ -1478,18 +1431,9 @@ def _shell_argv(command: str, platform: Optional[str] = None) -> List[str]:
 def _shell_error_line(stderr_b: bytes) -> str:
     """The line of a shell error that actually says what went wrong.
 
-    A PowerShell parser error starts with position noise, not the reason:
-
-        At line:1 char:20
-        + ls -la 2>/dev/null && echo done
-        +                    ~~
-        The token '&&' is not a valid statement separator in this version.
-
-    Taking the first line logs "At line:1 char:20", which identifies
-    nothing. Skip the position header, the echoed command and the caret
-    underline, and the CategoryInfo/FullyQualifiedErrorId trailer, and the
-    remaining line is the diagnosis. POSIX shells print the reason first,
-    so the same walk returns their first real line unchanged.
+    A PowerShell parser error starts with position noise ("At line:1 char:20",
+    the echoed command, a caret underline), so the first line identifies
+    nothing; the same walk returns POSIX output unchanged.
     """
     text = (stderr_b or b"").decode("utf-8", "replace").strip()
     if not text:
@@ -2188,14 +2132,10 @@ _ANNOUNCE_INTENT_RE = re.compile(
 def _announced_but_stopped(text: Optional[str]) -> bool:
     """Does a reply with no tool call end by announcing a step it never took?
 
-    Field case 2026-11-05 (qwen3.8-flash): the whole reply was one line,
-    "checking the timezone config in Settings:", and the run ended there.
-
-    * The last line ends with a colon: in any language that introduces
-      something, and nothing follows. (A code block or list after the colon
-      means the last line is not the colon line.)
-    * Or a short reply whose last line is "let me check..." / "checking…".
-    A question to the user ("Should I restart it?") is a real stop.
+    Field case 2026-11-05 (qwen3.8-flash): the whole reply was "checking the
+    timezone config in Settings:" and the run ended there. True when the last
+    line ends with a colon, or a short reply ends "let me check...". A question
+    to the user is a real stop.
     """
     body = (text or "").strip()
     if not body:
@@ -2933,20 +2873,10 @@ PLAN_ALLOWED_TOOLS = frozenset({
 def _plan_allows(tool_name: str) -> bool:
     """Is this tool usable in Plan mode?
 
-    Plan mode is an allowlist of read-only tools. MCP tools could never be
-    listed there by name - they are user-installed and arbitrary
-    (`mcp__chrome-devtools__navigate`, `mcp__context7__query-docs`) - so the
-    allowlist silently dropped EVERY connected server, and the model reported
-    it had no browser while chrome-devtools sat connected with 29 tools.
-
-    MCP is the plugin system: what a user connects is what they want the
-    agent to have, in either mode. Researching a plan by reading docs through
-    an MCP server or driving a browser is exactly what planning needs.
-
-    Note this admits mutating MCP tools too (a server that writes to a
-    database). That is the user's own configuration and their call; the
-    permission/autonomy gate still applies to every MCP call as it does in
-    Agent mode.
+    Plan mode is an allowlist of read-only tools, but MCP tools are
+    user-installed and arbitrary, so they cannot be listed by name; the
+    allowlist silently dropped EVERY connected server. Any mcp__ tool is
+    admitted in both modes; the permission/autonomy gate still applies.
     """
     return tool_name in PLAN_ALLOWED_TOOLS or tool_name.startswith("mcp__")
 
@@ -2957,15 +2887,12 @@ def _tool_def_name(d: Dict[str, Any]) -> str:
 
 
 def _get_tool_definitions() -> List[Dict[str, Any]]:
-    """
-    Return OpenAI-compatible tool definitions.
+    """OpenAI-compatible tool definitions.
 
-    Returns built-in schemas directly.  The tool_registry.py stub does not
-    provide a functional get_all_base_tools, so registry-based loading is
-    skipped to avoid false warnings.
-
-    Connected MCP servers' tools are appended (namespaced mcp__server__tool)
-    so external tools ride the exact same agent loop as built-ins.
+    Returns built-in schemas directly; the tool_registry.py stub lacks a
+    working get_all_base_tools, so registry loading is skipped. Connected MCP
+    servers' tools are appended (namespaced mcp__server__tool) so they ride the
+    same agent loop as built-ins.
     """
     defs = list(_TOOL_SCHEMAS)
     try:
@@ -2983,12 +2910,11 @@ def _get_tool_definitions() -> List[Dict[str, Any]]:
 
 
 def _mcp_web_tool_names() -> List[str]:
-    """Names of connected MCP tools that can reach the web (search/fetch/…).
+    """Names of connected MCP tools that can reach the web (search/fetch/...).
 
     Used by every subscription gate on built-in web tools: when the user has
-    connected their own MCP search server (tavily, brave, fetch, …), the
-    model must be REDIRECTED to it instead of shown the subscription card -
-    MCP tools are never subscription-gated.
+    connected their own MCP search server, the model must be REDIRECTED to it,
+    since MCP tools are never subscription-gated.
     """
     try:
         from src.services.mcp_manager import get_mcp_manager
@@ -3236,10 +3162,9 @@ def _mcp_active_definitions(
 def _scratch_rules_section(project_root: str) -> str:
     """Where the agent's own screenshots and throwaway scripts go.
 
-    Without it they were written next to the user's files: one project root
-    held verify_dashboard_desktop.png, dash_row2_crop.png, verify_deck.py,
-    generate_sketch.py and a dozen more, all the agent's checking work. Claude
-    Code and Cursor handle this the same way, as a standing instruction.
+    Without it they landed next to the user's files: one project root held
+    verify_dashboard_desktop.png, dash_row2_crop.png, verify_deck.py and more,
+    all the agent's checking work.
     """
     if not project_root:
         return ""
@@ -3265,11 +3190,9 @@ _MCP_SERVER_MENTION_RE = re.compile(r"Use the (.+?) MCP server\(s\)")
 def _mcp_mentioned_tools(message: str, available: Set[str]) -> Set[str]:
     """MCP tools the user named in their message, among `available`.
 
-    The "@" menu inserts either a tool ("Use the `mcp__x__y` MCP tool") or a
-    server ("Use the `x` MCP server(s)"); see src/ui/mcp_mentions.py. In
-    deferred mode those definitions were not in the request, so the model's
-    first move on an explicit request was a lookup turn. Naming one is the
-    user asking for it: its definition is loaded up front.
+    The "@" menu inserts either a tool or a server; in deferred mode those
+    definitions were not in the request, so naming one loads its definition up
+    front instead of costing a lookup turn.
     """
     if not message or "mcp" not in message.lower():
         return set()
@@ -3285,10 +3208,9 @@ def _mcp_mentioned_tools(message: str, available: Set[str]) -> Set[str]:
 def _mcp_pending_block(pending: Optional[List[Dict[str, Any]]]) -> str:
     """Servers that are configured but cannot be called, with the reason.
 
-    A server added by `npx claude-code-templates --mcp ...` - often by the
-    agent itself through Bash - waits for the user's approval, or fails to
-    start (missing API key, 401). The model saw no trace of it and told the
-    user the tool did not exist, or kept retrying.
+    A server added by `npx claude-code-templates --mcp ...` (often by the agent
+    itself through Bash) waits for approval or fails to start (missing key, 401).
+    The model saw no trace and told the user the tool did not exist, or retried.
     """
     lines = []
     for p in pending or []:
@@ -3514,17 +3436,11 @@ class AgentWorker(QThread):
 # Message queue
 
     async def _process_queue(self):
-        """
-        Event loop for the agent worker thread.
+        """Event loop for the agent worker thread.
 
-        Architecture:
-          - Each chat message creates a cancellable asyncio.Task (_handle_chat).
-          - While the task runs we concurrently watch the queue for a stop/new-chat
-            message using asyncio.wait(FIRST_COMPLETED).  This is the
-            cancellation pattern -
-            CancelledError propagates through every await in the call chain,
-            including mid-tool-execution.
-          - Only _is_running=False (set by AgentWorker.stop()) exits the outer loop.
+        Each chat message creates a cancellable asyncio.Task; while it runs the
+        queue is watched for a stop/new-chat message via asyncio.wait, so
+        CancelledError propagates through every await in the chain.
         """
         self._queue = asyncio.Queue[WorkerMessage]()
 
@@ -3823,23 +3739,13 @@ class AgentWorker(QThread):
 # MAIN BRIDGE CLASS
 
 class CortexAgentBridge(QObject):
-    """
-    Bridge between Cortex IDE UI and the agentic core.
+    """Bridge between the Cortex IDE UI and the agentic core.
 
-    Signals (matching StubAIAgent interface so ai_chat.py works unchanged):
-        response_chunk     , streaming text token
-        response_complete  , full response text when done
-        request_error      , error string
-        file_generated     , (filepath, content) when Write tool runs
-        file_edited_diff   , (filepath, old, new) when Edit tool runs
-        tool_activity      , (tool_name, info, status) real-time card updates
-        directory_contents , (path, entries) when LS runs
-        thinking_started / thinking_stopped
-        todos_updated      , (todos_list, main_task)
-        tool_summary_ready , dict summary
-        user_question_requested, (question, options)
+    Signals match the StubAIAgent interface so ai_chat.py works unchanged:
+    response_chunk, response_complete, request_error, file_generated,
+    file_edited_diff, tool_activity, directory_contents, thinking_started/
+    stopped, todos_updated, tool_summary_ready, user_question_requested.
     """
-
 # PyQt signals
     response_chunk          = pyqtSignal(str)
     response_complete       = pyqtSignal(str)
@@ -4199,11 +4105,9 @@ class CortexAgentBridge(QObject):
     def enable_autogen(self, enabled: bool) -> None:
         """Enable or disable AutoGen multi-agent mode.
 
-        When enabled, the message router in ai_chat.py prefers the
-        CoordinationEngine multi-agent path (Performance/Ultimate mode)
-        over the single-agent agent_bridge path.
-
-        Called by main_window._on_toggle_autogen() on each toggle click.
+        When enabled the router in ai_chat.py prefers the CoordinationEngine
+        multi-agent path (Performance/Ultimate mode) over the single-agent
+        agent_bridge path. Called by main_window._on_toggle_autogen().
         """
         self._autogen_enabled = bool(enabled)
         log.info(
@@ -4933,15 +4837,11 @@ Required behavior:
         return self._memory_dir
 
     def _auto_create_cortex_dir(self, project_root: str) -> None:
-        """Auto-create .cortex/ directory structure inside the working project.
+        """Create the project's .cortex/ structure on set_project_root().
 
-        Called on set_project_root() so every project gets its own .cortex/
-        (next to .git/). Creates:
-          .cortex/
-          .cortex/memory/          ← checkpoints + MEMORY.md
-          .cortex/semantic_memory/ ← semantic search index
-          .cortex/memory.json      ← decisions, bugs, preferences
-          .cortex/memory/MEMORY.md ← conversation summary index
+        Gives every project its own .cortex/ (next to .git/): memory/
+        (checkpoints + MEMORY.md), semantic_memory/ (search index) and
+        memory.json (decisions, bugs, preferences).
         """
         if not project_root or not os.path.isdir(project_root):
             return
@@ -4999,16 +4899,11 @@ Required behavior:
         return os.path.join(self._get_memory_dir(), 'MEMORY.md')
 
     def _load_memory_section(self, memory_dir: str) -> str:
-        """
-        Build the complete memory prompt section to inject into the system prompt.
+        """Build the memory prompt section injected into the system prompt.
 
-        Three layers:
-          1. Behavioral instructions (how to save/read memories) + MEMORY.md index
-             via buildMemoryPrompt() from the project_memory package.
-          2. Content of recently-modified individual memory files (up to 10).
-
-        Returns the combined string, or empty string if the memory system is
-        not available or the directory is empty.
+        Three layers: behavioral instructions + MEMORY.md index via
+        buildMemoryPrompt(), then the content of up to 10 recently-modified
+        memory files. Returns "" when the memory system is unavailable or empty.
         """
         parts: List[str] = []
 
@@ -5252,22 +5147,11 @@ Required behavior:
     def _create_context_checkpoint(self, messages: List[Any], user_message: str = "",
                                    write_memory_md: bool = True,
                                    skip_semantic: bool = False) -> str:
-        """
-        Create a structured checkpoint of the current conversation state
-        and persist it to MEMORY.md for cross-session recovery.
+        """Checkpoint the current conversation state into MEMORY.md.
 
-        Captures:
-        - Current task / user request
-        - Todo items with statuses
-        - Files read and modified this session
-        - Key assistant decisions
-        - Conversation summary digest
-
-        The checkpoint is saved to:
-          1. A timestamped .md file in the memory dir
-          2. MEMORY.md index (so it's loaded automatically on next session)
-
-        Returns the checkpoint text (also used inline by _compact_messages).
+        Captures the task, todo statuses, files read/modified, key decisions and
+        a summary digest, writing a timestamped .md plus a MEMORY.md index entry
+        so the next session loads it. Returns the checkpoint text.
         """
         import time as _time
         from datetime import datetime as _dt
@@ -5529,10 +5413,8 @@ Required behavior:
     def _context_pressure(self, messages: List[Any]) -> Tuple[int, int]:
         """(tokens in use, compaction threshold) for the auto-continue decision.
 
-        In use: what the provider reported for the last request, else an
-        estimate from the messages (4 chars a token). Threshold: 60% of the
-        model's window, capped at 300K tokens, past which requests get slow
-        and costly whatever the window.
+        In use: what the provider reported for the last request, else an estimate
+        (4 chars a token). Threshold: 60% of the model's window, capped at 300K.
         """
         used = int(getattr(self, '_last_prompt_tokens', 0) or 0)
         if not used:
@@ -5551,13 +5433,9 @@ Required behavior:
     def _compact_messages(self, messages: List[Any], PCM: Type[Any]) -> List[Any]:
         """Compaction wrapper whose ONLY job is turning the spinner off.
 
-        Field report (log 16:45:55): the 'compacting' overlay appeared and
-        spun forever. The body emits 'compacting' on entry, but 'ready' -
-        the ONLY status that hides the overlay, was emitted nowhere on this
-        path; the emits live in the unrelated New-Chat save flow. Every
-        return (two early-outs and the main path) left the spinner up, and
-        an exception did too. A finally is the one construct that cannot
-        miss an exit.
+        Field report: the 'compacting' overlay spun forever because 'ready' (the
+        only status that hides it) was emitted nowhere on this path; a finally is
+        the one construct that cannot miss an exit.
         """
         try:
             return self._compact_messages_inner(messages, PCM)
@@ -5568,20 +5446,11 @@ Required behavior:
                 _swallow()
 
     def _compact_messages_inner(self, messages: List[Any], PCM: Type[Any]) -> List[Any]:
-        """
-        Trim conversation history so the next API call fits in the context window.
-        Saves the conversation summary to MEMORY.md for cross-session recovery.
+        """Trim history so the next API call fits the context window.
 
-        Strategy
-        --------
-        • Always keep the system message (index 0).
-        • Create a context checkpoint capturing task state, todos, files.
-        • Persist the checkpoint to MEMORY.md as a compaction record.
-        • Drop the oldest messages in the middle, keeping the last
-          KEEP_TAIL messages so recent context is intact.
-        • Walk the tail forward to the first safe boundary (a user or
-          assistant turn) so we never orphan a tool-result block.
-        • Inject the checkpoint as a rich summary so the LLM continues seamlessly.
+        Keeps the system message, writes a context checkpoint to MEMORY.md,
+        drops the oldest middle messages keeping the last KEEP_TAIL, and walks
+        the tail to a safe boundary so no tool-result block is orphaned.
         """
 # Emit UI status: "Compacting conversation..."
         try:
@@ -8152,10 +8021,10 @@ Required behavior:
 
     def _safe_emit(self, signal: Any, *args: Any) -> None:
         """Emit a PyQt signal only if the C++ object is still alive.
-        
-        Includes signal rate limiting to prevent Qt event-loop flooding
-        from crashing the IDE. If more than 50 signals are emitted in
-        100ms, subsequent signals are silently dropped.
+
+        Rate-limits to prevent Qt event-loop flooding: past 50 signals in 100ms
+        the excess is batched (see _flush_signal_batch), never silently dropped
+        for the critical signals.
         """
         # Strip NULL bytes from string arguments, some LLMs embed \x00
         args = tuple(
@@ -8645,11 +8514,11 @@ Required behavior:
 
     @staticmethod
     def _recover_truncated_tool_args(tool_name: str, raw_args: Any) -> Dict[str, Any]:
-        """Attempt to extract valid fields from truncated JSON tool arguments.
+        """Extract valid fields from truncated JSON tool arguments.
 
-        When the Mimo stream ends mid-transmission, the JSON string is cut off
-        but early fields (like file_path) are usually still parseable via regex.
-        This prevents Write/Bash from getting empty args and rejecting the call.
+        When the Mimo stream ends mid-transmission the JSON is cut off, but early
+        fields (file_path, command, pattern, path) are usually still parseable
+        via regex, so Write/Bash do not get empty args and reject the call.
         """
         if not isinstance(raw_args, str) or not raw_args.strip():
             return {}
@@ -9207,13 +9076,10 @@ Required behavior:
             self._safe_emit(self.request_error, f"Plan build failed: {str(e)}")
 
     def _check_recent_tool_results_for_tests(self) -> Tuple[bool, str]:
-        """Scan recent tool results for test/verification commands and their outcomes.
+        """Scan recent tool results for test/verification runs and their outcomes.
 
-        Returns:
-            (was_tested: bool, message: str)
-            - was_tested=True + message="": Tests passed
-            - was_tested=True + message!="": Tests ran but failed
-            - was_tested=False + message: No tests found (explanation)
+        Returns (was_tested, message): (True, "") tests passed; (True, msg) tests
+        ran but failed; (False, msg) no tests found.
         """
         # Count how many of the last N results are test runs
         test_tool_names = {"Bash", "PowerShell", "LS"}
@@ -9564,10 +9430,8 @@ Required behavior:
         """Freeze tool deadlines while a human is being asked to decide.
 
         Accumulates the exact time spent waiting on people so the deadline can
-        subtract it. Counting ticks instead was wrong: with a coarse idle tick
-        the loop could sleep straight through the end of the wait and let real
-        execution time pass uncounted (caught by
-        test_execution_after_the_human_decides_is_still_bounded).
+        subtract it; counting ticks instead let real execution time pass
+        uncounted when the loop slept through the end of the wait.
         """
         self._human_wait_depth = getattr(self, '_human_wait_depth', 0) + 1
         _t0 = time.monotonic()
@@ -9676,11 +9540,9 @@ Required behavior:
     def resolve_tool_handler(tool_name: str) -> Optional[str]:
         """Name of the method that handles `tool_name`, or None.
 
-        Static and side-effect free on purpose: the drift test resolves every
-        offered name without constructing a bridge or a QApplication.
-
-        Order is exact table, then alias, then prefix family. Alias before
-        prefix so a concrete name always wins over a broad rule.
+        Static and side-effect free so the drift test resolves every offered name
+        without constructing a bridge or a QApplication. Order: exact table, then
+        alias, then prefix family (alias before prefix so a name wins).
         """
         handler = CortexAgentBridge._TOOL_HANDLERS.get(tool_name)
         if handler is not None:
@@ -9696,19 +9558,10 @@ Required behavior:
     async def _dispatch_tool(
         self, tool_name: str, tool_id: str, args: Dict[str, Any]
     ) -> ToolResult:
-        """
-        Dispatch a tool call to the real agent tool or bridge-native fallback.
+        """Dispatch a tool call to the real agent tool or a bridge-native one.
 
-        Real tools (from src/agent/src/tools/):
-            Read  → FileReadTool.call()
-            Write → FileWriteTool.call()
-            Edit  → FileEditTool.call()
-            Glob  → GlobTool.call()
-            Grep  → GrepTool.call()
-
-        Bridge-native (no real implementation exists):
-            Bash  → BridgeBashTool.execute()
-            LS    → BridgeLSTool.execute()
+        Real tools (src/agent/src/tools/): Read, Write, Edit, Glob, Grep.
+        Bridge-native (no real implementation): Bash, LS.
         """
         try:
 # W15: the schema is the door, checked before every gate/handler, because bad args
@@ -10025,11 +9878,9 @@ Required behavior:
     async def _dispatch_bash(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Shell execution, plus telling the UI what the command changed.
 
-        One handler for Bash and PowerShell because they are one behaviour: the
-        platform name is an alias, not a second implementation. The extra work
-        over ``self._bash_tool.execute`` is the file tree refresh and closing
-        tabs for files the command moved to the Recycle Bin, which Write/Edit
-        already do for themselves.
+        One handler for Bash and PowerShell because they are one behaviour. The
+        extra work over ``self._bash_tool.execute`` is the file tree refresh and
+        closing tabs for files the command moved to the Recycle Bin.
         """
         command = args.get("command", "")
         # Check sandbox policy if enabled (lazy init)
@@ -10118,8 +9969,7 @@ Required behavior:
 
         Separated from the dispatch body so the sandbox gate for `serve` is
         reviewable on its own: that branch runs a command, so it must pass the
-        same check Bash passes, not a weaker one because it arrives through a
-        different tool.
+        same check Bash passes.
         """
         if action not in self._LIVE_PREVIEW_ACTIONS:
             return (f"LivePreview: unknown action {action!r} "
@@ -10153,15 +10003,9 @@ Required behavior:
     async def _dispatch_live_preview(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Render/test UI in the Live Preview panel, including a dev server.
 
-        UI tool: render/test UI in the Live Preview panel. All Qt widget
-        access must happen on the UI thread, so the request is shipped over a
-        queued signal and this (agent) thread waits on an Event the UI slot sets
-        when done. Executor keeps the event loop free while waiting; the
-        timeout is per action so a server boot is not mistaken for a hang.
-
-        `screenshot` additionally feeds the captured image into conversation
-        history through the same path the Read tool uses for native vision, so
-        the model actually sees the pixels on its next turn.
+        Qt widget access must happen on the UI thread, so the request ships over
+        a queued signal and this thread waits on an Event the UI slot sets. The
+        `screenshot` action feeds the image into history via the Read tool.
         """
         import threading as _threading
         _action = str(args.get("action", "")).strip().lower()
@@ -10249,10 +10093,9 @@ Required behavior:
     def _show_shots_named_in(self, reply: str) -> None:
         """The backstop: a final answer that names a screenshot shows it.
 
-        Telling the model is not a guarantee, and a path it wrote is still the
-        image it meant the user to see. Only .cortex/shots/ counts, so a reply
-        mentioning src/assets/logo.png does not put a logo in the chat. Skipped
-        when the agent already chose its images.
+        Only .cortex/shots/ counts, so a reply mentioning src/assets/logo.png
+        does not put a logo in the chat. Skipped when the agent already chose
+        its images.
         """
         if getattr(self, "_images_shown", 0) or getattr(self, "_telegram_turn", False):
             return
@@ -10268,10 +10111,9 @@ Required behavior:
     ) -> ToolResult:
         """Send one image to the paired phone over the Telegram bot.
 
-        Read-only on disk, and the network part is off-thread: the monitor
-        bounds the upload and returns a dict instead of raising, so a dead bot
-        or a socket that never answers becomes an error string the model can
-        act on rather than a stalled turn.
+        Read-only on disk, and the network part is off-thread: the monitor bounds
+        the upload and returns a dict instead of raising, so a dead bot becomes
+        an error string the model can act on rather than a stalled turn.
         """
         def _failed(reason: str) -> ToolResult:
             return ToolResult(tool_id=tool_id, result=None, success=False,
@@ -10339,18 +10181,11 @@ Required behavior:
     async def _dispatch_mcp_external(
         self, tool_id: str, args: Dict[str, Any], tool_name: str
     ) -> ToolResult:
-        """External MCP tool (`mcp__<server>__<tool>`), via the MCP manager.
+        """External MCP tool (`mcp__<server>__<tool>`) via the MCP manager.
 
-        Takes the name as a fourth argument, unlike the table handlers: a
-        prefix family exists precisely because its names cannot be listed, so
-        the handler is the only place that knows which one was called. The
-        dispatcher passes it, and tests/test_tool_dispatch.py asserts both
-        signatures so the difference stays deliberate.
-
-        The manager owns the server connections on its own thread. Runs in an
-        executor so a slow external server can never stall this event loop.
-        Permission/autonomy gates already applied to this call like any other
-        tool.
+        Takes the name as a fourth argument, unlike the table handlers: a prefix
+        family exists because its names cannot be listed. Runs in an executor so
+        a slow server cannot stall this loop.
         """
         from src.services.mcp_manager import get_mcp_manager
         _mgr = get_mcp_manager()
@@ -10426,11 +10261,11 @@ Required behavior:
                                 ok: bool, text: str, images, devtools: bool = True):
         """Hand the browser to the user when only they can go on.
 
-        * Own-Chrome mode and Chrome can't be reached: the setup card (turn on
-          remote debugging), then the same call once more.
-        * The page is a sign-in, a 2-step code or a security check: a card
-          asks the user to finish it in Chrome; the agent waits, untimed, and
-          is then told what happened. See src/services/ai_browser.py."""
+        Own-Chrome mode and Chrome unreachable: the setup card, then the same
+        call once more. A sign-in, 2-step code or security check: a card asks the
+        user to finish it in Chrome, the agent waits untimed, then is told what
+        happened.
+        """
         from src.services import ai_browser
         handover = ai_browser.get_handover()
 
@@ -11045,11 +10880,10 @@ Required behavior:
     def _write_keep_eol(cls, path: str, text: str) -> None:
         """Write text with the line endings the file already has on disk.
 
-        Edit contents are read in text mode (CRLF becomes LF), so writing them
-        back in text mode turned every LF file into CRLF on Windows, and the
-        newline="" writes turned CRLF files into LF. Either way git counted
-        every line as changed (+N / -N for a one-line edit). The file's own
-        style wins; a new file is written with LF."""
+        Trap: edit contents are read in text mode (CRLF becomes LF), so writing
+        them back in text mode turned every LF file into CRLF on Windows, and git
+        counted every line as changed. A new file is written with LF.
+        """
         crlf = False
         try:
             with open(path, "rb") as fh:
@@ -11881,8 +11715,8 @@ Required behavior:
         Resolve a potentially-relative path against the project root and
         validate it stays within the project boundary.
 
-        Returns the normalized absolute path if valid, or None if:
-          - The path escapes the project root directory
+        Returns the normalized absolute path if valid, or None if the path
+        escapes the project root.
         """
         if not raw_path:
             return None
@@ -11957,10 +11791,8 @@ Required behavior:
     def _announce_mcp_in_use(self, tool_name: str) -> None:
         """Tell the UI which MCP server the agent reached by itself.
 
-        Best-effort by design, exactly like _announce_skill_in_use: a missing
-        indicator must never break the tool call, so every failure here is
-        swallowed. Takes the raw namespaced tool name and derives the server,
-        so the call site stays a single line.
+        Best-effort by design: a missing indicator must never break the tool
+        call, so every failure here is swallowed.
         """
         try:
             from src.ui.mcp_indicator import server_from_tool
@@ -11988,19 +11820,11 @@ Required behavior:
             _swallow()
 
     async def _dispatch_security_scan(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle the SecurityScan tool (offensive recon/probing and defensive code scan).
+        """Handle the SecurityScan tool (offensive recon and defensive code scan).
 
-        Runs on a worker thread via asyncio.to_thread. Every action either blocks on
-        sockets (port scans, probe payloads) or on a subprocess (pip-audit, npm,
-        bandit). This handler is called from the async agent loop that also drives
-        the UI, so doing that work inline would freeze the window for the whole
-        scan, which for a 1024-port sweep is minutes.
-
-        An out-of-scope target is returned as success=False with the refusal text,
-        not raised: the model needs to read "this host is not authorized" as a
-        clear result so it reports it to the user, rather than as a traceback it
-        might try to work around.
+        Runs on a worker thread via asyncio.to_thread: every action blocks on
+        sockets or a subprocess. An out-of-scope target returns success=False
+        with the refusal text, not a raise, so the model reports it clearly.
         """
         action = str(args.get("action", "") or "").strip()
         target = args.get("target")
@@ -12072,10 +11896,9 @@ Required behavior:
     async def _dispatch_skill(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Skill tool, on-demand loading of an engineering skill's full text.
 
-        Progressive disclosure: the system prompt carries only each skill's
-        NAME and one-line description (the router). The body, the actual
-        method, enters the context only when the model asks for it here.
-        This is what keeps 9+ skills from costing 25k chars on every turn.
+        Progressive disclosure: the system prompt carries only each skill's NAME
+        and one-line description (the router); the body enters the context only
+        when the model asks for it here.
         """
         try:
             from src.agent.src.skills.cortex_skill import get_skills_manager
@@ -12261,11 +12084,10 @@ Required behavior:
     async def _dispatch_loop(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
         """Dispatch to the verified Loop engine (src/core/loop_engine/).
 
-        See Docs/agent_loop/agent_loop.md for the full spec. This wraps
-        LoopOrchestrator's start/verify/status/stop with the same
-        ToolResult contract every other dispatcher uses. The orchestrator
-        does blocking subprocess work (running verify commands, git),
-        so it's run off the event loop via asyncio.to_thread.
+        See Docs/agent_loop/agent_loop.md for the full spec. Wraps
+        LoopOrchestrator's start/verify/status/stop with the ToolResult contract;
+        the orchestrator does blocking subprocess work, so it runs via
+        asyncio.to_thread.
         """
         try:
             from src.core.loop_engine.loop_orchestrator import LoopOrchestrator
@@ -13091,9 +12913,9 @@ Required behavior:
         """
         Handle the AskUserQuestion agent tool.
 
-        Emits the question to the UI via `user_question_requested` signal, then
-        suspends the agent turn loop by awaiting an asyncio.Future.  The future
-        is resolved (from the Qt main thread) when the user submits an answer.
+        Emits the question to the UI via `user_question_requested`, then suspends
+        the turn loop by awaiting an asyncio.Future resolved (from the Qt main
+        thread) when the user submits an answer.
         """
         questions = args.get("questions", [])
 
@@ -13298,15 +13120,11 @@ Required behavior:
                               error=f"WebFetch error: {exc}")
 
     async def _dispatch_web_search(self, tool_id: str, args: Dict[str, Any]) -> ToolResult:
-        """
-        Handle the WebSearch tool.
+        """Handle the WebSearch tool.
 
-        Tier 0: Subscription proxy, SerpAPI via Django server (subscription users).
-        Tier 1: MiMo native web_search, best quality, uses MiMo's built-in search tool.
-        Tier 2: SerpAPI, Google search results (100 free/month, requires SERPAPI_API_KEY).
-        Tier 3: DuckDuckGo HTML search scraping (free, no API key, real web results).
-        Tier 4: DuckDuckGo Instant Answer API fallback (free, limited results).
-        Tier 5: Brave Search API (free tier 2K queries/month, requires BRAVE_API_KEY).
+        Tiers: 0 subscription proxy (SerpAPI via Django), 1 MiMo native
+        web_search, 2 SerpAPI (SERPAPI_API_KEY), 3 DuckDuckGo HTML scraping,
+        4 DuckDuckGo Instant Answer API, 5 Brave Search (BRAVE_API_KEY).
         """
         import asyncio
         import json
@@ -13754,32 +13572,12 @@ Required behavior:
 # Worker signal handlers
 
     def _flush_signal_batch(self) -> None:
-        """Deliver the signals the rate limiter is holding, then open a fresh window.
+        """Release held signals, then open a fresh rate window.
 
-        _safe_emit batches non-critical signals once more than 50 land inside
-        100ms, and releases them only when some LATER _safe_emit call opens a
-        new window. There is no timer. response_complete is emitted directly,
-        not through _safe_emit, so a batch held at the end of a burst was
-        released AFTER the turn had already closed. From 2026-09-10:
-
-          12:33:19 [SIGNAL-FLOOD] Rate limit hit ... batching non-critical signals
-          12:33:19 _on_response_ready: response_complete.emit() DONE
-          12:33:19 [ChatPanel] agent turn began while UI showed idle   <- no user send
-
-        That late signal reached ChatPanel._ensure() with _cur_msg already
-        None, and _ensure() calls begin_assistant_turn(): a new empty assistant
-        bubble, and the Stop button put back. Nothing ever closes that phantom
-        turn, so the chat sat "running" on a bubble nothing would fill. A prompt
-        typed then was queued instead of sent, because the UI still said
-        generating; pressing Stop released it and cancelled it in the same
-        moment (12:39:17 process_message, same second stop_generation, 12:39:20
-        "Chat task cancelled"). Both phantoms in the logs, 2026-09-09 16:00:46
-        and 2026-09-10 12:33:19, had SIGNAL-FLOOD in the same turn.
-
-        Call this immediately before every direct response_complete.emit().
-        Signals emitted from one thread are delivered in emission order, so the
-        held ones now land before turn_done instead of after it. The window is
-        reset as well, so emits that follow completion are not batched again.
+        _safe_emit batches once >50 signals land in 100ms, released only when a
+        LATER _safe_emit opens a window. A batch held at a burst's end arrived
+        after turn_done and re-opened a phantom turn, so call this immediately
+        before every direct response_complete.emit().
         """
         batch = getattr(self, '_signal_batch', None)
         if batch:
@@ -13860,10 +13658,9 @@ Required behavior:
     def clear_pending_images(self) -> None:
         """Discard images left by an interrupted or already-completed UI turn.
 
-        The native chat UI owns the current turn's image list and calls this
-        before injecting that list.  Without an explicit boundary, an image
-        left behind by a cancelled request could be concatenated with the next
-        pasted image, causing a vision model to answer from stale pixels.
+        The UI calls this before injecting the current turn's image list; without
+        the boundary, an image left by a cancelled request could be concatenated
+        with the next paste, making a vision model answer from stale pixels.
         """
         pending = getattr(self, "_pending_images", None)
         if pending:
@@ -13904,10 +13701,9 @@ Required behavior:
     def inject_image(self, base64_data: str, description: str = "Image"):
         """Store a pasted image for inclusion in the next LLM request.
 
-        The image is stored as base64 and injected into the conversation as a
-        vision message when the next chat() call is made.  The UI clears the
-        pending list once per turn before calling this method, so images from a
-        prior cancelled turn cannot leak into the current request.
+        Stored as base64 and injected as a vision message on the next chat()
+        call. The UI clears the pending list once per turn before calling this,
+        so images from a prior cancelled turn cannot leak in.
         """
         if not base64_data:
             log.warning("[VISION] Ignoring empty pasted image: %s", description)
@@ -13923,11 +13719,9 @@ Required behavior:
     def _current_model_supports_vision(self) -> bool:
         """Check if the currently selected model supports image/vision input.
 
-        Used to decide whether an attached image goes DIRECTLY to the selected
-        model (native vision, lossless) or must first be OCR'd
-        (non-vision models). Routing a screenshot through OCR and handing the
-        transcription to a model that could have seen the image itself loses
-        information, so native-vision models must never take the OCR detour.
+        Decides whether an attached image goes DIRECTLY to the selected model
+        (native vision, lossless) or must first be OCR'd. Routing a screenshot
+        through OCR for a model that could have seen the image loses information.
         """
         model_id = getattr(self, '_current_model_id', None)
         if not model_id:
@@ -14016,8 +13810,8 @@ Required behavior:
         """MCP tools whose definitions the model loaded in this conversation.
 
         Keyed by conversation id, so a new chat (start_fresh_session) or a
-        switch to another chat starts empty without any reset code, and a
-        tool loaded once stays loaded for the rest of the chat.
+        switch to another chat starts empty with no reset code, and a tool
+        loaded once stays loaded for the rest of the chat.
         """
         store = getattr(self, "_mcp_loaded_by_conv", None)
         if store is None:
@@ -14031,9 +13825,9 @@ Required behavior:
         it on the next continuation turn (the Read-tool native path).
 
         Mirrors inject_vision_history but carries the IMAGE, not OCR text. The
-        message is marked _read_image=True so the history-rebuild loop knows to
-        forward its images (ordinary history messages stay text-only, so pasted
-        images are unaffected)."""
+        message is marked _read_image=True so the history-rebuild loop forwards
+        its images (ordinary history messages stay text-only).
+        """
         _cm = ChatMessage(role="user", content=f"[Attached image: {filename}]")
         try:
             _cm.images = [base64_data]
@@ -14046,13 +13840,11 @@ Required behavior:
 
     def inject_vision_history(self, user_text: str, assistant_response: str):
         """Inject a vision exchange into conversation history.
-        
-        Called when vision processing completes outside the normal agent flow.
-        This ensures follow-up text messages have context about what was in images.
-        
-        IMPORTANT: Truncate the vision response to avoid eating the entire hist_cap.
-        The full response is already displayed in the UI; we only need a summary
-        in history so the model knows what was discussed.
+
+        Used when vision processing completes outside the normal agent flow, so
+        follow-up text messages have context about the images. The response is
+        truncated to _MAX_VISION_HIST: the full text is already shown in the UI,
+        and only a summary is needed in history.
         """
         _MAX_VISION_HIST = 3000  # Max chars for vision response in history
         
@@ -14099,15 +13891,11 @@ Required behavior:
         self.request_error.emit(error)
     
     def _is_simple_query(self, text: str) -> bool:
-        """Check if query is a pure greeting/ack that needs no tools.
-            
-        CONSERVATIVE: Only skip tools for pure social messages (hi, thanks, bye)
-        and capability questions about the AI itself.
-        Any message that MIGHT involve coding, files, or project work MUST get
-        the full agentic loop with tools enabled.
-            
-        Returns:
-            True if pure greeting/ack (skip tools), False otherwise (load tools)
+        """True for a pure greeting/ack that needs no tools.
+
+        CONSERVATIVE: skips tools only for pure social messages (hi, thanks,
+        bye) and capability questions about the AI itself. Anything that might
+        involve coding, files or project work gets the full agentic loop.
         """
         import re
         text_lower = text.strip().lower()
@@ -14411,15 +14199,11 @@ Required behavior:
             self._file_edit_permission_event.set()
 
     def on_project_access_respond(self, decision: str):
-        """Called when user responds to the project access permission card.
-        decision: 'once', 'always', or 'rejected'
+        """User responded to the project access permission card.
 
-        'once'   → allow THIS edit only; _project_access_granted stays False
-                    so the gate re-triggers for the next edit (one card per edit).
-        'always' → allow ALL future edits in this project, also after a
-                    restart (src/core/project_permissions.py); _always_allowed
-                    =True skips every gate until the user turns it off.
-        'rejected' → stop the agentic loop immediately.
+        'once' allows THIS edit only (_project_access_granted stays False so the
+        gate re-triggers next edit); 'always' allows all future edits in this
+        project, including after restart; 'rejected' stops the agentic loop.
         """
         log.info(f"[BRIDGE] Project access permission response: {decision}")
         if decision == "once":
@@ -14442,28 +14226,11 @@ Required behavior:
             self._project_access_event.set()
 
     async def _request_project_access(self) -> bool:
-        """Request project access permission from user.
-        Returns True if granted, False if rejected/stopped.
+        """Ask the user for project access. True if granted, False if rejected.
 
-        Behavior per decision:
-          'once'   → returns True but _project_access_granted stays False,
-                     so the NEXT edit will call this again (one card per edit).
-          'always' → returns True and sets _always_allowed=True, all future
-                     calls return True immediately (no more cards).
-          'rejected' → returns False, agent stops.
-
-        BUG HISTORY (both observed in the wild, red ✗ on the edit even
-        though the user clicked "Allow once"):
-        1. The return used `granted and self._project_access_granted` -
-           but 'once' DELIBERATELY keeps _project_access_granted False so
-           the next edit re-asks, which made "Allow once" evaluate to
-           False, i.e. indistinguishable from a rejection. The 'once'
-           grant lives in _file_edit_permission, so honor that here.
-        2. `evt.wait(60.0)`, a hard 60s timeout. If the user was reading
-           the card (or away) for over a minute, the tool failed even if
-           they clicked Allow afterward. Now: wait
-           INDEFINITELY for the click; Stop/Reject remains the escape
-           hatch, polled in 1s slices so it stays responsive.
+        'once' returns True but leaves _project_access_granted False so the next
+        edit asks again; 'always' sets _always_allowed. Trap: the wait must be
+        indefinite (Stop/Reject polled), a 60s timeout failed the tool.
         """
         if self._project_access_granted or self._always_allowed:
             return True
@@ -14493,9 +14260,8 @@ Required behavior:
         """Called when user clicks Accept or Reject on a permission card.
         decision: 'accept' or 'reject'
 
-        CRITICAL: When the user rejects, we set _stop_requested = True so the
-        agentic loop breaks IMMEDIATELY after this tool returns. This prevents
-        the AI from continuing to execute more tools after the user said NO.
+        On reject, _stop_requested = True so the agentic loop breaks IMMEDIATELY
+        after this tool returns, preventing more tools after the user said NO.
         """
         log.info(f"[BRIDGE] Permission response: {decision}")
         self._permission_granted = (decision == 'accept')
@@ -14565,13 +14331,11 @@ Required behavior:
     def apply_deferred_edit(self, path: str) -> bool:
         """Write accumulated deferred content to disk. Called by UI on Accept.
 
-        BUG history ("my edits keep reverting"): this wrote the staged
-        snapshot unconditionally. A snapshot staged minutes earlier could be
-        auto-applied on task-complete or app shutdown ON TOP of newer manual
-        edits the user had saved in between, silently reverting their work.
-        Now a snapshot is only applied if the file on disk still matches the
-        state it was staged against; otherwise the stale snapshot is dropped
-        and the user's newer content is preserved."""
+        Trap ("my edits keep reverting"): it once wrote the staged snapshot
+        unconditionally, so a stale snapshot could be auto-applied on
+        task-complete/shutdown ON TOP of newer manual edits. Now it applies only
+        if the file on disk still matches the state it was staged against.
+        """
         key = self._norm(path)
         content = self._deferred_edits.pop(key, None)
         self._forget_staged_edit(key)
@@ -14639,20 +14403,12 @@ Required behavior:
             log.info(f"[BRIDGE] Discarded deferred edit for {key} ({len(removed)} chars)")
 
     def _merge_parallel_edits(self, deferred: str, disk: str, disk_with_edit: str) -> str | None:
-        """Merge a parallel edit (applied to disk) into the accumulated deferred state.
+        """Merge a parallel edit (applied to disk) into the deferred state.
 
-        When the LLM sends multiple Edit calls for the same file in one turn, they are
-        all based on the same disk state.  Edit 1 chains into deferred.  Edit 2 might
-        target content NOT in deferred (parallel/independent edit).  We apply Edit 2 to
-        the original disk content, then merge the result with deferred.
-
-        Args:
-            deferred: The accumulated deferred content (has Edit 1 applied).
-            disk: The original disk content (what the LLM read).
-            disk_with_edit: disk with Edit 2 applied.
-
-        Returns:
-            Merged content with BOTH edits, or None if merge fails (overlapping edits).
+        When the LLM sends multiple Edit calls for one file in a turn, all are
+        based on the same disk state; Edit 2 may target content NOT in deferred,
+        so it is applied to disk and the result merged. Returns None if the
+        edits overlap.
         """
         if deferred == disk_with_edit:
             return deferred  # Same result, no merge needed
@@ -14855,12 +14611,9 @@ Required behavior:
     def note_edits_applied(self, count: int) -> None:
         """Record that staged edits have actually reached disk.
 
-        Without this the agent's last knowledge of an edit is the tool result
-        that said "STAGED, not on disk yet", so on the NEXT turn it still
-        believes the change is waiting and repeats "please accept" even though
-        the user accepted long ago (or Cortex auto-applied it at task end).
-        That is not the model inventing things, it is being told nothing has
-        changed since. The note is picked up by
+        Without this the agent's last knowledge of an edit is "STAGED, not on
+        disk yet", so next turn it repeats "please accept" even though the user
+        accepted long ago (or Cortex auto-applied it at task end). Picked up by
         consume_applied_edits_note() and prepended to the next turn's context.
         """
         try:
@@ -14992,13 +14745,10 @@ Required behavior:
 
     def restore_conversation_context(self, conversation_id: str) -> None:
         """Restore a SPECIFIC conversation's context into _conversation_history.
-        
-        Called by the UI when the user switches to a different chat.
-        Replaces the current history with the selected conversation's messages
-        so the AI has correct context for follow-up questions.
-        
-        Args:
-            conversation_id: The conversation to load context from.
+
+        Called by the UI when the user switches chats; replaces the current
+        history with the selected conversation's messages so the AI has correct
+        context for follow-up questions.
         """
         if not conversation_id:
             return
@@ -15182,11 +14932,10 @@ Required behavior:
     def _mode_filtered_tools(self, tool_defs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Drop tool definitions the current interaction mode forbids.
 
-        Runtime blocking alone is a wall the model keeps walking into -
-        it retries Write/Edit/Bash because the tool list still advertises
-        them. A tool that is not offered cannot be called at all. The
-        runtime block in _execute_single_tool_inner stays as the safety
-        net for a mode switch mid-turn.
+        Runtime blocking alone is a wall the model keeps walking into: it
+        retries Write/Edit/Bash because the tool list still advertises them. A
+        tool that is not offered cannot be called. The runtime block in
+        _execute_single_tool_inner stays as the safety net for a mid-turn switch.
         """
         mode = getattr(self, '_interaction_mode', 'Agent')
         if mode == 'Ask':
@@ -15327,12 +15076,9 @@ Required behavior:
     def _handle_image_with_fallback(self, message: str, images: list, context: str):
         """Images on a model that cannot see them.
 
-        The server-side OCR service was removed: Cortex is fully
-        BYOK and holds no vision key of its own. A vision-capable model
-        reads images natively (the caller checks that first, and _on_error
-        routes failed native sends here as a retry), so the only honest
-        answer for a non-vision model is a clear instruction to switch.
-        Never a silent failure, never a subscription gate.
+        The server-side OCR service was removed (Cortex is fully BYOK, no vision
+        key of its own), so the only honest answer for a non-vision model is a
+        clear instruction to switch models. Never a silent failure.
         """
         if self._current_model_supports_vision():
             log.info("[VISION] image handler reached with a vision model; sending images directly")
@@ -15454,14 +15200,11 @@ Required behavior:
         return self._current_conversation_id
 
     def save_session_to_memory(self) -> None:
-        """Summarize + compact the CURRENT conversation into MEMORY.md, then emit
+        """Summarize the CURRENT conversation into MEMORY.md, then emit
         session_saved_to_memory(success).
 
-        Used by the 'New Chat' flow: the whole chat is condensed into MEMORY.md
-        (task, todos, files, key decisions, conversation digest) so the user can
-        start a fresh chat WITHOUT losing context, the next message auto-loads
-        MEMORY.md into the system prompt. Runs on a daemon thread so the UI stays
-        responsive and the 'Summarizing & compacting…' status can animate.
+        Used by the 'New Chat' flow: the whole chat is condensed so the user
+        starts fresh WITHOUT losing context. Runs on a daemon thread.
         """
         import threading as _th
 
@@ -15740,14 +15483,9 @@ Required behavior:
     def save_memory_sync(self) -> None:
         """SYNCHRONOUS MEMORY.md save for shutdown, ZERO LLM cost.
 
-        This is the shutdown-safe version of save_session_to_memory().
-        It does NOT call the LLM (which could take 5-15s and fail on a
-        daemon thread killed during exit). Instead it uses the fast
-        _build_brief_done_summary() which extracts todos + files +
-        meaningful user requests from the conversation history.
-
-        Called from _emergency_shutdown_save() in main_window.py.
-        Guarantees MEMORY.md is written BEFORE the process exits.
+        Shutdown-safe version of save_session_to_memory(): it does NOT call the
+        LLM (5-15s, could fail on a daemon thread killed at exit) and uses
+        _build_brief_done_summary(). Called from _emergency_shutdown_save().
         """
         try:
             _hist = self._gather_full_history()
@@ -15992,12 +15730,9 @@ Required behavior:
     def _auto_save_to_memory_light(self) -> None:
         """Lightweight MEMORY.md update after each turn, ZERO LLM cost.
 
-        Uses _build_brief_done_summary() to build a structured summary from
-        todos, files modified, and recent actions. Writes to MEMORY.md via
-        _write_memory_summary() which preserves previous sessions.
-
-        Caller SHOULD wrap this in a daemon thread to avoid blocking the UI.
-        Silently returns if there's nothing meaningful to save.
+        Builds a structured summary via _build_brief_done_summary() and writes it
+        with _write_memory_summary() preserving previous sessions; runs on a
+        daemon thread and silently returns when there is nothing to save.
         """
         try:
             _hist = self._gather_full_history()
@@ -16026,15 +15761,11 @@ Required behavior:
             log.error(f"[AutoSave] _auto_save_to_memory_light failed: {e}", exc_info=True)
 
     def _write_memory_summary(self, summary: str) -> None:
-        """Write a CONCISE 'what was done' summary to MEMORY.md (<project>/.cortex/memory/).
+        """Write a CONCISE 'what was done' summary to MEMORY.md.
 
-        ONE BLOCK PER CONVERSATION, updated in place: each block carries an
-        invisible `<!-- session:<conversation_id> -->` marker; writing again
-        for the same conversation REPLACES that block instead of stacking a
-        near-duplicate per turn (bug history: three copies of the same
-        session at 11:01/11:04/11:09 because every turn appended anew).
-        Other conversations' blocks are preserved, most recent first,
-        capped at 20.
+        ONE BLOCK PER CONVERSATION, updated in place via an invisible
+        `<!-- session:<id> -->` marker, so writing again REPLACES that block
+        rather than stacking a near-duplicate per turn. Capped at 20 blocks.
         """
         import re as _re
         from datetime import datetime as _dt
@@ -16094,11 +15825,9 @@ Required behavior:
     def _remember_carried_todos(self) -> None:
         """Keep the text of todos written before this request.
 
-        The Tasks panel still shows them after a new message (or compaction)
-        clears the list here, and the model ticks them once it has checked
-        the work. That work was done earlier, so this request's edit count
-        says nothing about it: blocking it (2026-11-28, "it only counts file
-        edits made in this session") left finished tasks spinning.
+        The Tasks panel still shows them after a new message clears the list
+        here, and the model ticks them once it has checked the work. Trap:
+        blocking that (2026-11-28) left finished tasks spinning.
         """
         carried = set(getattr(self, '_carried_todos', set()))
         for t in self._current_todos:
@@ -16110,15 +15839,10 @@ Required behavior:
     def start_fresh_session(self) -> None:
         """Reset all in-memory conversation state for a brand-new chat.
 
-        Clears the conversation history and per-task state and starts a new
-        conversation_id. Context is NOT lost, it lives in MEMORY.md (saved by
-        save_session_to_memory) and is auto-loaded on the next message.
-
-        The agent session id is rolled here too. Without the roll every message
-        of this app run lands in ONE sessions row: _save_message_immediate calls
-        create_session() with INSERT OR IGNORE, so a frozen id means one row per
-        process instead of one per chat. set_current_as_parent=True records the
-        chat that was just closed as this session's parent.
+        Clears history and per-task state and starts a new conversation_id.
+        Context is NOT lost: it lives in MEMORY.md and is auto-loaded on the next
+        message. The agent session id is rolled here too, since create_session()
+        uses INSERT OR IGNORE and a frozen id means one sessions row per process.
         """
         try:
             _regenerate_session_id(set_current_as_parent=True)
@@ -16201,14 +15925,11 @@ Required behavior:
     # PROACTIVE CONTEXT WINDOW MONITORING (Task 4)
 
     def _check_context_window_pressure(self) -> None:
-        """Check if conversation history is approaching the context window limit.
+        """Check if history is approaching the context window limit.
 
-        Called after every AI response. Uses the existing autoCompact system
-        (agent.src.services.compact.autoCompact) for threshold calculation.
-        The autoCompact module uses model-aware thresholds with proper buffer
-        tokens (13K for auto-compact, 3K for manual) rather than a hard 85%.
-
-        Emits context_budget_update signal for the UI token usage bar.
+        Called after every response, using autoCompact's model-aware thresholds
+        (13K buffer for auto-compact, 3K for manual) rather than a hard 85%.
+        Emits context_budget_update for the UI token usage bar.
         """
         try:
             with self._history_lock:
@@ -16276,23 +15997,11 @@ Required behavior:
             log.debug(f"[BRIDGE] Context pressure check failed: {e}")
 
     def save_conversation_to_db(self) -> bool:
-        """Save conversation history directly to SQLite (bypasses JS/Chromium).
+        """Save conversation history straight to SQLite (bypasses JS/Chromium).
 
-        Used as fallback when Chromium renderer has crashed and
-        run_javascript() can't execute saveProjectChats().
-
-        CRITICAL: This method must NOT overwrite or duplicate messages that
-        were already saved by the JS saveProjectChats() → save_chats_to_sqlite
-        pipeline. The JS save stores messages from chat.messages (correct roles),
-        while this method pulls from _conversation_history which may have
-        extra system/tool messages or different content ordering.
-
-        Strategy:
-        1. If messages already exist in DB for this conversation → SKIP
-           (JS save already persisted correct data)
-        2. If DB is empty → clear + save _conversation_history as fallback
-
-        Returns True if save succeeded.
+        Fallback for when the renderer crashed and saveProjectChats() cannot
+        run. Must NOT overwrite rows the JS pipeline saved (those have correct
+        roles), so skip when the DB already has rows for this conversation.
         """
         try:
             from src.core.chat_history import get_chat_history
@@ -16362,18 +16071,11 @@ Required behavior:
             return False
 
     def _persist_chat_async(self) -> None:
-        """
-        Non-blocking chat persistence to SQLite.
+        """Non-blocking chat persistence to SQLite, right after each response.
 
-        Saves the current conversation to the database immediately after
-        each AI response. This ensures chats survive ANY crash:
-        - Chromium renderer crash
-        - Power loss
-        - IDE force-kill
-        - Windows session end
-
-        Uses a background thread with a 2-second debounce to avoid
-        excessive DB writes during rapid conversation turns.
+        Ensures chats survive any crash (renderer crash, power loss, force-kill,
+        session end). A background thread with a 2-second debounce avoids
+        excessive DB writes during rapid turns.
         """
         import threading as _threading
 
@@ -16477,11 +16179,8 @@ def get_active_rules_prompt_block() -> str:
 def get_cortex_project_context_block() -> str:
     """Get the .cortex/ project context block for system prompt injection.
 
-    Loads rules.md, context.md, commands.md, ignore.txt, and memory.json
-    from the project's .cortex/ directory and formats them as XML blocks.
-    Auto-creates .cortex/ directory if it doesn't exist.
-
-    Returns empty string if no .cortex/ context is available.
+    Loads rules.md, context.md, commands.md, ignore.txt, and memory.json from
+    the project's .cortex/ directory as XML blocks; returns "" if none exists.
     """
     if not _HAS_CORTEX_PROJECT_CTX:
         return ""
@@ -16534,10 +16233,8 @@ def get_skill_router_block(query: str = "") -> str:
     """Compact skill router for the system prompt.
 
     Lists every INACTIVE skill as name + one-line description with the
-    instruction to load it via the Skill tool when the task matches.
-    Active (toggled-on) skills are excluded, their full bodies are already
-    injected by get_active_skills_prompt_block(). Descriptions are clipped
-    so a large user skill collection cannot balloon the prompt.
+    instruction to load it via the Skill tool when the task matches. Active
+    skills are excluded (their bodies are already injected).
     """
     if not _HAS_SKILLS:
         return ""
@@ -16680,11 +16377,8 @@ def personalization_prompt() -> str:
 def get_all_system_prompt_extras() -> str:
     """Get combined system prompt injections from skills + rules + project context.
 
-    Called when building the full system prompt to inject into the LLM.
-    Includes:
-    - Active skills (SKILL.md files)
-    - Enabled rules (AGENTS.md)
-    - .cortex/ project context (rules.md, context.md, commands.md, memory.json, ignore.txt)
+    Includes active skills, enabled rules (AGENTS.md), and .cortex/ project
+    context (rules.md, context.md, commands.md, memory.json, ignore.txt).
     """
     parts: List[str] = []
     skills_block = get_active_skills_prompt_block()

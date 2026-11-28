@@ -1,27 +1,12 @@
-"""
-web_probe.py -- active vulnerability probes against an in-scope web target.
+"""Active vulnerability probes against an in-scope web target.
 
-This is the module that actually sends payloads, so its boundaries are drawn
-deliberately:
-
-  Detection, never exploitation. Probes prove that an injection point exists
-  and then stop. There is no UNION data extraction, no file write through a
-  SQL injection, no shell. The output is "this parameter is injectable", not
-  the contents of the target's user table. That line is what keeps this a
-  scanner instead of a weapon, and it is also what makes the findings
-  actionable: the fix is the same whether or not you dumped the data.
-
-  Non-destructive payloads only. A single quote to break a query, or
-  "AND 1=1" versus "AND 1=2" to compare responses. Never DROP, DELETE,
-  UPDATE, INSERT, or any statement that mutates.
-
-  Scoped and rate-limited. Every request goes through one Requester that
-  enforces the scope check and a per-minute request ceiling, so a probe
-  cannot flood a target by looping.
-
-Read-only probes: SQL injection, reflected XSS, path traversal, open
-redirect, exposed sensitive paths, dangerous HTTP methods, and CORS behaviour
-on a real endpoint.
+Sends payloads, so the boundaries are deliberate: detection never
+exploitation (prove an injection point exists, stop; no UNION extraction, file
+write or shell), non-destructive payloads only (a quote to break a query, or
+AND 1=1 vs 1=2; never DROP/DELETE/UPDATE/INSERT), and every request goes
+through one Requester that enforces scope and a per-minute ceiling.
+Read-only probes: SQLi, reflected XSS, path traversal, open redirect,
+exposed paths, dangerous HTTP methods, CORS.
 """
 
 from __future__ import annotations

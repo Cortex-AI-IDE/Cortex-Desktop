@@ -1,19 +1,13 @@
-"""
-Google Gemini Provider (native, BYOK), AI Studio API key.
+"""Google Gemini provider (native, BYOK via AI Studio API key).
 
-Google's Gemini API exposes an OFFICIAL OpenAI-compatible endpoint
-(chat completions, streaming, tool calls, Bearer auth):
+Gemini exposes an official OpenAI-compatible endpoint, so this is a thin
+subclass of OpenRouterProvider and inherits streaming, tool-call, retry and
+multimodal handling:
     https://generativelanguage.googleapis.com/v1beta/openai
-Docs:  https://ai.google.dev/gemini-api/docs/openai
-Keys:  https://aistudio.google.com/apikey
 
-Implementation: thin subclass of OpenRouterProvider, identical wire
-format, so streaming/tool-call/retry/multimodal handling is inherited.
-
-Model ids are Google's bare official ids (gemini-3.5-flash, ...). The
-"gemini" prefix is unique across Cortex providers, so no id prefix is
-needed; routing sends any bare gemini-* model here, while the
-"google/gemini-*" slash format keeps routing to OpenRouter as before.
+Model ids are Google's bare ids (gemini-3.5-flash). The "gemini" prefix is
+unique across Cortex providers, so bare gemini-* routes here while
+"google/gemini-*" keeps routing to OpenRouter as before.
 """
 from typing import List, Dict, Any
 

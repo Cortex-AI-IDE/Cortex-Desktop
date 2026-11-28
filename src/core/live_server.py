@@ -1,17 +1,12 @@
-"""
-live_server.py
-Built-in Live Server for Cortex IDE.
+"""Built-in Live Server for Cortex IDE.
 
-Starts a local HTTP server for the current HTML file's directory,
-injects a live-reload polling script into HTML responses, and watches
-the HTML file plus all linked CSS/JS assets for changes.
-When any watched file is saved the browser tab reloads automatically.
+Serves the current HTML file's directory over local HTTP, injects a live-reload
+polling script into HTML responses, and watches the HTML plus its linked CSS/JS
+so a save reloads the tab.
 
-Usage:
     server = LiveServer(root_dir, html_file_path)
-    port   = server.start()       # starts server + watcher threads
+    port   = server.start()       # server + watcher threads
     url    = server.get_url(html_file_path)
-    ...
     server.stop()
 """
 

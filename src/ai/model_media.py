@@ -1,29 +1,15 @@
 """Which models can watch a video, and how a video goes on the wire.
 
-Video is not a capability Cortex can assume: of the 443 models OpenRouter
-listed on 2026-09-16, 78 accept video and only 35 of those also accept the
-soundtrack. Sending a video to a model that cannot read it is the worst
-outcome - historically the payload was dropped somewhere in the serializers
-and the model answered from the text alone, looking like it had watched
-something it never received (see the vision bug history in
-``openrouter_provider._sanitize_messages``).
+Video is not assumed: of 443 OpenRouter models on 2026-09-16, 78 accept video
+and only 35 of those accept the soundtrack. Sending a video to a model that
+cannot read it is the worst outcome, since the payload was historically dropped
+in the serializers and the model answered from text alone, looking like it had
+watched something it never received. Capability is looked up, never guessed:
+OpenRouter publishes architecture.input_modalities, cached under
+~/.cortex/cache for a day; direct providers match by the part after the vendor
+prefix; a small built-in family list keeps it working offline.
 
-So capability is looked up, never guessed:
-
-* OpenRouter publishes ``architecture.input_modalities`` for every model on a
-  public endpoint (no key). That list is the source of truth, cached under
-  ``~/.cortex/cache`` for a day and refreshed on a daemon thread so no lookup
-  ever blocks the GUI.
-* Providers that serve the same model directly (MiMo's own endpoint serves
-  ``mimo-v2.5``, which OpenRouter lists as ``xiaomi/mimo-v2.5``) are matched
-  by the part after the vendor prefix.
-* With no cache and no network, a small built-in list of families known to
-  take video keeps the feature working offline instead of refusing outright.
-
-Wire format is OpenRouter's documented one, which the OpenAI-compatible
-endpoints share::
-
-    {"type": "video_url", "video_url": {"url": "<https url or data: URL>"}}
+Wire format: {"type": "video_url", "video_url": {"url": "<https or data:>"}}
 """
 
 from __future__ import annotations

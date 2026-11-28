@@ -1,22 +1,11 @@
-"""
-model_pricing.py, approximate $/token rates for Loop Engine budget checks.
+"""Approximate $/token rates for Loop Engine budget checks.
 
-This is NOT a billing source of truth (nothing here is sent to or reconciled
-with account billing). It exists purely so BudgetSpec.max_usd (agent_loop.md
-§3, §9) has a real number to compare against instead of always reading 0.
-Rates are per-1M-tokens, deliberately rounded and occasionally stale is
-acceptable here, the goal is "stop a loop before it runs away spending
-real money," not cent-accurate accounting.
-
-_RATES keys MUST track src/ai/model_registry.py's MODEL_GROUPS, that file
-is Cortex's single source of truth for which models actually exist and are
-selectable. Do not invent model ids here; if model_registry.py adds/renames/
-removes a model, update this table in the same change. test_release_suite.py
-has a regression test that fails if the two drift apart.
-
-Unrecognized models fall back to _DEFAULT, priced at the higher end on
-purpose: an unmatched model should make the budget check conservative (trip
-sooner), not silently free.
+Not a billing source of truth: it only gives BudgetSpec.max_usd a real number
+to compare against. Rates are per-1M-tokens and may be slightly stale; the
+goal is to stop a loop before it burns real money, not cent accuracy.
+_RATES must track MODEL_GROUPS in src/ai/model_registry.py; update both in the
+same change. Unknown models fall back to _DEFAULT, priced high on purpose so
+the budget check trips sooner rather than reading as free.
 """
 from __future__ import annotations
 

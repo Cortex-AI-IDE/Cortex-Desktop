@@ -1,21 +1,11 @@
 """Detect a model repeating the same block of ANSWER text over and over.
 
-Owner report 2026-11-22 (Linux, mostly DeepSeek V4.1 Flash and MiMo 2.6):
-now and then the reply streams the same text 10 to 100 times until Stop is
-pressed; the next prompt is fine. That is a decoding loop in the model, not
-something the user asked for. reasoning_loop.py already guards the THINKING
-stream, but only line by line (4 identical lines in a row, or a 120-line
-window of very few distinct lines). An answer loop repeats a whole block -
-a paragraph, a list, several different lines - which neither rule sees
-until long after the chat is full of copies.
-
-The rule here: the end of the streamed text is the same block repeated
-three times in a row (four times for a block under 200 characters). The
-block must hold real words (12+ letters or digits), so rulers like "-----"
-or a column of "}" never count, and must be at least 24 characters, so a
-word stuttering twice is not a loop. Checked every 48 characters of new
-text, using the last 48 characters to find candidate block lengths, so the
-cost stays small however fast the model streams.
+reasoning_loop.py guards the THINKING stream line by line, which never sees an
+answer loop: that repeats a whole paragraph or list, so the chat fills with
+copies before either line rule fires. The rule here: the end of the streamed
+text is the same block repeated 3 times in a row (4 for a block under 200
+chars). The block must hold real words and be >= 24 chars, so rulers and
+stray braces never count. Checked every 48 new characters.
 """
 from __future__ import annotations
 

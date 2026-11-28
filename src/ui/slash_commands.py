@@ -18,21 +18,12 @@ from PyQt6.QtWidgets import QFrame, QVBoxLayout, QListWidget, QListWidgetItem, Q
 
 # Pure logic (unit tested)
 def parse_slash_query(text: str, cursor_pos: Optional[int] = None) -> Optional[str]:
-    """Return the skill query being typed AT THE CURSOR, or None.
+    """Return the skill query being typed at the cursor, or None.
 
-    A "/" starts a skill query when it is at the very start of the text or
-    immediately follows whitespace (so a path like src/main does NOT trigger
-    it), and the text from "/" up to the cursor has no space/newline yet (a
-    space ends the token). Being cursor-aware is what lets a "/" typed
-    ANYWHERE mid-message open the picker, so several skills can be referenced
-    in one message.
-
-        "/"                     -> ""      (show all)
-        "/deb"                  -> "deb"   (filter)
-        "do /sch" (cursor@end)  -> "sch"   (after a space -> new token)
-        "src/main"              -> None    (not a token boundary)
-        "/debug x" (cursor@end) -> None    (space ended the token)
-        ""                      -> None
+    A "/" starts a query when it is at the start of the text or follows
+    whitespace (so src/main does not trigger it) and the text from it to the
+    cursor has no space yet. Cursor-aware, so a "/" mid-message opens the
+    picker and several skills can be referenced in one message.
     """
     if not text:
         return None

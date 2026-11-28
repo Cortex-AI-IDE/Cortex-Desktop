@@ -1,20 +1,12 @@
-"""
-DynamicProvider — one class for every server-defined OpenAI-compatible provider.
+"""DynamicProvider: one class for every server-defined OpenAI-compatible provider.
 
-A thin subclass of OpenRouterProvider, so streaming, tool calls, retries,
-reasoning deltas and multimodal handling are the battle-tested ones. What
-differs per provider comes from the synced
-spec (see src/ai/dynamic_providers.py), not from code:
-
-  base URL        spec["base_url"]           e.g. https://integrate.api.nvidia.com/v1
-  auth            spec["auth_style"]         bearer | header (<name>: key) | none
-  extra headers   spec["extra_headers"]      non-secret only (server validates)
-  extra body      spec["extra_body"]         merged into every request, never
-                                             overriding model/messages/tools
-  key             KeyManager "dyn_<slug>"    never synced, never sent to Cortex
-
-IDE model ids are ``dp/<slug>/<upstream id>``; the prefix is stripped right
-before the API call.
+Thin subclass of OpenRouterProvider, so streaming, tool calls, retries,
+reasoning deltas and multimodal handling are the battle-tested ones. Per-
+provider differences come from the synced spec (src/ai/dynamic_providers.py),
+not code: base_url, auth_style (bearer | header | none), non-secret
+extra_headers, extra_body (merged into every request, never overriding
+model/messages/tools), and a KeyManager "dyn_<slug>" key. IDE model ids are
+``dp/<slug>/<upstream id>``; the prefix is stripped before the API call.
 """
 from __future__ import annotations
 

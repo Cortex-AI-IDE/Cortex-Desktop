@@ -1,22 +1,12 @@
-"""
-model_registry.py — provider activation state, and the dropdown's model list.
+"""Provider activation state and the model dropdown's list.
 
-Nothing in here is a catalog. The models and the built-in providers are
-published by the server (AIModel + ProviderMeta rows, served from
-``GET /api/v1/models/config/``) and cached by ``src/ai/remote_models.py``,
-which also ships a generated offline snapshot in ``src/ai/data/``. This module
-only answers two questions on top of that:
+Not a catalog: models and built-in providers are published by the server
+(GET /api/v1/models/config/), cached by remote_models.py with a generated
+offline snapshot. This module only answers which providers the user may see,
+and what the dropdown renders now. Both are functions, never constants, so a
+server refresh or a fresh toggle is visible without a restart.
 
-  * which providers is this user allowed to see models for?  (activation)
-  * what should the dropdown render right now?                (composition)
-
-Both are functions, never constants: importing a list binds it once at import
-time and would never see a server refresh, a newly added custom provider, or
-a toggle the user just clicked.
-
-Regenerate the offline snapshot after changing the server catalog:
-
-    python tools/sync_server_catalog.py
+Regenerate the snapshot: python tools/sync_server_catalog.py
 """
 
 from __future__ import annotations
@@ -112,27 +102,17 @@ def _sanitise(raw) -> list | None:
 def get_enabled_providers() -> list:
     """Read the enabled-provider list from settings ('ai.enabled_providers').
 
-    Returns what was SAVED, sanitised but not filtered.
+    Returns what was SAVED, sanitised but not filtered. Filtering out slugs
+    missing from toggleable_providers() made the answer depend on whether
+    dynamic_providers had loaded its cache yet, and since
+    set_provider_enabled() writes this result straight back, one toggle click
+    with a cold cache erased every server-published and user-added provider
+    from disk. A slug that no longer exists is harmless; it matches no group
+    in the dropdown.
 
-    This used to drop any slug missing from toggleable_providers(), which
-    made the answer depend on whether dynamic_providers had loaded its cache
-    yet. Worse, set_provider_enabled() writes this result straight back, so a
-    single toggle click while the cache was cold silently erased every
-    server-published and user-added provider from disk - and the user's
-    switches came back off after every restart, no matter how many times the
-    symptom was patched.
-
-    A slug that no longer exists is harmless: it simply matches no group in
-    the dropdown. Being wrong in that direction costs nothing; being wrong in
-    the other direction destroys the user's settings.
-
-    The read is deliberately the FRESH one: a second Cortex saves whole files,
-    so the copy this instance loaded at startup can lag what the user just
-    switched in another window. That read already falls back to the in-memory
-    value when the file cannot be read, so a moment of contention returns the
-    saved choice rather than the server defaults - which matter, because the
-    panel draws those defaults as the user's own switches and one click then
-    persists them (2026-10-13).
+    The read is deliberately fresh: a second Cortex saves whole files, so the
+    copy loaded at startup can lag what the user just switched elsewhere. It
+    falls back to the in-memory value when the file cannot be read.
     """
     try:
         from src.config.settings import get_settings

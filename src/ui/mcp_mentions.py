@@ -1,18 +1,12 @@
 """@-mention menu for the chat input: type "@" to call a connected MCP tool.
 
-The same affordance as the "/" skill menu (src/ui/slash_commands.py), pointed
-at MCP instead: "@" opens a filterable list of every tool the connected MCP
-servers expose, and picking one inserts a compact "@tool " token that is
-expanded into an explicit agent instruction at send time.
-
-Why it exists: MCP tools were already in the model's function list, but the
-user had no way to SEE what was available or to insist on one. The model
-sometimes ignored a connected tool and fell back to a built-in (there is a
-comment about exactly that in agent_bridge). "@" makes the set discoverable
-and lets the user name the tool directly.
-
-The matching logic here is pure so it can be unit-tested; the popup widget is
-reused from slash_commands (a CHILD widget, never a top-level window).
+The same affordance as the "/" skill menu, pointed at MCP: "@" opens a
+filterable list of every tool the connected servers expose, and picking one
+inserts a compact "@tool " token expanded into an explicit instruction at send
+time. MCP tools were already in the model's function list, but the user had no
+way to see what was available or insist on one, and the model sometimes fell
+back to a built-in instead. Matching is pure so it can be unit-tested; the
+popup widget is reused from slash_commands as a CHILD widget, never top-level.
 """
 from __future__ import annotations
 

@@ -1,32 +1,14 @@
 """How to use each connected MCP server, derived from what the server exposes.
 
-Users connect any MCP server - public ones, a company's internal data server,
-something they wrote last week. The model sees each server as a flat list of
-tool names and parameters, which says what a tool does but not how the tools
-fit together, which ones change data, or which of two similar servers suits a
-task. Without that the agent guessed: on 2026-10-02 it spent ten turns on one
-element screenshot, switching between two browser servers and inventing a
-`selector` parameter Playwright does not have.
+A flat tool list says what a tool does but not how the tools fit together,
+which change data, or which of two similar servers suits a task. Without that
+the agent guessed: on 2026-10-02 it spent ten turns on one screenshot,
+switching browser servers and inventing a `selector` parameter Playwright does
+not have.
 
-Nothing here names a server. Every line comes from the server itself:
-
-1. Its own `instructions` from the initialize response - the MCP standard for
-   "how to use me" (what Claude Code shows as MCP Server Instructions). Cortex
-   used to discard them. 3 of 9 real servers sampled send them.
-2. The user's own notes for that server: an "instructions" field in its
-   mcp.json entry. This is how an internal server gets steering only its
-   owner can write ("orders_db is read-only reporting, never use it for
-   writes").
-3. Rules read from its tool definitions, which every sampled server
-   annotates (MCP tool annotations + parameter descriptions):
-   - which tool provides an id or reference that other tools need
-     ("`uid` (5 tools) comes from take_snapshot"),
-   - which tools change or delete data, using destructiveHint together with
-     openWorldHint and the tool's verb - a browser click is marked
-     destructive too, and must not read as "ask the user first",
-   - when two connected servers do much the same job, what only each can do.
-
-Kept short: this text rides on every request while the servers are connected.
+Nothing here names a server. Every line comes from the server itself: its own
+`instructions` from the initialize response (Cortex used to discard them), the
+user's notes in its mcp.json entry, and rules read from its tool definitions.
 """
 from __future__ import annotations
 

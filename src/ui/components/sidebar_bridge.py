@@ -1834,26 +1834,12 @@ class SidebarBridge(QObject):
     def _release_file_watcher(self) -> bool:
         """Destroy the watcher so Windows releases its directory handles.
 
-        A watched directory cannot be deleted on Windows: Qt holds an open
-        handle on every directory it monitors and the shell refuses to move
-        an open directory to the Recycle Bin, so SHFileOperation fails with
-        120 (DE_ACCESSDENIEDSRC) and the folder simply stays there.
-
-        removePaths() is NOT enough, which is the trap here. Qt's Windows
-        engine groups directory handles, so removing individual paths mostly
-        fails: asked to drop 179 directories it reported 116 of them as
-        failures and kept their handles open, and the delete still returned
-        120. Destroying the watcher object releases every handle and the
-        same delete then returns 0. Measured both ways on the directory from
-        the bug report.
-
-        deleteLater() would not do either, since it defers destruction past
-        the delete we are about to attempt. The watcher is parented to this
-        object, so C++ owns it: setParent(None) hands ownership back before
-        sip.delete() destroys it now.
-
-        Returns True if a watcher was released, so the caller knows to
-        schedule a restart.
+        Windows refuses to move an open directory to the Recycle Bin, so
+        SHFileOperation fails with 120. removePaths() is NOT enough: Qt groups
+        directory handles on Windows, so dropping 179 paths reported 116
+        failures and the delete still returned 120. deleteLater() would defer
+        past the delete. setParent(None) hands ownership back from C++ before
+        sip.delete(). Returns True if a watcher was released.
         """
         watcher = getattr(self, "_file_watcher", None)
         if watcher is None:

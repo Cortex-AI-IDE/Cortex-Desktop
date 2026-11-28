@@ -1,23 +1,13 @@
 """
-OpenRouter Provider
-Supports 300+ models via a single OpenAI-compatible API key.
+OpenRouter provider: 300+ models through one OpenAI-compatible API key.
 
-Popular coding models available:
-- anthropic/claude-opus-4.8              : Best overall coding / agentic (flagship)
-- anthropic/claude-haiku-4.5             : Fast & cheap for agentic loops
-- deepseek/deepseek-chat-v3.1            : DeepSeek V3 (great value)
-- deepseek/deepseek-r1                   : DeepSeek R1 reasoning
-- qwen/qwen3.7-max                       : Qwen 3.7 Max flagship agentic
-- qwen/qwen3.7-plus                      : Qwen 3.7 Plus cost-effective agentic
-- z-ai/glm-5.2                           : GLM-5.2 Z.ai coding-first 744B MoE (1M ctx)
-- z-ai/glm-5.1                           : GLM-5.1 latest Z.ai flagship (200K ctx)
-- minimax/minimax-m3                     : MiniMax M3 multimodal 1M ctx
-- google/gemini-2.5-pro                  : Gemini 2.5 Pro
-- openai/gpt-4o                          : GPT-4o
-- x-ai/grok-4.3                          : Grok 4.3
+Popular coding models: anthropic/claude-opus-4.8 (flagship agentic),
+anthropic/claude-haiku-4.5 (fast and cheap for loops), deepseek/deepseek-chat-v3.1,
+deepseek/deepseek-r1 (reasoning), qwen/qwen3.7-max and qwen/qwen3.7-plus,
+z-ai/glm-5.2 (744B MoE, 1M ctx), z-ai/glm-5.1, minimax/minimax-m3 (multimodal
+1M ctx), google/gemini-2.5-pro, openai/gpt-4o, x-ai/grok-4.3.
 
-Full model list: https://openrouter.ai/models
-API key:         https://openrouter.ai/keys
+Full list: https://openrouter.ai/models, keys: https://openrouter.ai/keys
 """
 from src.ai.providers.usage_parse import cached_tokens_from
 
