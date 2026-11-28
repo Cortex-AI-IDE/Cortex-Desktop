@@ -7191,8 +7191,9 @@ Required behavior:
 
                 # P8: Error recovery budget check, track consecutive errors
                 try:
+                    _stream_err = locals().get("_stream_exc")
                     _err_recovery_msg = self._safety.check_error_recovery(
-                        str(_stream_exc) if '_stream_exc' in dir() else ""
+                        str(_stream_err) if _stream_err is not None else ""
                     )
                     if _err_recovery_msg and "STOP" in _err_recovery_msg:
                         log.warning(f"[SAFETY] Error recovery budget exhausted: {_err_recovery_msg[:200]}")

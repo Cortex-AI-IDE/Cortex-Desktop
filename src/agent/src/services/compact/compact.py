@@ -783,7 +783,7 @@ def shouldExcludeFromPostCompactRestore(
         planFilePath = expandPath(getPlanFilePath(agentId))
         if normalizedFilename == planFilePath:
             return True
-    except:
+    except Exception:
         # silent-ok: an unresolvable plan path only costs this exclusion, and
         # this runs per file during restore, so a log line would repeat.
         pass
@@ -795,7 +795,7 @@ def shouldExcludeFromPostCompactRestore(
         )
         if normalizedFilename in normalizedMemoryPaths:
             return True
-    except:
+    except Exception:
         # silent-ok: same as above; a missing memory path falls through to
         # "not excluded", which restores one extra file rather than failing.
         pass
@@ -977,7 +977,7 @@ def createPlanAttachmentIfNeeded(agentId: str) -> Optional[Dict]:
     """
     try:
         planContent = getPlan(agentId)
-    except:
+    except Exception:
         planContent = None
     
     if not planContent:
@@ -985,7 +985,7 @@ def createPlanAttachmentIfNeeded(agentId: str) -> Optional[Dict]:
     
     try:
         planFilePath = getPlanFilePath(agentId)
-    except:
+    except Exception:
         return None
     
     return createAttachmentMessage({
@@ -1007,7 +1007,7 @@ def createSkillAttachmentIfNeeded(agentId: str) -> Optional[Dict]:
     """
     try:
         invokedSkills = getInvokedSkillsForAgent(agentId)
-    except:
+    except Exception:
         invokedSkills = []
     
     if not invokedSkills:
@@ -1171,7 +1171,7 @@ async def streamCompactSummary(
                     context.get('options', {}).get('agentDefinitions', {}).get('activeAgents', []),
                     'compact',
                 )
-            except:
+            except Exception:
                 useToolSearch = False
             
             # Build tools list
@@ -1299,7 +1299,7 @@ async def compactConversation(
         appState = await context.getAppState() if asyncio.iscoroutinefunction(context.getAppState) else context.getAppState()
         try:
             logPermissionContextForAnts(appState.get('toolPermissionContext'), 'summary')
-        except:
+        except Exception:
             # silent-ok: a diagnostic dump; compaction must proceed without it.
             pass
         
@@ -1415,13 +1415,13 @@ async def compactConversation(
         if context.get('readFileState'):
             try:
                 context['readFileState'].clear()
-            except:
+            except Exception:
                 # silent-ok: clearing a plain dict; the state is replaced below.
                 pass
         if context.get('loadedNestedMemoryPaths'):
             try:
                 context['loadedNestedMemoryPaths'].clear()
-            except:
+            except Exception:
                 # silent-ok: same plain-dict clear; a stale entry is harmless.
                 pass
         
@@ -1461,7 +1461,7 @@ async def compactConversation(
                 {'callSite': 'compact_full'},
             ):
                 postCompactFileAttachments.append(createAttachmentMessage(att))
-        except:
+        except Exception:
             # The model is not told which tools became available; the turn
             # still runs, but a silent gap here explains "it never used X".
             logForDebugging('deferred tools delta skipped after full compact')
@@ -1469,7 +1469,7 @@ async def compactConversation(
         try:
             for att in getAgentListingDeltaAttachment(context, []):
                 postCompactFileAttachments.append(createAttachmentMessage(att))
-        except:
+        except Exception:
             logForDebugging('agent listing delta skipped after full compact')
         
         try:
@@ -1480,7 +1480,7 @@ async def compactConversation(
                 [],
             ):
                 postCompactFileAttachments.append(createAttachmentMessage(att))
-        except:
+        except Exception:
             logForDebugging('MCP instructions delta skipped after full compact')
         
         # Execute session start hooks
@@ -1533,7 +1533,7 @@ async def compactConversation(
         
         try:
             telemetry_context_stats = tokenStatsToStatsigMetrics(analyzeContext(messages))
-        except:
+        except Exception:
             telemetry_context_stats = {}
         
         logEvent('cortex_compact', {
@@ -1574,7 +1574,7 @@ async def compactConversation(
                     context.get('options', {}).get('querySource', 'compact'),
                     context.get('agentId'),
                 )
-            except:
+            except Exception:
                 # silent-ok: prompt-cache break detection is telemetry; it
                 # cannot usefully fail a compaction that has already run.
                 pass
@@ -1786,13 +1786,13 @@ async def partialCompactConversation(
         if context.get('readFileState'):
             try:
                 context['readFileState'].clear()
-            except:
+            except Exception:
                 # silent-ok: clearing a plain dict; the state is replaced below.
                 pass
         if context.get('loadedNestedMemoryPaths'):
             try:
                 context['loadedNestedMemoryPaths'].clear()
-            except:
+            except Exception:
                 # silent-ok: same plain-dict clear; a stale entry is harmless.
                 pass
         
@@ -1833,13 +1833,13 @@ async def partialCompactConversation(
                 {'callSite': 'compact_partial'},
             ):
                 postCompactFileAttachments.append(createAttachmentMessage(att))
-        except:
+        except Exception:
             logForDebugging('deferred tools delta skipped after partial compact')
         
         try:
             for att in getAgentListingDeltaAttachment(context, messagesToKeep):
                 postCompactFileAttachments.append(createAttachmentMessage(att))
-        except:
+        except Exception:
             logForDebugging('agent listing delta skipped after partial compact')
         
         try:
@@ -1850,7 +1850,7 @@ async def partialCompactConversation(
                 messagesToKeep,
             ):
                 postCompactFileAttachments.append(createAttachmentMessage(att))
-        except:
+        except Exception:
             logForDebugging('MCP instructions delta skipped after partial compact')
         
         # Execute session start hooks
@@ -1928,7 +1928,7 @@ async def partialCompactConversation(
                     context.get('options', {}).get('querySource', 'compact'),
                     context.get('agentId'),
                 )
-            except:
+            except Exception:
                 # silent-ok: prompt-cache break detection is telemetry; it
                 # cannot usefully fail a compaction that has already run.
                 pass

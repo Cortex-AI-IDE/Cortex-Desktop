@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QMenu, QMessageBox, QInputDialog, QTabBar,
     QFrame, QSizePolicy, QApplication, QDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QSignalBlocker
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QSignalBlocker, QProcess
 from PyQt6.QtGui import QAction, QKeySequence, QIcon, QFont, QCloseEvent, QTextDocument
 # Custom title bar removed, using native Windows title bar
 from PyQt6.QtWebChannel import QWebChannel
