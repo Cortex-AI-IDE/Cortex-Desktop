@@ -99,15 +99,11 @@ class CortexDatabase:
         self._write_timer.timeout.connect(self._flush_write_queue)
         self._write_interval = 100  # ms debounce (was 500ms, reduced to prevent data loss)
 
-# Dedicated writer thread
-        # The debounce QTimer above fires on the GUI thread. Executing the
-        # flush there means SQLite I/O ON THE GUI THREAD. On machines where
-        # a third-party antivirus (Bitdefender etc.) intercepts and scans
-        # every WAL commit, each write takes 50-500ms instead of ~1ms, the
-        # UI visibly freezes mid-work. (Dev machines with the folder
-        # excluded from Windows Defender never show this, which is why it
-        # only reproduced on customer/office machines.) The timer callback
-        # now only WAKES this thread; all queued writes run here.
+# Writer thread: the debounce QTimer fires on the GUI thread, and flushing
+# there means SQLite I/O on it. Antivirus (Bitdefender) scanning every WAL
+# commit turns ~1ms writes into 50-500ms, freezing the UI (only reproduced on
+# customer machines; dev excludes Defender). The timer now just wakes this
+# thread, which runs all queued writes.
         self._writer_wake = threading.Event()
         self._writer_stop = False
         self._writer_thread = threading.Thread(
@@ -269,10 +265,8 @@ class CortexDatabase:
             except Exception:
                 pass  # silent-ok: the column already exists on an upgraded database
 
-            # ★ MIGRATION: Backfill NULL updated_at values.
-            # Older schema versions created conversations without setting updated_at.
-            # This one-time fix copies created_at → updated_at for any rows where
-            # updated_at IS NULL, ensuring ORDER BY updated_at DESC works correctly.
+            # Backfill NULL updated_at from created_at (older schemas omitted it) so
+            # ORDER BY updated_at DESC works.
             try:
                 cursor.execute(
                     "UPDATE conversations SET updated_at = created_at WHERE updated_at IS NULL"
@@ -434,11 +428,10 @@ class CortexDatabase:
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            # INSERT OR IGNORE preserves the existing project_path on conflict.
-            # INSERT OR REPLACE was deleting the old row (with correct project_path)
-            # and inserting with a wrong path, causing history to "vanish" when a
-            # stale shutdown save used an empty/fallback project_path.
-            # A separate UPDATE keeps title and updated_at current without touching project_path.
+            # INSERT OR IGNORE preserves the existing project_path on conflict: REPLACE
+            # deleted the correct row and inserted a wrong path, making history "vanish"
+            # when a stale shutdown save used an empty path. A separate UPDATE keeps title
+            # and updated_at current without touching project_path.
             cursor.execute("""
                 INSERT OR IGNORE INTO conversations (conversation_id, project_path, title, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?)
@@ -503,19 +496,12 @@ class CortexDatabase:
         tools_json = json.dumps(tools_used) if tools_used else "[]"
         metadata_json = json.dumps(metadata) if metadata else None
 
-        # Drop an immediate repeat of the message already at the end of this
-        # conversation.
-        # Six different places write here (agent_bridge x2, chat_history x2,
-        # crash_persistence x3 raw INSERTs, and this method), and nothing
-        # coordinates them, so the same turn was being stored more than once:
-        # a real conversation held "hi" twice and one greeting four times out
-        # of 41 rows. Every reader inherits that, which is why a checkpoint
-        # digest listed each line twice; the digest was correct and its input
-        # was not.
-        # Guarding here rather than at each caller means no writer can
-        # reintroduce it, the same reason the settings redaction sits at the
-        # serialiser. Only the LAST row is compared, so a genuine repeat later
-        # in a chat ("hi" said again an hour on) is still recorded.
+        # Drop an immediate repeat of the last message: six writers (agent_bridge x2,
+        # chat_history x2, crash_persistence x3 raw INSERTs, this method) don't
+        # coordinate, so turns were stored multiple times ("hi" twice, one greeting
+        # four times in 41 rows), duplicating checkpoint digests. Guard at the sink so
+        # no writer can reintroduce it (like settings redaction at the serialiser).
+        # Compare only the LAST row, so a genuine repeat later is still recorded.
         try:
             if content:
                 with self._get_connection() as _c:
@@ -689,11 +675,9 @@ class CortexDatabase:
         history was still here. With this flag the restore falls back to a
         conversation that actually has something to show.
         """
-        # rowid breaks the tie. updated_at is milliseconds, and two rows written
-        # in the same millisecond - "+ New Chat" straight after a save, or any
-        # test - left the winner up to SQLite, so the restore picked an
-        # arbitrary one of the two. rowid grows with insertion, so the newer
-        # row wins whenever the timestamps are equal.
+        # rowid breaks ties: updated_at is milliseconds, and two rows in the same tick
+        # let SQLite pick arbitrarily (restore chose wrong). rowid grows with insert,
+        # so the newer row wins.
         sql = ("SELECT * FROM conversations WHERE project_path = ? "
                + ("AND timeline_json IS NOT NULL AND length(timeline_json) > 2 "
                   if require_timeline else "")

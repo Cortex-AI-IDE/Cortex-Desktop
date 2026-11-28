@@ -552,13 +552,11 @@ class HealthMapDialog(QDialog):
                 target = str(Path(self._bridge.project_root) / target)
             log.info(f"[HealthMap] open file request: {target}:{line}")
             main = self._find_main_window()
-            # CortexMainWindow exposes the editor through PRIVATE helpers:
-            # _open_file_at_line / _open_file. The public open_file() lives on
-            # EditorTabWidget with a 4-arg (filepath, content, language)
-            # signature, so probing for public names here always fell through
-            # to the "No editor available" toast even though the editor was
-            # one call away. Probe the real names first, keep the public ones
-            # as fallbacks in case the main window ever grows them.
+            # The editor is exposed through PRIVATE helpers _open_file_at_line/_open_file;
+            # the public open_file() lives on EditorTabWidget with a different signature,
+            # so probing public names always fell through to "No editor available" even
+            # though the editor was one call away. Probe the real names first, keep public
+            # ones as fallbacks if main window ever grows them.
             if main is not None and hasattr(main, "_open_file_at_line"):
                 main._open_file_at_line(target, int(line or 0))
             elif main is not None and hasattr(main, "open_file_at_line"):

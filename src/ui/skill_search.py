@@ -140,14 +140,10 @@ def matching_names(skills: List[Dict], query: str) -> List[str]:
     return [s.get("name", "") for s in search(skills, query)]
 
 
-# Prompt time routing (different problem to the menu)
-# The "/" menu takes a deliberate 1-3 word query and AND-matches it: typing
-# more words must narrow 251 skills down. The skill router in the system
-# prompt gets the user's whole sentence instead ("make the landing page
-# animations feel smoother"), where AND-matching returns nothing at all -
-# "make", "the" and "feel" match no skill, so one useless term kills the
-# whole query. Routing therefore scores per term and SUMS, requiring only
-# that something matched.
+# Prompt routing differs from the "/" menu: that takes a 1-3 word query and
+# AND-matches to narrow 251 skills; the system prompt gets the user's whole
+# sentence, where AND-matching returns nothing ("make", "the", "feel" match
+# none, so one useless term kills the query). Score per term and SUM instead.
 
 _STOPWORDS = frozenset("""
 a an and are as at be been but by can could do does doing for from get got
@@ -171,12 +167,10 @@ def rank_for_prompt(skills: List[Dict], text: str,
     if not qs:
         return []
 
-    # Pre-normalise once, then weight each term by how RARE it is. Without
-    # this, "build a pdf report" returned build-isometric-arpg,
-    # build-threejs-enemy-systems, build-game-audio... because "build" is a
-    # name prefix on dozens of skills and swamped the one term that mattered.
-    # A term matching half the library carries almost no signal; one matching
-    # three skills carries most of it.
+    # Pre-normalise once, then weight each term by rarity: without this "build a
+    # pdf report" returned build-isometric-arpg, build-threejs-enemy-systems, etc.
+    # because "build" prefixes dozens of skills and swamped the one useful term.
+    # A term matching half the library carries almost no signal.
     import math
     prepped = []
     for s in skills:

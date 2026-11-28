@@ -121,17 +121,11 @@ class LivePreviewPanel(QWidget):
         self._view = QWebEngineView()
         self._page = _ConsoleCapturePage(self._view)
         self._view.setPage(self._page)
-        # The preview runs pages Cortex did not write: a cloned repo's
-        # index.html, a remote URL. Qt's default lets a file:// page fetch()
-        # ANY other local file, and a security review on 2026-10-23 read
-        # ~/.cortex/auth.json (the login session), settings.json and
-        # C:\Windows\win.ini from a page in this panel; it could then print
-        # them to the console the agent reads back. Turning the first
-        # setting off alone also stopped a file:// page loading its OWN CSS,
-        # scripts and images, so local files are no longer opened as file://
-        # at all: _url_for_file() serves them over http://127.0.0.1 from the
-        # project (or the file's folder), where assets load normally and
-        # file:// is out of reach. These two stay off for anything local.
+        # The preview runs pages Cortex did not write; Qt's default let a file:// page
+        # fetch any local file (2026-10-23 review read auth.json, settings.json,
+        # win.ini). Turning that setting off also broke the page's own assets, so
+        # local files now serve over http://127.0.0.1 from the project folder, with
+        # file:// out of reach. Both settings stay off for anything local.
         from PyQt6.QtWebEngineCore import QWebEngineSettings as _S
         _settings = self._view.settings()
         _settings.setAttribute(_S.WebAttribute.LocalContentCanAccessFileUrls, False)

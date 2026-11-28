@@ -172,14 +172,9 @@ class OpenAIProvider(BaseProvider):
                 else:
                     _body["max_tokens"] = max_tokens
 
-                # ── Reasoning/thinking support for GPT-5.x models ──
-                # GPT-5.4 and newer support interleaved thinking via reasoning_effort.
-                # Nano variants (gpt-5.4-nano) do NOT support reasoning and return 400.
-                # CRITICAL: reasoning_effort + function tools = 400 on Chat Completions.
-                # GPT-5.x requires /v1/responses for tools+reasoning. Only enable
-                # reasoning when NO tools are passed (pure text response turn).
-                # CRITICAL: When reasoning is enabled, GPT-5.x ONLY accepts temperature=1.0
-                # (same constraint as o1/o3 reasoning models). Any other value → 400.
+                # GPT-5.x reasoning: 5.4+ supports reasoning_effort; nano variants 400. CRITICAL:
+                # reasoning_effort + function tools = 400 on Chat Completions (needs /v1/responses),
+                # so enable only when NO tools are passed. When on, temperature must be 1.0.
                 _is_gpt5_nano = model and "nano" in model.lower()
                 from src.agent.src.utils.thinking import get_provider_thinking_config
                 _t_cfg = get_provider_thinking_config("openai")
@@ -331,14 +326,9 @@ class OpenAIProvider(BaseProvider):
                 else:
                     _body["max_tokens"] = max_tokens
 
-                # ── Reasoning/thinking support for GPT-5.x models ──
-                # GPT-5.4 and newer support interleaved thinking via reasoning_effort.
-                # Nano variants (gpt-5.4-nano) do NOT support reasoning and return 400.
-                # CRITICAL: reasoning_effort + function tools = 400 on Chat Completions.
-                # GPT-5.x requires /v1/responses for tools+reasoning. Only enable
-                # reasoning when NO tools are passed (pure text response turn).
-                # CRITICAL: When reasoning is enabled, GPT-5.x ONLY accepts temperature=1.0
-                # (same constraint as o1/o3 reasoning models). Any other value → 400.
+                # GPT-5.x reasoning: 5.4+ supports reasoning_effort; nano variants 400. CRITICAL:
+                # reasoning_effort + function tools = 400 on Chat Completions (needs /v1/responses),
+                # so enable only when NO tools are passed. When on, temperature must be 1.0.
                 _is_gpt5_nano = model and "nano" in model.lower()
                 from src.agent.src.utils.thinking import get_provider_thinking_config
                 _t_cfg = get_provider_thinking_config("openai")
@@ -361,12 +351,9 @@ class OpenAIProvider(BaseProvider):
                     if delta is None:
                         continue
 
-                    # ── Reasoning/thinking content (for thought card / brain-icon UI) ──
-                    # OpenAI models (gpt-5.x, gpt-4.1+, o-series) emit reasoning tokens
-                    # that belong in the brain-icon thought container with chevron, NOT
-                    # in the main chat stream. Routed via __REASONING_DELTA__: matching
-                    # DeepSeek. The agent_bridge emits these to tool_activity with
-                    # type="thinking" which drives the thought card UI.
+                    # OpenAI reasoning tokens belong in the thought card, not the chat stream.
+                    # Routed via __REASONING_DELTA__ (matching DeepSeek); agent_bridge emits
+                    # tool_activity type="thinking" to drive the brain-icon UI.
                     if getattr(delta, 'reasoning_content', None):
                         yield f"__REASONING_DELTA__:{delta.reasoning_content}"
 
@@ -374,14 +361,10 @@ class OpenAIProvider(BaseProvider):
                     if getattr(delta, 'content', None):
                         yield delta.content
 
-                    # ── Tool call deltas ──
-                    # CRITICAL: OpenAI SDK delivers INCREMENTAL arguments per delta
-                    # (e.g. '{"file_path"', ':', '"forLoop.js"', ...). We yield
-                    # ONLY the raw incremental value, NOT the accumulated value.
-                    # The agent_bridge does its own += on each delta. Yielding the
-                    # accumulated value causes double-accumulation → corrupt JSON
-                    # like {"{"file{"file_path{"file_path":"{... seen in terminal.log.
-                    # This matches the DeepSeek pattern.
+                    # OpenAI SDK delivers INCREMENTAL arguments per delta; yield ONLY the raw
+                    # incremental value, not the accumulated one. agent_bridge does its own +=
+                    # so yielding accumulated values double-accumulates into corrupt JSON.
+                    # Matches the DeepSeek pattern.
                     if getattr(delta, 'tool_calls', None):
                         for _tc_delta in delta.tool_calls:
                             _idx = getattr(_tc_delta, 'index', 0)

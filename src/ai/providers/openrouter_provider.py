@@ -166,10 +166,9 @@ def openrouter_supports_vision(model_id: str) -> bool:
     and the listed Qwen text variants are text-only.
     """
     m = (model_id or "").lower()
-    # The router selects a multimodal model when the prompt carries an
-    # image. Reporting it text-only would push pastes down the
-    # subscription-gated OCR path - the exact bug this function exists
-    # to prevent.
+    # Report a model as multimodal when chosen for an image prompt: calling it
+    # text-only would push pastes down the subscription-gated OCR path, the bug
+    # this function exists to prevent.
     if m == "openrouter/auto":
         return True
 
@@ -184,12 +183,9 @@ def openrouter_supports_vision(model_id: str) -> bool:
     )
     if any(m.startswith(p) for p in VISION_PREFIXES):
         return True
-    # Defensive heuristic: a model id that carries a vision marker is vision.
-    # The prefix table above is a closed snapshot and cannot know about models
-    # published after this build ships (e.g. "deepseek/deepseek-v4-flash-vision-exp"
-    # was absent and got forced through the subscription-gated OCR path). The
-    # server config is the authoritative source; this only guards the offline /
-    # pre-fetch window.
+    # Vision-marker heuristic: the prefix table is a closed snapshot and can't know
+    # later models (deepseek/deepseek-v4-flash-vision-exp was absent and forced
+    # through OCR). Server config is authoritative; this guards offline/pre-fetch.
     if "vision" in m:
         return True
     return False
@@ -467,16 +463,11 @@ class OpenRouterProvider(BaseProvider):
                 name         = msg.get("name")
 
                 if isinstance(content, list):
-                    # Preserve OpenAI-style multimodal content. A text-only list is
-                    # collapsed to a plain string (maximum compatibility), but if ANY
-                    # image_url (or other non-text) block is present the list is kept
-                    # intact so the vision model actually receives the image.
-                    # BUG history: this used to flatten EVERY list to text via
-                    # block.get("text"), which silently discarded image_url blocks
-                    # (they have no "text" field). That undid the multimodal payload
-                    # built upstream, so every pasted image sent through OpenRouter
-                    # (Claude, GPT, Grok, Gemini…) reached the model as text-only -
-                    # the model then parroted stale "Subscription Required" history.
+                    # Keep OpenAI-style multimodal content: collapse text-only lists to a string
+                    # for compatibility, but retain lists containing image_url/non-text blocks.
+                    # BUG: flattening every list via block.get("text") discarded images (no text
+                    # field), so all OpenRouter pastes arrived text-only and the model parroted
+                    # stale "Subscription Required" history.
                     _norm_blocks: List[Dict[str, Any]] = []
                     _has_media = False
                     for block in content:
@@ -511,19 +502,10 @@ class OpenRouterProvider(BaseProvider):
                     out["tool_call_id"] = tool_call_id
                 normalized.append(out)
 
-            # Only the opening message may carry role "system". OpenRouter
-            # forwards the array untouched, and the Anthropic family upstream
-            # (Claude direct, Claude on Bedrock, Gemini) rejects the whole
-            # request when a later one appears:
-            #   400 messages.23: role 'system' must precede an 'assistant'
-            #   message or end the array
-            # Cortex does insert them mid-conversation, for the truncated
-            # history marker and for the directives re-injected after
-            # compaction. Alibaba and OpenAI accept that, so it only surfaced
-            # on a failover to OpenRouter (log 2026-08-26 23:39), where the
-            # fallback died instantly and the turn was lost. Fold the late
-            # ones into user turns, which every provider accepts and which
-            # keeps the wording visible to the model.
+            # Only the first message may be role "system": OpenRouter forwards the array
+            # and Anthropic rejects later ones (400). Cortex inserts them mid-conversation
+            # for truncation and post-compaction; Alibaba/OpenAI accept it, but failover to
+            # OpenRouter killed the turn (2026-08-26). Fold late ones into user turns.
             normalized = self._demote_late_system_messages(normalized)
 
             # Strip/drop orphaned tool_calls & tool messages, shared logic,
@@ -649,13 +631,9 @@ class OpenRouterProvider(BaseProvider):
             if k not in ("retry_callback", "max_retries", "retry_notify")
         }
 
-        # ── Image-pipeline diagnostic (only when images are actually in play) ──
-        # This ran unconditionally over EVERY message of EVERY request and
-        # logged a WARNING for each plain-text user message, the normal case.
-        # Measured: 1,224 of 2,504 log lines (49%) in one session, plus the
-        # per-message string formatting and file I/O on every single turn.
-        # A text-only conversation cannot "drop" an image, so there is nothing
-        # to diagnose unless at least one message carries image blocks.
+        # Image diagnostic only when images are in play: it used to run on EVERY
+        # message and warn on normal text, 1,224 of 2,504 log lines (49%) in one
+        # session plus per-turn formatting/I/O. Text chats can't drop an image.
         if any(
             isinstance(_m.get("content"), list)
             and any(isinstance(b, dict) and b.get("type") == "image_url" for b in _m["content"])
@@ -674,11 +652,9 @@ class OpenRouterProvider(BaseProvider):
         sanitized_messages = self._sanitize_messages(messages)
         sanitized_tools    = self._sanitize_tools(api_params.get("tools"))
 
-        # Diagnostic: prove at the LAST possible point before the HTTP call
-        # whether an image actually made it into the payload. Multiple prior
-        # fixes (formatter, sanitizer) each turned out to have a downstream
-        # step that silently dropped images again, so log truth here instead
-        # of trusting earlier "attached"/"supports_vision" log lines.
+        # Prove at the last point before HTTP whether an image made it into the
+        # payload: earlier formatter/sanitizer fixes each had a downstream step that
+        # dropped images again. Log truth here, not earlier "attached" lines.
         for _dm in sanitized_messages:
             if _dm.get("role") == "user" and isinstance(_dm.get("content"), list):
                 _img_n = sum(1 for b in _dm["content"] if isinstance(b, dict) and b.get("type") == "image_url")
@@ -693,19 +669,10 @@ class OpenRouterProvider(BaseProvider):
             "messages": sanitized_messages,
             "stream":   stream,
         }
-        # Models that reject sampling parameters.
-        # This used to test only the "anthropic/" PREFIX, which is an
-        # OpenRouter naming convention. Gateways that use BARE upstream ids
-        # never matched it: a gateway sending BARE ids (gpt-5.6-terra,
-        # sonnet-5, opus-5, haiku) let a GPT-5 request come through with
-        # temperature attached and the API answered
-        #   HTTP 400: Unsupported parameter: 'temperature' is not supported
-        #   with this model
-        # and the whole turn failed. Match on the model FAMILY instead, after
-        # stripping any provider prefix, so the rule holds however the model
-        # is addressed.
-        #   - GPT-5.x are reasoning models and reject temperature outright.
-        #   - Anthropic deprecated it.
+        # Sampling-parameter rejection must match model FAMILY after stripping any
+        # prefix: testing only the "anthropic/" prefix missed gateways using bare ids
+        # (gpt-5.6-terra, sonnet-5), letting temperature through -> HTTP 400 and a lost
+        # turn. GPT-5.x reject temperature outright; Anthropic deprecated it.
         _skip_params = {"tools", "tool_choice"}
         _bare = model.lower().rsplit("/", 1)[-1]
         _no_sampling = (
@@ -725,11 +692,9 @@ class OpenRouterProvider(BaseProvider):
             if tool_choice is not None:
                 payload["tool_choice"] = tool_choice
 
-        # The router picks from candidates satisfying EVERY constraint, so a
-        # max_tokens ceiling only shrinks the pool - and with tools + vision
-        # already narrowing it, the pool came out empty (HTTP 404 "No models
-        # match your request"). There is no specific model to protect here,
-        # so let the chosen one use its own default.
+        # The router picks from candidates satisfying EVERY constraint; a max_tokens
+        # ceiling shrinks the pool, and with tools + vision it went empty (404 "No
+        # models match"). No specific model to protect, so use its own default.
         if model == "openrouter/auto":
             payload.pop("max_tokens", None)
             try:
@@ -767,12 +732,9 @@ class OpenRouterProvider(BaseProvider):
         max_retries    = self._max_retries
         last_error: Optional[Exception] = None
         _fell_back_free = False   # Track if we already fell back from :free → paid model
-        # Must be initialized BEFORE the attempt loop: the ConnectionError
-        # handler reads it, and if the POST itself fails (connection refused,
-        # TLS error…) the in-try assignment below never runs, referencing it
-        # then raised UnboundLocalError ("cannot access local variable
-        # '_yielded_content'"), masking the real network error and killing the
-        # retry logic. Alibaba/MiMo providers already carry this outer guard.
+        # Initialise BEFORE the attempt loop: the ConnectionError handler reads it, and
+        # if POST fails the in-try assignment never runs, causing UnboundLocalError that
+        # masked the network error and killed retries. Alibaba/MiMo already guard this.
         _yielded_content = False
 
         for attempt in range(max_retries + 1):
@@ -799,10 +761,9 @@ class OpenRouterProvider(BaseProvider):
                             log.error(f"[{self.DISPLAY_NAME}] API error: %s", response.text[:1000])
                     response.raise_for_status()
 
-                    # Per-chunk socket timeout, shorter first-chunk timeout (30s)
-                    # prevents free/overloaded models from hanging silently.
-                    # Falls back to HTTP read timeout (now 45s for simple queries) if
-                    # raw socket access fails (varies by OS/urllib3 version).
+                    # Per-chunk socket timeout, shorter first-chunk (30s) so free/overloaded models
+                    # can't hang silently; fall back to HTTP read timeout (45s for simple queries)
+                    # where raw sockets aren't available.
                     _saved_sock_timeout = None
                     _yielded_content = False
                     _reasoning_source_logged = False  # one INFO line per stream
@@ -857,15 +818,9 @@ class OpenRouterProvider(BaseProvider):
                                 log.error(f"[{self.DISPLAY_NAME}] SSE JSON parse error: {e}")
                                 continue
 
-                            # OpenRouter reports the model it actually used on
-                            # every chunk. For a named model that echoes what
-                            # was asked for, but for `openrouter/auto` it is
-                            # the ONLY way to learn which model answered, and
-                            # without it a bad turn cannot be diagnosed: a
-                            # router pick that emits XML-style tool calls
-                            # instead of OpenAI `tool_calls` looks in the log
-                            # exactly like a model that simply chose not to
-                            # call a tool. Logged once per response.
+                            # OpenRouter reports the model used on every chunk. For openrouter/auto that's
+                            # the only way to know which answered; without it a router pick emitting XML
+                            # tool calls looks exactly like a model that chose not to call one. Log once.
                             if model == "openrouter/auto":
                                 _routed = data.get("model")
                                 if _routed and _routed != getattr(self, "_last_routed_model", None):
@@ -874,12 +829,9 @@ class OpenRouterProvider(BaseProvider):
 
                             choices = data.get("choices", [])
                             if not choices:
-                                # usage-only chunk (some models send this at the end)
-                                # `"usage" in data` is not enough: a provider
-                                # may send "usage": null on chunks that carry
-                                # none, and `data["usage"].get(...)` then dies
-                                # mid-stream, losing the whole answer. NVIDIA
-                                # NIM does exactly this on its final chunk.
+                                # Usage-only chunk: `"usage" in data` isn't enough, a provider may send null
+                                # and data["usage"].get(...) dies mid-stream, losing the answer (NVIDIA NIM's
+                                # final chunk does this).
                                 _usage = data.get("usage") or {}
                                 if _usage:
                                     self._token_count["input"]  = _usage.get("prompt_tokens", 0)
@@ -947,10 +899,9 @@ class OpenRouterProvider(BaseProvider):
                                             "arguments": raw_args if isinstance(raw_args, str) else str(raw_args),
                                         },
                                     }
-                                    # Gemini thought signatures ride in extra_content and
-                                    # MUST round-trip, or multi-turn tool calling 400s
-                                    # (missing thought_signature). Only Gemini emits it;
-                                    # the request serializer strips it for non-Google.
+                                    # Gemini thought signatures ride in extra_content and MUST round-trip or
+                                    # multi-turn tool calls 400 (missing thought_signature). Only Gemini emits it;
+                                    # the serializer strips it for non-Google.
                                     if tc.get("extra_content"):
                                         _tc_entry["extra_content"] = tc["extra_content"]
                                     tool_call_data.append(_tc_entry)
@@ -1135,13 +1086,10 @@ class OpenRouterProvider(BaseProvider):
                         "OpenRouter API returned an error (HTTP 400). The server may be temporarily unavailable. "
                         "Try again or switch to a different model."
                     )
-                # Extract clean error message for user display, including the
-                # upstream provider's real reason from metadata.raw (without
-                # this, a region-locked model surfaced only as the useless
-                # "Provider returned error").
-                # A model name the provider does not know: one plain message that
-                # names what it does accept (providers/error_text.py). Google and
-                # the dynamic gateways inherit this handler.
+                # Extract a clean error for display, including the upstream reason from
+                # metadata.raw (without it a region-locked model only said "Provider returned
+                # error"). Unknown model names get one message listing accepted values
+                # (providers/error_text.py); Google and dynamic gateways inherit this.
                 from src.ai.providers.error_text import unknown_model_message
                 _unknown = unknown_model_message(self, payload.get('model', ''), status, _resp_body)
                 if _unknown:
@@ -1273,11 +1221,9 @@ class OpenRouterProvider(BaseProvider):
 
             message_dicts = self._format_messages_for_provider(messages)
 
-            # ── Image-pipeline diagnostic (only when images are in play) ──
-            # Same fix as the PRE-SANITIZE block in _chat_raw: this used to
-            # warn once per message per request on text-only chats, which was
-            # half the log file. Only meaningful when the request carries
-            # images, a text conversation has no image to lose.
+            # Image diagnostic only when images are in play, same fix as PRE-SANITIZE in
+            # _chat_raw: it used to warn per message on text-only chats, half the log file.
+            # A text conversation has no image to lose.
             if any(
                 getattr(_m, "images", None) for _m in messages
             ) or any(

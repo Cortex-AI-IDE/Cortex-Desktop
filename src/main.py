@@ -3,34 +3,18 @@ Cortex AI IDE, Entry Point
 Run with: python src/main.py
 """
 
-# CRITICAL: Apply PyInstaller runtime hooks FIRST
-# Redirects stdout/stderr to NullWriter to prevent OSError [Errno 22]
-# from print(flush=True) in frozen --noconsole builds.
-# This MUST run before ANY other imports or print() calls.
-# Only activate in frozen builds, dev mode needs full console output.
+# Apply PyInstaller runtime hooks FIRST: they redirect stdout/stderr to
+# NullWriter so print(flush=True) can't raise OSError 22 in frozen --noconsole
+# builds. Must precede all imports/prints; frozen only, dev keeps console output.
 import sys as _sys
 import os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
-# A usable temp directory, before anything asks for one.
-# 2026-10-13: Cortex died at startup with a Python traceback in a message box:
-#     [Errno 2] No usable temporary directory found in
-#     ['...\\cortex-setup-tmp', 'C:\\Users\\...\\AppData\\Local\\Temp', ...]
-# It had been launched by the installer, which had been given a temp folder
-# that was deleted when the installer exited - so TEMP and TMP pointed at
-# nothing. Python raises on the FIRST use of tempfile anywhere in the import
-# graph, which is why it surfaced as an unhandled exception rather than a
-# message anyone could act on.
-# TEMP is inherited from whoever started us and can be stale, deleted, or
-# unwritable (a sandboxed parent). None of that is the user's doing and all of
-# it is recoverable: drop a bad value, let Python use its own search list, and
-# fall back to a folder of our own if even that fails.
-# The two reporting helpers live in src/utils/silent.py because
-# main_window.py needs them too. They are imported before get_logger("main")
-# is reached, which is safe: silent.py has no import-time dependencies, so
-# importing it costs nothing and cannot fail on a missing logger or Qt.
-# The underscore aliases are kept so the call sites below, and the detector in
-# tests/test_no_silent_failures.py, read the same as before the extraction.
+# Ensure a usable temp dir before anything asks: the installer launched Cortex
+# with TEMP/TMP pointing at a folder it deleted on exit, so the first tempfile
+# use raised Errno 2. Drop the bad value, let Python use its search list, fall
+# back to our folder. Helpers live in src/utils/silent.py (no import-time deps);
+# underscore aliases keep call sites and the detector test unchanged.
 from src.utils.silent import (  # noqa: E402  (deliberately before Qt)
     bootstrap_warn as _bootstrap_warn,
     warn_once as _warn_once,
@@ -76,11 +60,9 @@ def _ensure_tempdir() -> None:
 
 _ensure_tempdir()
 
-# CRITICAL: Force SelectorEventLoop on Windows BEFORE any asyncio import.
-# Python 3.14 ProactorEventLoop (IOCP) crashes with access violation on
-# Windows when the event loop is destroyed while IOCP ops are pending.
-# SelectorEventLoop uses select() which is safe and avoids the crash.
-# This must run before ANY other imports that may trigger asyncio init.
+# Force SelectorEventLoop on Windows BEFORE any asyncio import: Python 3.14's
+# ProactorEventLoop (IOCP) crashes with an access violation when destroyed with
+# IOCP ops pending. SelectorEventLoop uses select(), which is safe.
 if _sys.platform == 'win32':
     import warnings as _warnings
     _warnings.filterwarnings('ignore', category=DeprecationWarning, message='.*asyncio.*')
@@ -94,10 +76,9 @@ if getattr(_sys, 'frozen', False):
         # --noconsole build, which surfaces as a startup traceback.
         _bootstrap_warn("runtime_hook_noconsole", exc)
 
-# ── --register-file-types / --unregister-file-types ──
-# Adds Cortex to "Open with" and Default apps for this user, for a build run
-# without the installer (see src/core/file_associations.py). Handled before
-# the single-instance check so it also works while Cortex is running.
+# --register/--unregister-file-types adds Cortex to "Open with" and Default apps
+# for a build without the installer (src/core/file_associations.py). Handled
+# before the single-instance check so it works even while Cortex is running.
 if any(_a in ('--register-file-types', '--unregister-file-types') for _a in _sys.argv[1:]):
     from src.core.file_associations import cli as _fa_cli
     _fa_rc, _fa_msg = _fa_cli(_sys.argv[1:])
@@ -108,10 +89,8 @@ if any(_a in ('--register-file-types', '--unregister-file-types') for _a in _sys
         print(_fa_msg)
     _sys.exit(_fa_rc)
 
-# SINGLE-INSTANCE CHECK, BEFORE any heavy imports
-# This runs BEFORE PyQt6, dotenv, or any other slow imports.
-# If another instance is running, bring its window to front and exit
-# immediately, no dialog, no delay.
+# Single-instance check BEFORE heavy imports (PyQt6, dotenv, ...): if another
+# instance is running, bring its window forward and exit immediately, no dialog.
 if _sys.platform == 'win32' and not _os.environ.get('CORTEX_ALLOW_MULTI'):
     try:
         import ctypes
@@ -204,12 +183,10 @@ if _sys.platform == 'win32' and not _os.environ.get('CORTEX_ALLOW_MULTI'):
         # writing to the same SQLite file as the first.
         _bootstrap_warn("single_instance", exc)
 
-# POSIX single instance lock (Linux, macOS)
-# The Windows mutex above does nothing off Windows, so without this branch a
-# second launch runs alongside the first and two processes write the same
-# SQLite database. flock is the POSIX equivalent: the kernel releases it when
-# the process dies, so a crash cannot strand the lock. Files or folders on the
-# command line still reach the running instance through instance_ipc.
+# POSIX lock (Linux/macOS): the Windows mutex does nothing there, so a second
+# launch would run alongside the first and both write the same SQLite DB. flock
+# is kernel-released on death, so a crash can't strand it. CLI paths still reach
+# the running instance via instance_ipc.
 if _sys.platform != 'win32' and not _os.environ.get('CORTEX_ALLOW_MULTI'):
     try:
         from src.core.instance_ipc import (
@@ -310,16 +287,11 @@ except Exception as exc:
     # means every rule they wrote silently stops applying.
     log.debug("[startup] global rules dir not created: %s", exc)
 
-# CRITICAL: Load .env FIRST before ANY other imports, DEVELOPMENT ONLY.
-# Frozen (installed) builds must NEVER read .env files:
-#   - API keys come exclusively from Settings → Models & Providers, stored
-#     encrypted via KeyManager (Windows Credential Manager).
-#   - The provider key loader checks ENVIRONMENT VARIABLES FIRST, so a stray
-#     .env in the install directory silently OVERRIDES whatever the user
-#     saved in Settings, keys appear "not working" with no error anywhere.
-#   - Worse, the old lookup included Path.cwd()/.env: launching Cortex from
-#     inside any project folder swallowed THAT project's .env (its secrets,
-#     its OPENROUTER_API_KEY…) into Cortex's own process.
+# Load .env FIRST, DEVELOPMENT ONLY. Frozen builds must never read .env: keys
+# come from Settings -> Models & Providers (encrypted via KeyManager), and the
+# loader checks env vars first, so a stray .env in the install dir silently
+# overrides saved keys with no error. The old lookup also included Path.cwd()
+# /.env, swallowing any project's own secrets into Cortex's process.
 if getattr(sys, 'frozen', False):
     log.info("Frozen build, .env loading disabled; API keys come from "
              "Settings → Models & Providers (Windows Credential Manager)")
@@ -345,10 +317,9 @@ else:
     except ImportError:
         log.warning("python-dotenv not installed")
 
-# CRITICAL: Kill orphaned Chromium processes BEFORE QApplication creation.
-# Qt starts the Chromium process manager during QApplication init. If old
-# orphaned processes are still running, they conflict with the new ones
-# and cause access violations / heap corruption crashes on second launch.
+# Kill orphaned Chromium processes BEFORE QApplication creation: Qt starts the
+# Chromium process manager during init, and leftover orphans conflict with the
+# new ones, causing access violations/heap corruption on second launch.
 if sys.platform == 'win32':
     try:
         import subprocess as _sp
@@ -409,34 +380,18 @@ os.environ['QT_SCALE_FACTOR_ROUNDING_POLICY'] = 'PassThrough'
 if sys.platform == 'win32':
     os.environ['QT_QPA_PLATFORM'] = 'windows'
     
-# GPU stability. Qt WebEngine runs Chromium's GPU code on a thread inside
-# Cortex.exe ("Chrome_InProcGpuThread") whatever flags are passed, so a
-# graphics-driver crash there ends the whole app: renderProcessTerminated
-# does NOT see it. Store crash report 2026-11 (Windows 11 + NVIDIA): access
-# violation on that thread in d3d11/nvwgf2umx.dll. The defence is the
-# crash-driven fallback in src/core/gpu_compat.py (crash_fallback): after
-# such a crash the next launch uses CPU rendering and asks.
-# Additional crash prevention:
-#   1. Reduced Monaco rendering features (no bracket colorization, smooth scroll, etc.)
-#   2. LSP marker line-number validation (prevents out-of-bounds decoration crash)
-#   3. QWebChannel call throttling and null-safety guards
-#   4. renderProcessTerminated signal handler in webview_panel.py
+# GPU stability: Qt WebEngine runs Chromium's GPU code in-process on Windows
+# (Chrome_InProcGpuThread), so a driver crash ends the app and
+# renderProcessTerminated never sees it (2026-11 NVIDIA d3d11/nvwgf2umx).
+# gpu_compat.crash_fallback switches the next launch to CPU and asks. Also:
+# reduced Monaco features, LSP line-number validation, QWebChannel guards.
+# Plain json here: this runs before Qt is imported.
 
-# NO WINDOWS ERROR DIALOGS FROM CHILD PROCESSES
-# Cortex spawns git, PowerShell and node constantly. When one of them
-# cannot start, Windows puts up a MODAL "The application was unable to
-# start correctly (0xc0000142)" box, and a modal box blocks Cortex until
-# somebody clicks OK. Seen with git.exe: the app appeared to freeze, while
-# the real problem was a dialog waiting for a click.
-# 0xc0000142 is STATUS_DLL_INIT_FAILED, a child that could not initialise
-# its DLLs, which on this kind of machine means the system was out of
-# memory or desktop heap at the moment of the spawn. Suppressing the box
-# does not fix that, it stops one failed spawn from stalling the whole
-# app: the child returns a failure code instead, which the caller can
-# handle and log.
-# The error mode is inherited by every child, which is the point. Set
-# before anything is spawned. GP-fault reporting is deliberately NOT
-# suppressed, so a genuine crash is still visible.
+# Suppress Windows error dialogs from child processes: git/PowerShell/node are
+# spawned constantly, and a failed spawn shows a MODAL 0xc0000142 box that
+# blocks Cortex until clicked (git.exe once froze the app). STATUS_DLL_INIT_FAILED
+# is usually out of memory/desktop heap; the error mode is inherited and set
+# before spawn. GP-fault reporting stays on so real crashes remain visible.
 if sys.platform == 'win32':
     try:
         import ctypes as _ctypes
@@ -447,10 +402,9 @@ if sys.platform == 'win32':
     except Exception as exc:
         log.debug("[startup] error-mode not set: %s", exc)
 
-# CHROMIUM MEMORY GOVERNANCE, Prevent OOM crashes
-# Qt WebEngine (Chromium) has no built-in memory cap and can consume
-# 2-4GB of RAM alone on complex pages (Monaco + AI chat + terminal).
-# These flags cap JS heap and force aggressive GC to prevent OOM.
+# Chromium memory governance: WebEngine has no built-in cap and can use 2-4GB on
+# complex pages (Monaco + chat + terminal). These flags cap the JS heap and force
+# aggressive GC to prevent OOM.
 if not os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS'):
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = (
         '--js-flags="--max-old-space-size=256" '  # Reduced from 512MB to 256MB per renderer
@@ -463,11 +417,10 @@ if not os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS'):
         '--log-level=3 '                            # FATAL only, hides benign GPU spam (ProduceSkia mailbox / uninitialized SharedImage)
         '--no-sandbox '                             # CRITICAL: sandbox init hangs 5-6min on Python 3.14 + Windows
         '--disable-gpu-sandbox '                    # GPU sandbox can cause access violations on Windows
-        # NOTE: never add --in-process-gpu. It saved ~80MB idle RAM but on
-        # some GPU/driver combos (typical office machines) the in-process GPU
-        # thread fails to create a context, every webview (sidebar/editor/
-        # terminal/settings) renders BLANK while Python-side logs look fine.
-        # Dev machines tolerated it; a fresh Win10 install did not (2.7.4).
+        # Never add --in-process-gpu: it saved ~80MB idle but on some GPU/driver combos
+        # (typical office machines) the in-process GPU thread fails to create a context
+        # and every webview paints BLANK while Python logs look fine. Dev machines
+        # tolerated it; a fresh Win10 install did not (2.7.4).
         '--renderer-process-limit=1 '               # ONE shared renderer for all internal pages (sidebar/Monaco/
                                                     # terminal/settings): each extra renderer costs 100-150MB and
                                                     # every page we load is local trusted UI
@@ -476,35 +429,13 @@ if not os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS'):
         '--disable-background-timer-throttling '
     )
 
-# SOFTWARE RENDERING FALLBACK, blank webviews on office machines
-# Symptom this exists for: on some Windows 10 machines (office PCs with old
-# Intel drivers are the classic case) Chromium cannot create a GPU context.
-# Every WebEngine surface, the sidebar, editor.html, terminal.html and the
-# memory-management page, paints BLANK/dark while the Python side logs look
-# perfectly healthy: the pages report loadFinished, the bridges connect, and
-# nothing raises. Only the pixels are missing, which is why this looks like
-# "the app is broken" and not like an error.
-# The same failure class already bit 2.7.4 via --in-process-gpu (see the note
-# above). Removing that flag fixed those machines, but it did not give the
-# app any way to survive a driver that simply cannot hand out a context.
-# SwiftShader renders everything on the CPU, so it works on any machine at
-# the cost of some speed. It is never forced on healthy machines: the
-# decision flows through src/core/gpu_compat.py in this order:
-#   1. CORTEX_SOFTWARE_RENDERING=1 in the environment          -> software
-#   2. settings.json ui.rendering_mode = software|gpu          -> user choice
-#   3. legacy settings.json ui.software_rendering = true       -> software
-#   4. AUTOMATIC hardware detection (the new part):
-#        - only Microsoft Basic Display/Render adapters present -> software
-#          (no real GPU driver installed, blank is guaranteed)
-#        - AMD/ATI adapter with a pre-2017 driver               -> software
-#          (the cohort reported blank on older Win10/11 machines)
-#        - only Intel adapters, with a pre-2017 driver          -> software
-#   5. otherwise                                               -> gpu
-# Uncertain hardware stays on GPU: the runtime WebGL probe in
-# src/ui/render_health.py catches what this heuristic cannot, a few seconds
-# after startup, and offers the same fix with evidence.
-# Settings are read here with plain json rather than the settings module,
-# because this must run BEFORE Qt is imported.
+# Software fallback for blank webviews: old Intel Windows drivers can't create
+# a GPU context, so sidebar/editor/terminal paint BLANK while bridges look
+# healthy. SwiftShader works anywhere at some speed cost, never forced on
+# healthy machines. Decision in gpu_compat.py: CORTEX_SOFTWARE_RENDERING=1;
+# settings ui.rendering_mode; legacy software_rendering; auto-detect (Basic
+# adapters, pre-2017 AMD/Intel); else gpu. Uncertain hardware stays on GPU and
+# render_health.py's WebGL probe offers the fix with evidence. Plain json here.
 if not getattr(sys, 'frozen', False):
     if os.path.dirname(os.path.dirname(os.path.abspath(__file__))) not in sys.path:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -582,13 +513,11 @@ from src.main_window import CortexMainWindow
 
 def main():
 
-    # Capture fatal crashes (e.g., native/Qt segfault) to a persistent log.
-    # This helps diagnose "sudden close" cases that don't raise Python exceptions.
-    # Bound BEFORE the try, because the heartbeat and clean-shutdown paths
-    # further down use it outside any guard. Assigning it inside meant that
-    # if the import or Path.home() failed, startup died on
-    # `NameError: name 'crash_dir' is not defined` instead of reporting the
-    # real cause, and the user could not open the IDE at all.
+    # Capture fatal crashes (native/Qt segfault) to a persistent log for "sudden
+    # close" cases that raise no Python exception. Bind crash_dir BEFORE the try:
+    # the heartbeat and clean-shutdown paths below use it outside any guard, and
+    # assigning it inside made an import/Path.home() failure die with NameError
+    # instead of reporting the real cause.
     crash_dir = Path.home() / ".cortex"
 
     try:
@@ -609,21 +538,16 @@ def main():
                 _crash_fp.write(_old[-1_000_000:])
         except Exception as exc:
             log.debug("[CRASH] crash.log not truncated: %s", exc)
-        # NOT `faulthandler.enable` - the module is imported under an alias
-        # above and the bare name is never bound, so this raised NameError,
-        # the surrounding except swallowed it, and BOTH this call and the
-        # old dump_traceback_later timer never ran. Native segfault capture and
-        # hang detection were silently off. crash.log looked healthy the
-        # whole time because the explicit pre-exec dump further down does its
-        # own import: 339 dumps in the file, every one from that one place,
-        # and zero fatal-crash signatures.
+        # Don't call faulthandler.enable: the module is imported under an alias, so the
+        # bare name was never bound and this raised NameError, swallowed by the except,
+        # silently disabling native segfault capture and the old dump_traceback_later
+        # timer. crash.log looked healthy because the explicit pre-exec dump below does
+        # its own import (339 dumps, all from there, zero fatal-crash signatures).
         _faulthandler.enable(file=_crash_fp, all_threads=True)
-        # No dump_traceback_later timer. Its watchdog thread walks every
-        # thread's frames without the GIL while they keep running, and on
-        # 2026-09-13 19:34:56 it crashed Cortex (access violation in
-        # python314.dll) mid-way through dumping the AI stream thread.
-        # Hangs are covered by ui_stall_detector, which reads the GUI
-        # thread's stack safely via sys._current_frames().
+        # No dump_traceback_later timer: its watchdog walked every thread's frames
+        # without the GIL while they ran, and on 2026-09-13 19:34:56 it crashed Cortex
+        # (python314.dll access violation) mid-dump of the AI stream thread. Hangs are
+        # covered by ui_stall_detector, which reads the GUI stack via sys._current_frames.
         log.info(f"[CRASH] faulthandler enabled -> {crash_path}")
     except Exception as e:
         log.debug(f"[CRASH] faulthandler not enabled: {e}")
@@ -637,10 +561,8 @@ def main():
     except Exception as e:
         log.warning(f"[STABILITY] Could not start stability engine: {e}")
 
-    # PROCESS RSS MONITOR, Soft memory limit with graceful degradation
-    # Monitors this process's RSS (Resident Set Size) and triggers
-    # emergency compaction when it exceeds a threshold. This prevents
-    # the OS OOM-killer from terminating the IDE process.
+    # RSS monitor with graceful degradation: trigger emergency compaction above a
+    # threshold so the OS OOM-killer doesn't terminate the IDE.
     _max_rss_mb = 2000  # Default: 2GB soft cap (was 500MB, too low for AI streaming + WebEngine)
     try:
         for _i, _arg in enumerate(sys.argv):
@@ -706,10 +628,8 @@ def main():
                 return  # psutil not available, can't monitor
             while True:
                 try:
-                    # Every 5 min, owner request (2026-09-13): one [MEM] line in
-                    # cortex.log, so a crash can be matched against memory
-                    # growth. Reading and logging only; nothing here throttles
-                    # or slows the app (owner decision 2026-07-23).
+                    # Log one [MEM] line every 5 min (owner 2026-09-13) so a crash can be matched
+                    # against memory growth. Read/log only, no throttling (owner 2026-07-23).
                     _time.sleep(300.0)
                     try:
                         _rss_mb = _proc.memory_info().rss / (1024 * 1024)
@@ -732,10 +652,9 @@ def main():
                                 f"[RSS-MONITOR] Process RSS {_rss_mb:.0f}MB exceeds {max_mb}MB threshold, "
                                 f"triggering emergency compaction"
                             )
-                        # Request GC on the GUI thread, collecting HERE
-                        # (daemon thread) can finalize QObjects on the
-                        # wrong thread and crash the app. At most hourly, as
-                        # when this loop itself only ran hourly.
+                        # Request GC on the GUI thread: collecting HERE (daemon thread) can finalize
+                        # QObjects on the wrong thread and crash. At most hourly, as this loop used to
+                        # run hourly.
                         if _time.time() - _last_gc_request >= 3600.0:
                             _last_gc_request = _time.time()
                             try:
@@ -769,11 +688,10 @@ def main():
     
     app = QApplication(sys.argv)
 
-    # Qt's own C++ warnings (QTextHtmlParser, QtWebChannel's "JSON message
-    # object is missing") reach fd 2 directly and never pass through Python's
-    # sys.stderr, so the stderr wrapper in src/utils/logger.py cannot see
-    # them. A Qt message handler drops them on every platform without
-    # redirecting a descriptor, so print() and child processes keep working.
+    # Qt's C++ warnings (QTextHtmlParser, "JSON message object is missing") go to fd 2
+    # directly and bypass Python's sys.stderr, so logger.py can't see them. A Qt
+    # message handler drops them on all platforms without redirecting a descriptor,
+    # keeping print() and child processes working.
     try:
         from src.utils.logger import install_qt_message_filter
         install_qt_message_filter()
@@ -808,24 +726,19 @@ def main():
     except Exception as _ct_exc:
         log.warning(f"[ColorTheme] not applied: {_ct_exc}")
 
-    # Native right-click menus, including the ones Chromium builds inside
-    # every QWebEngineView, are Qt widgets that no page CSS can reach.
-    # They used to keep the STARTUP theme forever, because the app-wide
-    # QSS is applied exactly once here and never reapplied (re-polishing
-    # the web views was measured at 75+s), so after switching to light
-    # every menu stayed a dark card with dark text. Installed on the
-    # application so no view can be missed, and each menu is styled as it
-    # is polished, which is always with the theme in effect right then.
+    # Native right-click menus (including Chromium's) are Qt widgets CSS can't
+    # reach; they kept the STARTUP theme because app-wide QSS is applied once at
+    # startup and never reapplied (re-polishing web views cost 75+s). Install on
+    # the application and style each menu as it's polished, with the live theme.
     try:
         from src.ui.native_menu import install_global_menu_theming
         install_global_menu_theming(app)
     except Exception as _menu_err:
         log.warning(f"[THEME] Global menu theming not installed: {_menu_err}")
 
-    # ── Global QPalette, the BASE palette under everything QSS doesn't
-    # cover (tooltips, native dialogs, combo popups). Must match the SAVED
-    # theme: this used to force dark unconditionally, so in light mode any
-    # unstyled surface leaked dark chrome. "system" resolves via the OS.
+    # Global QPalette is the base under what QSS doesn't cover (tooltips, native
+    # dialogs, combo popups). Must match the SAVED theme: it used to force dark, so
+    # light mode leaked dark chrome. "system" resolves via the OS.
     from PyQt6.QtGui import QPalette, QColor
     try:
         from src.config.settings import get_settings as _get_settings
@@ -965,10 +878,9 @@ def main():
     log.info("Starting Cortex AI IDE...")
     _profile("pre_window_init")
 
-    # CRITICAL: Clean stale Chromium GPU cache on startup.
-    # After a crash, Chromium leaves corrupted GPU shader cache files.
-    # On next launch, loading these corrupted files causes heap corruption
-    # and access violations. Deleting them forces Chromium to regenerate.
+    # Clean stale Chromium GPU cache on startup: after a crash Chromium leaves
+    # corrupted shader cache files whose reload causes heap corruption and access
+    # violations next launch. Deleting forces regeneration.
     if sys.platform == 'win32':
         try:
             import shutil as _shutil
@@ -979,14 +891,10 @@ def main():
         except Exception as exc:
             log.debug("[STARTUP] .QtWebEngine GPU cache not cleaned: %s", exc)
 
-    # PRE-WARM: Cache rg.exe to stable location before first Grep call
-    # In frozen builds, rg.exe lives in _MEIPASS (temp dir). Running it
-    # from there triggers Windows Defender scans (5-20s latency per call).
-    # Pre-copying to LOCALAPPDATA/Cortex/bin/ eliminates this overhead.
-    # ── PRE-WARM: Cache rg.exe to LOCALAPPDATA/Cortex/bin/ and spawn rg --version ──
-    # Running rg --version once at startup makes Windows Defender cache its trust.
-    # Subsequent Grep calls skip the 5-20s Defender scan and complete in <100ms.
-    # Works in BOTH dev and frozen builds. The daemon thread never blocks the UI.
+    # Pre-warm rg.exe: in frozen builds it lives in _MEIPASS, and running it there
+    # triggers Defender scans (5-20s per Grep). Copy to LOCALAPPDATA/Cortex/bin and
+    # spawn rg --version once to cache trust, so later calls finish <100ms. Works in
+    # dev and frozen builds; the daemon thread never blocks the UI.
     try:
         from src.agent.src.tools.grep_tool.grep_tool import prewarm_ripgrep
         prewarm_ripgrep()
@@ -994,10 +902,9 @@ def main():
     except Exception as e:
         log.debug(f"[PRE-WARM] Skipped: {e}")
 
-    # ── PRE-WARM: open the crash store off the GUI thread ──
-    # Session restore needs it, and the first PRAGMA journal_mode=WAL on
-    # cortex.db held the GUI thread for 1.9s (UI-STALL 2026-10-30 14:18:06).
-    # Opened here, restore finds it ready, or waits only for what is left.
+    # Pre-warm the crash store off the GUI thread: session restore needs it, and the
+    # first PRAGMA journal_mode=WAL on cortex.db held the GUI 1.9s (UI-STALL
+    # 2026-10-30 14:18:06). Open here so restore finds it ready.
     try:
         import threading as _crash_thr
         from src.core.crash_persistence import get_crash_store
@@ -1006,12 +913,9 @@ def main():
     except Exception as e:
         log.debug(f"[PRE-WARM] Crash store not opened early: {e}")
 
-# PRE WARM: pypdfium2 (PDFium) import
-    # The pypdfium2 import chain loads a native PDFium library, which takes
-    # 10-40s on OneDrive-dehydrated files and frozen builds.
-    # Pre-importing in a daemon thread at startup means the module is
-    # already cached in sys.modules by the time the user opens a PDF,
-    # making the import instant (dict lookup only).
+# Pre-warm pypdfium2: its native PDFium import takes 10-40s on OneDrive-dehydrated
+# files and frozen builds. Pre-import in a daemon thread so opening a PDF is just
+# a sys.modules lookup.
     try:
         import threading
         def _prewarm_pdfium():
@@ -1024,13 +928,10 @@ def main():
     except Exception as e:
         log.debug(f"[PRE-WARM] pypdfium2 pre-warm skipped: {e}")
 
-    # LOGIN GATE, Cortex requires an account
-    # Decided from the SAVED session only - see src/core/login_gate.py. No
-    # network call happens here on purpose: asking the server whether the
-    # token is good would mean that a slow, unreachable or mid-deploy
-    # cortex-ide.app locks every user out of an editor that works offline.
-    # An expired token still opens the app and refreshes behind the window;
-    # the server re-checks the token on every API call anyway, which is the
+    # Login gate decided from the SAVED session only (src/core/login_gate.py): no
+    # network call, or a slow/unreachable/mid-deploy cortex-ide.app would lock
+    # everyone out of an editor that works offline. An expired token still opens the
+    # app and refreshes behind the window; the server re-checks every API call, the
     # right place for a revoked session to fail.
     try:
         from src.core.login_gate import evaluate as _gate_eval, refresh_in_background
@@ -1046,10 +947,9 @@ def main():
             from src.ui.dialogs.login_dialog import require_login
             if not require_login():
                 log.info("[LoginGate] sign-in cancelled, exiting")
-                # Not sys.exit(): Python's full teardown destroyed the
-                # sign-in worker thread while it was still running and Qt
-                # aborted ("Fatal Python error: Aborted", Linux crash.log
-                # 2026-10-30, main.py login gate). See _exit_without_teardown.
+                # Don't sys.exit(): full teardown destroyed the still-running sign-in worker and
+                # Qt aborted ("Fatal Python error: Aborted", Linux crash.log 2026-10-30).
+                # Use _exit_without_teardown instead.
                 _exit_without_teardown(0)
             _gate = _gate_eval()          # re-read what the login just wrote
         if _gate.should_refresh:
@@ -1067,10 +967,9 @@ def main():
     _profile("window_created")
     # window.show() is now called in __init__
 
-    # No Pro offer card at startup (removed 2026-10-20, owner decision): it
-    # opened over the IDE on every launch of a free account. The same card
-    # stays available on request from Help -> Upgrade to Pro
-    # (main_window, subscription_offer.maybe_show_offer(force=True)).
+    # No Pro offer card at startup (removed 2026-10-20, owner decision): it opened
+    # over the IDE on every free-account launch. Still available on request via
+    # Help -> Upgrade to Pro (subscription_offer.maybe_show_offer(force=True)).
 
     # SHUTDOWN HARDENING, Emergency save on force-kill / crash
     
@@ -1108,10 +1007,9 @@ def main():
         except Exception as e:
             log.warning(f"[SHUTDOWN] Failed to flush settings: {e}")
 
-        # ── 3. Persist chat history, CRITICAL: chats must survive ANY crash ──
-        # Skip if main_window's closeEvent already saved + flushed DB (prevents
-        # duplicate JS saves that race and lose messages). This is the normal
-        # path on clean close, closeEvent runs first, then aboutToQuit fires.
+        # Persist chat history so chats survive any crash. Skip if main_window.closeEvent
+        # already saved + flushed DB (avoids duplicate racing JS saves that lose
+        # messages); that is the normal clean close, closeEvent then aboutToQuit.
         if getattr(window, '_shutdown_save_done', False):
             log.debug(f"[SHUTDOWN] Chat already saved by closeEvent, skipping (reason: {reason})")
         else:
@@ -1189,15 +1087,11 @@ def main():
     _auto_save_timer.start(30_000)  # 30 seconds
     log.info("[AUTO-SAVE] Periodic snapshot timer started (every 30s)")
 
-    # ── Prune the tool-result cache ──
-    # tool_result_storage.cleanup_old_results() has always existed and was
-    # never called from anywhere, so the cache only ever grew: 468 files and
-    # 1,126 MB in %APPDATA%\Cortex\tool-results-cache before this, on a
-    # machine with under a gigabyte of free RAM. The function's own 24 hour
-    # retention removed 467 of those files, so the policy was right and
-    # simply had no caller.
-    # Deferred rather than run inline: it stats every file in the directory,
-    # and startup is already the slowest moment. 5s is past the first frame.
+    # Prune the tool-result cache: cleanup_old_results() existed but had no caller,
+    # so the cache grew to 468 files / 1,126 MB in %APPDATA%\Cortex\tool-results-cache
+    # on a machine with under 1GB free RAM. Its 24h retention removed 467, so the
+    # policy was right and only lacked a caller. Defer 5s (past first frame): it
+    # stats every file and startup is already slow.
     def _prune_tool_cache():
         try:
             from src.ai.tool_result_storage import cleanup_old_results
@@ -1209,32 +1103,24 @@ def main():
 
     QTimer.singleShot(5_000, _prune_tool_cache)
 
-    # ── Stability pump, GUI-thread executor for the stability engine ──
-    # The monitor thread only SETS flags (see stability_engine._handle_pressure);
-    # gc.collect() and saves must run here on the GUI thread. Running them on
-    # the monitor thread held the GIL mid-repaint (UI freeze) and could
+    # Stability pump runs on the GUI thread: the monitor only SETS flags
+    # (stability_engine._handle_pressure), while gc.collect() and saves must run
+    # here. On the monitor thread they held the GIL mid-repaint (freeze) and could
     # finalize QObjects from the wrong thread (crash).
     def _stability_pump() -> None:
-        # Both jobs below block the GUI thread, and both are triggered by
-        # memory pressure, which is exactly what a running agent creates. That
-        # is why typing into the terminal went slow mid-run: measured 2.2s of
-        # frozen input right after "Pressure snapshot saved (GUI thread)".
-        # They stay on the GUI thread, for the reasons above. What changes is
-        # WHEN they run: never while the agent is mid-turn, and never both in
-        # the same tick. Delaying a pressure snapshot by one 15s tick costs
-        # nothing; freezing the UI while someone is typing costs them the
-        # keystroke.
+        # Both jobs below block the GUI and are triggered by memory pressure, exactly
+        # what a running agent creates (typing froze 2.2s after "Pressure snapshot").
+        # They stay on the GUI thread; what changes is WHEN: never mid-turn, never
+        # both in one tick. Delaying a snapshot one tick costs nothing; freezing while
+        # someone types loses a keystroke.
         import time as _t
         try:
             from src.core.stability_engine import get_stability_engine
             _engine = get_stability_engine()
 
-            # Defer entirely while a turn is in flight. The engine's flags are
-            # sticky, so nothing is lost, it just happens once the agent is
-            # idle.
-            # _agentic_turn_active, NOT the worker's _is_running: that one is
-            # true for the whole life of the worker thread, so using it would
-            # have switched this pump off permanently instead of deferring it.
+            # Defer entirely while a turn is in flight; the engine's flags are sticky, so
+            # nothing is lost. Check _agentic_turn_active, NOT the worker's _is_running:
+            # that stays true for the worker's whole life and would disable this permanently.
             try:
                 from src.ai.agent_bridge import get_agent_bridge
                 _b = get_agent_bridge()
@@ -1283,10 +1169,9 @@ def main():
     _stability_pump_timer.start(60_000)  # 60s, monitor sets flags at most hourly now
     log.info("[STABILITY] GUI-thread pump started (every 5s)")
 
-    # CRASH HEARTBEAT, Detect unclean shutdowns on next startup
-    # Write a heartbeat file every 3 seconds during normal operation.
-    # On startup, if the heartbeat exists without a clean-shutdown
-    # marker, we know the IDE crashed and can offer session recovery.
+    # Crash heartbeat: write a file every 3s during normal operation. If startup
+    # finds it without a clean-shutdown marker, the IDE crashed and can offer
+    # session recovery.
     _heartbeat_path = crash_dir / "heartbeat.lock"
     _clean_shutdown_path = crash_dir / "clean_shutdown.marker"
     # Check if we had a clean shutdown last time
@@ -1358,15 +1243,11 @@ def main():
             _auto_save_timer.stop()
         except Exception:  # silent-ok: the quit below still runs
             pass
-        # NOT sys.exit(0). Python runs this handler inside whatever Qt
-        # callback is active (main_window.event, a streaming chunk slot...),
-        # and a SystemExit raised there makes Python do its FULL teardown:
-        # it destroyed the chat's still-running render thread and Qt aborted
-        # (Linux crash.log: "Received SIGTERM" then "Fatal Python error:
-        # Aborted" in Py_Exit, 2026-10-31, 11-03, 11-19). Ask Qt to quit
-        # instead: app.exec() returns, aboutToQuit stops the threads, and
-        # main() leaves through _exit_without_teardown. If the event loop
-        # is stuck, a watchdog ends the process after 5 seconds.
+        # Don't sys.exit(0): Qt runs this handler inside an active callback (main_window.
+        # event, a streaming slot) and SystemExit triggers full teardown, destroying the
+        # chat's render thread and aborting (Linux crash.log 2026-10-31/11-03/11-19).
+        # Ask Qt to quit so app.exec() returns, aboutToQuit stops threads, and main()
+        # exits via _exit_without_teardown. A 5s watchdog ends a stuck loop.
         try:
             _qapp = QApplication.instance()
             if _qapp is not None:
@@ -1388,10 +1269,9 @@ def main():
     except Exception as e:
         log.warning(f"[SHUTDOWN] Could not install signal handlers: {e}")
 
-    # Paths on the command line: double-click on an associated file, "Open
-    # with Cortex IDE" on a file or folder, a drop on the icon. The first
-    # folder becomes the project; every file opens in a tab. Later launches
-    # hand their paths to this instance (src/core/instance_ipc.py).
+    # CLI paths: double-click on an associated file, "Open with Cortex IDE" on a
+    # file/folder, or a drop on the icon. First folder becomes the project, every
+    # file opens in a tab; later launches hand paths over via src/core/instance_ipc.
     def _open_launch_paths(paths):
         folder_opened = False
         for p in paths:
@@ -1439,12 +1319,10 @@ def main():
     QTimer.singleShot(3000, lambda: log.debug("Main: Loop is ALIVE! (3s check)"))
     
     try:
-        # Freeze the startup object graph before the event loop takes over.
-        # The stability pump's pressure-triggered gc.collect() held the GUI
-        # thread for 3041 ms (2026-10-27 13:37:25): with 1.3 GB resident the
-        # full sweep walks every long-lived Qt and bridge object on every
-        # collect. gc.freeze() moves everything alive now into a permanent
-        # generation that later collections skip, so a collect only sweeps
+        # Freeze the startup object graph before the event loop: the stability pump's
+        # pressure-triggered gc.collect() held the GUI 3041ms (2026-10-27 13:37:25),
+        # walking every long-lived Qt/bridge object at 1.3GB resident. gc.freeze() moves
+        # them to a permanent generation later collections skip, so collect only sweeps
         # what the session created after this point. No behaviour change.
         try:
             import gc as _gc

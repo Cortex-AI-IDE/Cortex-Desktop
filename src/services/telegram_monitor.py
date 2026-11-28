@@ -75,20 +75,18 @@ PAIR_TTL_S = 3600.0
 PAIR_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 PAIR_LEN = 8
 
-# Refusals are answered with a marker, not an empty string: the Settings panel
-# has to tell "you have no token yet" apart from "a chat already holds this
-# bot", and a blank code can only say "something failed". No marker can collide
-# with a real code, because PAIR_ALPHABET holds no "!".
+# Refusals get a marker, not an empty string: Settings must tell "no token yet"
+# from "a chat already holds this bot". No marker can collide with a real code
+# because PAIR_ALPHABET has no "!".
 PAIR_REFUSED_NO_TOKEN = "!no-token"
 PAIR_REFUSED_ALREADY_PAIRED = "!already-paired"
 PAIR_REFUSED_NO_SUBSCRIPTION = "!no-subscription"
 
-# Telegram ships with the subscription, like OCR, embeddings and web search, so
-# it uses the SAME verdict they do: CortexAPIClient.has_subscription(). There is
-# no Telegram-specific entitlement rule. A plan that lapses freezes this bot at
-# the same moment it freezes the rest of Cortex, and a renewal unfreezes both.
-# The check reads the saved account copy, so it answers offline; it is cached
-# for ENTITLEMENT_TTL_S because it sits on every network path.
+# Telegram ships with the subscription (like OCR/embeddings/web search), so use
+# CortexAPIClient.has_subscription(): no Telegram-specific entitlement. A lapsed
+# plan freezes this bot with the rest, renewal unfreezes both. The check reads
+# the saved account copy (offline) and is cached ENTITLEMENT_TTL_S since it's on
+# every network path.
 SUB_REQUIRED_REASON = "Telegram needs a Cortex subscription"
 
 # How long one entitlement verdict is reused. Every outbound send, poll and
@@ -110,12 +108,10 @@ PAIR_GROUP_REFUSED = (
     "Group members share one chat, so anyone in it could run prompts."
 )
 
-# A wrong code used to be answered with nothing at all, on the reasoning that an
-# error reply confirms the bot exists. That reasoning only holds for a stranger.
-# It is wrong for the owner, who has just pressed Show code: their own typo
-# produced total silence, which reads as a broken bot rather than a bad paste.
-# These are said only inside an active pairing window, so the stranger rule is
-# intact everywhere else.
+# A wrong code used to get silence (to avoid confirming the bot to strangers),
+# but that's wrong for the owner who just pressed Show code: their typo looked
+# like a dead bot. Answer only inside an active pairing window, so strangers
+# still get silence elsewhere.
 PAIR_WRONG_CODE = (
     "That code does not match. Check the code shown in Cortex and send it "
     "again as /pair CODE."
@@ -227,12 +223,10 @@ INBOUND_HELP = (
     "Approvals are still given in Cortex, on the computer."
 )
 
-# Questions the agent asks. A question message lists the options, numbered,
-# with one button each; a reply of "2" picks option 2 and any other text is a
-# custom answer. The answer reaches the same card the computer shows, so the
-# two can never disagree: whichever answers first wins, and the other side is
-# told. Only with prompts allowed, because an answer steers the run as much as
-# a prompt does.
+# Agent questions list numbered options with one button each; "2" picks option
+# 2, other text is a custom answer. The answer reaches the same card the
+# computer shows, so whichever side answers first wins; only with prompts
+# allowed, because answering steers the run like a prompt.
 QUESTION_FOOTER_ANSWERABLE = "Reply with a number, or type your own answer."
 QUESTION_FOOTER_LOCAL_ONLY = (
     "Answer in Cortex. To answer from here, turn on Allow prompts in "
@@ -274,11 +268,10 @@ INBOUND_QUEUE_DROPPED_REPLY = (
     "when you want it."
 )
 
-# A picture is downloaded here and handed to the same vision pipeline a pasted
-# image uses. The cap keeps one upload from becoming a multi-megabyte base64
-# string on the poller thread and again in the agent's history. Telegram
-# recompresses a photo to well under this, so only a deliberate oversized
-# upload is refused.
+# Downloaded pictures use the same vision pipeline as pasted images. The cap
+# stops one upload becoming a multi-MB base64 string on the poller thread and
+# again in history; Telegram recompresses photos well under it, so only
+# deliberate oversized uploads are refused.
 INBOUND_MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
 # Telegram re-encodes every photo to JPEG before getFile can reach it.
@@ -308,10 +301,9 @@ INBOUND_NO_VISION_REPLY = (
 # small enough that a burst cannot pile up multi-megabyte blobs in memory.
 INBOUND_MAX_VOICE_BYTES = 4 * 1024 * 1024
 
-# Voice notes are transcribed by the same server call the mic button uses,
-# which is slow and billed (Malayalam needed tens of seconds in testing).
-# Past this length the honest move is to refuse before downloading: a
-# 40-minute note would hold the queue and spend money on nothing usable.
+# Voice notes use the same slow, billed server call as the mic button (Malayalam
+# took tens of seconds). Past this length refuse before downloading: a 40-minute
+# note would hold the queue and spend money on nothing usable.
 INBOUND_MAX_VOICE_SECONDS = 180
 
 # Telegram delivers voice notes as OGG/Opus and does not re-encode them.
@@ -392,11 +384,9 @@ def voiced_update(message: dict, text: str) -> dict:
             "from": message.get("from") or {},
             "date": message.get("date"),
             "text": text,
-            # Marks this as the second pass through the prompt path. The note
-            # was already checked for age when it was queued; transcription
-            # can take most of a minute, and that wait is not a backlog. Without
-            # this a slow Malayalam transcript would age past the stale limit
-            # and be dropped after being understood correctly.
+            # Mark the second pass through the prompt path: age was checked when queued,
+            # but transcription can take most of a minute. Without this a slow Malayalam
+            # transcript aged past the stale limit and was dropped after being understood.
             "voice_transcript": True,
         },
     }
@@ -1359,17 +1349,15 @@ class TelegramMonitor:
         self._poll_interval = float(poll_interval_s)
         self._on_prompt = on_prompt
         self._is_busy = is_busy
-        # Subscription verdict. None means no policy is wired, which is the
-        # case for this module's own tests: the monitor is transport, the
-        # application decides who may use it, and get_monitor() always wires
-        # the real check. See _entitled().
+        # Subscription verdict: None means no policy wired (this module's own tests);
+        # the monitor is transport, the app decides who may use it, and get_monitor()
+        # always wires the real check. See _entitled().
         self._is_subscribed = is_subscribed
         self._entitled_verdict = False
         self._entitled_at: Optional[float] = None
-        # Questions the agent asked that Telegram has been shown, oldest
-        # first: question_id -> {token, options, chat_id, message_id, body,
-        # asked_at, remote_answer}. Written by the worker (on send) and the
-        # poller (on a reply), so every touch is under _lock.
+        # Telegram-shown agent questions, oldest first: question_id -> {token, options,
+        # chat_id, message_id, body, asked_at, remote_answer}. Written by worker (send)
+        # and poller (reply), so every touch holds _lock.
         self._questions: dict = {}
         # Where a phone's answer goes: (question_id, answer). Runs on the
         # poller thread, so the GUI side hands it on as a queued Qt signal.
@@ -1460,11 +1448,9 @@ class TelegramMonitor:
         return verdict
 
     def _ensure_client(self) -> Optional[TelegramClient]:
-        # The single choke point every network path passes through, so it is
-        # also where the subscription gate lives: no subscription, no client,
-        # therefore no getUpdates, no message and no upload. Checked before the
-        # cached client is returned, or a plan that lapsed mid-session would
-        # keep sending through the client it already built.
+        # Choke point for every network path, and where the subscription gate lives: no
+        # subscription, no client, hence no getUpdates/message/upload. Check BEFORE
+        # returning the cached client, or a plan lapsing mid-session would keep sending.
         if not self._entitled():
             return None
         if self._client is not None:
@@ -1578,10 +1564,8 @@ class TelegramMonitor:
             log.debug("[Telegram] Enqueue failed: %s", type(e).__name__)
             self.stats["dropped"] += 1
 
-# GUI signal slots
-    # Each one builds a tiny dict and nothing else: no str(), no json.loads(),
-    # no regex over caller text. Tests assert this by passing objects whose
-    # __str__ raises.
+# GUI slots build a tiny dict and nothing else: no str(), json.loads() or regex
+# over caller text. Tests assert this with objects whose __str__ raises.
 
     def on_request_started(self, project: str = "") -> None:
         self.enqueue({"kind": _STARTED, "project": project})
@@ -1907,10 +1891,9 @@ class TelegramMonitor:
                 return
             if self._ensure_client() is None:
                 if self._is_subscribed is not None and not self._entitled():
-                    # A paid feature that lapsed. Stay alive but silent and
-                    # retry slowly, so a renewal resumes the bot on its own
-                    # instead of needing a restart. The entitlement cache is
-                    # shorter than this wait, so every pass asks again.
+                    # A lapsed paid feature stays alive but silent, retrying slowly so renewal
+                    # resumes the bot without a restart. The entitlement cache is shorter than the
+                    # wait, so every pass asks again.
                     stop_event.wait(PAIR_POLL_MAX_S)
                     continue
                 return
@@ -1955,10 +1938,9 @@ class TelegramMonitor:
             chat_id = (message.get("chat") or {}).get("id")
             text = message.get("text") or ""
             if not self._is_private_chat(message.get("chat")):
-                # A group shares one chat id between every member, so pairing
-                # there would hand the agent to all of them. The code is left
-                # unspent, so an honest paste into the wrong chat costs nothing
-                # but one message.
+                # A group shares one chat id among members, so pairing there would hand the
+                # agent to all of them. Leave the code unspent: an honest wrong-chat paste costs
+                # one message.
                 if chat_id not in (None, "") and _PAIR_CMD_RE.match(text.strip()):
                     if self._client:
                         self._client.send_text(str(chat_id), PAIR_GROUP_REFUSED)
@@ -2000,10 +1982,9 @@ class TelegramMonitor:
                     except Exception as e:
                         log.error("[Telegram] on_paired callback failed: %s", type(e).__name__)
                 return True
-            # Silence is still the default, but not while a code is outstanding
-            # from this desktop: the owner typing their own code wrong must be
-            # told, or a typo looks exactly like a dead bot. answer_for_miss
-            # keeps a stranger silent and the number of answers bounded.
+            # Silence is default, except while a code is outstanding from this desktop: the
+            # owner typing it wrong must be told, or a typo looks like a dead bot.
+            # answer_for_miss keeps strangers silent and answers bounded.
             reply = self._pairing.answer_for_miss(text, chat_id, now)
             if reply:
                 if self._client:
@@ -2011,10 +1992,9 @@ class TelegramMonitor:
                 log.info("[Telegram] A pairing attempt did not match the pending code")
         return False
 
-# inbound prompts
-    # A prompt may start a run or answer the question the agent asked. It may
-    # never approve a permission card: that stays in Cortex, on the computer.
-    # Everything below is a refusal first and a feature second.
+# Inbound prompts may start a run or answer an agent question, but NEVER approve
+# a permission card (that stays on the computer). Everything below is a refusal
+# first and a feature second.
 
     @staticmethod
     def _is_private_chat(chat) -> bool:
@@ -2407,11 +2387,9 @@ class TelegramMonitor:
             return 0
         moment = time.time() if now is None else now
         if not self._entitled():
-            # Checked once per batch, after the cheap settings tests. Nothing
-            # is sent back: replying would need the very network access the
-            # gate is refusing, and a bot that keeps answering "you cannot use
-            # me" is still a bot that answers. One line per window in the log,
-            # so the reason is findable without a flood.
+            # Check once per batch after cheap settings tests. Send nothing back: replying
+            # needs the network the gate refuses, and a bot that keeps saying "you cannot
+            # use me" is still a bot that answers. One log line per window, not a flood.
             if moment - self._last_sub_warn > INBOUND_RATE_WINDOW_S:
                 self._last_sub_warn = moment
                 log.info("[Telegram] Ignored prompts: no active subscription")
@@ -3188,9 +3166,8 @@ class TelegramMonitor:
                 run.acked = client.react(chat_id, message_id)
 
 
-# Shared instance
-# The Settings dialog is rebuilt every time it opens and it has no reference to
-# the main window's agent, so both sides meet here instead of threading a
+# Shared instance: the Settings dialog is rebuilt on each open with no reference
+# to the main window's agent, so both meet here instead of threading a
 # dependency through the dialog constructor. Same shape as get_settings().
 
 _shared: Optional[TelegramMonitor] = None

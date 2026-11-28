@@ -410,12 +410,9 @@ class TodoSection(QFrame):
         self._body_layout = QVBoxLayout(self._body)
         self._body_layout.setContentsMargins(4, 8, 4, 4)
         self._body_layout.setSpacing(10)  # breathing space between items
-        # Height-capped scroll wrapper: the section lives in the chat FOOTER,
-        # directly above the input area. Without a cap, a long task list (10+)
-        # makes the footer's sizeHint taller than the panel and the input area
-        #, last in the footer stack, is pushed completely off-screen. Capping
-        # here keeps the input visible no matter how many tasks arrive; the
-        # list scrolls internally instead.
+        # Height-capped scroll wrapper: the section lives in the chat FOOTER above the
+        # input. Without a cap a long task list makes the footer taller than the panel
+        # and pushes input off-screen. Cap here so input stays visible; list scrolls.
         self._body_scroll = QScrollArea()
         self._body_scroll.setWidgetResizable(True)
         self._body_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -627,12 +624,10 @@ class ContextBar(QFrame):
 
         self._label = QLabel("Context")
         self._label.setStyleSheet(f"color:{T['muted']};font-size:{T['font_size_xxs']};")
-        # Budget meter. It is the row's ONLY stretch-1 item, so it must stay
-        # visible at every percentage: hiding it at 0% left three zero-stretch
-        # labels sharing the slack and the "0%" drifted to the middle of the
-        # row (2026-10-21 report). At 0% only the TRACK goes transparent, which
-        # also avoids the stray dash a tinted border_dim track drew at rest
-        # (same report as TodoSection's progress bar, 2026-10-20).
+        # Budget meter is the row's only stretch-1 item, so it must stay visible at
+        # every percentage: hiding at 0% left three zero-stretch labels sharing slack
+        # and "0%" drifted to the middle (2026-10-21). At 0% only the TRACK goes
+        # transparent, avoiding the stray dash a tinted border_dim track drew.
         self._bar = QProgressBar()
         self._bar.setMaximum(100)
         self._bar.setValue(0)

@@ -170,17 +170,10 @@ class Verifier:
             duration = time.time() - t0
             combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
 
-# Empty gate detection
-            # "No tests were collected" is NOT "the code is broken", it means
-            # this check cannot evaluate anything, so it can never pass and can
-            # never point at a real defect. Reporting it as an ordinary failure
-            # made the loop chase a phantom: on a project whose pytest.ini
-            # exists but collects 0 tests (exit code 5), every iteration
-            # "failed" for a reason unrelated to the user's actual bug, and no
-            # amount of correct code could turn the gate green.
-            # Surface it as a verifier CONFIGURATION error instead, so the
-            # loop stops and tells the user its gate is empty rather than
-            # silently burning iterations.
+# "No tests were collected" (pytest exit 5) is a CONFIG error, not a failure:
+# the gate can never pass or point at a real defect. Reporting it as ordinary
+# failure made loops chase a phantom (project with pytest.ini but 0 tests).
+# Surface it as a verifier config error so the loop stops and tells the user.
             if Verifier._is_empty_gate(check, proc.returncode, combined):
                 return CheckOutcome(
                     name=check.name, passed=False, exit_code=proc.returncode,

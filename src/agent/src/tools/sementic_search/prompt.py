@@ -1,8 +1,6 @@
 # SementicSearchTool prompt template and description generator.
 # Provides the LLM-facing description and auto-search hint
-# that teaches the AI when and how to use semantic search
 # instead of (or in addition to) traditional grep.
-
 from typing import Any
 
 # Import related tool names for cross-references in the description

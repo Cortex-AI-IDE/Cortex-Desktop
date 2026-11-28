@@ -852,18 +852,14 @@ scope: project
     def setDefaultModel(self, model_id: str, model_label: str):
         """Update the default model and notify the chat panel to sync its button."""
         try:
-            # Accept short aliases too ("opus", "deepseek"): a hand-edited
-            # settings.json or a server-published alias resolves to the
-            # canonical id before it is persisted, same layering as the
-            # agent path (remote aliases first, built-in ALIAS_MAP second).
+            # Accept short aliases (opus, deepseek): hand-edited settings or server aliases
+            # resolve to canonical ids before persistence, remote aliases first then
+            # built-in ALIAS_MAP, same layering as the agent path.
             try:
-                # Absolute project import, matching every other agent-tree
-                # import in this file. The previous form appended
-                # src/agent/src to sys.path and imported `utils.model.aliases`,
-                # which only resolves when that directory is itself a sys.path
-                # root (the frozen runtime hook does that; dev does not), so in
-                # dev the import always failed and silently skipped alias
-                # resolution.
+                # Absolute project import, like every other agent-tree import here. The old
+                # form appended src/agent/src to sys.path and imported utils.model.aliases,
+                # which only works when that dir is a sys.path root (frozen hook yes, dev no),
+                # so dev silently skipped alias resolution.
                 from src.agent.src.utils.model.aliases import (
                     resolveOrPassthrough as _resolve,
                 )
@@ -934,10 +930,9 @@ scope: project
             tracker = get_usage_tracker()
             local_profile = tracker.get_profile()
             
-            # Merge CACHED server profile (api.user_info), INSTANT, no
-            # network. This slot runs on the GUI thread via QWebChannel;
-            # the inline api.get_profile() it used to make froze the whole
-            # app per call. Fresh data arrives via refreshServerData().
+            # Merge CACHED api.user_info, instant, no network: this GUI-thread slot used to
+            # call api.get_profile() inline and froze the app. Fresh data comes via
+            # refreshServerData().
             try:
                 from src.core.cortex_api import get_api_client
                 api = get_api_client()
@@ -969,10 +964,9 @@ scope: project
             tracker = get_usage_tracker()
             local_stats = tracker.get_usage_stats()
             
-            # Merge CACHED server usage, INSTANT, no network. The inline
-            # api.get_usage_summary() this slot used to make ran on the GUI
-            # thread and froze the app; refreshServerData("usage") now
-            # fetches on a worker thread and fills _server_usage_cache.
+            # Merge CACHED server usage, instant, no network: the inline get_usage_summary()
+            # froze the app; refreshServerData("usage") now fetches on a worker into
+            # _server_usage_cache.
             from src.core.cortex_api import get_api_client
             api = get_api_client()
             if api.is_logged_in():
@@ -984,16 +978,10 @@ scope: project
                             "credits": server_usage.get("credits", {}),
                             "usage": server_usage.get("usage", {}),
                         }
-                        # Service Usage (OCR / embeddings / web search) must
-                        # show the ACCOUNT-wide numbers the server metered -
-                        # the same source the website /account/usage/ page
-                        # reads. Bug history (user screenshots, 2026-07-13):
-                        # this panel showed per-device local JSON counters
-                        # (6 OCR / 14,970 embeddings / 0 searches) while the
-                        # site showed the account truth (14 / real tokens /
-                        # 8), permanently out of sync for anyone using
-                        # Cortex on more than one machine. Local counters
-                        # remain the offline/logged-out fallback below.
+                        # Service Usage must show ACCOUNT-wide server numbers, the same source as
+                        # /account/usage/ (screenshots 2026-07-13: this panel showed local per-device
+                        # counters 6/14970/0 while the site showed 14/real/8, permanently out of sync
+                        # across machines). Local counters remain the offline fallback.
                         _services = (server_usage.get("usage", {}) or {}).get("services") or {}
                         if _services:
                             _cp = local_stats.setdefault("current_period", {})
@@ -1132,9 +1120,8 @@ scope: project
             from src.core.auth_manager import get_auth_manager
             auth = get_auth_manager()
             auth.logout()
-            # Cortex requires an account, so a sign-out has to return to the
-            # login screen rather than leaving a signed-out IDE on screen.
-            # singleShot(0) lets this slot return to the web channel before
+            # Cortex requires an account, so sign-out must return to login, not leave a
+            # signed-out IDE. singleShot(0) lets this slot return to the web channel before
             # the gate goes modal.
             from PyQt6.QtCore import QTimer
             from src.ui.dialogs.login_dialog import relogin_or_quit
@@ -1733,12 +1720,9 @@ scope: project
         except Exception:
             return "[]"
 
-# Telegram run notifications
-    # These cannot ride the generic SETTINGS_MAP path: setSetting splits a
-    # dotted key on the FIRST dot only, so "telegram.quiet_hours.start" would
-    # be stored under a key literally named "quiet_hours.start". The token
-    # also has to go through telegram_config, which puts it in KeyManager
-    # instead of settings.json.
+# Telegram notifications can't use SETTINGS_MAP: setSetting splits on the FIRST
+# dot, so telegram.quiet_hours.start would be stored under "quiet_hours.start".
+# The token goes through telegram_config into KeyManager, not settings.json.
 
     @pyqtSlot(result=str)
     def getTelegramSettings(self) -> str:
@@ -1750,13 +1734,10 @@ scope: project
                 "enabled": cfg.enabled,
                 "paired": bool(cfg.chat_id),
                 "hasToken": tg.has_token(),
-                # Telegram ships with the subscription, so `subscribed` is the
-                # app's single entitlement check (has_subscription()), the same
-                # one OCR, embeddings and web search read. There is no
-                # Telegram-only rule and no second state to report: the card
-                # locks when the plan lapses and unlocks when it renews. Read
-                # from the saved account copy, so this never blocks the GUI
-                # thread. Absent field (older page) is treated as allowed.
+                # Telegram uses the app's single entitlement check (has_subscription()), same
+                # as OCR/embeddings/web search: no Telegram-only rule. The card locks on lapse
+                # and unlocks on renewal, read from the saved account copy so the GUI never
+                # blocks; an absent field (older page) counts as allowed.
                 "subscribed": self._telegram_subscribed(),
                 # False after "Skip for now" at the sign-in screen: the card
                 # then asks for a sign-in rather than an upgrade.
@@ -2023,21 +2004,16 @@ class MemoryManagerDialog(QDialog):
         self._page = _MemoryPage(self._view)
         self._view.setPage(self._page)
 
-        # Settings is a dialog, not a browser. Chromium's own menu was
-        # reachable anywhere in it, offering Back, Forward, Reload and Save
-        # page, plus Open link in new window, Save link and Copy link address
-        # on the About page's links. Back and Reload can navigate the dialog
-        # away from memory_management.html, leaving a blank pane the user
-        # cannot recover without closing Settings. The page defines no
-        # context menu of its own, so nothing is lost by suppressing it. The
-        # editor and terminal surfaces do the same.
+        # Suppress Chromium's context menu in this dialog: Back/Reload/Save page and
+        # link actions could navigate away from memory_management.html, leaving a blank
+        # pane only recoverable by closing Settings. The page defines no menu, and the
+        # editor/terminal do the same.
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         log.debug("[MemoryManager] QWebEngineView + _MemoryPage created")
 
-        # Kill the WHITE flash while Chromium boots + the page loads
-        # (multi-second on compiled builds under RAM pressure): paint the
-        # webview in the theme background instead of Chromium's default
-        # white, so the dialog looks intentionally dark while loading.
+        # Kill the white flash while Chromium boots and the page loads (multi-second in
+        # compiled builds under RAM pressure): paint the webview in the theme background
+        # so the dialog looks intentionally dark while loading.
         try:
             from PyQt6.QtGui import QColor
             _theme = "dark"
@@ -2078,12 +2054,10 @@ class MemoryManagerDialog(QDialog):
 
         layout.addWidget(self._view)
 
-        # Track load progress so the safety net can tell "still loading"
-        # apart from "stuck". Bug history: a fixed 3s timer fired on every
-        # open in compiled builds (QtWebEngine cold-starts slower there,
-        # especially under RAM pressure) and yanked the still-loading real
-        # page, replacing it with the broken setHtml fallback, users saw
-        # an unstyled Times-Roman settings page with no keys/toggles.
+        # Track load progress so the safety net can tell "loading" from "stuck": a fixed
+        # 3s timer fired on every compiled-build open (cold WebEngine is slower), yanking
+        # the real page into the broken setHtml fallback and showing an unstyled
+        # Times-Roman settings page with no keys/toggles.
         self._load_progress = 0
         self._view.loadProgress.connect(self._on_load_progress)
 
@@ -2153,17 +2127,11 @@ class MemoryManagerDialog(QDialog):
             else:
                 log.warning(f"[MemoryManager] Cannot refresh UI: _view={self._view}, _page_loaded={self._page_loaded}")
 
-            # (MCP is free since 2026-10-20 and no longer waits for a
-            # subscription; the restart below just refreshes the panel.)
-            # History: MCP was subscription-gated and its servers were parked
-            # in status="subscription" while logged out, so signing in had to
-            # relaunch them and refresh the MCP panel. Bug history: login
-            # refreshed profile/usage only, so the "Subscription Required"
-            # lock card stayed (and servers stayed unlaunched) until the
-            # user clicked Refresh manually. start() does a network
-            # subscription check + spawns processes → run it off the GUI
-            # thread; the JS refreshes are staggered on GUI timers to show
-            # the connecting → connected progression.
+            # MCP is free since 2026-10-20, so the restart below only refreshes the panel.
+            # History: MCP was subscription-gated with servers parked status=subscription,
+            # so sign-in had to relaunch them; login originally refreshed only profile/usage,
+            # leaving the lock card until manual Refresh. start() does network + spawns, so
+            # run it off the GUI thread; stagger JS refreshes to show connecting->connected.
             def _restart_mcp():
                 try:
                     from src.services.mcp_manager import get_mcp_manager
@@ -2343,10 +2311,9 @@ class MemoryManagerDialog(QDialog):
         if not self._page_loaded:
             log.warning("[MemoryManager] _push_state_to_page skipped: page not loaded")
             return
-        # Build JS that:
-        # 1. Tries the real receiveMemoryState render first
-        # 2. ALWAYS injects a visible fallback container as safety net
-        # The JSON payload is injected directly (it's already valid JS object notation).
+        # Build JS that tries the real receiveMemoryState render first and ALWAYS
+        # injects a visible fallback container as a safety net. The JSON payload is
+        # injected directly (already valid JS object notation).
         js_code = (
             "(function(){\n"
             f"  var _s = {payload};\n"

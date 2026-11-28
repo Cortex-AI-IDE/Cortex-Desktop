@@ -14,12 +14,11 @@ import logging
 
 log = logging.getLogger("store_update")
 
-# The Store product id for "Cortex AI IDE" (publisher: Pasons Group), from
-# Partner Center. It is the stable key of the pdp deep link. The package
-# family name cannot be used instead: its publisher-id suffix is a hash the
-# Store computes at submission time and it appears nowhere in this repo, so a
-# PFN link would have to be hardcoded from a build artefact and would break
-# silently on any identity change.
+# Store product id for "Cortex AI IDE" (publisher Pasons Group), from Partner
+# Center; the stable key of the pdp deep link. The package family name can't
+# substitute: its publisher-id suffix is a hash Store computes at submission,
+# appears nowhere in this repo, and a hardcoded PFN would break on any
+# identity change.
 STORE_PRODUCT_ID = "9P9F7VT4NN4M"
 
 # The same page in a browser, for a Windows PC where the Store app cannot open.

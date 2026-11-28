@@ -45,11 +45,10 @@ class SiliconFlowEmbeddings:
     
     # Fallback dimensions (for hash-based embedding)
     FALLBACK_DIMENSIONS = 384
-    # Name of the local TF-IDF space. Versioned because the index stores it
-    # per entry: vectors from a different weighting are not comparable, and
-    # a new name is what makes the index re-embed the old ones.
-    #   tfidf-local   1 + log(tf/max_tf), clamped at 0 (kept only top terms)
-    #   tfidf-local-2 log(1 + tf), every matched term counts
+    # Versioned TF-IDF space name stored per index entry: vectors from different
+    # weightings aren't comparable, so a new name forces re-embedding.
+    # tfidf-local: 1+log(tf/max_tf) clamped (top terms only);
+    # tfidf-local-2: log(1+tf), every matched term counts.
     LOCAL_MODEL = 'tfidf-local-2'
     
     def __init__(self, model_name: str = None, api_key: str = None):
@@ -63,13 +62,11 @@ class SiliconFlowEmbeddings:
         self.model_name = model_name or self.DEFAULT_MODEL
         self._lock = threading.Lock()
         self._initialized = True  # Always initialized (proxy or hash fallback)
-        # Circuit breaker for the Django proxy. Bug history: background
-        # indexing calls the proxy once PER FILE; when the server was
-        # struggling the client kept firing anyway (a 502 storm, dozens of
-        # retries in seconds) which can block every gunicorn worker on the
-        # 2GB droplet and take the whole site down. After _CB_THRESHOLD
-        # consecutive failures the proxy is skipped for _CB_COOLDOWN_SEC
-        # and the local fallback embedding is used instead.
+        # Django-proxy breaker: background indexing calls the proxy once PER FILE,
+        # and during a 502 storm dozens of retries in seconds blocked every gunicorn
+        # worker on the 2GB droplet and took the site down. After _CB_THRESHOLD
+        # consecutive failures, skip the proxy for _CB_COOLDOWN_SEC and use local
+        # embeddings.
         self._cb_failures = 0
         self._cb_open_until = 0.0
         self._CB_THRESHOLD = 5
@@ -147,10 +144,9 @@ class SiliconFlowEmbeddings:
         model_info = self.MODELS.get(self.model_name, {})
         return int(model_info.get("dimensions", self.FALLBACK_DIMENSIONS))
     
-# Local TF IDF vocabulary for offline embeddings
-    # 384 hand-picked code/semantic concepts. Each concept maps to
-    # a dimension index.  The embedding value = log-normalized TF.
-    # Similar code → similar vectors (unlike SHA256 hash garbage).
+# 384 hand-picked code/semantic concepts, each mapped to a dimension index;
+# value = log-normalized TF. Similar code gives similar vectors (unlike SHA
+# hash noise).
     _VOCAB = None  # lazy-built class singleton
 
     @classmethod
@@ -282,11 +278,9 @@ class SiliconFlowEmbeddings:
                 model_name=self.LOCAL_MODEL, dimensions=dimensions,
             )
 
-        # Term frequency, match tokens to vocab via:
-        #   1. Exact match: "payment" → vocab["payment"] (if exists)
-        #   2. Stem match:  "payments" → stem "payment" → vocab["payment"]
-        #   3. Prefix match: "process_payment" → vocab["process"] + vocab["payment"]
-        #   4. Substring: "paypal_capture_order" → vocab["paypal"] + vocab["capture"] + vocab["order"]
+        # Match tokens to vocab by exact, then stem (payments->payment), then prefix
+        # (process_payment -> process+payment), then substring (paypal_capture_order
+        # -> paypal+capture+order).
         tf = {}
         _STEM_SUFFIXES = ('ing', 'tion', 'ment', 'ness', 'able', 'ible', 'ed', 'er', 'ly', 'es', 's')
 
@@ -325,11 +319,10 @@ class SiliconFlowEmbeddings:
                 model_name=self.LOCAL_MODEL, dimensions=dimensions,
             )
 
-        # Sublinear TF: log(1 + tf), positive for every matched term. The old
-        # 1 + log(tf / max_tf) went to zero or below for any term rarer than
-        # ~37% of the file's commonest one, and the max(0, .) below dropped
-        # it: agent_bridge.py kept a handful of words and lost "dispatch",
-        # so every local query scored 0.0 (2026-10-23).
+        # Sublinear TF log(1+tf) is positive for every matched term. The old
+        # 1+log(tf/max_tf) went <=0 for terms rarer than ~37% of the commonest and
+        # max(0,.) dropped them: agent_bridge.py kept a few words, lost "dispatch",
+        # and every local query scored 0.0 (2026-10-23).
         for k in tf:
             tf[k] = _math.log1p(tf[k]) if tf[k] > 0 else 0.0
 

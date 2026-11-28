@@ -10,17 +10,11 @@ import time
 
 from src.utils.logger import get_logger
 
-# This must go through the project's get_logger(), not a bare
-# logging.getLogger(). get_logger() attaches the shared rotating cortex.log
-# handler to the named logger and sets propagate=False. A bare getLogger()
-# here had no handlers of its own and propagated to a root logger that this
-# app never configures (the only basicConfig() in src/ sits in a __main__
-# demo block), so every TRIPPED / half-open / auto-recovered / volume-cap
-# message fell through to logging.lastResort -> stderr, and logger.py
-# dup2-redirects stderr into a pipe nothing reads. The net effect was that
-# the breaker disabled tools completely silently: cortex.log contained zero
-# "[CIRCUIT BREAKER]" lines across every session, so a blocked tool could
-# only be diagnosed by guessing from the model's own error text.
+# Use the project's get_logger(), not bare logging.getLogger(): get_logger
+# attaches the cortex.log handler and sets propagate=False. The bare call
+# reached an unconfigured root -> lastResort -> stderr, which logger.py
+# dup2-redirects into an unread pipe, so the breaker disabled tools with ZERO
+# "[CIRCUIT BREAKER]" lines in cortex.log, diagnosable only by guessing.
 log = get_logger("circuit_breaker")
 
 
@@ -51,38 +45,25 @@ class ToolCircuitBreaker:
     _SEARCH_REPETITIVE_LIMIT = 500  # Effectively unlimited for exploration
     _SEARCH_FAIL_THRESHOLD = 8      # More forgiving on transient failures
 
-    # Tools that CHANGE the project. These are the work itself, so a volume
-    # cap must never apply to them: an agent making many small, correct edits
-    # was having its editing tool switched off for being productive, and every
-    # later edit silently did nothing while the model kept believing it had
-    # applied them. Repeated FAILURE still trips the breaker for these, which
-    # is the signal that actually means something is wrong.
+    # Project-changing tools are the work itself, so no volume cap: many small
+    # correct edits had Edit switched off for being productive, and later edits
+    # silently did nothing while the model believed they applied. Repeated
+    # FAILURE still trips the breaker, which is the real signal.
     _MUTATING_TOOLS = {
         "Edit", "Write", "MultiEdit", "NotebookEdit", "CreateFile",
         "edit_file", "write_file", "create_file",
     }
 
-    # Shell execution is the work too, not exploration of it: it is how the
-    # agent compiles, runs the test suite, builds packages and drives git.
-    # Bash was omitted from the exemption above, so a long run that was
-    # entirely SUCCESSFUL still had Bash switched off once it passed
-    # repetitive_limit (observed: blocked at call 51, every call green), and
-    # from then on every compileall/pytest verification silently did nothing
-    # while the model kept believing its gates had passed. Worse, the cap's
-    # message told it to "stop searching", which is not what it was doing.
-    # Dropping the volume cap here does not remove loop protection, which
-    # never depended on it:
-    #   - 3 consecutive FAILURES still trip the breaker (record_call below);
-    #   - identical repeated calls are caught by the executor's dedup cache;
-    #   - agent_safety.check_doom_loop() flags same-tool-same-args repetition.
-    # Aliases are listed because dispatch names vary by surface.
+    # Bash is work too (compile, tests, builds, git), but was omitted from the
+    # exemption: a fully successful long run got Bash switched off at call 51, so
+    # every later verification silently did nothing while the model believed gates
+    # passed. No loop protection lost: 3 consecutive failures still trip, dedup
+    # catches identical calls, and agent_safety.check_doom_loop flags repetition.
     _EXECUTION_TOOLS = {"Bash", "bash", "run_command", "Terminal", "shell"}
 
-    # A disabled tool is blocked before it runs, so it can never report the
-    # success that would re-enable it: the breaker latched shut for the rest
-    # of the run. The standard escape is a half-open probe: after a cooldown,
-    # let exactly one call through. If it works the breaker closes, if it
-    # fails it opens again and the clock restarts.
+    # A disabled tool can't run to report the success that would re-enable it, so
+    # the breaker latched shut. Standard escape is a half-open probe after cooldown:
+    # one call through; success closes, failure reopens and restarts the clock.
     _COOLDOWN_SECONDS = 60.0
 
     def __init__(
@@ -192,12 +173,9 @@ class ToolCircuitBreaker:
                     f"{_waited:.0f}s, allowing one probe call"
                 )
             else:
-                # Say plainly that the call did not happen. The old wording
-                # ("you may still call it if needed") described a call that
-                # was in fact discarded every time, so the model kept issuing
-                # edits, kept being told they were fine, and never learned
-                # that nothing was reaching disk. It read the advisory tone
-                # as throttling and reported the tool as "rate-limited".
+                # Say plainly the call did NOT happen: the old "you may still call it if
+                # needed" described a discarded call, so the model kept issuing edits and
+                # believing them applied, reading the advisory tone as rate-limiting.
                 return (
                     f"ERROR: {tool_name} is temporarily disabled by the circuit "
                     f"breaker after {self._fail_counts.get(tool_name, 0)} consecutive "
@@ -210,10 +188,8 @@ class ToolCircuitBreaker:
 
         self._total_calls[tool_name] = self._total_calls.get(tool_name, 0) + 1
 
-        # Volume caps exist to break exploration loops, so they apply only to
-        # tools that READ. Capping the tools that change files, or that run the
-        # builds and tests which verify the change, punished the agent for
-        # doing the work it was asked to do.
+        # Volume caps break exploration loops, so apply only to READ tools; capping
+        # file-changing or build/test tools punishes the agent for doing the work.
         if (
             tool_name in self._MUTATING_TOOLS
             or tool_name in self._EXECUTION_TOOLS

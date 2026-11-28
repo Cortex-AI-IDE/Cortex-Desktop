@@ -12,22 +12,18 @@ from pathlib import Path
 
 log = logging.getLogger("settings")
 
-# A second running Cortex (the Store build next to a dev run) or an AV scan
-# can hold settings.json open for its own whole-file rewrite at the exact
-# moment we save; on Windows that surfaces as a sharing violation (errno 13).
-# Dropping the write silently left the new value in memory only, so the
-# change reverted at the next start: the "provider toggles are not respected
-# after restart" report. Retry briefly, then stay dirty and retry again on
-# the next set() and once more at exit.
+# A second Cortex (Store + dev) or an AV scan can hold settings.json during its
+# whole-file rewrite at save time, causing a Windows sharing violation (errno
+# 13). Dropping the write silently left the value in memory only, so it reverted
+# at restart ("provider toggles not respected"). Retry briefly, then stay dirty
+# and retry on the next set() and at exit.
 _SAVE_RETRIES = 5
 _SAVE_RETRY_DELAY = 0.08
 
-# Reads get the same patience as writes, for the same reason: a sibling
-# rewriting the file (or a scanner holding it) turns a read into errno 13
-# for a few milliseconds, and a read that returns "nothing" is treated as
-# "this user has never chosen a provider", which redraws the panel with the
-# server defaults. Fewer attempts than a write because this runs on the
-# GUI thread while the user is clicking.
+# Reads retry too: a sibling rewrite or scanner turns a read into errno 13 for
+# milliseconds, and "nothing" reads as "user never chose a provider", redrawing
+# with server defaults. Fewer attempts than writes since this runs on the GUI
+# thread while the user clicks.
 _READ_RETRIES = 3
 
 
@@ -42,11 +38,9 @@ DEFAULT_SETTINGS = {
         "editor_default_readonly": True,  # Editor starts in read-only preview mode
         "show_terminal_by_default": False,  # Terminal hidden by default
         "sidebar_position": "left",  # Settings -> Appearance -> Sidebar position
-        # Settings -> Appearance -> Interface -> Chat panel position. The chat
-        # panel and the editor+terminal block trade places; the sidebar keeps
-        # its own edge. Both values are resolved together in
-        # src/ui/layout_positions.py so the two settings cannot fight. The
-        # editor has no setting of its own: it fills the space left over.
+        # Appearance > Interface > Chat panel position: chat and editor+terminal trade
+        # places, sidebar keeps its edge. Both resolved together in layout_positions.py
+        # so they can't fight; editor fills the leftovers (no setting of its own).
         "chat_position": "left",
     },
     "ai_command": {
@@ -78,23 +72,15 @@ DEFAULT_SETTINGS = {
         # tool calls and diffs into one line between the AI's messages
         # (chat_panel.ActivityGroup); "detailed" shows every card.
         "chat_activity": "compact",
-        # Compatibility switch for machines whose GPU driver cannot give
-        # Chromium a context. Symptom: the sidebar, editor, terminal and
-        # settings pages render BLANK/dark while everything else works and
-        # the logs look healthy (classic on older office PCs, AMD chipsets).
-        # Setting this to true renders on the CPU via SwiftShader: slower,
-        # but visible. Read very early in main.py, straight from
-        # settings.json, before Qt is imported. Equivalent env var:
-        # CORTEX_SOFTWARE_RENDERING=1
+        # Compatibility switch for GPU drivers that can't give Chromium a context:
+        # sidebar/editor/terminal/settings render blank while logs look healthy (older
+        # office PCs, AMD). True renders on CPU via SwiftShader, slower but visible.
+        # Read very early in main.py before Qt; env equivalent CORTEX_SOFTWARE_RENDERING=1.
         "software_rendering": False,
-        # Three-state rendering mode (preferred over the boolean above):
-        #   "auto"     - detect: Microsoft Basic adapter or AMD with a
-        #                pre-2017 driver => software, otherwise GPU, and the
-        #                runtime WebGL probe offers the switch if panels
-        #                still come up blank (src/core/gpu_compat.py,
-        #                src/ui/render_health.py)
-        #   "gpu"      - always hardware acceleration
-        #   "software" - always CPU/SwiftShader (compatibility mode)
+        # Three-state rendering mode (preferred over the boolean): "auto" detects
+        # Microsoft Basic / pre-2017 AMD -> software, else GPU, with a runtime WebGL
+        # probe offering the switch if panels stay blank (gpu_compat.py, render_health.py);
+        # "gpu" always hardware; "software" always CPU/SwiftShader.
         "rendering_mode": "auto",
     },
     "ai": {
@@ -140,10 +126,9 @@ DEFAULT_SETTINGS = {
         "sound_alerts": False,              # Play a sound when tasks complete
     },
     "telegram": {
-        # Outbound notifications only. The bot token is NOT here: settings.json
-        # is plaintext and _is_secret_field() would blank any *_token value on
-        # the way out. The token lives in KeyManager under the provider slug
-        # "telegram" (see src/services/telegram_config.py).
+        # Outbound notifications only: the bot token is NOT here (settings.json is
+        # plaintext and _is_secret_field() blanks *_token), it lives in KeyManager under
+        # "telegram" (telegram_config.py).
         "enabled": False,
         "chat_id": "",          # written by pairing, sent to Telegram as-is
         # One flag per event the user chose. Off here and on in the UI means
@@ -171,13 +156,10 @@ DEFAULT_SETTINGS = {
             # later without generating a new one.
             "reusable": False,
         },
-        # Inbound prompts: a message typed in the paired chat becomes a user
-        # prompt in the chat panel. Off by default on purpose. Turning this on
-        # gives the phone a remote control for the agent, so an existing
-        # install must opt in rather than acquire that after an update.
-        # It can also answer a question the agent asked (same power as a
-        # prompt). It can never approve a permission card: that still happens
-        # in Cortex, on the computer.
+        # Inbound prompts: a paired-chat message becomes a user prompt, off by default
+        # so an existing install opts in rather than gaining phone remote control after
+        # an update. It can answer agent questions (same power) but NEVER approve a
+        # permission card: that stays in Cortex on the computer.
         "inbound": {
             "enabled": False,
         },
@@ -213,10 +195,9 @@ class Settings:
         # live read is refused merges over this instead of over nothing, so a
         # moment of contention can never delete keys it did not get to see.
         self._last_disk: dict | None = None
-        # Dot-paths this instance changed since it loaded the file. _save()
-        # writes these from memory and everything else from a fresh disk
-        # read, so a second Cortex saving its stale whole-file copy cannot
-        # revert keys it never touched. See _merged_with_disk().
+        # Dot-paths changed since load: _save() writes these from memory and the rest
+        # from a fresh disk read, so a second Cortex saving its stale whole-file copy
+        # can't revert keys it never touched. See _merged_with_disk().
         self._touched: set = set()
         atexit.register(self.flush)
         self._load()
@@ -227,15 +208,11 @@ class Settings:
         if self._config_file.exists():
             stored = self._read_file()
             if stored is None:
-                # The file is there and could not be read even after the
-                # retries: a sibling Cortex is mid-rewrite, or a scanner has
-                # it. Falling back to the defaults in memory is survivable -
-                # get_fresh() re-reads, and _merged_with_disk() refuses to
-                # overwrite a file this instance has never seen. What is NOT
-                # survivable is treating it as "no file", because the
-                # provider panel then draws the server defaults (MiMo +
-                # DeepSeek) as the user's own choice and the next click
-                # persists them.
+                # File present but unreadable after retries (sibling mid-rewrite or scanner):
+                # falling back to in-memory defaults is survivable (get_fresh re-reads,
+                # _merged_with_disk refuses to overwrite an unseen file); treating it as "no
+                # file" is not, since the provider panel then draws server defaults (MiMo +
+                # DeepSeek) as the user's choice and the next click persists them.
                 log.warning("[Settings] %s could not be read at startup; "
                             "using defaults in memory and re-reading on "
                             "demand", self._config_file)
@@ -261,10 +238,9 @@ class Settings:
                 result[key] = val
         return result
 
-    # Anything named like a credential. settings.json is world-readable
-    # plaintext and ends up in backups, screenshots and support bundles, so
-    # a real key must never reach it. The real value belongs in KeyManager,
-    # which is encrypted; this file only ever records that one exists.
+    # Anything credential-like: settings.json is world-readable plaintext in
+    # backups/screenshots/support bundles, so real keys belong in encrypted
+    # KeyManager; this file only records that one exists.
     _KEY_PLACEHOLDER = "***"
 
     @staticmethod

@@ -50,11 +50,8 @@ def get_preferred_programming_font() -> str:
 
     Priority: JetBrains Mono > Fira Code > Cascadia Code > system fonts.
     """
-    # Premium programming fonts (priority order)
-    # Tier 1: Fonts designed for editors
-    # Tier 2: Modern purpose-built coding fonts with ligatures
-    # Tier 3: System fonts
-    # Tier 4: Universal fallbacks
+    # Programming font priority: editor-designed, purpose-built ligature fonts,
+    # system fonts, then universal fallbacks.
     preferred_fonts = [
         # Tier 1: Editor-grade monospace fonts
         "JetBrains Mono",      # Designed for IDEs
@@ -97,11 +94,9 @@ class PygmentsSyntaxHighlighter(QSyntaxHighlighter):
     # Cortex dark editor palette.
     # Works perfectly with: Python, JS/TS, HTML, CSS, Java, C/C++, Rust, Go, SQL, etc.
     DARK_COLORS = {
-        # CORTEX DARK EDITOR PALETTE
-        # Background: #181818, Foreground: #d6d6dd
-        # Syntax ref: keyword=#83d6c5, string=#e394dc, function=#efb080,
-        #            number=#efb080, class=#87c3ff, attribute=#aaa0fa,
-        #            comment=#6d6d6d, operator=#83d6c5, variable=#d6d6dd
+        # Cortex dark editor palette: bg #181818, fg #d6d6dd; keyword/operator
+        # #83d6c5, string #e394dc, function/number #efb080, class #87c3ff,
+        # attribute #aaa0fa, comment #6d6d6d, variable #d6d6dd.
         
         # Keywords - teal (#83d6c5)
         Token.Keyword:            ("#83d6c5", False, False),     # Teal - if, def, class, return
@@ -413,10 +408,8 @@ class PygmentsSyntaxHighlighter(QSyntaxHighlighter):
             if '</style>' in text_lower:
                 new_state = 0
         
-        # Determine if this is a transition line (contains opening/closing tags)
-        # Transition lines use HtmlLexer so the tag itself is colored correctly.
-        # Pure content lines inside script/style always use their own lexer,
-        # even if the line contains '<' (e.g. innerHTML template strings).
+        # Transition lines (opening/closing tags) use HtmlLexer so the tag colours
+        # correctly; pure script/style content lines use their own lexer even with '<'.
         is_transition = (
             (state == 0 and ('<script' in text_lower or '<style' in text_lower)) or
             (state == 1 and '</script>' in text_lower) or
@@ -890,17 +883,8 @@ class CodeEditor(QPlainTextEdit):
             self.document(), language=language, is_dark=True, base_font=font
         )
 
-        # Code Folding System - REMOVED in AI-first mode
-        # self._folding_manager = FoldingManager(self.document())
-        # self._folding_manager.ranges_changed.connect(self._on_folding_changed)
-        # self._folding_manager.range_collapsed.connect(self._on_range_collapsed)
-        # self._folding_manager.range_expanded.connect(self._on_range_expanded)
-        # self._folding_folder = get_folder_for_language(language)
-        # self._folding_timer = QTimer(self)
-        # self._folding_timer.setSingleShot(True)
-        # self._folding_timer.timeout.connect(self._update_folding_ranges)
-        # # Initial fold computation (delayed)
-        # QTimer.singleShot(500, self._update_folding_ranges)
+        # Code folding removed in AI-first mode; the FoldingManager/folder/timer setup
+        # that followed is intentionally disabled.
 
         # Line wrap off
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -1709,14 +1693,7 @@ class CodeEditor(QPlainTextEdit):
             doc = self.document()
             text_before = doc.toPlainText()[:position]
             
-            # HTML auto-close removed - using basic editor instead
-            # closing_tag = get_closing_tag(text_before)
-            # if closing_tag:
-            #     # Insert the closing tag
-            #     self.insertPlainText(closing_tag)
-            #     # Move cursor back between tags
-            #     cursor.setPosition(position)
-            #     self.setTextCursor(cursor)
+            # HTML auto-close removed; this editor uses the basic editor instead.
         
         if event.text().isalnum() or event.text() in (".", "_"):
             self._completion_timer.start(200) # 200ms delay to prevent flood
@@ -1762,10 +1739,9 @@ class CodeEditor(QPlainTextEdit):
         if not self.window().isActiveWindow():
             return
 
-        # Round 6: Suppress native tooltip windows during AI streaming.
-        # QToolTip.showText() creates a native top-level window that triggers
-        # Windows DWM recomposition at the title-bar boundary, causing the
-        # capsule ghost fragment. Suppress during streaming and for 2s after.
+        # Suppress native tooltips during AI streaming (+2s): QToolTip.showText makes a
+        # top-level window that triggers DWM recomposition at the title bar, the capsule
+        # ghost fragment.
         try:
             mw = self.window()
             if hasattr(mw, '_streaming_active') and mw._streaming_active:

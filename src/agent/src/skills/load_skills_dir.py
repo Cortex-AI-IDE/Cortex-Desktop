@@ -1,12 +1,7 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportRedeclaration=false, reportAssignmentType=false
-# Loads skills from /skills/ and legacy /commands/ directories,
-# handles dynamic skill discovery, conditional skills, and MCP integration.
-# CONVERSION PHASES:
-#   Phase 1: Core imports, types, utility functions
-#   Phase 2: Frontmatter parsing and skill command creation
-#   Phase 3: Skills directory loader (/skills/ format)
-#   Phase 4: Legacy /commands/ loader + main getSkillDirCommands
-#   Phase 5: Dynamic/conditional skills + MCP registration
+# Load /skills/ and legacy /commands/: dynamic discovery, conditional skills,
+# MCP integration. Phases: core imports/types/utils; frontmatter + command
+# creation; /skills/ loader; legacy /commands/ loader; dynamic/MCP registration.
 
 from __future__ import annotations
 
@@ -107,24 +102,12 @@ except ImportError:
         return Signal()
 
 
-# Names that have no real implementation anywhere in this tree.
-# These used to be defined only inside the ``except ImportError`` handler above,
-# on the assumption that the ``try`` block imported the real ones. It does not:
-# no module in the project defines them. So whenever the imports succeeded, which
-# is the normal case, the names were never bound and every call site raised
-# NameError.
-# That was not theoretical. ``addSkillDirectories`` opens by calling
-# ``isSettingSourceEnabled``, and ``file_write_tool`` schedules it with
-# ``asyncio.create_task`` on every write. The task is never awaited, so the
-# NameError surfaced only as an unretrieved-task warning on stderr, which
-# ``src/utils/logger.py`` redirects into a pipe nothing reads. Dynamic skill
-# discovery has therefore been silently dead. Reproduced before the fix:
-# ``NameError: name 'isSettingSourceEnabled' is not defined``.
-# They are bound unconditionally here instead. The bodies are the ones the
-# fallback block already used, so the import-failure path behaves as before.
-# ``isEnvTruthy`` does have a real implementation at ``..utils.env_utils``. It is
-# left as the stub here because its only caller, ``getSkillDirCommands``, has no
-# callers of its own. Import the real one before wiring that function up.
+# Bind these stubs unconditionally: they existed only in the except
+# ImportError branch, so normal imports left them unbound (NameError on every
+# call). file_write_tool schedules addSkillDirectories -> isSettingSourceEnabled
+# on every write; the error went to stderr, which logger pipes nowhere, so
+# dynamic discovery was silently dead. Bodies match the fallback path.
+# isEnvTruthy has a real impl but its only caller has none; leave that stub.
 
 EFFORT_LEVELS = ['minimal', 'medium', 'high']
 
@@ -689,10 +672,9 @@ async def getSkillDirCommands(cwd: str) -> List[Command]:
     skills_locked = isRestrictedToPluginOnly('skills')
     project_settings_enabled = isSettingSourceEnabled('projectSettings') and not skills_locked
 
-    # --bare: skip auto-discovery (managed/user/project dir walks + legacy
-    # commands-dir). Load ONLY explicit --add-dir paths. Bundled skills
-    # register separately. skillsLocked still applies, --bare is not a
-    # policy bypass.
+    # --bare skips auto-discovery (managed/user/project walks + legacy commands):
+    # load only explicit --add-dir paths; bundled skills register separately.
+    # skillsLocked still applies, --bare isn't a policy bypass.
     if isBareMode():
         if len(additional_dirs) == 0 or not project_settings_enabled:
             logForDebugging(
@@ -774,10 +756,9 @@ async def getSkillDirCommands(cwd: str) -> List[Command]:
         *legacy_commands,
     ]
 
-    # Deduplicate by resolved path (handles symlinks and duplicate parent directories)
-    # Pre-compute file identities in parallel (realpath calls are independent),
-    # then dedup synchronously (order-dependent first-wins)
-    # Helper to create None coroutine
+    # Dedup by resolved path (symlinks, duplicate parents): pre-compute realpaths
+    # in parallel, then dedup synchronously (order-dependent first-wins). Helper
+    # creates a None coroutine.
     async def none_coro() -> None:
         return None
     
@@ -896,12 +877,10 @@ async def discoverSkillDirsForPaths(
                 dynamic_skill_dirs.add(skill_dir)
                 try:
                     await fs.stat(skill_dir)
-                    # Skills dir exists. Before loading, check if the containing dir
-                    # is gitignored, blocks e.g. node_modules/pkg/.cortex/skills from
-                    # loading silently. `git check-ignore` handles nested .gitignore,
-                    # .git/info/exclude, and global gitignore. Fails open outside a
-                    # git repo (exit 128 → false); the invocation-time trust dialog
-                    # is the actual security boundary.
+                    # Before loading a skills dir, check if its parent is gitignored (blocks e.g.
+                    # node_modules/pkg/.cortex/skills). git check-ignore handles nested/global
+                    # ignores, fails open outside git (128); the invocation-time trust dialog is
+                    # the real security boundary.
                     if await isPathGitignored(current_dir, resolved_cwd):
                         logForDebugging(
                             f"[skills] Skipped gitignored skills dir: {skill_dir}"

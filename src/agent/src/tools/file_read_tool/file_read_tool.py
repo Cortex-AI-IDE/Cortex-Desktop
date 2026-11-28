@@ -362,11 +362,10 @@ class FileStateEntry:
     offset: Optional[int] = None
     limit: Optional[int] = None
     
-    # Optional: True when auto-injection transformed content (stripped HTML comments,
-    # stripped frontmatter, truncated MEMORY.md). The model has only seen a partial view;
-    # Edit/Write must require an explicit Read first. `content` here holds the
-    # RAW disk bytes, not what the model saw.
-    # None/False for normal file reads - dedup is allowed.
+    # Optional marks auto-injected reads (HTML comments/frontmatter stripped,
+    # MEMORY.md truncated): the model saw only part, so Edit/Write must require
+    # an explicit Read. `content` is RAW disk bytes. None/False = normal read,
+    # dedup allowed.
     is_partial_view: Optional[bool] = None
 
 
@@ -416,11 +415,10 @@ def _notify_file_read_listeners(file_path: str, content: str) -> None:
 
 # MEMORY FILE MTIMES (WeakMap equivalent)
 
-# Side-channel from call() to map_tool_result_to_tool_result_block_param:
-# mtime of auto-memory files, keyed by the data object identity.
-# NOTE: Uses regular dict (not WeakKeyDictionary) because string keys don't
-# benefit from weak references and WeakKeyDictionary uses id() for equality
-# which breaks when different string objects have the same value.
+# Side-channel from call() to result mapping: mtime of auto-memory files
+# keyed by data object identity. A plain dict, not WeakKeyDictionary, because
+# string keys gain nothing from weak refs and WeakKeyDictionary's id()-based
+# equality breaks equal-valued strings.
 _memory_file_mtimes: Dict[str, float] = {}
 
 
@@ -769,11 +767,10 @@ def check_read_permission_for_tool(
     Returns:
         Dict with 'behavior' ('allow', 'deny', 'ask') and 'updated_input'
     """
-    # `utils.permissions` only resolves when src/agent/src is its own sys.path
-    # root. Cortex puts the PROJECT root on sys.path instead (main.py:13), and in
-    # dev it never adds src/agent/src at all - only the frozen runtime hook does.
-    # So the bare form raised ModuleNotFoundError on every call. The absolute
-    # form works under both roots; keep both, cheap and order-independent.
+    # `utils.permissions` resolves only when src/agent/src is its own sys.path
+    # root; Cortex puts the PROJECT root on sys.path (main.py:13), and dev never
+    # adds src/agent/src (only the frozen hook does), so the bare import raised
+    # ModuleNotFoundError. Keep both absolute forms, cheap and order-independent.
     try:
         from utils.permissions.filesystem_security import check_read_permission
     except ImportError:
@@ -1476,11 +1473,9 @@ class FileReadTool:
         # Use expandPath for consistent path normalization
         full_file_path = expand_path(file_path)
         
-        # Dedup: if we've already read this exact range and the file hasn't
-        # changed on disk, return a stub instead of re-sending the full content.
-        # Uses BOTH mtime and file_size, on Windows/OneDrive, mtime alone can
-        # be stale because cloud-sync placeholders preserve the old timestamp
-        # until the download completes.  A size change reliably signals new content.
+        # Dedup unchanged ranges: return a stub instead of re-sending content. Check
+        # BOTH mtime and size, since OneDrive placeholders keep stale timestamps until
+        # download; a size change reliably signals new content.
         dedup_killswitch = get_feature_value_cached_may_be_stale('cortex_read_dedup_killswitch', False)
         existing_state = None if dedup_killswitch else self._read_file_state.get(full_file_path)
         

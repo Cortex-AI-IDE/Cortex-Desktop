@@ -1076,14 +1076,9 @@ async def streamCompactSummary(
         True,
     )
     
-    # Setup activity interval for keep-alive signals during long compaction
-    # Send keep-alive signals during compaction to prevent remote session
-    # WebSocket idle timeouts from dropping bridge connections. Compaction
-    # API calls can take 5-10+ seconds, during which no other messages
-    # flow through the transport, without keep-alives, the server may
-    # close the WebSocket for inactivity.
-    # Two signals: (1) PUT /worker heartbeat via sessionActivity, and
-    # (2) re-emit 'compacting' status so the SDK event stream stays active
+    # Keep-alive during compaction: the 5-10s API calls send no other messages,
+    # so the server can drop the WebSocket for inactivity. Two signals: a PUT
+    # worker heartbeat (sessionActivity) and a re-emitted 'compacting' status.
     activityInterval = None
     if isSessionActivityTrackingActive():
         async def send_keep_alive_loop():

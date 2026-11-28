@@ -257,13 +257,10 @@ def progid(ft: FileType) -> str:
     return f"{PROGID_PREFIX}{ft.ext}"  # "Cortex.py"
 
 
-# Windows registry (installer and register file types)
-# One entry: (subkey, value name, data, uninstall). A value name of None
-# creates the key only. uninstall is "key" (delete the key and everything
-# under it), "value" (delete only this value, for keys other programs own
-# such as .py\OpenWithProgids), "keyifempty", or None (removed with a
-# parent entry's "key"). Subkeys are relative to HKCU (per-user install) or
-# HKLM (install for all users).
+# Registry entries: (subkey, value name, data, uninstall). None value name makes
+# the key only; uninstall = "key" (delete key+children), "value" (one value,
+# for keys other programs own like .py\OpenWithProgids), "keyifempty", or None
+# (removed with parent's "key"). Subkeys are relative to HKCU/HKLM.
 RegEntry = Tuple[str, Optional[str], str, Optional[str]]
 
 
@@ -440,12 +437,9 @@ def inno_script() -> str:
     app_key = rf"Software\Classes\Applications\{EXE_NAME}"
     for task, entries in windows_registry_entries(r"{app}\Cortex.exe").items():
         for subkey, name, data, uninstall in entries:
-            # Applications\Cortex.exe is also written to HKCU on an "all
-            # users" install: a per-user copy of that key (left by an older
-            # per-user install, or created by Windows when the user picked
-            # Cortex with "Choose another app") overrides HKLM, and one that
-            # points at a Cortex.exe that no longer exists makes "Open with"
-            # show the generic app icon instead of Cortex's.
+            # Applications\Cortex.exe is also written to HKCU on "all users" installs: a
+            # stale per-user key (older install or "Choose another app") overrides HKLM,
+            # and a dead path makes "Open with" show the generic app icon.
             roots = [("HKA", "")]
             if subkey.startswith(app_key):
                 roots.append(("HKCU", "Check: IsAdminInstallMode"))

@@ -372,11 +372,9 @@ class SidebarBridge(QObject):
         if not calls:
             return
         if not self._is_view_alive():
-            # Keeping the batch is the whole point. The previous version left
-            # these in _js_pending_calls and returned, so they were never
-            # delivered and never re-sent when the renderer came back. The
-            # Explorer then stayed stale until a manual Refresh, with nothing
-            # in the log to explain it.
+            # Keep the batch: the old version left these in _js_pending_calls and returned,
+            # so they were never delivered or re-sent when the renderer came back. Explorer
+            # stayed stale until manual Refresh with nothing in the log to explain it.
             log.warning(
                 f"[SidebarBridge] Renderer dead, {len(calls)} JS call(s) "
                 f"kept for the next reload"
@@ -500,10 +498,9 @@ class SidebarBridge(QObject):
 
     # FILE WATCHER, automatic sidebar updates on file changes
 
-    # Directories never worth watching, heavy, machine-generated, or locked.
-    # 'build'/'dist' are PyInstaller outputs: locked/access-denied during and
-    # after a compile, which spammed "FindNextChangeNotification failed ...
-    # (Access is denied.)" on every launch.
+    # Skip heavy/generated/locked dirs: build/ and dist/ are PyInstaller outputs,
+    # locked during and after a compile, which spammed FindNextChangeNotification
+    # "Access is denied" on every launch.
     _WATCH_EXCLUDE_DIRS = {
         'node_modules', '__pycache__', 'venv', '.venv', '.git', '.cortex',
         'build', 'dist', '.tox', '.pytest_cache', '.mypy_cache',
@@ -606,10 +603,9 @@ class SidebarBridge(QObject):
         # stale watchers pinning every directory in the project.
         self._release_file_watcher()
         self._file_watcher = QFileSystemWatcher(self)
-        # The tree scan runs on a worker thread and lands in
-        # _apply_watch_dirs. It used to run here, synchronously: os.walk over
-        # the project froze session restore for 1.6-2.0 s (UI-STALL,
-        # 2026-10-27, watchdog stack ended at _collect_watch_dirs -> os.walk).
+        # Tree scan runs on a worker and lands in _apply_watch_dirs. Running it here
+        # synchronously froze session restore 1.6-2.0s (UI-STALL 2026-10-27: _collect_
+        # watch_dirs -> os.walk).
         self._watch_gen = getattr(self, '_watch_gen', 0) + 1
         self._start_watch_scan(path, self._watch_gen)
         self._file_watcher.directoryChanged.connect(self._on_directory_changed)
@@ -633,10 +629,9 @@ class SidebarBridge(QObject):
         # Remember WHICH folder changed, so the refresh re-reads only that
         # folder instead of the whole tree (kept while AI work suppresses it).
         self._changed_dirs.add(path)
-        # DEBUG so it costs nothing at normal log level, but running once with
-        # debug on tells "no event arrived" apart from "event arrived and was
-        # suppressed". That distinction was missing every time this was
-        # reported as "auto-refresh dead".
+        # DEBUG level so it's free normally, but one run with debug on tells "no event
+        # arrived" from "event arrived and was suppressed", the distinction missing
+        # from every "auto-refresh dead" report.
         log.debug(f"[SidebarBridge] Directory changed: {path}")
         # Check both bridge-level and SidebarWidget-level _ai_active flags
         _parent = self.parent()
@@ -648,23 +643,20 @@ class SidebarBridge(QObject):
             # can catch up, otherwise files created during AI work never
             # appear until a manual refresh.
             self._pending_tree_refresh = True
-            # Self-healing retry: if the completion signal that clears the
-            # AI-active flags is ever missed (bug history: it sat behind the
-            # notification chain and could be skipped, leaving _ai_active
-            # stuck True forever, Explorer never auto-refreshed again), this
-            # timer re-checks every few seconds and fires the refresh as soon
-            # as the flags clear. While AI genuinely works it just re-arms.
+            # Self-heal if the completion signal clearing AI-active flags is missed (it sat
+            # behind the notification chain and could be skipped, leaving _ai_active True
+            # forever, Explorer never auto-refreshing): re-check every few seconds and
+            # refresh once flags clear; while AI works, just re-arm.
             self._arm_suppressed_retry()
             return
         try:
             self.refreshGitStatus()
         except Exception as e:
             log.debug(f"[SidebarBridge] Git refresh on dir change failed: {e}")
-        # BUG history: this debounce timer existed but was never started -
-        # the tree-refresh path (_on_watcher_refresh → loadDirectoryTree) was
-        # dead code, so a newly created file never appeared in the Explorer
-        # until the user hit manual refresh. Restarting per event coalesces
-        # bursts into one refresh 1s after the last change.
+        # The debounce timer existed but was never started, so the tree-refresh path
+        # (_on_watcher_refresh -> loadDirectoryTree) was dead and new files never
+        # appeared until manual refresh. Restart per event to coalesce bursts into one
+        # refresh 1s after the last change.
         if self._watcher_debounce:
             self._watcher_debounce.start()
 
@@ -697,10 +689,9 @@ class SidebarBridge(QObject):
             self._arm_suppressed_retry()
             return
         self._pending_tree_refresh = False
-        # Pick up directories created since the last scan, at ANY depth.
-        # This used to scan only the project root's immediate children, so a
-        # folder the agent scaffolded deeper (src/ui/components/widgets/) was
-        # never watched and files inside it never triggered a refresh.
+        # Adopt directories created since the last scan at ANY depth: scanning only the
+        # root's immediate children missed agent-scaffolded folders like
+        # src/ui/components/widgets/, so files inside never triggered refresh.
         self._sync_watch_dirs()
         changed = sorted(self._changed_dirs)
         self._changed_dirs.clear()
@@ -746,14 +737,10 @@ class SidebarBridge(QObject):
                 log.warning(f"listDirectory: path not found or not a dir: {dir_path}")
                 return json.dumps([])
 
-            # ── Per-item fault tolerance ──
-            # Field bug (log 12:42, WinError 448): ONE OneDrive reparse
-            # point ('frames', "untrusted mount point") threw inside the
-            # sort key's is_dir(), the exception killed the WHOLE listing,
-            # and the sidebar showed an empty tree for an entire project
-            # until OneDrive finished validating minutes later. The user
-            # restarted the app repeatedly believing Cortex was broken.
-            # One poisoned entry must cost ONE entry, never the tree.
+            # Per-item fault tolerance: one OneDrive reparse point ("frames", untrusted
+            # mount) threw in the sort key's is_dir(), killing the WHOLE listing (WinError
+            # 448, log 12:42) and leaving an empty tree for minutes. One poisoned entry
+            # must cost one entry, never the tree.
             raw = []
             for item in path.iterdir():
                 try:
@@ -1191,11 +1178,9 @@ class SidebarBridge(QObject):
             _file_indices = {}  # path -> index in files list
             try:
                 result = subprocess.run(
-                    # --untracked-files=all (not bare -u): bare -u's meaning
-                    # ("all" vs "normal") depends on the user's git version/
-                    # config, and "normal" collapses a brand-new untracked
-                    # directory into one line for the whole folder, which
-                    # then renders as a blank/nameless row in the sidebar.
+                    # Use --untracked-files=all: bare -u's meaning depends on git version/config,
+                    # and "normal" collapses a new untracked directory into one line, rendering as
+                    # a blank sidebar row.
                     ['git', 'status', '--porcelain', '--untracked-files=all'],
                     cwd=self._project_path,
                     capture_output=True, text=True, timeout=5,
@@ -1475,18 +1460,11 @@ class SidebarBridge(QObject):
         if not self._project_path:
             self._call_js('updateGitFiles({"branch":"","files":[],"error":"No project"})')
             return
-# Coalesce instead of stacking workers
-        # This used to disconnect the previous worker and immediately start a
-        # NEW QThread, without stopping the old one. Each worker runs 7-8 git
-        # subprocesses, and the file watcher fires per changed file, so a
-        # command that touches many files spawned that many concurrent git
-        # thread+process sets. Measured 2026-08-20 16:26: collectstatic ran
-        # 25.1s and the GUI froze 16.3s inside this very function, at
-        # `self._git_worker.error_occurred.disconnect()`, because disconnect
-        # contends with the signal traffic of all those live workers.
-        # Now: if a refresh is already in flight, just remember that another is
-        # wanted. The running worker triggers exactly one follow-up when it
-        # finishes, so N file events cost at most 2 git runs, not N.
+# Coalesce instead of stacking workers: disconnecting the old and starting a
+# new QThread per file event spawned 7-8 git subprocesses each; collectstatic
+# froze the GUI 16.3s in error_occurred.disconnect() contending with live
+# workers (2026-08-20 16:26). Now an in-flight refresh records one follow-up,
+# so N events cost at most 2 git runs.
         _prev = getattr(self, '_git_worker', None)
         if _prev is not None:
             try:
@@ -1979,10 +1957,9 @@ class SidebarBridge(QObject):
         _parent = self.parent()
         _parent_ai_active = getattr(_parent, '_ai_active', False) if _parent else False
         if self._suppress_refresh or self._ai_active or _parent_ai_active or getattr(self, '_suppress_watcher', False):
-            # The agent fires this signal WHILE it is working (_ai_active True),
-            # so dropping it outright meant agent-created files never showed
-            # until manual refresh. Mark pending; the post-AI completion path
-            # in main_window checks this flag and catches up.
+            # The agent fires this WHILE working (_ai_active True); dropping it meant
+            # agent-created files never showed until manual refresh. Mark pending; the
+            # post-AI path in main_window catches up.
             self._pending_tree_refresh = True
             return
         from PyQt6.QtCore import QTimer

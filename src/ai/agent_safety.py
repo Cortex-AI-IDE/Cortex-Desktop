@@ -300,10 +300,9 @@ class AgentSafetyGuard:
         """
         abs_path = os.path.normpath(os.path.abspath(file_path))
 
-        # Creating a NEW file can't require having read it, the file does not
-        # exist yet. Warning here was pure noise on every legitimate new-file
-        # Write (log 2026-07-22 shows it firing for every created file) and it
-        # made the structured Write path look more "wrong" than shelling out.
+        # Creating a new file can't require reading it; the warning fired on every
+        # legitimate Write (log 2026-07-22) and made structured Write look worse than
+        # shelling out.
         if not os.path.exists(abs_path):
             return None
 
@@ -416,11 +415,9 @@ class AgentSafetyGuard:
         try:
             current_mtime = os.stat(abs_path).st_mtime
             if record.mtime is not None and current_mtime > record.mtime:
-                # mtime alone lies constantly on this codebase: the AUTO-EDIT
-                # path rewrites the identical content seconds after the tool
-                # call, and OneDrive touches timestamps on sync. 76 STALE READ
-                # warnings in one evening (log 23:0x-23:5x), nearly all false.
-                # Only the CONTENT changing makes a read stale.
+                # mtime lies here: AUTO-EDIT rewrites identical content seconds later and
+                # OneDrive touches timestamps. 76 STALE READ warnings in one evening (23:0x-
+                # 23:5x), nearly all false. Only CONTENT changes make a read stale.
                 current_hash = self._hash_file(abs_path)
                 if current_hash is not None and current_hash == record.content_hash:
                     record.mtime = current_mtime      # self-heal: touch, not change
@@ -524,22 +521,11 @@ class AgentSafetyGuard:
         doom_msg = self.check_doom_loop(tool_name, args)
         if doom_msg:
             if "DOOM LOOP DETECTED" in doom_msg:
-                # ── AUTO mode: warn, never hard-block a WRITING tool ──
-                # Bug history: this exemption covered ONLY Bash ("Bash is the
-                # fallback when Edit/Write fail"). That asymmetry taught the
-                # model the opposite of what we want: Edit/Write got hard
-                # errors while Bash always succeeded, so it abandoned the
-                # structured edit tools and started writing throwaway
-                # `_fix_x.py` scripts and running them through Bash to do
-                # string surgery on real files (log 2026-07-22: 26 turns of
-                # Write(_scan1.py)→Bash→Write(_fix_brands.py)→Bash…, edits
-                # frequently not landing). Worse, each throwaway script has a
-                # NEW path, so it never trips this loop check at all, the
-                # guard punished honest iteration on one file and rewarded
-                # the fragile workaround.
-                # Blocking one tool only reroutes the loop through another;
-                # in AUTO mode every writing tool now gets the same warning
-                # and the model is told to change approach.
+                # AUTO warns, never hard-blocks a writing tool: the Bash-only exemption made
+                # Edit/Write error while Bash succeeded, so the model abandoned structured
+                # edits for throwaway _fix_x.py scripts (26 Write->Bash turns, edits often
+                # not landing). New script paths dodged the loop check, punishing honest work.
+                # Blocking one tool just reroutes the loop; warn all writing tools equally.
                 if is_auto_mode and (tool_name == "Bash" or tool_name in WRITE_TOOL_NAMES):
                     warnings.append(f"[DOOM-LOOP WARNING] {doom_msg}")
                 else:

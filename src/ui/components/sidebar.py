@@ -12,15 +12,11 @@ from src.utils.logger import get_logger
 
 log = get_logger("sidebar")
 
-# Asked of the page before any sidebar rename, because the answer has to come
-# from the DOM the user is looking at rather than a cached path: clicking a
-# folder triggers a lazy-load re-render, and the highlighted row is what
-# actually survived it. `var` is the page's selectedPath, `dom` is the row
-# carrying .tree-node.selected, and both are reported so a disagreement shows
-# up in cortex.log instead of being guessed at.
-# `focus` is document.hasFocus(): the page is the only thing that can say
-# whether it is the half of the window the keystroke was aimed at, and unlike
-# a Qt focus probe it does not depend on Chromium's internal focus widget.
+# Ask the PAGE before any sidebar rename: a lazy-load re-render can replace the
+# highlighted row, so the DOM is the truth, not a cached path. `var` is the
+# page's selectedPath, `dom` the .tree-node.selected row; both are reported so
+# disagreement shows in cortex.log. `focus` is document.hasFocus(): only the
+# page knows which half of the window the keystroke was aimed at.
 _SELECTION_JS = (
     "(function(){"
     "var v=(typeof selectedPath!=='undefined'&&selectedPath)?selectedPath:'';"
@@ -550,22 +546,13 @@ class SidebarWidget(QWidget):
             key = event.key()
             ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             if key == Qt.Key.Key_F2 and event.type() == QEvent.Type.KeyPress:
-                # Fallback route only. F2 carries a window-wide QAction shortcut
-                # (Edit > Rename), and Qt resolves a shortcut before the key
-                # event reaches any widget, so what normally runs is
-                # MainWindow._rename_file, which asks this sidebar first via
-                # rename_selected_item(). Keeping this branch means F2 still
-                # works if that shortcut is ever unregistered, and both routes
-                # end in the same method so they cannot drift apart.
-                # This used to push {type:'rename'} into
-                # window._pendingNativeModals instead. Nothing drains that queue
-                # once the QWebChannel is up: _on_bridge_connected() stops
-                # _modal_poll (correctly - the page calls Python directly from
-                # then on), and the page's own flush at channel init runs once,
-                # before any F2 can happen. So every F2 pushed an entry that was
-                # never read and the key did nothing, while right-click >
-                # Rename kept working because it calls bridge.nativeModal()
-                # directly.
+                # Fallback route only: F2 normally hits MainWindow._rename_file via a
+                # window-wide QAction shortcut (Qt resolves shortcuts before key events), which
+                # asks this sidebar through rename_selected_item(). Keep this branch if the
+                # shortcut is ever unregistered; both end in the same method so they can't
+                # drift. The old _pendingNativeModals queue was never drained once QWebChannel
+                # was up (channel init flush runs before any F2), so F2 did nothing while
+                # right-click > Rename worked.
                 _foc = self._is_focused()
                 log.info("[RENAME] F2 reached eventFilter (sidebar focused=%s)", _foc)
                 if _foc and self.rename_selected_item():

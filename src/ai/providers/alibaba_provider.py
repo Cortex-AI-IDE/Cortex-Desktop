@@ -44,13 +44,10 @@ class AlibabaProvider(BaseProvider):
     # (pay-as-you-go / standard Model Studio, keys start with "sk-").
     DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
-    # Token Plan is a SEPARATE billing channel with its own key prefix
-    # ("sk-sp-") AND its own endpoint. Alibaba's docs are explicit: "The API
-    # Keys and Base URLs for Token Plan, Coding Plan, and pay-as-you-go are
-    # completely isolated and must be used in matching pairs." Sending an
-    # sk-sp- key to the pay-as-you-go base URL returns 401 Unauthorized (the
-    # exact error seen in the field). ap-southeast-1 is the international
-    # Token Plan host; other regions can override via DASHSCOPE_BASE_URL.
+    # Token Plan is a separate billing channel with its own sk-sp- prefix AND
+    # endpoint; Alibaba says keys and base URLs are isolated and must be paired.
+    # sk-sp- on the pay-as-you-go URL gives 401 (seen in the field). ap-southeast-1
+    # is the international Token Plan host; DASHSCOPE_BASE_URL can override.
     TOKEN_PLAN_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 
     def _resolve_base_url(self) -> str:
@@ -151,12 +148,9 @@ class AlibabaProvider(BaseProvider):
     def available_models(self) -> List[ModelInfo]:
         """Available Alibaba Model Studio (DashScope) models."""
         try:
-            # Latest 1M-context Qwen models only. Older models (qwen3.6-plus,
-            # qwen-flash, qwen-turbo, qwen-vl-max) were removed. Vision is
-            # NATIVE on qwen3.8-max / qwen3.7-plus (Alibaba console: "Visual
-            # Understanding") on BOTH standard (sk-) and Token Plan (sk-sp-)
-            # keys, so Cortex sends images DIRECTLY to Qwen (no server-OCR
-            # detour). supports_tools=True, supports_vision=<per capability>.
+            # Latest 1M-context Qwen only (older plus/flash/turbo/vl-max removed). Vision is
+            # native on qwen3.8-max/qwen3.7-plus with BOTH sk- and sk-sp- keys, so images
+            # go directly to Qwen, no OCR detour. supports_tools=True, vision per capability.
             return [
                 ModelInfo("qwen3.8-max", "Qwen 3.8 Max (Vision, Flagship)", "alibaba",
                           1_000_000, 131_072, True, True),
@@ -449,12 +443,9 @@ class AlibabaProvider(BaseProvider):
         session = self._get_session()
         _read_to = self._resolve_read_timeout(True, tools)
 
-        # Record the size of what we are about to send. DeepSeek logs its tool
-        # count on every call and this provider logged nothing, so when a
-        # request stalled on 2026-09-09 there was no record of how big it was -
-        # the one number needed to tell "the endpoint choked on the payload"
-        # apart from "the endpoint was simply down". That request carried 68
-        # tools; the same 68 went to DeepSeek minutes later and streamed fine.
+        # Log payload size: DeepSeek logs tool count and this provider didn't, so a
+        # 2026-09-09 stall had no record of size (68 tools; the same 68 streamed fine
+        # to DeepSeek minutes later). This distinguishes "endpoint choked" from "down".
         try:
             _payload_bytes = len(json.dumps(payload))
             log.info(
@@ -528,10 +519,9 @@ class AlibabaProvider(BaseProvider):
                             continue  # silent-ok: a non-JSON line is a keepalive, not an event
 
                         _events += 1
-                        # An error can arrive INSIDE a 200 stream as its own
-                        # event. It has no "choices", so it used to be skipped
-                        # silently: the turn ended with nothing and Cortex said
-                        # "Task completed successfully" (2026-09-12).
+                        # Errors can arrive inside a 200 stream as their own event with no "choices";
+                        # skipping it ended the turn with nothing and said "Task completed successfully"
+                        # (2026-09-12).
                         _err = data.get("error") if isinstance(data, dict) else None
                         if _err or (not data.get("choices") and data.get("code") and data.get("message")):
                             _e = _err if isinstance(_err, dict) else data
@@ -603,10 +593,9 @@ class AlibabaProvider(BaseProvider):
                             f"Alibaba stream ended with an empty reply "
                             f"(finish_reason={_finish}, events={_events})")
                     if not _answered:
-                        # Reasoning only, then the stream ended: 2026-09-12 the
-                        # thought broke off mid-sentence with no answer and no
-                        # tool call. The bridge retries such a turn; record
-                        # how the stream ended so the cause is visible.
+                        # Reasoning-only then stream end: 2026-09-12 the thought broke mid-sentence with
+                        # no answer or tool call. The bridge retries such turns; record how the stream
+                        # ended so the cause is visible.
                         log.warning(
                             "[Alibaba] Reply had reasoning but no answer or tool call: "
                             "%d events, finish_reason=%s, [DONE]=%s, usage=%s, last event=%s",

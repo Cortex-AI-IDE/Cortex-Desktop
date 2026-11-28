@@ -379,13 +379,10 @@ class _NoiseFilter(logging.Filter):
         return True
 
 
-# Shared handlers (process wide singletons)
-# Every named logger MUST share ONE file handler. Previously each get_logger()
-# name created its own _HourlyRotatingFileHandler on the same cortex.log -
-# at each hour boundary every handler instance independently detected the
-# rollover and rotated the file again, littering the log dir with tiny
-# cortex.<date>_<hour>_1.log … _N.log files (one per extra handler) and
-# risking dropped lines from concurrent copy+truncate.
+# Every named logger must share ONE file handler. Previously each get_logger()
+# name created its own rotating handler on cortex.log; at hour boundary each
+# rotated independently, littering cortex.<date>_<hour>_N.log and risking
+# dropped lines from concurrent copy+truncate.
 _shared_file_handler = None
 _shared_console_handler = None
 
@@ -429,15 +426,11 @@ def _get_shared_handlers():
         try:
             file_handler = _make_file_handler(log_dir)
         except OSError as primary_error:
-            # Opening cortex.log can fail for a moment - a second Cortex
-            # (the installed build shares ~/.cortex), an antivirus scan of
-            # the file just rotated. Take a per-process name in the SAME
-            # directory rather than leaving the user's log behind.
-            # The old fallback used tempfile.gettempdir()/Cortex/logs, and
-            # when TEMP pointed somewhere unexpected that wrote a Cortex\logs
-            # folder into whatever directory the app was started from (seen
-            # 2026-10-13 inside the project tree). Logs then went missing
-            # from ~/.cortex/logs, where every diagnosis looks for them.
+            # Opening cortex.log can briefly fail (second Cortex sharing ~/.cortex, or an
+            # antivirus scan of a just-rotated file). Take a per-process name in the SAME
+            # directory. The old fallback used tempfile.gettempdir()/Cortex/logs, which
+            # wrote a Cortex\logs folder into the launch cwd when TEMP was odd (seen in
+            # project tree 2026-10-13); logs then went missing from ~/.cortex/logs.
             fallback_dir = log_dir
             fallback_name = f"cortex-{os.getpid()}.log"
             try:

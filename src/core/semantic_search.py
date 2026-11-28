@@ -281,14 +281,10 @@ class SemanticSearch:
             log.error(f"Error indexing {file_path}: {e}")
             return False
     
-# Embedding spaces
-    # Vectors from two models cannot be compared: the score is noise. The
-    # index never said which model produced an entry, and a cloud call that
-    # failed mid-index fell back to local TF-IDF without a word, so the
-    # index on this repo held 486 TF-IDF vectors among 1,440 Qwen ones, all
-    # labelled Qwen (2026-10-23). A cloud query could not find those 486
-    # files, and without a subscription a TF-IDF query could not find the
-    # other 1,440 - SementicSearch scoped to tests/ returned nothing.
+# Vectors from different models can't be compared (score is noise), but the
+# index never recorded its model and a failed cloud call silently fell back to
+# TF-IDF: 486 TF-IDF among 1,440 Qwen vectors all labelled Qwen (2026-10-23).
+# Neither query mode could find the other's files.
 
     from src.core.siliconflow_embeddings import SiliconFlowEmbeddings as _SF
     _LOCAL_MODEL = _SF.LOCAL_MODEL          # the local space in use now
@@ -393,10 +389,8 @@ class SemanticSearch:
             'skipped': 0,
             'errors': 0,
             'total_tokens': 0,
-            # How many files the walk saw. Without it a capped run can only
-            # report what it did, never how much is left, which is the number
-            # that tells a caller whether the answer it is about to return
-            # covers 5% of the project or 95%.
+            # Record how many files the walk saw: a capped run otherwise can't say whether
+            # its answer covers 5% or 95% of the project.
             'total_candidates': 0,
             # Always present so callers can read the shape without getattr.
             'capped': False,
@@ -407,35 +401,19 @@ class SemanticSearch:
             'pruned_foreign': self._prune_outside_root(),
         }
         
-        # Find all source files in ONE tree walk, pruning excluded
-        # directories in-place so we never descend into them at all.
-        # PERFORMANCE: the old code called Path.rglob() once PER extension
-        # (11 calls), each one a FULL recursive walk of the entire project,
-        # including venv/, node_modules/, .git/, etc., and only filtered
-        # those out AFTER the fact. On a project with a real venv/
-        # node_modules, that's up to 11x redundant full-tree walks plus I/O
-        # spent enumerating tens of thousands of files that were always
-        # going to be thrown away. Measured cost on this project: ~9-10s of
-        # background-thread CPU/IO contention that delayed GUI event-loop
-        # timers (chat restore, warmup) by the same amount on a
-        # memory-constrained machine. os.walk() with in-place `dirnames`
-        # pruning visits each directory exactly once and never enters an
-        # excluded one.
+        # One os.walk with excluded dirs pruned in-place. The old code called rglob()
+        # once PER extension (11 full recursive walks incl. venv/node_modules/.git),
+        # filtering after the fact: ~9-10s of CPU/IO contention here that delayed GUI
+        # timers on memory-constrained machines.
         _WANTED_EXTS = {'.py', '.js', '.ts', '.java', '.go', '.rs', '.jsx', '.tsx',
                         '.html', '.css', '.md'}
         exclude_dirs = {
             '.git', '__pycache__', 'node_modules', 'venv', '.venv',
             'build', 'dist', '.tox', '.pytest_cache', '.mypy_cache',
             'installer_output', 'image_test',
-            # Generated/duplicate trees. Without these, search results are
-            # dominated by copies of files that already exist elsewhere:
-            #   staticfiles/  Django STATIC_ROOT, collectstatic output. On a
-            #                 stock Django project this alone was 108 of 323
-            #                 indexed files (Django admin's own CSS/JS plus a
-            #                 second copy of every project asset).
-            #   .cortex/      Cortex's own memory + checkpoints. Indexing it
-            #                 is circular: past summaries outrank real source,
-            #                 and it grew to 74 files on one project.
+            # Skip generated/duplicate trees: staticfiles/ was 108 of 323 indexed files on
+            # a stock Django project (collectstatic output), and .cortex/ (memory +
+            # checkpoints, 74 files) is circular: past summaries outrank real source.
             '.cortex', 'staticfiles', 'htmlcov', 'coverage',
             '.next', '.nuxt', '.svelte-kit', '.parcel-cache',
             '.ruff_cache', '.gradle', 'target', 'vendor',
@@ -451,12 +429,9 @@ class SemanticSearch:
                 if os.path.splitext(fname)[1] not in _WANTED_EXTS:
                     continue
                 full = os.path.join(dirpath, fname)
-                # Empty files have nothing to embed. Skipping them here
-                # keeps them out of the 'errors' tally, index_file()
-                # returns False both for a real failure and for "no
-                # meaningful content", so empty __init__.py markers were
-                # being reported as errors (8 of them on this project),
-                # which reads like something broke when nothing did.
+                # Skip empty files before indexing: index_file() returns False both for real
+                # failures and "no content", so empty __init__.py markers counted as errors (8
+                # here) and looked like something broke.
                 try:
                     if os.path.getsize(full) == 0:
                         continue
@@ -468,21 +443,16 @@ class SemanticSearch:
         # Django dev server is single-threaded, rapid requests queue up
         # and block all other UI-related requests.
         _API_DELAY = 0.05  # 50ms between embedding API calls
-        # Save progress at most once per minute, TIME based, not count based.
-        # Bug history: saving every 10 files rewrote the ENTIRE index (100k+
-        # lines of JSON at ~3000 embeddings) every ~4 seconds for the whole
-        # indexing run, quadratic disk/CPU churn that starved the GUI and
-        # made dialogs crawl on RAM-pressured machines. Saves are atomic, so
-        # a crash loses at most the last minute of embedding work.
+        # Save progress at most once per MINUTE (time-based). Saving every 10 files
+        # rewrote the whole index (100k+ lines at ~3000 embeddings) every ~4s, quadratic
+        # churn that starved the GUI. Saves are atomic, so a crash loses at most a minute.
         _SAVE_EVERY_SEC = 60
         _last_save = _time.monotonic()
 
-        # Drop entries the walk no longer produces. Indexing only ever added
-        # and updated, so deleted files stayed searchable forever: 402 rows
-        # for the src/agent modules removed in cdc6184, plus `Tool.py` beside
-        # the real `tool.py` (case-insensitive disk, case-sensitive keys).
-        # Skipped when the walk found nothing, so a missing or unreadable
-        # root cannot wipe the index.
+        # Drop entries no longer produced: indexing only added/updated, so deleted files
+        # stayed searchable (402 rows for modules removed in cdc6184, plus Tool.py
+        # beside tool.py). Skip when the walk found nothing, so an unreadable root can't
+        # wipe the index.
         stats['pruned_missing'] = 0
         if files_to_index:
             _walked = set(files_to_index)
@@ -527,13 +497,9 @@ class SemanticSearch:
             else:
                 stats['errors'] += 1
 
-            # Bounded run: stop once the file cap OR the time cap is reached.
-            # The caller re-enters on the next call and continues from the
-            # saved index, so a long convert spreads out instead of freezing
-            # one call. Skipped files cost nothing, so both caps budget real
-            # work. The time cap exists because one file is one network
-            # round-trip: a count cap alone still means "N x however slow the
-            # proxy is today".
+            # Bound the run by file cap OR time cap; the caller re-enters and continues from
+            # the saved index. The time cap matters because each file is a network
+            # round-trip: a count cap alone is "N x however slow the proxy is today".
             if max_files is not None and stats['indexed'] >= max_files:
                 stats['capped'] = True
                 stats['stop_reason'] = 'max_files'
@@ -615,10 +581,9 @@ class SemanticSearch:
             min_similarity = (0.05 if self._is_local(getattr(query_result, 'model_name', ''))
                               else 0.3)
         
-        # Calculate similarities. With numpy: convert the query ONCE and do
-        # the dot products directly on the stored float32 arrays, the old
-        # per-entry cosine_similarity() re-converted BOTH vectors to numpy
-        # on every call (1500+ list→array copies per search).
+        # With numpy, convert the query ONCE and dot-product the stored float32 arrays;
+        # the old per-entry cosine_similarity re-converted BOTH vectors every call
+        # (1500+ copies per search).
         similarities = []
         # Optional sub-directory scope. Normalised once, for the same reason as
         # the root: this is compared against every candidate.
@@ -631,12 +596,9 @@ class SemanticSearch:
                     f"[SemanticSearch] Ignoring unusable scope path: {scope_path!r}"
                 )
 
-        # Containment before ranking, not after. A foreign row can outscore a
-        # real one; filtering after the sort would let it eat a result slot
-        # and then vanish, so the caller quietly got fewer answers than top_k
-        # with no explanation. _prune_outside_root() normally leaves nothing
-        # here; this is the guarantee that survives a hand-edited index or a
-        # cache mutated between load and search.
+        # Filter to the project root BEFORE ranking: a foreign row can outscore a real
+        # one and, filtered after sort, eat a result slot then vanish. _prune_outside_root
+        # normally leaves none; this survives a hand-edited or stale cache.
         root_candidates = [
             (path, embedding)
             for path, embedding in self.embeddings_cache.items()

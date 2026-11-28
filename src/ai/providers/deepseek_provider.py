@@ -43,11 +43,9 @@ class DeepSeekProvider(BaseProvider):
             self._read_timeout = self._get_float_env("CORTEX_DEEPSEEK_READ_TIMEOUT_SEC", 120.0, minimum=3.0, maximum=600.0)
             self._tool_read_timeout = self._get_float_env("CORTEX_DEEPSEEK_TOOL_READ_TIMEOUT_SEC", 180.0, minimum=5.0, maximum=600.0)
             self._chunk_timeout = self._get_float_env("CORTEX_DEEPSEEK_CHUNK_TIMEOUT_SEC", 90.0, minimum=10.0, maximum=300.0)
-            # Wall-clock cap on time between real SSE data events. The
-            # byte-level timeouts above are blind to a server that keeps the
-            # socket warm with keep-alive comments while never sending an
-            # event, field case 2026-07-30 12:39: request sent, 425s of
-            # total silence, user gave up and restarted the app.
+            # Wall-clock cap between real SSE data events: byte timeouts miss a server
+            # keeping the socket warm with keep-alive comments but sending no events
+            # (2026-07-30 12:39: 425s of silence, user restarted).
             self._event_stall_timeout = self._get_float_env("CORTEX_DEEPSEEK_EVENT_STALL_SEC", 180.0, minimum=30.0, maximum=900.0)
             self._tool_desc_max_chars = self._get_int_env("CORTEX_DEEPSEEK_TOOL_DESC_MAX_CHARS", 180, minimum=60, maximum=500)
 
@@ -121,11 +119,9 @@ class DeepSeekProvider(BaseProvider):
                     supports_streaming=True,
                     supports_vision=False,
                 ),
-                # The vision model the comment further down was waiting for.
-                # Matches V4 Flash on text and takes images at the same token
-                # rate, roughly 384 tokens per image. Output is capped at 64K
-                # here rather than the 384K the API allows, which is plenty
-                # for an editing turn and keeps a runaway reply affordable.
+                # Vision model matches V4 Flash on text, takes images at ~384 tokens each.
+                # Output capped 64K here (not the API's 384K): plenty for an edit turn, keeps
+                # runaway replies affordable.
                 ModelInfo(
                     id="deepseek-v4-flash-vision-exp",
                     name="DeepSeek V4 Flash Vision Exp",
@@ -203,11 +199,9 @@ class DeepSeekProvider(BaseProvider):
                 name = msg.get("name")
 
                 if isinstance(content, list):
-                    # Preserve multimodal content instead of flattening it to text -
-                    # see the identical bug fixed in openrouter_provider.py /
-                    # anthropic_provider.py: block.get("text") silently drops
-                    # image_url blocks. DeepSeek has no vision model today, but this
-                    # keeps all providers consistent and safe for when one lands.
+                    # Preserve multimodal content, don't flatten: block.get("text") drops image_url
+                    # blocks (same bug fixed in openrouter/anthropic providers). DeepSeek has no
+                    # vision model today, but this keeps providers consistent for when one lands.
                     _norm_blocks: List[Dict[str, Any]] = []
                     _has_media = False
                     for block in content:
@@ -378,10 +372,8 @@ class DeepSeekProvider(BaseProvider):
         retry_callback = kwargs.pop("retry_callback", None)
         max_retries = self._max_retries
         last_error: Optional[Exception] = None
-        # Once anything has been streamed, an error must NOT restart the
-        # request: the model would send the whole answer again from the
-        # start and the chat would show it twice (or once per retry). Only
-        # failures before the first piece are retried.
+        # After any streamed content, an error must NOT restart: the model resends the
+        # whole answer and chat shows it twice. Retry only failures before first piece.
         _streamed_any = False
 
         for attempt in range(max_retries + 1):
@@ -408,10 +400,8 @@ class DeepSeekProvider(BaseProvider):
                             log.error("[DeepSeek] API error: %s", response.text[:1000])
                     response.raise_for_status()
 
-# Socket level chunk timeout
-                    # Set a per-chunk socket read timeout so that if the
-                    # server stalls mid-stream, we detect it quickly instead
-                    # of blocking forever in iter_lines().
+# Per-chunk socket read timeout so a mid-stream stall is caught quickly instead
+# of blocking forever in iter_lines().
                     _saved_sock_timeout = None
                     try:
                         _raw_sock = getattr(getattr(getattr(response.raw, '_fp', None), 'fp', None), 'raw', None)
@@ -423,28 +413,16 @@ class DeepSeekProvider(BaseProvider):
                     except Exception:
                         pass  # silent-ok: non-critical safety net around the socket timeout
 
-                    # monotonic, not time.time(): this measures how long the
-                    # stream has been silent, and a wall clock jumps when the
-                    # user corrects the date/time. On 2026-10-15 two clock
-                    # corrections mid-answer (+10,594 s, then +3,807 s, both
-                    # in the Windows event log to the second) looked like
-                    # hours of silence and aborted two healthy requests.
+                    # Use monotonic(), not time.time(): this measures silence duration and wall
+                    # clock jumps when the user fixes date/time. On 2026-10-15 two corrections
+                    # (+10,594s then +3,807s, in the event log) looked like hours of silence and
+                    # aborted two healthy requests.
                     _last_event_ts = time.monotonic()
                     try:
-# Event level stall watchdog
-                        # The connect/read/socket timeouts reset on EVERY byte,
-                        # so SSE keep-alive comments (': ping') defeat all of
-                        # them: the stream stays byte-alive while delivering
-                        # nothing. Field case (log 2026-07-30 12:39:35): the
-                        # request went out and the agent sat in this loop for
-                        # 425s with zero data events and zero log lines until
-                        # the user clicked Stop and restarted the app. Only a
-                        # real 'data:' event proves the model is responding -
-                        # measure staleness against those, and abort into the
-                        # existing retry/error path instead of hanging forever.
-                        # (Keep-alive lines themselves give us the scheduling
-                        # points; a fully dead socket is caught by the 90s
-                        # socket timeout above.)
+# Stall watchdog: connect/read/socket timeouts reset on EVERY byte, so SSE
+# ': ping' keep-alives defeat them. 2026-07-30 the agent sat 425s with zero
+# events until Stop. Only a real 'data:' event proves progress; measure those
+# and abort into retry/error. Keep-alives still provide scheduling points.
                         for line in response.iter_lines():
                             if time.monotonic() - _last_event_ts > self._event_stall_timeout:
                                 raise RuntimeError(

@@ -52,17 +52,12 @@ def _configure_certifi():
             os.environ['REQUESTS_CA_BUNDLE'] = path
             return
 
-    # Last resort: build a bundle from the Windows certificate store.
-    # This branch used to create an ssl context, discard it, and fall through
-    # to `pass`, so it configured nothing at all. requests then asked certifi
-    # itself, got the path that does not exist, and raised
-    #   Could not find a suitable TLS CA certificate bundle, invalid path: ...
-    # on every single request. A fallback that silently does nothing is worse
-    # than no fallback, because it reads like the case is handled.
-    # requests wants a file, so write the roots Windows already trusts into
-    # one and point at that. It only runs when the bundled pem is genuinely
-    # missing, which now also means the build is broken and should be fixed
-    # by collect_data_files('certifi') in cortex.spec.
+    # Last resort: build a CA bundle from the Windows certificate store. This
+    # branch used to create an ssl context, discard it, and `pass`, so requests
+    # got certifi's missing path and raised "Could not find a suitable TLS CA
+    # certificate bundle" on every call. A silent fallback is worse than none.
+    # Write the roots Windows trusts to a file and point at it. Only runs when the
+    # bundled pem is genuinely missing (build should fix cortex.spec instead).
     try:
         import ssl
         import tempfile

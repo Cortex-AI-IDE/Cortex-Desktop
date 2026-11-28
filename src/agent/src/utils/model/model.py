@@ -1,9 +1,6 @@
 # Model name resolution and rendering utilities for the multi-LLM IDE.
 # Handles:
 # - Runtime main loop model selection
-# - Model name formatting for display
-# - 200k context model detection
-
 import os
 from typing import Optional
 

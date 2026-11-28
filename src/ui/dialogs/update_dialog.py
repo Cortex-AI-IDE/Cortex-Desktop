@@ -251,13 +251,11 @@ class UpdateDialog(QDialog):
 
             self._update_progress(100)
 
-            # ── Integrity check, verify the installer BEFORE launching it ──
-            # The server publishes the SHA-256 of the exact release binary.
-            # TLS protects the transfer, but verifying the hash is the
-            # defense-in-depth that catches a tampered/corrupted download
-            # (poisoned CDN cache, swapped file on the server, truncated
-            # transfer) before we execute a 300 MB installer with the user's
-            # privileges. Refuse to run anything whose hash doesn't match.
+            # Verify the installer BEFORE launching: the server publishes the SHA-256 of
+            # the exact binary. TLS protects transfer, but the hash catches a tampered or
+            # corrupted download (poisoned CDN, swapped server file, truncated transfer)
+            # before executing a 300MB installer with the user's privileges. Refuse on
+            # mismatch.
             if self._sha256:
                 self._update_status("Verifying installer...")
                 import hashlib

@@ -21,20 +21,16 @@ from src.ui.chat_text import find_mermaid_spans
 from src.ui.tokens import CHAT_TOKENS as T
 
 
-# Mermaid fences are located by chat_text.find_mermaid_spans, the single source
-# of truth shared with the turn-end card builder. The two DOTALL patterns that
-# used to live here had no line anchor, so a message that merely MENTIONED a
-# ```mermaid fence in prose, or quoted that token inside a plain code block,
-# was treated as a diagram opener and the rest of the message was swallowed as
-# diagram code (chat console: UnknownDiagramError, 2026-10-22).
+# Use chat_text.find_mermaid_spans as the single source of truth shared with
+# the turn-end builder. The old unanchored DOTALL patterns treated a prose
+# mention or quoted ```mermaid as a real opener and swallowed the rest as
+# diagram code (UnknownDiagramError, 2026-10-22).
 
 
-# Live ▶ Run payloads
-# The streaming card is HTML inside a QTextBrowser, so it cannot host a Qt
-# button. Its ▶ Run is an <a href="cortex-run:ID"> and the code behind that ID
-# lives in this registry, read when chat_panel's anchor handler fires.
-# CodeBlockWidget owns the real button once the turn ends; this only has to
-# keep the button alive and working while the reply is still streaming.
+# Live ▶ Run: the streaming card is HTML in QTextBrowser (no Qt button), so
+# it uses <a href="cortex-run:ID"> with code in this registry, read by
+# chat_panel's anchor handler. CodeBlockWidget owns the real button at turn
+# end; this keeps it working while streaming.
 _RUN_PAYLOADS: dict[str, tuple[str, str]] = {}
 _RUN_SEQ = [0]
 _RUN_PAYLOAD_CAP = 200
@@ -96,10 +92,9 @@ def _strip_mermaid_for_streaming(text: str) -> tuple[str, bool]:
     return ''.join(kept).strip(), True
 
 
-# Some models emit an invented "<questions>[{...}]</questions>" TEXT block
-# (AskUserQuestion's exact arg JSON) instead of calling the tool, the raw
-# JSON then rendered as prose. Strip it from display; on_turn_done parses it
-# and shows a real interactive QuestionCard instead.
+# Some models emit a "<questions>[{...}]</questions>" TEXT block instead of
+# calling the tool; strip it from display and let on_turn_done parse it into
+# a real QuestionCard.
 _RE_QUESTIONS_COMPLETE = re.compile(r'<questions>\s*(\[.*?\])\s*</questions>', re.DOTALL)
 _RE_QUESTIONS_OPEN = re.compile(r'<questions>.*$', re.DOTALL)
 
@@ -112,10 +107,9 @@ def _strip_questions_for_streaming(text: str) -> str:
     text = _RE_QUESTIONS_OPEN.sub('', text)
     return text.strip()
 
-# Pre-compiled patterns for replacing code fences during streaming.
-# Qt's setMarkdown() mangles fenced code blocks (shows language hint as text).
-# Replace with a styled placeholder during streaming; _render_prose creates
-# real CodeBlockWidget on turn_done.
+# Pre-compile fence patterns for streaming: Qt setMarkdown mangles fenced
+# code (shows the language as text), so swap in a styled placeholder;
+# _render_prose builds real CodeBlockWidgets at turn_done.
 _RE_CODE_COMPLETE = re.compile(r'```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n(.*?)```', re.DOTALL)
 _RE_CODE_OPEN = re.compile(r'```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n(.*)$', re.DOTALL)
 
@@ -123,14 +117,11 @@ _RE_CODE_OPEN = re.compile(r'```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n(.*)$', re.DOTALL)
 # (completed fences have stable content → cache hit after first highlight).
 _STREAM_HL_CACHE: dict[tuple[str, str, str], str] = {}
 
-# Throttle state for the STILL-OPEN fence (the one that grows every tick and
-# therefore never hits _STREAM_HL_CACHE): (lang, bg) → (code_at_last_full_hl,
-# code_html_at_last_full_hl).  Between full re-highlights (every +400 chars)
-# the delta is appended as plain escaped text — momentarily uncolored while
-# streaming, fully colored on the next full pass and in the final render.
-# Without this, pygments re-ran on the ENTIRE growing code body every tick
-# (O(n) pygments per tick → O(n²) over the block), one of the worst costs in
-# the old per-tick pipeline for long code blocks.
+# Throttle the STILL-OPEN fence (grows each tick, never hits the cache):
+# (lang,bg) -> (code, html) at last full highlight. Between full passes every
+# +400 chars the delta is appended as plain escaped text, uncoloured briefly
+# then coloured on the next pass and final render. Without this pygments
+# re-ran the whole growing body each tick (O(n) per tick -> O(n^2)).
 _OPEN_FENCE_HL_STATE: dict[tuple[str, str], tuple[str, str]] = {}
 _OPEN_FENCE_HL_DELTA = 400  # chars of growth before a full re-highlight
 
@@ -194,29 +185,18 @@ def _extract_code_fences_for_streaming(text: str) -> tuple[str, dict[str, str]]:
         # (full pygments pass only every +400 chars) instead of
         # re-highlighting the entire growing body on every tick.
         code_html = _highlight_for_stream(code, lang, is_open=_open_flag[0])
-        # Live markup draws the SAME card CodeBlockWidget draws at turn end:
-        # ONE bordered frame holding a header strip (lang left, chevron +
-        # Copy right) and the code body underneath.
-        # History: the header used to be a <table> and the body a sibling
-        # <pre>, each carrying its own 1px border. Qt's rich text engine
-        # painted those as two separate boxes with a seam between them, so a
-        # fence still did not read as one card during streaming ("code block
-        # must be inside a card", second report 2026-10-29). A single <table>
-        # whose second row holds the <pre> is the shape Qt renders as one
-        # continuous frame, so the live block now matches CodeBlockWidget.
-        # This is markup only: Copy/chevron become real controls (and a shell
-        # block gains its Run button) when _render_single_prose swaps the
-        # block for a CodeBlockWidget at turn end.
+        # Live markup mirrors CodeBlockWidget: ONE bordered table holding a header
+        # row (lang left, chevron+Copy right) and a body row with <pre>. The old
+        # header <table> + sibling <pre> each had a border, and Qt painted two boxes
+        # with a seam, so it didn't read as one card (report 2026-10-29). Markup
+        # only: Copy/chevron/Run become real controls at turn end.
         lang_label = (
             f'<span style="color:{T["muted"]};font-family:{T["font_mono"]};'
             f'font-size:10px;font-weight:600;">{_html.escape(lang.upper())}</span>'
             if lang else '')
-        # ▶ Run for shell blocks, LIVE. The href is intercepted by
-        # chat_panel._chat_anchor_clicked and turned into the same
-        # run_in_terminal_requested signal CodeBlockWidget._do_run emits.
-        # Before this the streaming card had no Run at all: it appeared only
-        # after the turn ended, so a mid-turn screenshot showed a card with
-        # Copy and no Run ("the run button stopped appearing", 2026-10-29).
+        # ▶ Run for shell blocks, live: chat_panel intercepts the href into the same
+        # run_in_terminal_requested signal CodeBlockWidget emits. Before this the
+        # streaming card had Copy but no Run until turn end (2026-10-29 report).
         run_link = ""
         if (lang or "").strip().lower() in _LIVE_RUN_LANGS:
             _rid = _register_run_payload(code, lang)

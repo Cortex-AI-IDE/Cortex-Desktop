@@ -38,10 +38,9 @@ _KNOWN_TAGS = [
     'thinking', 'think', 'THINK', 'cortex_thought',
 ]
 
-# Agent control tags that never belong in visible prose. A lone opening or
-# closing tag standing on its own line is removed even without its partner;
-# see Pass 1c in strip_all_control_tags. Deliberately narrower than
-# _KNOWN_TAGS: words like 'summary' or 'plan' are real HTML/prose.
+# Control tags never meant for visible prose. A lone opening/closing tag on its
+# own line is removed without its partner (Pass 1c of strip_all_control_tags).
+# Narrower than _KNOWN_TAGS: 'summary'/'plan' are real HTML/prose.
 _ORPHAN_CONTROL_TAGS = (
     'task_summary', 'file_edited', 'exploration', 'tasklist',
     'tool_result', 'tool_call', 'terminal_output',
@@ -51,15 +50,11 @@ _ORPHAN_CONTROL_TAG_LINE = re.compile(
     r'^[ \t]*</?(?:' + '|'.join(_ORPHAN_CONTROL_TAGS) + r')(?:\s[^>\n]*)?>[ \t]*$',
     re.MULTILINE | re.IGNORECASE)
 
-# JSON file-entry fragment lines left behind when a <task_summary> block is
-# cleaned in pieces. Pass 8 of strip_all_control_tags only removes JSON that
-# starts with '{' and ends with '}', so a piece that begins or ends MID an
-# entry keeps its fragments as visible text: the 2026-09-18 screenshot showed
-# exactly this, a sealed piece starting part-way through the "files" array
-# ("}, "action": "created", "path": ...},") plus whole and truncated entry
-# lines. Each alternative below is a line shape that only JSON fragments
-# produce; code fences and inline code are stashed before either caller runs
-# this, so real code samples are untouched.
+# JSON file-entry fragments left when a <task_summary> block is cleaned in
+# pieces: Pass 8 only removes JSON starting '{' and ending '}', so pieces cut
+# mid-entry keep fragments visible (2026-09-18 screenshot). Each alternative
+# is a shape only JSON fragments produce; code fences are stashed first, so
+# real code is untouched.
 _JSON_ENTRY_FRAG_LINE = re.compile(
     r'^[ \t]*(?:'
     # any line carrying an entry action, incl. dangling tails like "}, ...
@@ -77,10 +72,9 @@ _JSON_ENTRY_FRAG_LINE = re.compile(
     r')',
     re.MULTILINE)
 
-# Unambiguous signature of a task_summary "files" entry. Two or more of these
-# lines in one indented run means the run is leaked JSON, not code, so
-# auto_fix_broken_code_fences must not fence it (fencing stashes it away from
-# _JSON_ENTRY_FRAG_LINE and renders it as a raw JSON code card).
+# Signature of a task_summary "files" entry. Two+ such lines in one indented
+# run mean leaked JSON, not code, so auto_fix_broken_code_fences must not fence
+# it (fencing would render it as a raw JSON code card).
 _JSON_ENTRY_STRONG = re.compile(r'"action"\s*:\s*"(?:modified|created|deleted)"')
 
 
@@ -168,18 +162,10 @@ def strip_all_control_tags(text: str) -> str:
     for tag in _KNOWN_TAGS:
         clean = re.sub(rf'<{tag}(?:[^>\n]*)?$', '', clean, flags=re.MULTILINE | re.IGNORECASE)
 
-    # Pass 1c: Orphan agent-control tags on a line of their own.
-    # Pass 1 only removes a COMPLETE pair. An answer is often cleaned in more
-    # than one piece - prose blocks split wherever thinking or a tool event
-    # interleaves, sealed past 2000 chars, restored part by part - and then one
-    # piece ends "<task_summary>" while the next starts with the JSON and
-    # "</task_summary>". Each piece is cleaned alone: Pass 8 removes the JSON
-    # and both lone tags survived as visible text, which is the 2026-09-10
-    # screenshot ("<task_summary>", blank lines, "</task_summary>"). Splitting
-    # the real response at every position inside its block leaked BOTH tags at
-    # 320 of 347 positions. The system prompt puts control tags on their own
-    # lines, so only whole-line tags go; a tag named inside a sentence, inline
-    # code or a code block (stashed above) is left alone.
+    # Pass 1c removes orphan control tags on their own line: answers are cleaned
+    # in pieces (thinking/tool interleaves, seals), so <task_summary> can land in
+    # one piece and </task_summary> in the next (2026-09-10 both survived as text).
+    # Only whole-line tags go, since the prompt puts them on their own lines.
     clean = _ORPHAN_CONTROL_TAG_LINE.sub('', clean)
 
     # Pass 2: Catch-all paired XML tags, only match tags with actual attribute
@@ -251,10 +237,11 @@ def strip_all_control_tags(text: str) -> str:
     # Remove residual "key": "value", patterns on a line (broken JSON fragments)
     clean = re.sub(r'(?:^|\n)\s*"[a-z_]+"\s*:\s*(?:"[^"]*"|\[[\s\S]*?\]|\{[\s\S]*?\})\s*,?\s*(?=\n|$)', '', clean)
 
-    # Pass 8b: JSON file-entry fragment lines. The regexes above only match
-    # JSON that arrives as complete objects; when this block was cleaned in
-    # pieces a piece can hold entry lines cut mid-object, which nothing above
-    # removes. See _JSON_ENTRY_FRAG_LINE for the shapes and the screenshot.
+    # JSON file-entry fragments left when a <task_summary> block is cleaned in
+    # pieces: Pass 8 only removes JSON starting '{' and ending '}', so pieces cut
+    # mid-entry keep fragments visible (2026-09-18 screenshot). Each alternative
+    # is a shape only JSON fragments produce; code fences are stashed first, so
+    # real code is untouched.
     clean = _JSON_ENTRY_FRAG_LINE.sub('', clean)
 
     # Pass 9: Topic/status headings that precede prose
@@ -295,10 +282,9 @@ def clean_broken_windows_paths(text: str) -> str:
     t = re.sub(r'([A-Z])\s+:\s+\\', r'\1:\\', t)
     # Fix fragmented paths
     t = re.sub(r'\\([A-Z])\s+([a-z]+)', r'\\\1\2', t)
-    # Fix fragmented filenames, ONLY match real Windows paths with backslashes
-    # Must have at least one backslash after the drive letter to be a real path.
-    # Without this guard, normal text like "C:\Users" followed by "but each"
-    # gets matched and spaces are stripped: "but each" → "buteach".
+    # Match only real Windows paths with a backslash after the drive letter:
+    # otherwise "C:\Users" followed by "but each" was matched and spaces stripped
+    # ("buteach").
     def _fix_frag(m):
         s = m.group(0)
         # Only strip spaces inside path segments (between backslashes),
@@ -344,15 +330,10 @@ def clean_markdown_urls(text: str) -> str:
 # A markdown list item at any indent: "- x", "* x", "+ x", "1. x", "2) x".
 _LIST_ITEM_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\S')
 
-# Glued fence openers: "```mermaidflowchart TB ..."
-# DeepSeek v4 emits the language and the first statement on ONE line, with no
-# newline between them (verified from the chunk stream in cortex.log). The
-# streaming stripper copes (find_mermaid_spans accepts the glued form), but
-# turn-end segmentation requires a real newline, so the diagram card shown
-# while streaming was thrown away at turn end and the raw fence text leaked
-# into prose (where "-->|Yes|" even got parsed as a fake table).
-# Longest-prefix match against a known language set, so "csharp" is not split
-# as "c" + "sharp" and a clean "```python" is left completely untouched.
+# Glued fence openers: DeepSeek v4 emits "```mermaidflowchart TB" on one line.
+# Streaming stripper copes, but turn-end segmentation needs a real newline or
+# the diagram card is discarded and raw fence text leaks into prose. Match the
+# longest known-language prefix so "csharp" isn't split as "c"+"sharp".
 _FENCE_LANGS = frozenset({
     "mermaid", "graph", "flowchart", "sequencediagram", "classdiagram",
     "statediagram", "erdiagram", "gantt", "pie", "mindmap", "timeline",
@@ -404,15 +385,11 @@ def split_glued_fence_languages(text: str) -> str:
     return _GLUED_FENCE_RE.sub(_split, text)
 
 
-# Mermaid auto wrap gate
-# Only an unfenced payload that is unambiguously a diagram may be wrapped.
-# `timeline`, `journey`, `gantt`, `pie` and `mindmap` are ordinary English
-# words, so the old re.IGNORECASE test turned prose into a diagram:
-# "Timeline is decisive: spec fixed 6:36 PM..." matched `timeline\b` and the
-# entire paragraph was routed to the Mermaid viewer, which drew a blank
-# canvas because a sentence is not a diagram (2026-10-22 screenshot).
-# Two guards: the head must match CASE-SENSITIVELY (a real payload starts
-# with the lowercase keyword), and the body must carry that family's syntax.
+# Only unfenced payloads unambiguously diagrams may be wrapped: timeline,
+# journey, gantt, pie, mindmap are ordinary English words, and the old
+# re.IGNORECASE test turned "Timeline is decisive: spec fixed 6:36 PM..." into
+# a blank Mermaid canvas (2026-10-22 screenshot). Require a case-sensitive head
+# (real payloads start lowercase) and family syntax in the body.
 _RE_MERMAID_HEAD = re.compile(
     r'^(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?'
     r'|erDiagram|journey|gantt|pie|mindmap|timeline|quadrantChart'
@@ -461,24 +438,17 @@ def looks_like_mermaid_payload(text: str) -> bool:
     return bool(_RE_MERMAID_EDGE.search(text))
 
 
-# Real mermaid fences: a line anchored scanner
-# A fence opener must START A LINE (CommonMark allows up to three leading
-# spaces). The streaming stripper and the turn-end card builder used DOTALL
-# patterns with no anchor, so an inline "```mermaid" written inside a sentence
-# and the same literal token quoted inside a plain code block both matched and
-# swallowed the REST OF THE MESSAGE as diagram code. A MermaidDiagramCard was
-# then built out of prose and the viewer raised
-#   UnknownDiagramError: No diagram type detected ... for text: fence and
-#   routed to the viewer.
-# (chat console, 2026-10-22). Every caller now asks this scanner instead of
-# carrying its own regex, so the two paths can never disagree again.
+# Fence opener must START a line (CommonMark: up to 3 leading spaces). The old
+# DOTALL patterns matched inline "```mermaid" and the literal inside a code
+# block, swallowing the REST of the message and building a diagram card from
+# prose (UnknownDiagramError, 2026-10-22). All callers now use this scanner so
+# the streaming and turn-end paths can't disagree.
 _FENCE_OPEN_RE = re.compile(r'^([ \t]{0,3})(`{3,})([^\s`]*)(.*)$')
 _FENCE_CLOSE_RE = re.compile(r'^[ \t]{0,3}`{3,}[ \t]*$')
 
-# Case-insensitive keyword set for FENCED bodies only. An author who writes
-# "```mermaid" has already declared the language, so "Graph TD" is accepted
-# here; the unfenced gate above stays case-sensitive on purpose, because that
-# one exists to keep the English word "Timeline" out of the viewer.
+# FENCED bodies only use a case-insensitive keyword set: "```mermaid" already
+# declares the language, so "Graph TD" is fine. The unfenced gate stays case-
+# sensitive to keep the English word "Timeline" out of the viewer.
 _FENCE_HEAD_KEYWORDS = frozenset({
     'graph', 'flowchart', 'sequencediagram', 'classdiagram', 'statediagram',
     'statediagram-v2', 'erdiagram', 'journey', 'gantt', 'pie', 'mindmap',
@@ -631,10 +601,8 @@ def auto_fix_broken_code_fences(text: str) -> str:
         flags=re.DOTALL | re.IGNORECASE,
     )
 
-    # ── Wrap bare indented code blocks in markdown fences ──
-    # When AI outputs code indented with 4+ spaces (not in a list), Qt's
-    # setMarkdown treats it as a <blockquote>, not <pre><code>. Detect
-    # blocks of 3+ consecutive indented lines and wrap them in ``` fences.
+    # Wrap bare 4+ space indented blocks (not in a list): Qt setMarkdown treats them
+    # as <blockquote>, not <pre><code>. Wrap runs of 3+ indented lines in ```.
     def _dedent_indented_block(block: str) -> str:
         # Dedent: remove leading 4 spaces or 1 tab from each line
         lines = block.split('\n')
@@ -650,30 +618,11 @@ def auto_fix_broken_code_fences(text: str) -> str:
                 dedented.append(line)
         return '\n'.join(dedented).strip()
 
-    # LINEAR LINE SCAN (2026-08-16) — replaces the previous single regex
-    #   (?<=\n)([ \t]{4,}[^\n]*\n){3,}(?=\n|$)
-    # which was CATASTROPHIC: [ \t]{4,} and [^\n]* overlap on each line's
-    # leading spaces, so when the lookahead failed (indented run followed
-    # by a non-blank line — a mermaid closing fence, or an incomplete last
-    # line mid-stream) the engine re-split every line's indentation in
-    # exponentially many ways.  The ui_stall watchdog caught the GUI
-    # thread burning 45.9s inside it (chat_text.py:328) = the whole IDE
-    # "Not Responding" whenever a response streamed indented blocks
-    # (mermaid diagrams, nested code).  A plain scan is O(n) and wraps
-    # exactly the same blocks: a run of 3+ indented lines, not at the
-    # very start of the text, followed by a blank line or end of text.
-    # FIX 2026-08-16 (mermaid regression): track fence state while scanning
-    # so indented lines INSIDE an existing ``` block (mermaid diagrams,
-    # nested code) are never double-wrapped.  The old regex had the same
-    # blind spot but the catastrophic backtracking masked it; the linear
-    # scan exposed the bug because it actually runs fast enough to corrupt
-    # every mermaid block that has 3+ indented lines.
-    # FIX 2026-10-22 (nested lists shown as code): the "not in a list" rule
-    # above was never implemented. A nested bullet sits 4+ spaces in, so a
-    # run of three of them followed by a blank line - or by the end of the
-    # buffer, which is every streaming tick - was fenced and drawn as one
-    # grey code block of raw "- ..." lines. Indentation under a list item is
-    # list content (CommonMark), so such a run is left for mistune.
+    # Linear scan replaces a catastrophic regex where [ \t]{4,} and [^\n]*
+    # overlapped on leading spaces, backtracking 45.9s of GUI time on indented
+    # blocks (Not Responding). O(n) scan wraps the same blocks (3+ indented lines,
+    # not at start, followed by blank/end), tracks fence state, and leaves runs of
+    # 3+ nested bullets to mistune (CommonMark list content).
     _ind_lines = fixed.split('\n')
 
     def _run_is_list_content(start: int, end: int) -> bool:
@@ -714,12 +663,9 @@ def auto_fix_broken_code_fences(text: str) -> str:
             if ((_j - _i) >= 3 and (_j == _n or not _ind_lines[_j].strip())
                     and not _run_is_list_content(_i, _j)):
                 _run = _ind_lines[_i:_j]
-                # 2026-09-18: an indented run of <task_summary> "files"
-                # entries is leaked JSON, not code. Fencing it here hides it
-                # from _JSON_ENTRY_FRAG_LINE (fenced blocks are stashed and
-                # restored verbatim) and renders it as a raw JSON code card,
-                # which is the 2026-09-18 broken-summary screenshot. Two or
-                # more entry-action lines never occur in real code blocks.
+                # An indented run of task_summary "files" entries is leaked JSON, not code:
+                # fencing hides it from _JSON_ENTRY_FRAG_LINE and renders a raw JSON code card
+                # (2026-09-18 screenshot). Two+ entry-action lines never occur in real code.
                 if sum(1 for _l in _run
                        if _JSON_ENTRY_STRONG.search(_l)) < 2:
                     _body = _dedent_indented_block('\n'.join(_run))
@@ -740,30 +686,19 @@ def auto_fix_broken_code_fences(text: str) -> str:
        looks_like_mermaid_payload(trimmed):
         fixed = f'```mermaid\n{trimmed}\n```'
 
-# Fences only count where a fence can be
-    # The three rules below used to fire ANYWHERE in a line. An inline
-    # mention of a fence - "That stray ` ``` ` lands", a table cell
-    # "| A fenced ```json example |" - was split onto a line of its own and
-    # became a REAL fence, so the rest of the reply rendered as one code
-    # block, live and after a restart (2026-10-21 screenshots: 1,854 of
-    # 2,122 characters swallowed, headings and tables shown as raw text).
-    # Rules 1 and 2 now apply only to a fence that STARTS its line; rule 3
-    # skips a fence inside an inline code span or a table row.
-    # Fix ```language async fn() → ```language\nasync fn()
-    # [ \t]+ NOT \s+: \s matches newlines, so the old pattern also collapsed
-    # a legitimate blank line after the fence opener into nothing.
+# Fence rules apply only where a fence can start its line: inline mentions
+# ("That stray ``` lands", "| A fenced ```json example |") used to be split
+# into a real fence, swallowing 1,854/2,122 chars (2026-10-21). Rule 3 skips
+# inline/table fences; use [ \t]+ not \s so blank lines aren't eaten.
     fixed = re.sub(r'(?m)^([ \t]*```[a-zA-Z0-9_#+-]+)[ \t]+(?=\S)', r'\1\n', fixed)
     # Normalize ALL CRLF → LF inside code fence blocks (openings, content, closings)
     def _normalize_fence_crlf(m):
         return m.group(0).replace('\r\n', '\n')
     fixed = re.sub(r'```[a-zA-Z0-9_#+-]*[\s\S]*?```', _normalize_fence_crlf, fixed)
-    # Ensure bare ``` (no lang) with content on same line gets newline.
-    # BUG history: this used \s+, which matches NEWLINES, so every
-    # CLOSING fence followed by a blank line and prose ("```\n\nThree…")
-    # had its blank line eaten ("```\nThree…"), corrupting well-formed
-    # messages and shifting downstream fence pairing (prose got swallowed
-    # into code cards, commands were mangled, the "THREE card" bug).
-    # [ \t]+ restricts it to actual same-line content.
+    # Bare ``` with same-line content needs a newline. The old \s+ matched NEWLINES,
+    # so a closing fence followed by blank line + prose lost the blank line, shifting
+    # later fence pairing and swallowing prose into code cards (the "THREE card"
+    # bug). [ \t]+ restricts it to real same-line content.
     fixed = re.sub(r'(?m)^([ \t]*```)[ \t]+(?=\S)', r'\1\n', fixed)
 
     # ── Move an opening fence that shares a line with preceding text onto its
@@ -780,11 +715,9 @@ def auto_fix_broken_code_fences(text: str) -> str:
         return line[:m.start(2)].rstrip() + '\n' + m.group(2)
     fixed = '\n'.join(_fence_to_own_line(_l) for _l in fixed.split('\n'))
 
-    # ── Balance fences so NO code ever leaks as plain text ──
-    # A fence WITH a language tag (```bash) is always an OPENING. If we hit one
-    # while already inside a block, the previous block was never closed, insert
-    # a closing ``` first. A bare ``` toggles. Any block still open at the end
-    # gets a closing ``` appended. This guarantees every code region is wrapped.
+    # Balance fences so code never leaks: a language-tagged fence (```bash) is
+    # always an opening, so insert a close if one is already open; bare ``` toggles;
+    # append a close for any block open at end. Guarantees every code region wraps.
     out_lines = []
     in_fence = False
     for line in fixed.split('\n'):
@@ -806,29 +739,19 @@ def auto_fix_broken_code_fences(text: str) -> str:
         out_lines.append('```')
     fixed = '\n'.join(out_lines)
 
-    # NOTE: a "merge consecutive fenced blocks" regex used to live here, it
-    # DELETED a closing fence + following opening fence to fuse back-to-back
-    # code blocks. Removed: on partial buffers (streaming flushes, prose
-    # blocks split by thinking/tool interleaves) it deleted REAL fence
-    # markers, shifting every later fence pairing, prose got swallowed into
-    # code cards and commands lost words/spaces (the "THREE card" bug).
-    # Consecutive code segments are already merged safely at segment level by
-    # ChatPanel._merge_consecutive_code_blocks after parsing.
+    # Removed "merge consecutive fenced blocks" regex: it deleted a close + next
+    # open to fuse back-to-back code, and on partial buffers deleted REAL fences,
+    # shifting pairing and mangling commands (the "THREE card" bug). ChatPanel.
+    # _merge_consecutive_code_blocks already merges safely after parsing.
 
     return fixed
 
 
-# Prose markdown sanitising (save restore)
-# A table cell that itself contains a ``` fence is legal-looking input but
-# illegal markdown: the fence ends up alone on a line, inside the table body,
-# where mistune reads it as the START of a code block. Everything after it,
-# headings, tables, the task JSON, the rest of the answer, then renders as one
-# monospace blob. Measured on a real saved block: 4,660 of 4,564 characters
-# ended up inside a single <pre> (the 2026-10-21 screenshot).
-# The stray fence is invisible to the tag stripper because it stashes
-# ```...``` regions as protected code, so the <task_summary> JSON riding inside
-# that fake block could never be removed either. Rejoin the row FIRST, and both
-# symptoms disappear together.
+# A table cell containing a ``` fence is illegal markdown: the fence lands alone
+# inside the table and mistune treats the rest of the answer as one <pre> (4,660
+# of 4,564 chars in a real saved block, 2026-10-21). The tag stripper stashes
+# fenced regions, so <task_summary> JSON inside the fake block also survived.
+# Rejoin the row first and both symptoms disappear.
 _FENCE_LINE_RE = re.compile(r'^[ \t]*```')
 
 
@@ -957,10 +880,9 @@ def sanitize_prose_markdown(text: str) -> str:
     # fence balancer below, which counts openers and would otherwise pair a
     # glued one with a later closer and mangle the tail.
     text = split_glued_fence_languages(text)
-    # Undo the scar the old fence rules left on an INLINE mention: "` ``` `"
-    # was split into "`", "```", "`" on three lines (auto_fix_broken_code_
-    # fences before 2026-10-21). A line holding only ``` between a line that
-    # ends with a backtick and one that starts with one is never a real block.
+    # Undo the old fence-rule scar on inline mentions: "` ``` `" was split into
+    # three lines. A lone ``` between a line ending in a backtick and one starting
+    # with a backtick is never a real block.
     text = re.sub(r'`[ \t]*\n([ \t]*```[a-zA-Z0-9_#+-]*)[ \t]*\n[ \t]*`',
                   lambda m: '` ' + m.group(1).strip() + ' `', text)
     if '&#124;' in text:
@@ -1046,11 +968,9 @@ def streaming_clean(text: str) -> str:
         _code_blocks.append(m.group(0))
         return f'\x00CODEBLOCK{len(_code_blocks) - 1}\x00'
     text = re.sub(r'```[\s\S]*?```', _stash, text)
-    # Stash tables FIRST, before inline code stashing, so backtick content
-    # inside table cells (e.g. `QMenuBar`, `#141414`) is protected.  Without
-    # this order, the inline regex consumes table backticks, the table stash
-    # captures \x00INLINE{n}\x00 markers, and those markers leak as visible
-    # text when tables are restored after inline restore.
+    # Stash tables BEFORE inline code so backticks in cells (`QMenuBar`, `#141414`)
+    # stay protected. Otherwise inline stashing consumes them, the table stash
+    # captures \x00INLINE{n}\x00 markers, and those leak as visible text on restore.
     _tables: list[str] = []
     def _stash_table(m):
         _tables.append(m.group(0))
@@ -1068,14 +988,10 @@ def streaming_clean(text: str) -> str:
         _links.append(m.group(0))
         return f'\x00LINK{len(_links) - 1}\x00'
     text = re.sub(r'\[[^\]]*\]\([^)]*\)', _stash_link, text)
-    # Strip known control tags (task_summary, file_edited, etc.) even when
-    # the closing tag hasn't arrived yet during streaming.  Without this,
-    # <task_summary>{"title":...}</task_summary> leaks as raw text because
-    # the paired-tag regex below only matches when both tags are present.
-    # IMPORTANT: Only strip paired tags for AGENT CONTROL tags (tool output,
-    # file operations).  Tags like 'summary', 'analysis', 'plan', 'thinking'
-    # can appear in normal AI prose, stripping paired versions would delete
-    # the AI's actual response.  Those are handled by full_clean on turn_done.
+    # Strip paired control tags (task_summary, file_edited, ...) during streaming:
+    # without this the raw block leaks because the regex needs both tags. Only
+    # AGENT control tags: 'summary'/'analysis'/'plan'/'thinking' can be real prose,
+    # so their paired forms are handled by full_clean on turn_done instead.
     _STREAM_CONTROL_TAGS = (
         'file_edited', 'exploration', 'task_summary', 'tasklist',
         'permission', 'search', 'grep', 'glob', 'read_file', 'write_file',
@@ -1090,15 +1006,13 @@ def streaming_clean(text: str) -> str:
     # so partial <think> or <summary doesn't leak as visible text.
     for tag in _KNOWN_TAGS:
         text = re.sub(rf'<{tag}(?:\s[^>]*)?>[\s\S]*$', '', text, flags=re.IGNORECASE)
-    # A live block that starts part-way through a control block ends with a
-    # lone closing tag; drop it (see Pass 1c in strip_all_control_tags). Runs
-    # AFTER the rule above so an opening tag still hides the rest while it
-    # streams.
+    # A live block starting mid-control-block ends with a lone closing tag: drop it
+    # (Pass 1c). Runs after the rule above so an opening tag still hides the rest
+    # while streaming.
     text = _ORPHAN_CONTROL_TAG_LINE.sub('', text)
-    # A piece sealed part-way through a <task_summary> "files" array holds
-    # entry lines cut mid-object; no paired-tag or paired-brace regex matches
-    # them, so they rendered as raw JSON (2026-09-18 screenshot). Drop the
-    # fragment line shapes here too, not only in strip_all_control_tags.
+    # A piece sealed mid-"files" array holds entry lines cut mid-object that no
+    # paired regex matches; drop those fragments here too, not only in
+    # strip_all_control_tags.
     text = _JSON_ENTRY_FRAG_LINE.sub('', text)
     # Strip HTML-like tags, only known HTML tags to protect tree chars like <src/
     _COMMON_HTML_TAGS = (
@@ -1135,24 +1049,21 @@ def full_clean(text: str) -> str:
     # destroys <pre><code> tags before we can convert them to fences.
     text = auto_fix_broken_code_fences(text)
 
-    # ── Protect fenced code blocks from the prose-cleaning passes below ──
-    # strip_all_control_tags (deletes <html> tags / JSON inside code),
-    # clean_assistant_response (strips code comments that look like reasoning),
-    # and escape_currency_dollars (injects \$ into shell code) all operate on
-    # raw text and would CORRUPT code content. Stash each balanced ``` block
-    # behind an inert placeholder, clean the prose, then restore verbatim.
+    # Protect fenced blocks from prose cleaners: strip_all_control_tags deletes
+    # HTML/JSON inside code, clean_assistant_response strips comment-like text, and
+    # escape_currency_dollars injects \$ into shell code. Stash each balanced ```
+    # block behind an inert placeholder, clean prose, restore verbatim.
     _code_blocks: list[str] = []
     def _stash(m):
         _code_blocks.append(m.group(0))
         return f'\x00CODEBLOCK{len(_code_blocks) - 1}\x00'
     text = re.sub(r'```[\s\S]*?```', _stash, text)
 
-    # ── Protect markdown tables from destructive cleaners ──
-    # strip_all_control_tags and clean_broken_windows_paths mangle table
-    # cell content (hex codes like #1e1e1e, pipe chars, file paths with spaces).
-    # Stash contiguous pipe-delimited blocks before cleaning.
-    # Pattern matches: header row(s) + separator + data row(s), with
-    # optional blank lines between separator and data rows (common LLM output).
+    # Protect tables from destructive cleaners: strip_all_control_tags and
+    # clean_broken_windows_paths mangle cell content (hex codes, pipes, paths with
+    # spaces). Stash contiguous pipe-delimited blocks: header row(s) + separator +
+    # data row(s), optional blank lines between separator and data (common LLM
+    # output), before cleaning.
     _tables: list[str] = []
     _TABLE_HEADER_RE = r'^[ \t]*\|(?![\s\-:]+\|?\s*$).+[ \t]*\n'
     _TABLE_SEP_RE_CL = r'^[ \t]*\|[\s\-:]+(?:\|[\s\-:]+)*\|?[ \t]*\n'

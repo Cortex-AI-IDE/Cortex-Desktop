@@ -39,12 +39,11 @@ _RE_TEXT_JSON = re.compile(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}')
 # A tool-activity info that is itself a thinking fragment, not tool data.
 _RE_THINKING_INFO = re.compile(r'\{\s*"type"\s*:\s*"(thinking|reasoning)"')
 
-# Hard cap on the size of a single tool-activity `info` payload that the GUI
-# thread will process. Streaming providers can emit multi-megabyte `info`
-# blobs (e.g. large Write/Edit content or accumulated thinking); running the
-# regex + join + replace chain over that on the GUI thread froze the whole app
-# for ~60s (see ui_stall_detector reports). Nobody can read millions of chars
-# in a thinking bubble, so we only ever process the most recent tail.
+# Cap a tool-activity `info` payload before GUI processing: streaming providers
+# emit multi-MB blobs (large Write/Edit content, accumulated thinking), and the
+# regex/join/replace chain over that on the GUI thread froze the app ~60s
+# (ui_stall_detector). Nobody reads millions of chars in a bubble; keep the
+# recent tail.
 _MAX_ACTIVITY_INFO = 65536
 
 
@@ -135,13 +134,10 @@ class NativeChatBridge(QObject):
         if hasattr(b, 'request_started'):
             b.request_started.connect(self.unmute)
 
-# New Chat: drop what a stopped turn still sends
-    # New Chat stops a running reply, but signals the agent's thread already
-    # queued keep arriving afterwards, and ChatPanel._ensure() opens a new
-    # assistant message for any chunk when none is open: the fresh chat
-    # showed half a message from the old one. Muted, nothing that puts
-    # content in the chat gets through; the next request unmutes
-    # (agent_bridge.request_started, emitted by chat()).
+# New Chat drops queued chunks from a stopped turn: the agent thread's signals
+# keep arriving and ChatPanel._ensure() opens a new assistant message for any
+# chunk, so the fresh chat showed half the old reply. Mute content signals; the
+# next request unmutes (agent_bridge.request_started from chat()).
     _muted = False
 
     def mute(self):
@@ -208,12 +204,10 @@ class NativeChatBridge(QObject):
                 think_content = chunk[think_start:think_end].strip()
                 if think_content:
                     self.signals.thinking_delta.emit(think_content)
-                # Extract text content (after end tag).
-                # NO .strip(): the leading whitespace of the resuming content
-                # is REAL ("...on **port" [thought] " 8084**"), stripping it
-                # glued words across every thought→text transition (Grok
-                # interleaves thinking constantly, so commands/prose displayed
-                # as "port8084", "```powershellnpx", etc.).
+                # Extract text after the end tag WITHOUT .strip(): leading whitespace is real
+                # ("...on **port" [thought] " 8084**"); stripping glued words at every
+                # thought->text transition (Grok interleaves constantly: "port8084",
+                # "```powershellnpx").
                 after_think = chunk[end_match.end():]
                 self._in_thought = False
                 if after_think:
@@ -247,16 +241,11 @@ class NativeChatBridge(QObject):
         if self._in_thought:
             self.signals.thinking_delta.emit(chunk)
         else:
-            # STREAM RAW, do NOT strip control tags during streaming.
-            # strip_all_control_tags on partial content mangles incomplete
-            # XML tags, causing text to vanish until on_turn_done re-renders.
-            # Full cleaning happens in ChatPanel.on_turn_done() via _light_clean().
-            # BUG history: this was gated on `if chunk.strip():`, which DROPPED
-            # pure-whitespace deltas entirely, models emit standalone " " and
-            # "\n\n" tokens routinely, so words glued ("port" + [" " dropped] +
-            # "8084" → "port8084") and paragraphs merged. Every chunk must be
-            # forwarded byte-for-byte; only _text_emitted stays gated on
-            # non-whitespace (it controls the response_complete fallback).
+            # Stream raw, don't strip control tags mid-stream: cleaning partial content
+            # mangles incomplete XML and text vanishes until turn_done re-renders. Full
+            # clean happens in ChatPanel.on_turn_done via _light_clean(). BUG: gating on
+            # `chunk.strip()` dropped whitespace deltas (" ", "\n\n"), gluing words and
+            # paragraphs. Forward every chunk byte-for-byte; only _text_emitted stays gated.
             if chunk:
                 if chunk.strip():
                     self._text_emitted = True
@@ -356,10 +345,9 @@ class NativeChatBridge(QObject):
         """Map tool activity to tool_start / tool_end."""
         if self._muted:
             return
-        # GUI-THREAD GUARD: cap the payload before any regex/join/replace work.
-        # A single streamed `info` can be multiple megabytes; scanning that on
-        # the GUI thread froze the app for ~60s. Keep only the most recent tail
-        # so downstream string work is always bounded.
+        # GUI-thread guard: cap the payload BEFORE regex/join/replace. A streamed `info`
+        # can be megabytes, which froze the app ~60s. Keep only the recent tail so
+        # downstream string work stays bounded.
         if info and len(info) > _MAX_ACTIVITY_INFO:
             info = info[-_MAX_ACTIVITY_INFO:]
         # Filter out thinking/reasoning chunks that come through tool_activity
@@ -373,12 +361,9 @@ class NativeChatBridge(QObject):
                         return
                 self.signals.thinking_delta.emit(info)
             return
-        # Filter out JSON thinking fragments in info field. ONLY a thinking
-        # fragment: Grep/search results carry a "text" key per match
-        # ({"file":..,"line":..,"text":"<matched line>"}), and treating those
-        # as thinking glued every matched line into a Thought card with no
-# separators ("...still" "showed...", "fix)." " 1a.") while the
-        # Grep card never got its results.
+        # Filter JSON thinking fragments only: Grep results carry "text" per match
+        # ({"file":..,"line":..,"text":"<line>"}), and treating those as thinking glued
+        # every match into a Thought card while the Grep card showed nothing.
         _s = (info or "").lstrip()
         if '"text"' in _s and (_s.startswith("thinking") or _RE_THINKING_INFO.match(_s)):
             texts = _RE_TEXT_JSON.findall(info)
@@ -388,39 +373,26 @@ class NativeChatBridge(QObject):
                     self.signals.thinking_delta.emit(combined)
                     return
 
-        # Deduplicate: key on the FULL args, not info[:50].
-        # info[:50] collided DIFFERENT tools onto one key whenever they shared
-        # a long common prefix. run_command is the worst case: its info always
-        # starts with the same 'cd "<project path>" && …', so the first 50
-        # chars were identical for every command and their tool cards were all
-        # suppressed as "duplicates" (field log: 8x THOUGHT-SEG SUPPRESSED, same
-        # truncated key) — the "Let me check X … Let me find Y …" narration then
-        # walled up with no cards between it. A hash of the full info gives each
-        # distinct command its own key, while a genuine duplicate emit (byte-
-        # identical info) still hashes the same and is caught.
+        # Dedup on FULL args, not info[:50]: a shared prefix (run_command's 'cd <path>
+        # && ...') collided different tools onto one key, suppressing all their cards
+        # (8x THOUGHT-SEG SUPPRESSED, same key) and walling up narration. Hash full info
+        # so distinct commands get cards while byte-identical duplicates are caught.
         import hashlib as _hashlib
         dedup_key = f"{name}:{_hashlib.md5((info or '').encode('utf-8', 'ignore')).hexdigest()}"
         if status in ("running", "started", "pending"):
-            # ── Segment boundary: a real tool is starting, so any reasoning
-            # segment is over. Reset _in_thought, if a </think> tag was split
-            # across stream chunks the end-regex never matched and the flag
-            # would stay True forever, silently routing ALL later prose
-            # (including the final answer) into the collapsed Thought block.
-            # Also reset _text_emitted so it tracks only the segment AFTER the
-            # last tool: _on_response_complete's fallback re-emit then fires
-            # whenever the final answer produced no visible text, instead of
-            # being suppressed by prose from earlier agentic turns.
+            # A real tool starting ends any reasoning segment: reset _in_thought, or a
+            # </think> split across chunks leaves it True forever and routes all later prose
+            # (including the answer) into the collapsed Thought block. Also reset
+            # _text_emitted so the fallback re-emit tracks only prose after the last tool.
             self._in_thought = False
             self._text_emitted = False
             self._segment_raw = ""
             self._turn_had_tool = True
             if dedup_key in self._seen_tools:
-                # Suppressed: this exact name+info[:50] was already shown earlier
-                # in the run (session-wide set, cleared only at response_complete).
-                # This is invisible in the UI, its tool card vanishes AND, because
-                # tool_end still fires, the surrounding reasoning can merge into a
-                # "wall" Thought unless on_tool_end closes the think block. Log it
-                # so this path is finally observable in cortex.log.
+                # Suppressed: this name+info[:50] already shown this run (session set, cleared
+                # at response_complete). Invisible in the UI: the card vanishes and, unless
+                # on_tool_end closes it, reasoning merges into a wall Thought. Log it so the
+                # path is observable.
                 import logging
                 logging.getLogger(__name__).info(
                     f"[THOUGHT-SEG] tool_start SUPPRESSED (dedup) name={name!r} "
@@ -431,14 +403,10 @@ class NativeChatBridge(QObject):
             self._tool_counter += 1
             tool_id = f"tool_{self._tool_counter}"
             self._active_tools[name] = tool_id
-            # Remember this start's key so it is RELEASED when the tool ends
-            # (below). The dedup then only catches a genuine duplicate start
-            # emitted while the tool's card is still open; a legitimate re-run
-            # later (the agent re-Reads/re-Greps the same file, which it does
-            # constantly) gets its own card instead of being suppressed for the
-            # whole response. Session-wide suppression was hiding those cards,
-            # so the "Let me read X … Let me read Y …" narration between them
-            # collapsed into one wall Thought - the reported bug.
+            # Remember this start's key so it's RELEASED on tool end: dedup then catches only
+            # a true duplicate while the card is open; a legitimate re-Read/re-Grep later
+            # gets its own card. Session-wide suppression hid those, collapsing narration
+            # into one wall Thought (the reported bug).
             self._active_start_key[tool_id] = dedup_key
             # Parse JSON data for tool cards, fallback to clean display text
             data = self._parse_tool_data(info)
@@ -639,10 +607,9 @@ class NativeChatBridge(QObject):
         rows.append(("hunk", None, None,
                       f"@@ -{first_old},{old_count} +{first_new},{new_count} @@"))
 
-        # Keep only CTX unchanged lines either side of a change (the card
-        # shows 3). Emitting every unchanged line made a 1,500-line CSS edit
-        # a 1,500-row list, and the storage cap then saved only context, so
-        # the card expanded to nothing after an IDE restart.
+        # Keep only CTX unchanged lines either side (card shows 3): emitting all made a
+        # 1,500-line CSS edit a 1,500-row list, and the storage cap then kept only
+        # context, so the card expanded to nothing after restart.
         CTX = 3
         last = len(opcodes) - 1
         for idx, (tag, i1, i2, j1, j2) in enumerate(opcodes):

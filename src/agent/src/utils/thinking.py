@@ -124,10 +124,9 @@ PROVIDER_THINKING_DEFAULTS = {
         "budget_tokens": 8000,                   # Default thinking budget
     },
     "meta": {
-        # openrouter.ai/api/v1/models lists reasoning, include_reasoning and
-        # reasoning_effort in supported_parameters for muse-spark, so it gets
-        # the same adaptive treatment as the other reasoning families rather
-        # than being left on the no-thinking default.
+        # openrouter lists reasoning/include_reasoning/reasoning_effort in
+        # supported_parameters for muse-spark, so it gets adaptive thinking like the
+        # other reasoning families, not the no-thinking default.
         "thinking_type": "adaptive",
         "budget_tokens": 8000,
     },
@@ -319,14 +318,11 @@ def model_supports_thinking(provider: str, model_name: str) -> bool:
     provider = provider.lower()
     model_name = model_name.lower()
 
-    # A server-published model states this itself, ticked in the admin. Check
-    # it first: the tables below cannot know about a model released after this
-    # build, and without this a new reasoning model's thinking leaked into the
-    # visible reply instead of the Thought card.
-    # Two id shapes reach this function: OpenRouter ids arrive already split
-    # (provider="anthropic", model_name="claude-fable-5"), while direct
-    # providers pass the plain id. Try the rejoined form first, then the bare
-    # name, so both resolve against the server's model_id.
+    # Check server-published models first (ticked in admin): tables can't know a
+    # model released after this build, or a new reasoning model's thinking leaked
+    # into the visible reply. OpenRouter ids arrive pre-split (provider+model_name),
+    # direct providers pass the plain id; try rejoined first, then bare, so both
+    # match server model_id.
     try:
         from src.ai.remote_models import remote_supports_thinking
         for candidate in (f"{provider}/{model_name}", model_name):
@@ -407,10 +403,8 @@ def get_recommended_thinking_config(provider: str, model_name: str) -> Optional[
     if not model_supports_thinking(provider, model_name):
         return None
     
-    # Scale thinking budget by model context size:
-    #   1M ctx models → 4000 tokens (GPT-5.6, MiMo V2.5, DeepSeek V4, etc.)
-    #   200K ctx models → 1000 tokens (GPT-5.4/5.5, Claude, etc.)
-    # Default fallback → 1000 tokens
+    # Thinking budget scales with context: 1M ctx -> 4000 tokens (GPT-5.6, MiMo
+    # V2.5, DeepSeek V4), 200K -> 1000 (GPT-5.4/5.5, Claude), fallback 1000.
     budget = _get_thinking_budget_by_model(provider, model_name)
     
     # Check if model supports adaptive thinking

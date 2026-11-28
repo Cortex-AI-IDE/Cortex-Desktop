@@ -69,10 +69,9 @@ class CodeView(QFrame):
         # Responsive: never force wider than parent, horizontal scroll stays internal
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)  # allow shrinking below content width
-        # No `overflow:hidden` here: Qt Style Sheets do not support it, so it
-        # only produced a line of "Unknown property overflow" stderr noise per
-        # card (32 of them on a single session restore). QWidget clips children
-        # to its own geometry by default, so the property never did anything.
+        # No overflow:hidden: Qt stylesheets don't support it, so it only produced
+        # "Unknown property overflow" noise per card (32 on one restore). QWidget
+        # clips children by default, so the property never did anything.
         self.setStyleSheet(
             f"#codeView {{ background:{T['md_code_bg']}; border:1px solid {T['border']};"
             f" border-radius:6px; }}")
@@ -182,11 +181,9 @@ class ToolCardBase(QFrame):
         # card is a flat ledger row rather than a boxed card (2026-09-11).
         self.setStyleSheet(self._frame_qss())
         self._badge_token = "mono_muted"
-        # Stored for retheme(), these are the values baked into the header
-        # widgets below, all captured at CONSTRUCTION time. A live theme
-        # switch left these cards (Grep/Bash/Read/...) with the OLD theme's
-        # frame background, the "run command card background still
-        # leaking" bug. retheme() rebuilds every styled widget from LIVE T.
+        # Store header colours for retheme(): they're baked into widgets at
+        # CONSTRUCTION, so a live switch left cards with the old frame background
+        # ("run command card background still leaking"). retheme() rebuilds from live T.
         self._tool_type = tool_type
         _, self._arg_color_token = get_tool_icon(tool_type)
         # Responsive containment: fill parent width, never overflow
@@ -200,13 +197,10 @@ class ToolCardBase(QFrame):
         # Header row
         self._has_body = has_body
         self.header = QWidget()
-        # Explicit transparent, REQUIRED. A bare QWidget with no stylesheet
-        # of its own still matches the app-wide `QWidget { background-color
-        # }` rule in dark.qss/light.qss, set ONLY ONCE at startup and never
-        # re-applied at runtime (that's what prevents the 75s freeze).
-        # Without this the header shows whichever theme was active at APP
-        # STARTUP forever, a solid box of the wrong color sitting on top
-        # of the correctly-rethemed card frame, regardless of live switches.
+        # Explicit transparent is REQUIRED: a bare QWidget still matches the app-wide
+        # QWidget background rule in dark.qss/light.qss, applied only once at startup
+        # (reapplying costs 75s). Without this the header keeps the APP-STARTUP theme
+        # forever, a wrong-coloured box on the correctly-rethemed card.
         self.header.setStyleSheet("background: transparent;")
         self.header.setCursor(Qt.CursorShape.PointingHandCursor if has_body else Qt.CursorShape.ArrowCursor)
         h = QHBoxLayout(self.header)
@@ -227,10 +221,9 @@ class ToolCardBase(QFrame):
         self._name_lbl = QLabel(name)
         self._name_lbl.setObjectName("toolName")
         _contain_label(self._name_lbl, wrap=False)
-        # ElidedLabel keeps long commands/args inside the card, never widens
-        # the chat panel or triggers a horizontal scrollbar. Full text on hover.
-        # Muted rather than tinted by tool family: the gutter icon already
-        # carries the family color, a colored argument read as noise.
+        # ElidedLabel keeps long commands inside the card, no widening or horizontal
+        # scrollbar, full text on hover. Muted, not family-tinted: the gutter icon
+        # carries the family colour already.
         self._arg_lbl = ElidedLabel(arg)
         self._arg_lbl.setObjectName("toolArg")
         self._badge_lbl = QLabel("")
@@ -414,24 +407,18 @@ class EditCard(ToolCardBase):
             cv = CodeView()
             cv.set_lines(rows)
             self.body_layout.addWidget(cv)
-            # Show the change, do not hide it behind a second click. The
-            # parent activity group is already collapsed; the diff IS the
-            # content of an Edit row, so it starts open (CodeView caps its
-            # own height at 18 lines).
+            # Show the change, don't hide it behind a click: the activity group is already
+            # collapsed and the diff IS the Edit row's content, so it starts open (CodeView
+            # caps itself at 18 lines).
             self._collapsed = False
             self.body.setVisible(True)
             if self._chev:
                 self._chev.setText("\u2304")
 
-# diff rows
-    # Field report 2026-10-22: "the edited diff is not showing inside the
-    # tool section". The card only ever rendered data["hunk_lines"], and
-    # the only producer of hunk_lines is native_chat_bridge, which feeds
-    # the SEPARATE DiffCard. Nothing ever put hunk_lines on a tool card,
-    # so the Edit row was an empty shell whose diff lived elsewhere (and
-    # was gone entirely when that signal did not reach the panel).
-    # agent_bridge now also sends the edit's old_string/new_string (it
-    # read them and threw them away), so the card diffs them itself.
+# Diff rows: the card only rendered data["hunk_lines"], whose only producer
+# (native_chat_bridge) feeds the SEPARATE DiffCard, so Edit rows were empty
+# shells (2026-10-22 "edited diff not showing"). agent_bridge now also sends
+# old_string/new_string so the card diffs them itself.
     _MAX_DIFF_ROWS = 400     # past this the card is unreadable and costly
     _CONTEXT_LINES = 3       # unchanged lines kept around each change
 
@@ -1113,14 +1100,10 @@ def make_card(tool_type: str, data: dict) -> ToolCardBase:
     if "name" not in data:
         data["name"] = tool_type
     card = cls(data)
-    # Persistence hooks. A saved timeline stores a card as its dispatch key
-    # plus this dict, and restore feeds both straight back into make_card().
-    # Held on the card because ChatPanel keys cards by tool_id only, so
-    # without it the type and the output were unrecoverable and every
-    # restored tool degraded to a one-line text row (2026-10-21 report:
-    # 1,044 tool blocks in a live timeline, none carrying a card type).
-    # _update_rich_card() merges tool_end results into this same dict, so
-    # the saved copy carries the real output, not just the start args.
+    # Persistence: a saved timeline stores dispatch key + this dict and restore
+    # feeds both to make_card(). ChatPanel keys cards by tool_id only, so without
+    # it restored tools degraded to one-line rows (1,044 blocks with no type,
+    # 2026-10-21). _update_rich_card merges tool_end output into the same dict.
     card._card_type = key
     card._card_data = data
     return card

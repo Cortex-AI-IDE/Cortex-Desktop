@@ -26,30 +26,22 @@ log = get_logger("webview_panel")
 # active theme's background). tokens.py imports nothing, so this is cycle-free.
 from src.ui.tokens import TOKENS as T
 
-# Above this many characters a file is handed to the webview as a file:// URI
-# instead of being embedded in a runJavaScript string. Qt's IPC channel and
-# V8's main thread both stall on multi-megabyte inline payloads.
-# Module level because two code paths need it and only one used to have it:
-# it lived inside _open_file_js, so _flush_pending_switch had no guard and
-# re-shipped the whole file on every switch back to that tab.
+# Above this size a file goes to the webview as a file:// URI, not embedded in
+# runJavaScript: Qt IPC and V8 stall on multi-MB inline strings. Module-level
+# because two paths need it: it used to live in _open_file_js, so
+# _flush_pending_switch had no guard and re-shipped the file on every switch.
 _LARGE_CHAR_THRESHOLD = 200_000
 
-# Hard ceiling for anything handed to the Monaco renderer. A ~40 MB JSON file
-# (geo/ne_10m_admin_1_states_provinces.json, 39,959,249 chars) was serialized
-# with json.dumps() and pushed through runJavaScript() as one string literal.
-# V8 could not allocate it -> SIGTRAP (exit 133) -> the shared Chromium render
-# process died, taking editor + sidebar + terminal with it.
-# The old 200 KB guard only ran on the BACKGROUND branch of _run_open_now; a
-# user click took the activate=True branch that returned before the guard, so
-# nothing capped the click path. Every path now routes through
-# _deliver_to_editor(), which enforces this ceiling, so no caller can bypass it
-# by choosing a different code path.
+# Hard ceiling for Monaco: a ~40MB JSON (39,959,249 chars) pushed through
+# runJavaScript as one string literal killed V8 -> SIGTRAP/133 -> the shared
+# Chromium renderer took editor/sidebar/terminal with it. The old 200KB guard
+# ran only on the background branch; a user click returned first. Every path
+# now goes through _deliver_to_editor(), which enforces this ceiling.
 _MAX_EDITOR_CHARS = 20_000_000  # 20 MB of text: refuse to open above this
 
-# Large-file XHR must hit a same-origin temp path under %TEMP%/cortex_webview.
-# editor.html itself is loaded from that folder. XHR to the real project path
-# (especially OneDrive Desktop) often hangs forever in QWebEngine, leaving the
-# tab stuck on "// Loading...".
+# Large-file XHR needs a same-origin temp path under %TEMP%/cortex_webview
+# (where editor.html lives). XHR to the real project path (especially OneDrive
+# Desktop) often hangs forever, leaving the tab on "// Loading...".
 _LARGE_CACHE_DIR = Path(__import__("tempfile").gettempdir()) / "cortex_webview" / "large_cache"
 
 
@@ -89,10 +81,7 @@ class _LoggingWebEnginePage(QWebEnginePage):
             lvl = int(level)
         except Exception:
             lvl = 0
-        # Route JS console messages to appropriate Python log levels:
-        # INFO (0) → debug (noisy, routine editor operations)
-        # WARN (1) → warning (worth noting but not critical)
-        # ERROR (2) → error (real problems that need attention)
+        # JS console levels: INFO(0)->debug (noisy), WARN(1)->warning, ERROR(2)->error.
         if lvl == 0:
             log.debug(f"[JS] {message}")
         elif lvl == 1:
@@ -315,15 +304,11 @@ class WebviewPanel(QWidget):
         self._view = QWebEngineView()
         self._page = _LoggingWebEnginePage(self._view)
         self._view.setPage(self._page)
-        # KILL WHITE FLASH: TRANSPARENT page background, not dark. A dark
-        # color only fixes the RENDERER's background; Chromium's native
-        # surface still shows its gray placeholder quad and a white first
-        # composite BEFORE the renderer starts (video-captured at boot:
-        # gray at t+4.10s, white at t+4.33s). Native child windows also
-        # z-order ABOVE the Qt startup overlay, so the overlay can't hide
-        # it. Transparent makes the uninitialized surface composite as
-        # nothing, the dark Qt window shows through until the HTML (which
-        # paints its own background) renders.
+        # Kill the white flash with a TRANSPARENT background, not dark: a dark colour
+        # only fixes the renderer, while Chromium's native surface shows gray then
+        # white before it starts (video: gray t+4.10s, white t+4.33s) and z-orders above
+        # the Qt overlay. Transparent composites as nothing, letting dark Qt show until
+        # the HTML paints its own background.
         from PyQt6.QtGui import QColor
         from PyQt6.QtCore import Qt as _Qt
         self._page.setBackgroundColor(QColor(_Qt.GlobalColor.transparent))
@@ -331,19 +316,14 @@ class WebviewPanel(QWidget):
         # is what shows while it loads or resizes (a dark flash in light mode).
         self._view.setStyleSheet(f"background: {T['bg']}; border: none;")
 
-        # Chromium's own menu (Back, Forward, Reload, Save page, Save image,
-        # Copy image address) was reachable by right-clicking the welcome
-        # screen. Those entries belong to a browser, not to an editor pane:
-        # "Back" and "Reload" can navigate the pane away from editor.html,
-        # and "Save page" offers to write the IDE's own markup to disk. The
-        # terminal already suppresses it the same way, see xterm_terminal.py.
+        # Chromium's right-click menu on the welcome screen (Back/Reload/Save page)
+        # belongs to a browser, not an editor: it can navigate away from editor.html or
+        # offer to save the IDE's own markup. The terminal suppresses it the same way.
         self._view.setContextMenuPolicy(_Qt.ContextMenuPolicy.NoContextMenu)
 
-        # Enable localStorage + cross-directory file access
-        # NOTE: JavascriptCanAccessClipboard intentionally DISABLED -
-        # Monaco editor uses the Python bridge (copyToClipboard slot) for clipboard.
-        # Enabling it causes Qt/Chromium to spam "qt.qpa.mime: Retrying to obtain clipboard"
-        # when the OS clipboard is locked or unavailable (especially under memory pressure).
+        # Enable localStorage + cross-directory file access. JavascriptCanAccessClipboard
+        # stays DISABLED: Monaco uses the Python bridge, and enabling it spams
+        # "qt.qpa.mime: Retrying to obtain clipboard" under memory pressure.
         self._view.settings().setAttribute(
             self._view.settings().WebAttribute.LocalStorageEnabled, True
         )
@@ -362,10 +342,9 @@ class WebviewPanel(QWidget):
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
-        # Inline Monaco loader.js + inject file:/// vs/ path → write temp file → load.
-        # Inlining loader.js avoids <script src="file:///..."> cross-directory loading
-        # issues in QWebEngineView. Dynamic script/XHR fetches from file:/// URIs
-        # work correctly with LocalContentCanAccessFileUrls enabled.
+        # Inline loader.js and write file:/// URIs to a temp file before loading: this
+        # avoids <script src="file:///..."> cross-directory issues, while dynamic
+        # script/XHR from file:/// works with LocalContentCanAccessFileUrls.
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             _bundle_root = Path(sys._MEIPASS)
         else:
@@ -404,11 +383,10 @@ class WebviewPanel(QWidget):
             from src.utils.exit_hooks import register as _register_exit_hook
             _register_exit_hook(_cleanup_tmp)
 
-            # Cache-busting: append timestamp to force fresh page load every restart.
-            # boot=1 tells editor.html to stay boot-hidden (flat dark, content
-            # invisible) until the startup overlay is dismissed - the page's
-            # native surface z-orders above the Qt overlay and would otherwise
-            # paint its own splash/welcome next to the main loading screen.
+            # Cache-bust with a timestamp so each restart loads fresh. boot=1 keeps editor.
+            # html boot-hidden (flat dark) until the overlay is dismissed: the native page
+            # surface z-orders above the Qt overlay and would paint its own splash beside
+            # the main loading screen.
             from src.core import boot_state
             _boot_q = "&boot=1" if boot_state.is_booting() else ""
             url = QUrl.fromLocalFile(str(self._tmp_html.resolve()))
@@ -421,10 +399,9 @@ class WebviewPanel(QWidget):
         # Catch Chromium render process crashes
         self._view.page().renderProcessTerminated.connect(self._on_render_crash)
         
-        # Install event filter on the webview to intercept Ctrl+S ShortcutOverride.
-        # QWebEngineView accepts ShortcutOverride by default, which prevents Qt's
-        # menu shortcut (Ctrl+S → _save_current) from ever firing. By rejecting
-        # ShortcutOverride for Ctrl+S, we let Qt's shortcut system handle it.
+        # Event filter intercepts Ctrl+S ShortcutOverride: QWebEngineView accepts it by
+        # default, preventing Qt's menu shortcut (_save_current). Rejecting it lets Qt
+        # handle Ctrl+S.
         self._view.installEventFilter(self)
         
         layout.addWidget(self._view)
@@ -767,10 +744,9 @@ class WebviewPanel(QWidget):
 
             safe_path = json.dumps(fp)
             safe_lang = json.dumps(lang)
-            # Route through the choke point: re-inlining a multi-MB string here
-            # was the crash-recovery loop (XHR fails -> inline 40MB -> SIGTRAP
-            # -> reload -> re-queue -> inline again). The choke point refuses
-            # oversized content and uses XHR for large-but-editable files.
+            # Route through the choke point: re-inlining a multi-MB string here was the
+            # crash loop (XHR fails -> inline 40MB -> SIGTRAP -> reload -> requeue). It
+            # refuses oversized content and uses XHR for large-but-editable files.
             self._deliver_to_editor(fp, content, lang, activate=True)
             log.info(
                 f"[WebviewPanel] large-file fallback via _deliver_to_editor: "
@@ -824,11 +800,9 @@ class WebviewPanel(QWidget):
         """
         log.info(f"[WebviewPanel] open_file: {file_path} (lang={language}, len={len(content)}, page_loaded={self._page_loaded})")
 
-# Oversized file gate
-        # Anything above the ceiling is refused before it can reach the
-        # renderer. We keep only the size (not the buffer) so a 20MB+ string is
-        # never retained in Python nor shipped over IPC. The editor shows a
-        # read-only notice tab instead. See _MAX_EDITOR_CHARS.
+# Oversized file gate: refuse above the ceiling before the renderer sees it.
+# Keep only the size, not the buffer, so 20MB+ strings are never retained or
+# shipped over IPC; show a read-only notice tab. See _MAX_EDITOR_CHARS.
         _too_large = bool(content) and len(content) > _MAX_EDITOR_CHARS
         if _too_large:
             log.warning(
@@ -1007,10 +981,9 @@ class WebviewPanel(QWidget):
             if hasattr(self, '_open_queue'):
                 self._open_queue.clear()
             safe_path = json.dumps(path)
-            # Push fresh content from Python cache to JS before switching,
-            # so the JS openFiles{path}.content is always up-to-date.
-            # Without this, stale JS cache causes file to show old content
-            # until IDE restart (caching bug reported: files only update on restart).
+            # Push fresh Python-cache content to JS before switching so openFiles[path].
+            # content is current. Without it the JS cache showed old content until IDE
+            # restart (reported caching bug).
             fdata = self._open_files.get(path, {})
             py_content = fdata.get("content", "")
             py_lang = fdata.get("language", "plaintext")
@@ -1025,10 +998,9 @@ class WebviewPanel(QWidget):
 
             safe_lang = json.dumps(py_lang)
 
-            # Large-but-editable files: route through the choke point, which
-            # re-caches and uses openFileFromUri (JS switches instantly when it
-            # already holds real content, and XHRs only if it doesn't). Never
-            # inline >200KB here.
+            # Large-but-editable files go through the choke point, which re-caches and uses
+            # openFileFromUri (JS switches instantly with real content, XHRs only if not).
+            # Never inline >200KB here.
             if path and len(py_content) > _LARGE_CHAR_THRESHOLD:
                 self._deliver_to_editor(path, py_content, py_lang, activate=True)
                 self._pending_switch_path = None
@@ -1132,17 +1104,11 @@ class WebviewPanel(QWidget):
             self._open_timer: Optional[QTimer] = None
 
         def _run_open_now(fp: str, c: str, lang: str, activate: bool):
-            # NOTE: Do NOT mark as delivered before the JS call succeeds.
-            # The JS ACK (bridge.onContentDelivered) is the reliable signal.
-            # Premature marking caused "empty editor" bugs when the JS call
-            # was throttled or the page hadn't loaded yet.
-            # ALL paths (user click, background restore) now go through
-            # _deliver_to_editor, the single choke point that enforces the size
-            # ceiling. Previously this function had its own inline logic and a
-            # user click (activate=True) RETURNED before the 200 KB guard, so a
-            # 40 MB file was json.dumps()'d into one JS string literal and
-            # crashed the renderer (SIGTRAP/133). Do not reintroduce a direct
-            # openFile() here.
+            # Mark delivered only after JS ACKs (bridge.onContentDelivered): premature
+            # marking caused "empty editor" when throttled or before page load. All paths
+            # go through _deliver_to_editor, the choke point for the 200KB cap; a direct
+            # openFile() once bypassed it and a 40MB file crashed the renderer. Don't
+            # reintroduce direct openFile() here.
             if fp and hasattr(self, "_large_fallback_done"):
                 # Allow the XHR fallback to be re-attempted for a fresh open.
                 self._large_fallback_done.discard(fp)
@@ -1211,14 +1177,11 @@ class WebviewPanel(QWidget):
             return
 
         if self._open_timer is None:
-            # Use a QTimer for ALL files, including the first.
-            # The first file fires at 0ms (next event-loop iteration),
-            # subsequent files are spaced by _delay_ms (10s warmup / 1.5s normal).
-            # CRITICAL: Using a timer (even 0ms) instead of calling _flush_one()
-            # synchronously ensures _open_timer remains set during batch opens
-            # (e.g. _process_pending loop). Without this, each _open_file_js()
-            # resets _open_timer=None after flushing, so the next call creates
-            # another immediate flush, completely bypassing the warmup delay.
+            # QTimer for ALL files, including the first: 0ms on the next event-loop tick,
+            # then _delay_ms (10s warmup / 1.5s normal). A timer (even 0ms) keeps _open_timer
+            # set during batch opens; calling _flush_one synchronously let each
+            # _open_file_js reset it to None, creating another immediate flush that bypassed
+            # the warmup delay entirely.
             def _flush_one():
                 if not self._open_queue:
                     self._open_timer = None
@@ -1342,12 +1305,9 @@ class WebviewPanel(QWidget):
             return
 
         def _safe_callback(content: str):
-# EMPTY CONTENT FALLBACK
-            # If Monaco returns empty/None, fall back to Python cache or
-            # disk content to prevent accidental file wiping.
-            # FIX: Only fall back to disk when content is None (JS bridge
-            # broken). Empty string "" means user intentionally cleared the
-            # file, trust Monaco and save the empty content.
+# Empty-content fallback: if Monaco returns empty/None, use Python cache or
+# disk to avoid wiping the file. Fall back to disk ONLY when content is None
+# (broken JS bridge); "" means the user cleared it, so trust and save it.
             if content is None:
                 try:
                     from pathlib import Path

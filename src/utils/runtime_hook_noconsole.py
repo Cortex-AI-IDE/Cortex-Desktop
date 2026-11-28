@@ -5,15 +5,11 @@ This runs BEFORE the application starts to globally suppress console windows.
 import sys
 import os
 
-# ── Null-safe stdout/stderr for console=False builds ──
-# When built with console=False, sys.stdout/stderr are broken file
-# descriptors. print(..., flush=True) raises OSError: [Errno 22].
-# CRITICAL: the replacements must have REAL OS file descriptors, i.e.
-# open(os.devnull). The previous fake _NullWriter had fileno() == -1,
-# and anything that hands sys.stderr to a child process (the MCP SDK's
-# stdio_client does by default) then failed with [Errno 9] Bad file
-# descriptor, every MCP server broke instantly in the installed .exe
-# while dev runs worked (a real console provided real streams).
+# Null-safe stdout/stderr for console=False builds: sys.stdout/stderr are
+# broken descriptors, so print(flush=True) raises OSError [Errno 22]. CRITICAL:
+# replacements need REAL OS fds (open(os.devnull)); the fake _NullWriter had
+# fileno() == -1, so anything handing stderr to a child (MCP SDK stdio_client)
+# failed [Errno 9] and every MCP server broke in the .exe while dev worked.
 class _NullWriter:
     """Last-resort fallback if os.devnull cannot be opened."""
     def write(self, s): pass

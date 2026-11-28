@@ -207,17 +207,10 @@ class CrashStore:
                         (conversation_id, content, now)
                     )
 
-                    # updated_at is deliberately NOT touched here. See the note
-                    # in save_assistant_response: this table also holds
-                    # timeline_json, so stamping one integer rewrites the whole
-                    # multi-megabyte row. This call runs on the GUI thread
-                    # straight off the Enter key:
-                    #   chat_panel.py:6850 eventFilter -> _emit_send -> _on_send
-                    #     crash_persistence.py:206 save_user_message
-                    #       cursor.execute            <- GUI frozen 1.7s
-                    # Crash safety is unchanged: the message INSERT above and
-                    # the recovery-log INSERT below both still run before this
-                    # returns.
+                    # Don't stamp updated_at: conversations also holds timeline_json,
+                    # so one integer rewrites the whole multi-MB row on the GUI thread
+                    # (frozen 1.7s via chat_panel eventFilter -> _on_send -> save).
+                    # Crash safety unchanged: both INSERTs still run before return.
 
                     # Log for crash recovery
                     cursor.execute(
@@ -288,29 +281,12 @@ class CrashStore:
                         (conversation_id, content, now, metadata_json)
                     )
 
-                    # updated_at is deliberately NOT stamped here.
-                    # The conversations table also holds timeline_json, the
-                    # whole serialized chat, and SQLite cannot update part of a
-                    # row: setting one integer rewrites the entire row and its
-                    # overflow pages into the WAL. Measured 2026-09-09 on the
-                    # active conversation, timeline_json was 26.26 MB across 21
-                    # rows while every other column totalled 0.00 MB, and the
-                    # live row was 5.97 MB. So this stamped a timestamp at a
-                    # cost of ~6 MB of I/O, and it grows with the conversation.
-                    # It is also redundant: database.set_conversation_timeline
-                    # writes `timeline_json = ?, updated_at = ?` together on
-                    # every turn, so the timestamp stays current without this.
-                    # What is lost is a few seconds of staleness between the
-                    # send and the turn finishing, which only affects ordering
-                    # in a conversation list.
-                    # This path matters more than it looks: it was effectively
-                    # dead until the _RESTORING_ACTIVE scope bug in chat_panel
-                    # was fixed the same day (47 "[CrashSave] SKIPPED" against 1
-                    # "EXECUTING" in a day's log). Re-enabling crash save would
-                    # otherwise have added a ~6 MB write per turn.
-                    # Crash safety is unchanged: the response INSERT above and
-                    # the recovery-log INSERT below both still run before this
-                    # returns.
+                    # Don't stamp updated_at: conversations also holds timeline_json,
+                    # and SQLite rewrites the whole row + overflow into the WAL
+                    # (26.26 MB across 21 rows on 2026-09-09; live row 5.97 MB).
+                    # set_conversation_timeline already writes both columns, so only
+                    # a few seconds of list-order staleness is lost. This path was
+                    # dead until the _RESTORING scope fix (47 SKIPPED vs 1 EXECUTING).
 
                     # Log for crash recovery
                     content_bytes = len(content.encode('utf-8'))

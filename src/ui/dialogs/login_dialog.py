@@ -123,13 +123,10 @@ def _asset(relative: str) -> str:
 def _ui_font(size: int, weight: int, tracking: float = 0.0) -> QFont:
     """Brand face if present, otherwise the closest installed fallback."""
     families = QFontDatabase.families()
-    # "Ubuntu" and "DejaVu Sans" ship on Linux and on neither Windows nor
-    # macOS, so without Segoe UI / SF Pro in this list every Windows user got
-    # the bare QFont() default, which is not the brand face and is not what
-    # the screen was designed against.
-    # "Inter Variable" is the name Qt registers the BUNDLED Inter under
-    # (src/ui/fonts.py); plain "Inter" is never in families(), so without it
-    # the login screen skipped the bundled face and landed on Segoe UI.
+    # Ubuntu/DejaVu ship only on Linux, so without Segoe UI/SF Pro Windows users
+    # got bare QFont defaults. "Inter Variable" is the name Qt registers for the
+    # BUNDLED Inter (fonts.py); plain "Inter" is never in families(), so the login
+    # screen otherwise skipped the bundled face.
     for name in ("Geist", "Inter", "Inter Variable",
                  "Segoe UI Variable Display", "Segoe UI",   # Windows
                  "SF Pro Display", "Helvetica Neue",        # macOS
@@ -146,11 +143,9 @@ def _ui_font(size: int, weight: int, tracking: float = 0.0) -> QFont:
     return f
 
 
-# colour maths
-# Qt stylesheets accept "#rrggbb" everywhere, but the app's tokens also use
-# rgba() with a fractional alpha for text. Compositing to a solid hex here
-# means every colour this screen applies is unambiguous, and it is what makes
-# the contrast checks below measurable.
+# Composite rgba() tokens (fractional alpha) to solid hex here: Qt stylesheets
+# accept #rrggbb everywhere, making every colour on this screen unambiguous
+# and the contrast checks measurable.
 
 _RGB_RE = re.compile(r"rgba?\(\s*([^)]+)\)")
 
@@ -505,10 +500,9 @@ class _LoginWorker(QThread):
             if auth.is_logged_in():
                 self.finished_ok.emit(auth.get_user_info())
                 return
-            # The callback thread can FAIL - an expired code, an unverified
-            # email, an unreachable server. It used to fail silently, so the
-            # browser said "Login Successful" while this loop kept spinning
-            # for the full five minutes and the user was told nothing. Ask.
+            # The callback thread can fail (expired code, unverified email, unreachable
+            # server); it used to fail silently, so the browser said "Login Successful"
+            # while this loop spun five minutes with no explanation. Ask now.
             err = auth.consume_login_error()
             if err:
                 self.failed.emit(err)
@@ -607,10 +601,9 @@ class LoginDialog(QDialog):
         top.setStyleSheet(f"color:{self._p['fg']};border:none;")
         v.addWidget(top)
 
-        # AbsoluteSpacing advances the LAST glyph too, so the ink ends one
-        # tracking step before the label's right edge. The stack is left
-        # aligned and "Cortex" is wider than this line, so no centring
-        # correction is needed, only the optical gap above.
+        # AbsoluteSpacing advances the last glyph too, leaving ink one tracking step
+        # before the right edge. The stack is left-aligned and "Cortex" is wider, so
+        # no centring correction is needed, only the optical gap above.
         sub = QLabel("AI IDE")
         sub.setFont(_ui_font(SUB_PX, 700, SUB_TRACK))
         sub.setStyleSheet(f"color:{self._p['fg_dim']};border:none;")

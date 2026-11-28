@@ -60,13 +60,10 @@ ACTIONS = (
 MAX_RENDER_CHARS = 8000
 MAX_FINDINGS_RENDERED = 40
 
-# session
-# A client report covers a whole engagement, which is several tool calls:
-# recon, then ports, then the web probes, then the code sweep. Each call
-# returns its own payload, so the merged result of each call is kept here and
-# `action='report'` renders one document from all of them instead of only the
-# last sweep. Capped, because this process runs for a working day and an agent
-# that loops must not be able to grow a list without bound.
+# A client report covers a whole engagement (recon, ports, web probes, code
+# sweep). Each call's merged result is kept here so action='report' renders one
+# document from all, not just the last sweep. Capped: this process runs a
+# working day and a looping agent must not grow the list without bound.
 MAX_SESSION_REPORTS = 60
 _SESSION_REPORTS: List[ScanReport] = []
 

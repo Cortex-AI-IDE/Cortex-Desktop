@@ -219,13 +219,10 @@ def _foreign_project_configs(root: str):
     ]
 
 
-# Variables a server needs to put a window on the user's desktop. The MCP
-# SDK's get_default_environment() passes only HOME, LOGNAME, PATH, SHELL,
-# TERM and USER on POSIX - a deliberate "leak nothing" default - so every
-# server Cortex launched had no display at all. chrome-devtools-mcp starts a
-# headed Chrome and died on the spot; Playwright only worked because it runs
-# headless. These carry no secrets: they name the display and the session
-# bus, nothing more. Windows has no equivalent and is left untouched.
+# Desktop env vars for MCP servers: the SDK's get_default_environment passes
+# only HOME/LOGNAME/PATH/SHELL/TERM/USER on POSIX, so servers had no display
+# and chrome-devtools-mcp (headed Chrome) died. These carry no secrets, only
+# display/session bus names; Windows is untouched.
 _GUI_ENV_VARS = (
     "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
     "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE",
@@ -801,11 +798,9 @@ class MCPManager:
             out = {}
             for raw_name, d in servers.items():
                 name = _sanitize(raw_name)
-                # Command (stdio) and url (HTTP/SSE) servers both. Remote ones
-                # used to be skipped here without a word: 19 of the 104
-                # claude-code-templates MCP templates are url-only, so after
-                # `npx claude-code-templates --mcp <one of them>` the server
-                # was in .mcp.json and nowhere in Cortex.
+                # Handle stdio AND url (HTTP/SSE) servers: remote ones were skipped silently,
+                # and 19 of 104 claude-code-templates are url-only, so after installing one it
+                # was in .mcp.json but nowhere in Cortex.
                 if _is_server_entry(d):
                     out[name] = McpServerConfig.from_dict(name, d, scope, source)
                 else:
@@ -871,14 +866,11 @@ class MCPManager:
         if changed:
             self._notify_roots_changed()
 
-# MCP roots
-    # Servers that read or write files (chrome-devtools: screenshots,
-    # snapshots, scripts with filePath) only accept paths inside the roots
-    # the CLIENT declares. Cortex declared none, so chrome-devtools refused
-    # every file in the project - "Access denied: path ".../.cortex/shots/x.png"
-    # is not within any of the configured workspace roots" (10-19 / 10-20
-    # logs) - and the agent fell back to pulling screenshots and page
-    # snapshots into the conversation instead.
+# MCP roots: file-using servers (chrome-devtools screenshots/snapshots/scripts)
+# only accept paths inside CLIENT-declared roots. Cortex declared none, so every
+# project file was "Access denied: path ... is not within any configured
+# workspace roots" (10-19/20 logs) and the agent fell back to pasting
+# screenshots/page snapshots into the conversation.
 
     def _roots(self) -> list:
         """file:// roots for MCP servers: the open project, else home."""
@@ -962,16 +954,10 @@ class MCPManager:
 
         loop.call_soon_threadsafe(_schedule)
 
-    # Bounded auto-retry with backoff. Real-world evidence (a customer log):
-    # a server failed 12+ times over 6 minutes with WinError 2 / TaskGroup
-    # errors, needing the user to manually remove+re-add it before ONE
-    # attempt happened to succeed, nothing about the config had changed.
-    # That means the failure was transient (PATH/env not yet settled, first
-    # npx/uvx invocation downloading+antivirus-scanning a package, etc.), and
-    # a plain retry-with-backoff would have fixed it without the user
-    # touching anything. Capped so a genuinely broken command (uv not
-    # installed at all) still settles into "error" instead of retrying
-    # forever.
+    # Bounded retry with backoff: a customer log had a server fail 12+ times in 6
+    # minutes (WinError 2/TaskGroup) until manual remove+re-add, with unchanged
+    # config, so the failure was transient (PATH/env, first npx/uvx download +
+    # antivirus). Capped so a genuinely broken command settles into error.
     _RETRY_DELAYS = (3.0, 8.0, 20.0)  # seconds between attempts 1→2, 2→3, 3→4
 
     async def _server_task(self, state: _ServerState) -> None:
@@ -1057,13 +1043,10 @@ class MCPManager:
                 env=_server_environment(cfg.env),
                 cwd=_server_cwd(self._project_root),
             )
-            # errlog MUST have a real OS file descriptor. stdio_client
-            # defaults to sys.stderr, but in the frozen console=False build
-            # the no-console runtime hook replaced sys.stderr with a null
-            # writer whose fileno() returned -1, the npx child spawn then
-            # failed with [Errno 9] Bad file descriptor (every server,
-            # instantly, .exe only; dev runs worked because a real console
-            # provided real streams). os.devnull is a genuine fd.
+            # errlog needs a real OS fd: stdio_client defaults to sys.stderr, but frozen
+            # console=False replaced it with a null writer whose fileno() was -1, so npx
+            # child spawn failed Errno 9 instantly in .exe builds (dev had a real console).
+            # os.devnull is a genuine fd.
             with open(os.devnull, "w", encoding="utf-8") as _errlog:
                 async with stdio_client(params, errlog=_errlog) as (read, write):
                     yield read, write
@@ -1543,15 +1526,10 @@ class MCPManager:
             return
         cfg.enabled = enabled
         if cfg.source != "cortex":
-            # Inherited from another tool: we must not edit their file, so
-            # write a cortex-owned copy instead, at the SAME scope.
-            # This used to force scope="global" on the belief that ours is
-            # always applied last. It is not: load_configs() reads foreign
-            # global, then cortex global, then foreign PROJECT, then cortex
-            # project. A global shadow is therefore overwritten by any
-            # project-scoped foreign entry, so disabling a server that came
-            # from <project>/.mcp.json did nothing at all - it kept starting
-            # and kept failing, with the config screen showing it disabled.
+            # Inherited server config: write a Cortex-owned copy at the SAME scope. Forcing
+            # scope="global" was wrong: load_configs reads foreign global, cortex global,
+            # foreign PROJECT, cortex project, so a global shadow is overwritten by any
+            # foreign project entry and disabling a <project>/.mcp.json server did nothing.
             cfg.source = "cortex"
             cfg.scope = _shadow_scope(cfg.scope, self._project_root)
         if cfg.scope == "project":

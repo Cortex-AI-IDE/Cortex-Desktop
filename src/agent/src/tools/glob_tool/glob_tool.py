@@ -35,14 +35,9 @@ except ImportError:
 
 DEFAULT_GLOB_LIMIT = 100  # Default limit for glob results
 
-# Directories that are never project source. Kept in step with grep_tool's
-# _SKIP_DIRS, because both tools answer the same "where is this" question and
-# must agree on what the project is.
-# Why this exists: on Linux a project root routinely holds a multi-gigabyte
-# `dist`, a Python `venv`, a `build` folder and a `.git` with thousands of
-# packed objects. Without pruning, `**/*.py` at the root answered with vendored
-# and generated files as well as the user's own, and the agent concluded code
-# existed that no human wrote.
+# Never-project dirs, kept in step with grep_tool's _SKIP_DIRS (same question,
+# same answer). Without pruning, `**/*.py` at a Linux root returns vendored
+# dist/venv/build/.git files as if they were the user's code.
 SKIP_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", "venv", ".venv",
     "env", ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
@@ -269,19 +264,16 @@ async def glob(
         # placeholder files on Windows/OneDrive, and os.walk sits on top of it.
         def _do_glob() -> List[str]:
             result: List[str] = []
-            # Bug history, fixed twice: the first version used lstrip, which
-            # strips a CHARACTER SET rather than a prefix, so "**/*.py"
-            # became ".py" and every such search returned 0 files. The
-            # matcher below replaces both attempts.
+            # Bug history: lstrip strips a CHARACTER SET, not a prefix, so "**/*.py"
+            # became ".py" and every search returned 0 files. The matcher below replaces
+            # both attempts.
             matcher = glob_to_regex(pattern)
             # A pattern that names an excluded directory outright is an explicit
             # request for it, so the defaults stand down for that subtree only.
             exempt = _literal_directories(pattern) & SKIP_DIRS
-            # os.walk, not pathlib.rglob, so excluded directories can be
-            # skipped before they are entered. rglob walks the whole subtree and
-            # only lets you filter afterwards, which on a project holding a
-            # `dist/` or `node_modules/` means paying for thousands of entries
-            # on every search.
+            # os.walk skips excluded dirs BEFORE entering them; rglob walks the whole
+            # subtree and filters afterwards, paying for thousands of entries in dist/ or
+            # node_modules/ on every search.
             for current, dirs, names in os.walk(search_dir, followlinks=False):
                 here = os.path.relpath(current, search_dir).replace(os.sep, "/")
                 inside_exempt = any(
@@ -532,10 +524,9 @@ class GlobTool:
             permission_context=app_state.tool_permission_context,
         )
 
-        # Relative to the searched directory, not the process cwd. The app
-        # never chdirs into the project, so cwd-relative names came out as
-        # "..\..\AppData\...\pkg\calc.py" for a project outside the install
-        # dir. Grep uses the same base, so the two tools agree.
+        # Paths are relative to the searched dir, not cwd: the app never chdirs into
+        # the project, so cwd-relative results leaked AppData paths. Grep uses the
+        # same base.
         filenames = [to_relative_path(f, search_dir) for f in result["files"]]
         
         # Build output

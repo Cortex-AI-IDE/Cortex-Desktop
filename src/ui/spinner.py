@@ -39,17 +39,11 @@ from PyQt6.QtWidgets import QWidget
 from src.ui.tokens import TOKENS as T
 
 
-# Theme aware colour
-# Spinners take one colour per tool kind (the palette in
-# src/ui/html/ai_chat/spinner_demo.html), picked for a dark background, and
-# they kept the QColor they were built with. On the light theme that left
-# pale shapes on paper: the "Exploring..." GridSpinner in lime at 12-45%
-# opacity, and after a live switch every running spinner stayed in its
-# dark-theme colour. The colour is now adapted to the theme in force at
-# PAINT time: on light, too-pale colours are deepened (same hue, lower
-# lightness) to 4.5:1 against the page; on dark, only colours under the 3:1
-# graphics minimum are lifted (a spinner built on light, then switched), so
-# the demo palette stays exactly as designed there.
+# Spinners take one colour per tool kind (dark-background palette), kept the
+# QColor they were built with, so light theme left pale shapes and live
+# switches kept old colours. Adapt at PAINT time: on light, deepen pale colours
+# to 4.5:1; on dark, lift only colours under the 3:1 graphics minimum so the
+# demo palette stays exactly as designed there.
 _MIN_CONTRAST_LIGHT = 4.5
 _MIN_CONTRAST_DARK = 3.0
 _adapted: dict = {}
