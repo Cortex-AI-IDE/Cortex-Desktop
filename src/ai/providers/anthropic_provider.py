@@ -204,17 +204,11 @@ class AnthropicProvider(BaseProvider):
                 name = msg.get("name")
 
                 if isinstance(content, list):
-                    # Preserve OpenAI-style multimodal content (this endpoint is
-                    # OpenAI-compatible per the module docstring, so image_url
-                    # blocks are valid here too). A text-only list still collapses
-                    # to a plain string; a list with any image_url (or other
-                    # non-text) block is kept intact.
-                    # BUG history: this duplicated openrouter_provider.py's own
-                    # _sanitize_messages bug, flattening via block.get("text")
-                    # silently discarded image_url blocks. Not shared code, so
-                    # fixing OpenRouter's copy did not fix this one; the native
-                    # Anthropic (bare model id, direct ANTHROPIC_API_KEY) path
-                    # kept dropping every pasted image independently.
+                    # Preserve multimodal content (endpoint is OpenAI-compatible, so image_url is
+                    # valid). A text-only list still collapses to a string; any image/non-text
+                    # block stays intact. BUG: this duplicated OpenRouter's flattening bug via
+                    # block.get("text"), silently dropping images; fixing that copy didn't fix
+                    # this one, so the native Anthropic path kept dropping every pasted image.
                     _norm_blocks: List[Dict[str, Any]] = []
                     _has_media = False
                     for block in content:

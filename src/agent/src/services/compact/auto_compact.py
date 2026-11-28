@@ -357,11 +357,10 @@ async def shouldAutoCompact(
     if querySource in ('session_memory', 'compact'):
         return False
     
-    # marble_origami is the ctx-agent, if ITS context blows up and
-    # autocompact fires, runPostCompactCleanup calls resetContextCollapse()
-    # which destroys the MAIN thread's committed log (module-level state
-    # shared across forks). Inside feature() so the string DCEs from
-    # external builds (it's in excluded-strings.txt).
+    # marble_origami is the ctx-agent: its autocompact calls
+    # resetContextCollapse(), which destroys the MAIN thread's committed log
+    # (shared module state across forks). Keep the string inside feature() so
+    # external builds DCE it (excluded-strings.txt).
     if feature('CONTEXT_COLLAPSE'):
         if querySource == 'marble_origami':
             return False
@@ -369,29 +368,20 @@ async def shouldAutoCompact(
     if not isAutoCompactEnabled():
         return False
     
-    # Reactive-only mode: suppress proactive autocompact, let reactive compact
-    # catch the API's prompt-too-long. feature() wrapper keeps the flag string
-    # unless the REACTIVE_COMPACT flag is enabled.
-    # Note: returning false here also means autoCompactIfNeeded never reaches
-    # trySessionMemoryCompaction in the query loop, the /compact call site
-    # still tries session memory first. Revisit if reactive-only graduates.
+    # Reactive-only: suppress proactive autocompact, let reactive compact catch
+    # prompt-too-long. The feature() wrapper keeps the flag string only when
+    # REACTIVE_COMPACT is enabled. Returning false also skips
+    # trySessionMemoryCompaction in the query loop (/compact still tries it);
+    # revisit if reactive-only graduates.
     if feature('REACTIVE_COMPACT'):
         if getFeatureValue_CACHED_MAY_BE_STALE('cortex_cobalt_raccoon', False):
             return False
     
-    # Context-collapse mode: same suppression. Collapse IS the context
-    # management system when it's on, the 90% commit / 95% blocking-spawn
-    # flow owns the headroom problem. Autocompact firing at effective-13k
-    # (~93% of effective) sits right between collapse's commit-start (90%)
-    # and blocking (95%), so it would race collapse and usually win, nuking
-    # granular context that collapse was about to save. Gating here rather
-    # than in isAutoCompactEnabled() keeps reactiveCompact alive as the 413
-    # fallback (it consults isAutoCompactEnabled directly) and leaves
-    # sessionMemory + manual /compact working.
-    # Consult isContextCollapseEnabled (not the raw gate) so the
-    # CORTEX_CONTEXT_COLLAPSE env override is honored here too. require()
-    # inside the block breaks the init-time cycle (this file exports
-    # getEffectiveContextWindowSize which collapse's index imports).
+    # Context-collapse owns headroom (90% commit / 95% blocking spawn);
+    # autocompact at ~93% would race it and nuke the context being saved. Gate
+    # here, not in isAutoCompactEnabled, to keep reactiveCompact as the 413
+    # fallback and sessionMemory + /compact working. Use isContextCollapseEnabled
+    # so the env override applies; require() inside breaks the init-time cycle.
     if feature('CONTEXT_COLLAPSE'):
         try:
             import importlib
@@ -489,10 +479,9 @@ async def autoCompactIfNeeded(
         setLastSummarizedMessageId(None)
         runPostCompactCleanup(querySource)
         
-        # Reset cache read baseline so the post-compact drop isn't flagged as a
-        # break. compactConversation does this internally; SM-compact doesn't.
-        # BQ 2026-03-01: missing this made 20% of cortex_prompt_cache_break events
-        # false positives (systemPromptChanged=true, timeSinceLastAssistantMsg=-1).
+        # Reset the cache-read baseline so the post-compact drop isn't a false
+        # break: compactConversation does it, SM-compact didn't. BQ 2026-03-01: 20%
+        # of cortex_prompt_cache_break events were false positives.
         if feature('PROMPT_CACHE_BREAK_DETECTION'):
             notifyCompaction(querySource or 'compact', getattr(toolUseContext, 'agentId', ''))
         

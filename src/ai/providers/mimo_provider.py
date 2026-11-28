@@ -64,14 +64,10 @@ def _token_plan_unsupported(url: str, status: int, body: str, model: str):
 class MimoProvider(BaseProvider):
     """Xiaomi MiMo API provider (OpenAI-compatible) with full agentic support."""
 
-# Host routing
-    # MiMo has TWO API endpoints depending on key type:
-    #   tp-* (Token Plan)  → https://token-plan-sgp.xiaomimimo.com/v1
-    #   sk-* (Pay-as-you-go) → https://api.xiaomimimo.com/v1
-    # The provider auto-detects the correct endpoint from MIMO_API_KEY prefix.
-    # If the primary endpoint fails (auth errors, timeouts, connection errors),
-    # the provider falls back to the OTHER endpoint and retries.
-    # Set MIMO_API_HOST to force a specific endpoint (disables fallback).
+# MiMo has two endpoints by key type: tp-* -> token-plan-sgp.xiaomimimo.com/v1,
+# sk-* -> api.xiaomimimo.com/v1. Auto-detected from MIMO_API_KEY prefix, with
+# fallback to the other endpoint on auth/timeout/connection errors. Set
+# MIMO_API_HOST to force one (disables fallback).
 
     _API_HOST_SK = "https://api.xiaomimimo.com/v1"             # sk-* pay-as-you-go
     _API_HOST_TP = "https://token-plan-sgp.xiaomimimo.com/v1"  # tp-* token plan
@@ -231,13 +227,10 @@ class MimoProvider(BaseProvider):
                     context_length=1_048_576,
                     max_tokens=131_072,
                     supports_streaming=True,
-                    # Owner-verified: BOTH v2.5 models accept images with a
-                    # pay-as-you-go (sk-) key; only token-plan keys reject
-                    # them server-side, and that is a KEY property handled at
-                    # runtime in _current_model_supports_vision, not a model
-                    # property. False here sent every image through the
-                    # OCR proxy even on sk- keys, lossy, slower, and
-                    # needlessly routed through the Cortex server.
+                    # Owner-verified: both v2.5 models accept images on sk- keys; only tp- keys
+                    # reject them server-side, a KEY property handled at runtime in
+                    # _current_model_supports_vision. False here forced all images through OCR even
+                    # on sk-, lossy and needlessly proxied.
                     supports_vision=True,
                 ),
                 ModelInfo(
@@ -278,10 +271,9 @@ class MimoProvider(BaseProvider):
                 if resp.status_code in (401, 403):
                     return False
             except requests.exceptions.SSLError as exc:
-                # Do not retry without verification. The headers carry the
-                # bearer token, so an unverified retry would hand the key to
-                # whoever failed the certificate check. Fall through to the
-                # format check rather than transmitting the key.
+                # Never retry unverified: headers carry the bearer token, so an unverified
+                # retry would hand it to whoever failed the certificate check. Fall through to
+                # format checking instead.
                 log.error(
                     f"[MiMo] TLS verification failed while validating the key "
                     f"for {self._primary_host}: {exc}. Not sending the key "
@@ -320,15 +312,11 @@ class MimoProvider(BaseProvider):
             formatted: List[Dict[str, Any]] = []
             for msg in messages:
                 if isinstance(msg, dict):
-                    # A dict can carry attachments too, and this branch used to
-                    # forward it VERBATIM. Once history contains tool calls,
-                    # _sanitize_tool_call_messages turns every message into a
-                    # dict, so on the agentic path "images"/"videos" reached
-                    # the API as unknown top-level keys, were ignored, and the
-                    # model answered as if nothing was attached - it went off
-                    # to run ffprobe and pip-install OpenCV to look at the file
-                    # itself (2026-09-16 14:05 log). Build the blocks here too,
-                    # and pop the keys either way so nothing unknown is sent.
+                    # Dict messages carry attachments too, and this branch forwarded them VERBATIM.
+                    # Once history has tool calls, _sanitize_tool_call_messages makes every message
+                    # a dict, so images/videos went to the API as unknown keys, were ignored, and the
+                    # model ran ffprobe/pip to hunt for the file itself (2026-09-16 14:05). Build
+                    # blocks here too and pop the keys either way.
                     m = dict(msg)
                     _d_imgs = m.pop("images", None)
                     _d_vids = m.pop("videos", None)
@@ -363,12 +351,9 @@ class MimoProvider(BaseProvider):
                         if _vid:
                             content_blocks.append(video_block(str(_vid)))
                     for img_data in images:
-                        # This used to stamp image/png on EVERY attachment with
-                        # no format check at all, so a JPEG went out labelled
-                        # PNG and an SVG went out as PNG-wrapped XML. Use the
-                        # one shared detector; it returns None for anything the
-                        # vision endpoints cannot decode, and dropping beats
-                        # failing the whole request.
+                        # Don't stamp image/png on every attachment: JPEGs went out labelled PNG and
+                        # SVGs as PNG-wrapped XML. Use the shared detector; it returns None for
+                        # undecodable formats, and dropping beats failing the whole request.
                         url = build_image_data_uri(img_data)
                         if url is None:
                             continue
@@ -377,11 +362,9 @@ class MimoProvider(BaseProvider):
                             "image_url": {"url": url}
                         })
                     m: Dict[str, Any] = {"role": msg.role, "content": content_blocks}
-                    # Says what actually goes on the wire. Without it, an
-                    # attachment that never made it into the payload looks
-                    # exactly like a model that ignored it - which is how a
-                    # video "attached" in the UI still had the model running
-                    # `dir` to hunt for the file on disk (2026-09-16 log).
+                    # Say what actually goes on the wire: otherwise an attachment that never made
+                    # it looks like a model ignoring it (a video "attached" in the UI still had the
+                    # model running dir to find the file, 2026-09-16).
                     log.info("[MiMo] multimodal payload: %s",
                              " + ".join(b.get("type", "?") for b in content_blocks))
                 else:
@@ -519,12 +502,10 @@ class MimoProvider(BaseProvider):
                 continue
 
             except requests.exceptions.SSLError as exc:
-                # Never retransmit without verification. This request carries
-                # the user's API key in the headers and their conversation in
-                # the body, and an SSLError is the one signal that the peer is
-                # not who it claims to be. Retrying with verify=False would
-                # convert a detected interception into a successful one, so
-                # fail closed and surface the failure to the user instead.
+                # Never retransmit unverified: the request carries the user's key in headers
+                # and conversation in the body, and SSLError means the peer may be an impostor.
+                # Retrying with verify=False would turn detected interception into success; fail
+                # closed and surface it.
                 last_error = Exception(
                     f"MiMo TLS certificate verification failed for "
                     f"{self._primary_host}: {exc}. Refusing to retry without "
@@ -673,10 +654,9 @@ class MimoProvider(BaseProvider):
         url = f"{self._base_url}/chat/completions"
 
         last_error: Optional[Exception] = None
-        # Once anything has been streamed, an error must NOT restart the
-        # request (here or on the fallback host): MiMo would send the whole
-        # answer again and the chat would show it twice, once per retry
-        # (owner report 2026-11-22: replies repeating in the chat).
+        # After any streamed content, an error must NOT restart the request (here or on
+        # the fallback host): MiMo would resend the whole answer and chat would show it
+        # twice (owner report 2026-11-22).
         _streamed_any = False
         for attempt in range(self._max_retries + 1):
             if attempt > 0:
@@ -701,26 +681,19 @@ class MimoProvider(BaseProvider):
                 )
                 response.raise_for_status()
 
-                # Track whether we received ANY content from this stream.
-                # MiMo sometimes closes SSE streams without sending [DONE],
-                # triggering "Response ended prematurely". If we already have
-                # useful content, treat the stream as complete rather than retrying.
+                # Track whether ANY content arrived: MiMo sometimes closes SSE without [DONE],
+                # triggering "Response ended prematurely". With useful content already, treat
+                # the stream as complete rather than retrying.
                 _yielded_content = False
-                # Track whether tool calls were in flight when stream ended.
-                # If a tool call was streaming arguments and the connection
-                # dropped mid-JSON, the accumulated arguments will be truncated
-                # and invalid, we must NOT treat this as complete.
+                # Track in-flight tool calls at stream end: if arguments were cut mid-JSON they
+                # are truncated and invalid, so do NOT treat this as complete.
                 _seen_tool_call_deltas = False
                 _last_tool_call_had_name = False
 
-# Stream telemetry
-                # Field report: MiMo sometimes appears to not stream at all -
-                # silence, then the whole answer lands at once. The log could
-                # not say whether Xiaomi buffered (server side) or Cortex did
-                # (client side), because nobody measured the chunks. These
-                # counters settle it: a large first-delta latency with few
-                # deltas = server-side buffering; many small-gap deltas with a
-                # bursty UI = a Cortex rendering problem to chase instead.
+# Stream telemetry: field reports of MiMo silence then a whole answer couldn't
+# say whether Xiaomi or Cortex buffered, since nobody measured chunks. These
+# counters settle it: large first-delta latency with few deltas = server
+# buffering; many small-gap deltas with a bursty UI = client rendering.
                 import time as _t
                 _st_t0 = _t.monotonic()
                 _st_first = None      # seconds until the FIRST delta of any kind
@@ -774,13 +747,10 @@ class MimoProvider(BaseProvider):
                     content = delta.get("content", "")
                     tool_calls = delta.get("tool_calls", [])
 
-# MiMo reasoning content fix
-                    # MiMo v2.5 sends the FULL visible response in
-                    # reasoning_content even when thinking is disabled.
-                    # The __REASONING_DELTA__ path swallows it (routed to
-                    # thought card), leaving only a tiny content fragment.
-                    # When thinking is disabled, merge reasoning into content
-                    # so the user sees the full response.
+# MiMo v2.5 sends the FULL visible response in reasoning_content even with
+# thinking off. __REASONING_DELTA__ swallows it into the thought card, leaving a
+# tiny fragment. Merge reasoning into content when thinking is disabled so the
+# user sees the full response.
                     _thinking_enabled = (
                         isinstance(thinking, dict)
                         and thinking.get("type") == "enabled"
@@ -946,12 +916,9 @@ class MimoProvider(BaseProvider):
                                  or "incomplete" in _err_str
                                  or "chunked" in _err_str)
                 if _streamed_any:
-                    # If tool call deltas were in flight when the stream dropped,
-                    # the accumulated arguments are likely truncated JSON. This
-                    # used to RETRY the request, which streamed the whole answer
-                    # again on top of what the chat already showed (and doubled
-                    # the tool-call deltas). Fail the turn with a clear message
-                    # instead; the user can send again.
+                    # In-flight tool deltas at stream drop mean truncated JSON arguments. This used
+                    # to RETRY, streaming the whole answer again over what chat showed and doubling
+                    # deltas. Fail the turn with a clear message; the user can resend.
                     if _seen_tool_call_deltas and _is_premature:
                         log.warning(
                             f"Mimo API stream ended early DURING tool call streaming "

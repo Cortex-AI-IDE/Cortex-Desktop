@@ -1,8 +1,6 @@
-# Detects potentially destructive bash commands and returns 
+# Detects potentially destructive bash commands and returns
 # warning strings for display in the permission dialog.
-# This is purely informational, it doesn't affect permission 
 # logic or auto-approval.
-
 import re
 from typing import Dict, List, Optional, Tuple
 

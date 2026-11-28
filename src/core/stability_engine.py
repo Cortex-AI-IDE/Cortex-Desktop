@@ -97,10 +97,9 @@ class StabilityEngine:
         self._last_cleanup_time = 0.0
         self._last_critical_log = 0.0
 
-        # Pending work flags, set by the monitor thread, consumed by the
-        # GUI thread. gc.collect() must NEVER run on the monitor thread:
-        # it can finalize QObjects from the wrong thread (hard crash) and
-        # holds the GIL long enough to freeze the UI mid-repaint.
+        # Pending flags set by the monitor, consumed on the GUI thread: gc.collect()
+        # must NEVER run on the monitor (finalizes QObjects on the wrong thread, hard
+        # crash, and holds the GIL mid-repaint).
         self._gc_pending = False
         self._save_pending = False
 
@@ -116,10 +115,9 @@ class StabilityEngine:
             log.info("[STABILITY] psutil not available, using fallback monitoring")
 
     def start(self, interval_seconds: float = 3600.0) -> None:
-        # Hourly heartbeat by owner decision (2026-07-23): continuous RAM/CPU
-        # sampling measurably cost more than it protected. One health reading
-        # per hour is a liveness pulse, not a monitor; nothing in the app may
-        # throttle or sleep based on these readings.
+        # Hourly heartbeat (owner 2026-07-23): continuous RAM/CPU sampling cost more
+        # than it protected. One reading/hour is a liveness pulse; nothing throttles or
+        # sleeps based on it.
         """Start the stability monitor."""
         if self._running:
             return
@@ -229,12 +227,9 @@ class StabilityEngine:
         """Get health using psutil (accurate)."""
         try:
             mem = self._psutil.virtual_memory()
-            # interval=None is NON-BLOCKING: it returns CPU% since the previous
-            # call, which is exactly right for periodic polling. The old
-            # interval=0.1 slept 100ms inside every tick purely to measure -
-            # on an already RAM-pressured machine that is 100ms of extra wakeup
-            # and scheduler churn per tick, for a number we then compare against
-            # thresholds whose actions are throttled to 30-60s anyway.
+            # interval=None is non-blocking: CPU% since last call, right for polling. The
+            # old interval=0.1 slept 100ms per tick to measure, adding wakeup churn on an
+            # already pressured machine for thresholds whose actions are throttled 30-60s.
             cpu = self._psutil.cpu_percent(interval=None)
             thread_count = threading.active_count()
 
@@ -242,18 +237,11 @@ class StabilityEngine:
             ram_used = mem.used / (1024 * 1024)
             ram_total = mem.total / (1024 * 1024)
 
-            # Determine pressure level.
-            # CRITICAL is RAM-only. A pegged CPU (all cores busy during a
-            # PyInstaller build, a FAISS index rebuild, or a semantic-search
-            # embedding batch) means the machine is computing hard, not that it
-            # is about to crash: CPU load drops the instant the work finishes.
-            # Only RAM exhaustion actually kills a process, so only RAM may arm
-            # the anti-crash emergency path (save-everything, minimal
-            # operation). Before this, a healthy box at RAM=55.4% was logged as
-            # "CRITICAL PRESSURE" purely because CPU hit 100% during a build
-            # (log 2026-10-27 14:50), which alarmed the user for no reason.
-            # CPU still escalates to HIGH/ELEVATED, which request a throttled
-            # GC, the right "slow down a little" response to a saturated box.
+            # CRITICAL is RAM-only: a pegged CPU (builds, FAISS, embeddings) means hard
+            # computing, not impending crash, and drops the instant work finishes. Only
+            # RAM exhaustion kills processes. Before this a healthy 55.4% RAM box was
+            # "CRITICAL" because CPU hit 100% in a build (2026-10-27 14:50). CPU still
+            # escalates HIGH/ELEVATED for a throttled GC, the right slowdown response.
             if ram_pct > self._ram_critical:
                 pressure = PressureLevel.CRITICAL
             elif cpu > self._cpu_critical or ram_pct > self._ram_high:
@@ -322,12 +310,9 @@ class StabilityEngine:
         now = time.time()
 
         if health.pressure == PressureLevel.CRITICAL:
-            # CRITICAL: Emergency mode, log throttled to avoid flooding.
-            # 300s, not 30s: on a machine that simply runs near its RAM limit
-            # (the common case for this app), the 30s throttle still wrote
-            # ~120 CRITICAL lines/hour that told the user nothing new. The
-            # protective actions below keep their own tighter throttles, only
-            # the log line is quieted.
+            # Emergency mode logs throttled 300s, not 30s: a machine running near its RAM
+            # limit wrote ~120 CRITICAL lines/hour saying nothing new. Protective actions
+            # keep their own tighter throttles; only the log line is quieted.
             if now - self._last_critical_log > 300.0:
                 self._last_critical_log = now
                 log.critical(

@@ -20,10 +20,9 @@ from .windows_terminal import PathResolverThread
 
 log = get_logger("xterm_terminal")
 
-# A real PTY is what makes arrows, Ctrl+C, vim and a REPL work. pywinpty
-# provides it on Windows (ConPTY); macOS and Linux get the same interface from
-# the standard library. Without one, this widget falls back to QProcess, which
-# "doesn't support interactive terminal apps like vim or python repl well".
+# A real PTY is what makes arrows, Ctrl+C, vim and REPLs work: pywinpty gives
+# it on Windows (ConPTY), stdlib pty on macOS/Linux. Without one the widget
+# falls back to QProcess, which handles interactive apps badly.
 from src.core.pty_backend import PTY_AVAILABLE, PtyProcess
 
 
@@ -326,11 +325,9 @@ class XTermWidget(QWidget):
         
         # Web View for xterm.js
         self._webview = QWebEngineView()
-        # Prevent the WHITE FLASH before the HTML loads: the widget
-        # stylesheet below does NOT cover Chromium's own page background -
-        # the page defaults to white and paints one white frame at creation
-        # (visible at every IDE boot). page().setBackgroundColor() is the
-        # canonical fix (sidebar/webview_panel/memory_manager already use it).
+        # Prevent the white flash before HTML loads: the widget stylesheet doesn't cover
+        # Chromium's page background, which paints one white frame at creation. Use
+        # page().setBackgroundColor() (as sidebar/webview_panel/memory_manager do).
         from PyQt6.QtGui import QColor as _QColor
         from PyQt6.QtCore import Qt as _Qt
         # Transparent, not a color, kills Chromium's gray-placeholder/white
@@ -355,12 +352,10 @@ class XTermWidget(QWidget):
         
         self._webview.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
-        # Report whether the page actually loaded. Without this the terminal
-        # fails SILENTLY: on machines where the page cannot load or the GPU
-        # cannot give Chromium a context, the panel is blank/dark while the
-        # Python side logs look completely healthy, which is exactly how the
-        # "everything is blank on that PC" reports arrive. webview_panel has
-        # had this since 2.8; the terminal never did.
+        # Report whether the page loaded: otherwise the terminal fails SILENTLY when
+        # Chromium can't get a GPU context (blank panel, healthy Python logs), exactly
+        # how "everything is blank on that PC" reports arrive. webview_panel has had
+        # this since 2.8; the terminal never did.
         self._webview.loadFinished.connect(self._on_page_load_finished)
         try:
             self._webview.page().renderProcessTerminated.connect(
@@ -385,13 +380,10 @@ class XTermWidget(QWidget):
         from .terminal_bridge import set_terminal_widget_ref
         set_terminal_widget_ref(self)
         
-        # Debug logging to file for troubleshooting (define first!).
-        # A debug log must never be able to break the terminal. If ~ is not
-        # writable (a locked profile, or a low-integrity sandbox token that may
-        # read the user profile but not write it) the append raises, and
-        # unguarded that escaped _build_ui() so XTermWidget never finished
-        # constructing and the whole panel came up blank. Fall back to the temp
-        # dir, then stay silent. Mirrors _tdebug's guard further down this file.
+        # Debug logging must never break the terminal: if ~ isn't writable (locked
+        # profile or low-integrity token) the append raises and, unguarded, escaped
+        # _build_ui so the panel came up blank. Fall back to temp, then stay silent;
+        # mirrors _tdebug's guard below.
         debug_log_path = os.path.join(os.path.expanduser("~"), "cortex_terminal_debug.log")
 
         def _debug_log_temp_path():
@@ -425,11 +417,10 @@ class XTermWidget(QWidget):
         debug_log("=" * 60)
         debug_log("Terminal initialization started")
         
-        # Load terminal.html, temp-file approach (same as editor.html in webview_panel.py).
-        # Reading HTML from bundle, resolving relative asset paths to absolute file:/// URIs,
-        # writing to a temp file, then loading from there.  This avoids QWebEngine security
-        # restrictions when loading from protected dirs like Program Files.
-        # CRITICAL: Always use setUrl(), never setHtml(), QWebChannel needs file:// origin.
+        # Load terminal.html via a temp file (like editor.html): read from bundle,
+        # resolve relative assets to file:/// URIs, write to temp, load there. Avoids
+        # QWebEngine restrictions on protected dirs like Program Files. Always use
+        # setUrl(), never setHtml(): QWebChannel needs a file:// origin.
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             _bundle_root = Path(sys._MEIPASS)
         else:
@@ -561,35 +552,17 @@ class XTermWidget(QWidget):
         if "\x03" in data:
             log.info("[XTerm] ^C received from xterm, writing interrupt to pty "
                      f"(pty_alive={bool(self._pty_process)})")
-            # Ctrl+C has two jobs and \x03 alone only does the first:
-            #   1. At the PowerShell prompt, \x03 makes PSReadLine cancel the
-            #      half-typed line. That works and is left untouched (\x03 is
-            #      still written to the pty at the bottom of this method).
-            #   2. Stopping a FOREGROUND program (`manage.py runserver`, ping,
-            #      an npm watcher). This is what the field report "Ctrl+C does
-            #      not stop runserver" was about, and \x03 cannot do it. It was
-            #      measured on this machine (2026-08-12): a foreground python
-            #      loop survives \x03, and even a real CTRL_C_EVENT fired from a
-            #      helper that AttachConsole'd the pty, because pywinpty spawns
-            #      the shell with CREATE_NEW_PROCESS_GROUP, which leaves Ctrl+C
-            #      DISABLED for the shell's children no matter what the shell
-            #      itself does. Every console-signal route was tried before and
-            #      each was worse than the bug (CTRL_BREAK in-process killed the
-            #      whole IDE; CTRL_BREAK from a helper dropped PowerShell into
-            #      its debugger; CTRL_C broadcast was silently ignored).
-            # So job 2 is done WITHOUT a console signal: if the shell has a
-            # foreground child, terminate that child's process tree. The shell
-            # (and the IDE) are never touched, nothing is attached to a console,
-            # no window can flash. Runs off the GUI thread because it walks the
-            # process table. Idle at the prompt there is no child, so this is a
-            # no-op and only the \x03 above takes effect.
+            # Ctrl+C: \x03 cancels a half-typed line (leave alone) but cannot stop a
+            # foreground program, since pywinpty spawns the shell with
+            # CREATE_NEW_PROCESS_GROUP, which disables Ctrl+C for children (measured
+            # 2026-08-12; console-signal routes failed or killed the IDE). Job 2 kills the
+            # foreground child's process tree off the GUI thread; at the prompt it's a no-op.
             self._interrupt_foreground_async()
         # Track command input for file operation detection
         if data == '\r' or data == '\n':
-            # Command submitted - parse it. Not when a running program, not
-            # the shell, is reading the line: that is where passwords are
-            # typed, and a parsed line can reach the AI chat as a "file
-            # operation" card.
+            # Parse a submitted command only when the shell isn't reading a line: that's
+            # where passwords are typed, and a parsed line can reach AI chat as a file
+            # operation card.
             line, self._command_buffer = self._command_buffer.strip(), ""
             if self._typing_into_program():
                 self._current_command = ""
@@ -768,12 +741,10 @@ class XTermWidget(QWidget):
         holding an arrow key. PSReadLine repaints the WHOLE input line on
         every keystroke, so this path runs constantly during typing.
         """
-        # AI/chat bookkeeping: coarse timer, OFF the keystroke path.
-        # This used to run per chunk on the GUI thread: an ANSI-stripping
-        # regex over the text plus one signal dispatch per output LINE into
-        # the event bus - regex + N signals for every keypress, competing
-        # with the very render they were delaying. The AI does not need
-        # sub-second freshness; get_last_output() flushes on demand.
+        # AI bookkeeping on a coarse timer, OFF the keystroke path. It used to run per
+        # chunk on the GUI thread (ANSI regex + one signal per output line), competing
+        # with the render it delayed. The AI doesn't need sub-second freshness;
+        # get_last_output() flushes on demand.
         self._raw_tail = (self._raw_tail + text)[-2000:]
         self._last_out_t = time.monotonic()
         if self._ai_access is not None:
@@ -809,13 +780,11 @@ class XTermWidget(QWidget):
         if len(self._terminal_buffer) > self._max_buffer:
             self._terminal_buffer = self._terminal_buffer[-self._max_buffer:]
         self.terminal_output_received.emit(clean_text)
-        # PERF: terminal_line_for_chat used to be emitted here once PER LINE.
-        # Nothing connects to it (checked .py, .html and .js), so a 5000-line
-        # build flood dispatched 5000 Qt signals per flush into the void:
-        # measured 9.1ms of GUI-thread time per flush versus 0.8ms for the
-        # single bulk emit above, which already carries the same text. The
-        # signal stays declared for API compatibility but is no longer driven.
-        # If a consumer is ever added, emit in BATCHES, never per line.
+        # terminal_line_for_chat used to emit once PER LINE; nothing connects to it
+        # (.py/.html/.js checked), so a 5000-line build flooded 5000 Qt signals into
+        # the void: 9.1ms per flush vs 0.8ms for the bulk emit carrying the same text.
+        # Keep the signal for API compatibility but don't drive it; if a consumer
+        # appears, emit in batches.
 
     def _on_render_crash(self, status, code):
         """Chromium's render process died, reload so the panel comes back.
@@ -912,12 +881,10 @@ class XTermWidget(QWidget):
             self._emit_buffer = ""
         self._last_emit_ms = time.monotonic() * 1000.0
 
-    # Compiled once, not per call. Honest note on the size of this win:
-    # re.compile() hits Python's internal pattern cache, so the old per-call
-    # version was already cheap. Measured on a 283KB / 5000-line flood:
-    # 1.81ms per call vs 1.69ms here, about 7%. Kept because it is clearer
-    # and strictly cheaper, NOT because it was a bottleneck. The real cost
-    # in this method's caller was the per-line signal loop (see _flush_ai_buffer).
+    # Compile once, not per call. Honest note: re.compile() uses Python's pattern
+    # cache, so the old version was already cheap (1.81ms vs 1.69ms on 283KB/5000
+    # lines, ~7%). Kept for clarity and strict cheapness, not as a bottleneck; the
+    # real cost was the per-line signal loop in _flush_ai_buffer.
     _ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
     def _clean_ansi(self, text: str) -> str:
@@ -959,35 +926,12 @@ class XTermWidget(QWidget):
             import traceback
             self._tdebug(traceback.format_exc())
         
-    # Ctrl+C root cause and the fix, measured with the real pty (2026-08-02):
-    #   pywinpty's ConPTY backend spawns the shell with
-    #   CREATE_NEW_PROCESS_GROUP, and Windows defines that flag to imply
-    #   SetConsoleCtrlHandler(NULL, TRUE): the new process IGNORES Ctrl+C,
-    #   and every child it launches INHERITS the ignore flag. So ConPTY was
-    #   correctly cooking our \x03 into CTRL_C_EVENT all along, and the
-    #   shell, ping, python, runserver, all silently ignored it. (This is
-    #   also why yesterday's helper-process CTRL_C broadcast did nothing.)
-    #   The undo is the shell calling SetConsoleCtrlHandler(NULL, FALSE) in
-    #   its own process at startup; children then start with Ctrl+C enabled
-    #   and plain \x03 behaves exactly like a normal terminal.
-    # Two command-line landmines cost a day each, do not regress them:
-    #   * powershell -Command "quoted string": when spawned directly via
-    #     CreateProcess (no cmd.exe in between), PS receives the QUOTES as
-    #     part of the command and evaluates the whole thing as a string
-    #     literal, interpolating $vars away and executing nothing. The
-    #     command must be passed UNQUOTED; -Command consumes the rest of
-    #     the line.
-    #   * The C# in -MemberDefinition needs "kernel32.dll" in double
-    #     quotes, which cannot be nested on this command line, so the
-    #     definition is assembled at runtime with [char]34.
-    #   * Add-Type COMPILES C#, which writes a .tmp into %TEMP%. When that
-    #     write is refused - antivirus, a locked-down temp, or Cortex itself
-    #     started from a sandboxed shell - PowerShell printed the failure and
-    #     a follow-up "Unable to find type [CortexNative.K32]" into the user's
-    #     terminal on every start and restart. The session is perfectly
-    #     usable without it (only Ctrl+C goes back to being ignored), so the
-    #     bootstrap stays silent: try/catch, like the copy in
-    #     core/terminal_session.py already had.
+    # Ctrl+C root cause (real pty, 2026-08-02): pywinpty's CREATE_NEW_PROCESS_GROUP
+    # implies SetConsoleCtrlHandler(NULL, TRUE), so shell+children ignore Ctrl+C.
+    # ConPTY cooked \x03 into CTRL_C_EVENT all along; the fix is the shell calling
+    # SetConsoleCtrlHandler(NULL, FALSE) at startup. Landmines: pass powershell
+    # -Command UNQUOTED; build C# [char]34 quotes; wrap Add-Type in try/catch
+    # (%TEMP% writes can fail under antivirus).
     _PS_ENABLE_CTRL_C = (
         "-NoExit -Command "
         "$md='[DllImport('+[char]34+'kernel32.dll'+[char]34+')] public static "
@@ -1071,15 +1015,11 @@ class XTermWidget(QWidget):
                 cmd = self._get_shell_command()
                 self._tdebug(f"Starting winpty with cmd={cmd}, cwd={self._cwd}")
                             
-                # ── Backend: default (ConPTY), NEVER force legacy WinPTY ──
-                # Forcing legacy WinPTY once wrecked the terminal (slow
-                # scraping pipeline, broken cls, blank redraws). ConPTY
-                # stays. The old belief that ConPTY never cooks  into
-                # an interrupt was WRONG: the events were generated but
-                # ignored, because CREATE_NEW_PROCESS_GROUP disables Ctrl+C
-                # in the spawned shell and its children. The shell now
-                # re-enables it at startup (_PS_ENABLE_CTRL_C above), so
-                # Ctrl+C only needs to write  (see _on_js_input).
+                # Backend: default ConPTY, NEVER force legacy WinPTY (it once wrecked the
+                # terminal: slow scraping, broken cls, blank redraws). The old belief that
+                # ConPTY doesn't cook \x03 was WRONG: events were generated but ignored because
+                # CREATE_NEW_PROCESS_GROUP disables Ctrl+C. The shell re-enables it at startup
+                # (_PS_ENABLE_CTRL_C), so Ctrl+C only needs to write \x03.
                 self._pty_process = PtyProcess.spawn(
                     cmd,
                     cwd=self._cwd,
@@ -1088,19 +1028,11 @@ class XTermWidget(QWidget):
                 )
                 self._tdebug(f"winpty spawned successfully, pid={self._pty_process.pid}")
 
-                # ── Apply the size xterm.js already reported ──
-                # The pty is born 24x80. xterm sends its real size as soon
-                # as the web channel is ready, which RACES this spawn:
-                #   15:15:40.035  _on_js_ready  (size sent -> pty is None)
-                #   15:15:40.072  pty spawned   (37ms too late)
-                # The dropped size left the shell believing it had 80
-                # columns inside a much wider window. PSReadLine positions
-                # its redraw with ABSOLUTE coordinates computed from that
-                # width, so every keystroke repainted at the wrong place:
-                # lines wrapped at 80, typed text looked doubled/garbled,
-                # and Up/Down history recall landed off-screen, "arrows
-                # don't work, typing is slow". Sessions where the spawn won
-                # the race were fine, which is why it came and went.
+                # Apply the size xterm.js already reported: the pty is born 24x80, and xterm's
+                # real size RACES spawn (15:15:40.035 ready before pty is None, spawned 37ms
+                # later). The dropped size made PSReadLine wrap at 80 and repaint at wrong
+                # absolute coordinates: doubled/garbled typing, off-screen history, "arrows
+                # don't work". Sessions where spawn won were fine, hence the intermittence.
                 _pend = self._pending_size
                 if _pend:
                     _cols, _rows = _pend
@@ -1149,11 +1081,8 @@ class XTermWidget(QWidget):
                                                 self.data_received.emit(accumulated)
                                                 accumulated = ""
                                                 last_emit = now
-                                            # No extra sleep: select()
-                                            # already waited 10ms, so the
-                                            # loop stays bounded. Sleeping
-                                            # again only delayed the next
-                                            # keystroke by up to 5ms.
+                                            # No extra sleep: select() already waited 10ms, so the loop stays bounded and
+                                            # a second sleep would only delay the next keystroke by up to 5ms.
                                             continue
                                     data = self.pty.read()
                                 except Exception:
@@ -1467,11 +1396,9 @@ class XTermWidget(QWidget):
                 pass
             self._process = None
             
-# Edit menu actions
-    # main_window's edit-action router calls term.copy()/paste()/cut()/
-    # select_all() when the terminal has focus. None of these existed -
-    # pressing Ctrl+V with the terminal focused raised an UNCAUGHT
-    # AttributeError (CRITICAL in cortex.log 2026-07-28 12:53:21).
+# Edit menu actions: main_window's router calls copy/paste/cut/select_all when
+# the terminal has focus, but none existed, so Ctrl+V raised an uncaught
+# AttributeError (cortex.log 2026-07-28 12:53:21).
     def paste(self):
         """Send clipboard text to the shell, what paste means in a terminal."""
         try:

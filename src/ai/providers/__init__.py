@@ -13,10 +13,9 @@ from src.utils.logger import get_logger
 log = get_logger("provider_registry")
 
 
-# Vision requests re-send their images on every step, and providers spend
-# seconds per image: measured 2026-09-12, qwen3.8-flash answered text in ~1s
-# but needed ~13s for ANY image and 29s for a 1.8MB screenshot. Large images
-# are downscaled once (cached) before they go out.
+# Vision re-sends images every step and providers spend seconds each
+# (2026-09-12: qwen3.8-flash ~1s text, ~13s any image, 29s for 1.8MB).
+# Downscale large images once and cache before sending.
 _IMAGE_TARGET_BYTES = 500 * 1024
 _IMAGE_MAX_SIDE = 1568
 _shrink_cache: "Dict[str, str]" = {}
@@ -386,14 +385,11 @@ class BaseProvider(ABC):
                     m["tool_call_id"] = msg.tool_call_id
                 if hasattr(msg, "reasoning_content") and getattr(msg, "reasoning_content"):
                     m["reasoning_content"] = getattr(msg, "reasoning_content")
-                # ── Vision: serialize attached images into OpenAI-style
-                #    multimodal content. BUG history: this shared formatter
-                #    (used by OpenRouter, OpenAI, DeepSeek…) copied role/content/
-                #    tool_calls but DROPPED msg.images entirely, so a pasted
-                #    image was attached to the ChatMessage yet never reached the
-                #    API, and the model answered from the previous image's
-                #    description still in history. (MiMo has its own formatter
-                #    that handled images, which is why only MiMo ever worked.)
+                # Serialize images into OpenAI multimodal blocks: this shared formatter
+                # (OpenRouter/OpenAI/DeepSeek...) copied role/content/tool_calls but DROPPED
+                # msg.images, so pasted images never reached the API and models answered from
+                # the previous image's description. MiMo had its own formatter, hence only
+                # MiMo worked.
                 _imgs = getattr(msg, "images", None)
                 _vids = getattr(msg, "videos", None)
                 if _imgs or _vids:
@@ -442,10 +438,9 @@ class BaseProvider(ABC):
         history truncation trimming the assistant turn but leaving its tool
         responses behind.
         """
-        # PASS 1 (original protection, kept): an assistant's tool_calls must be
-        # answered by ALL of its ids in the immediately-following contiguous
-        # run of tool messages, or the API rejects the follow-up turn. Strip
-        # tool_calls when incomplete.
+        # Pass 1: an assistant's tool_calls needs ALL ids answered in the immediately
+        # following contiguous tool messages or the API rejects the turn; strip
+        # incomplete tool_calls.
         n = len(normalized)
         i = 0
         while i < n:
@@ -464,10 +459,8 @@ class BaseProvider(ABC):
                             msg["content"] = ""
             i += 1
 
-        # PASS 2 (new protection): drop any 'tool' message that is no longer -
-        # or was never, paired with an open assistant tool_calls entry. This
-        # catches both the "pass 1 just stripped my parent" case and any
-        # standalone tool message with no parent in the list at all.
+        # Pass 2: drop 'tool' messages with no open assistant tool_calls parent,
+        # catching both "pass 1 stripped my parent" and standalone orphans.
         out: List[Dict[str, Any]] = []
         pending_ids: Optional[set] = None
         for msg in normalized:
@@ -511,14 +504,10 @@ class ProviderRegistry:
         ProviderType.GOOGLE:      ("src.ai.providers.google_provider",      "GoogleProvider"),
     }
     
-    # Providers eligible to take over a CHAT request when the requested
-    # provider cannot be resolved. Used in exactly one place: the fallback
-    # loop in get_provider() below.
-    # SILICONFLOW is absent from this FALLBACK list only. It is still
-    # registered lazily via _LAZY_PROVIDERS and implements chat(), but it is
-    # the embeddings service, so it is never a sensible automatic substitute
-    # for a conversation.
-    # Absent here means "never pick me as a substitute", NOT "cannot chat".
+    # Fallback chat providers for get_provider() when the requested one can't
+    # resolve. SILICONFLOW is absent ONLY here: it's lazy-registered and has
+    # chat(), but is the embeddings service, never a sensible chat substitute.
+    # Absent means "never pick me", not "cannot chat".
     _CHAT_PROVIDERS = (
         ProviderType.OPENROUTER, ProviderType.ANTHROPIC, ProviderType.OPENAI,
         ProviderType.GOOGLE, ProviderType.DEEPSEEK, ProviderType.ALIBABA,
@@ -628,12 +617,10 @@ class ProviderRegistry:
             # Try lazy-load before falling back to another chat provider
             provider = self._ensure_provider(provider_type)
         if not provider:
-            # Fall back to a real CHAT provider, never to an OCR service.
-            # An unresolved lookup used to be handed to the server-side OCR
-            # service unconditionally, so the whole conversation was sent to it
-            # and the request died with 401 Unauthorized from its chat endpoint,
-            # since a desktop OCR key is not a chat key. Prefer any registered
-            # chat provider that actually has a key.
+            # Fall back to a real chat provider, never OCR: an unresolved lookup used to
+            # go unconditionally to the server OCR service, sending the whole conversation
+            # and dying 401 from its chat endpoint (a desktop OCR key isn't a chat key).
+            # Prefer a registered chat provider with a key.
             for _pt in self._CHAT_PROVIDERS:
                 _cand = self._providers.get(_pt) or self._ensure_provider(_pt)
                 if not _cand:

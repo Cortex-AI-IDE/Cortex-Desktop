@@ -213,12 +213,10 @@ def classify_gpus(gpus: List[Dict]) -> Tuple[str, str]:
                     f"AMD adapter '{gpu.get('desc')}' with driver from "
                     f"{date.year} (before {_OLD_DRIVER_CUTOFF_YEAR})")
 
-    # Intel with an old driver and nothing else to draw on. Seen 2026-10-30 on
-    # an OptiPlex 7010 (i5-3470, Intel HD Graphics, driver 10.18.10.4252 from
-    # 2015-07): sidebar, editor and terminal black, while the pages loaded,
-    # Monaco reported ready and the WebGL probe passed, so the runtime check
-    # never fired. Only when Intel is the whole list: a laptop with an old
-    # Intel driver and a current NVIDIA card must not lose its GPU.
+    # Intel-only old driver fallback: OptiPlex 7010 (2015 HD Graphics driver) had
+    # blank sidebar/editor/terminal while pages loaded and WebGL probes passed.
+    # Require Intel to be the whole adapter list; a laptop with current NVIDIA
+    # must not lose its GPU.
     if all(_is_intel_adapter(g) for g in real):
         dates = [parse_driver_date(g.get("date_raw")) for g in real]
         if all(d is not None and d.year < _OLD_DRIVER_CUTOFF_YEAR for d in dates):
@@ -249,22 +247,13 @@ def gpu_inventory_summary(gpus: Optional[List[Dict]] = None) -> str:
 
 # Resolution
 
-# Crash-driven fallback
-# Qt WebEngine runs Chromium's GPU code on a thread INSIDE Cortex.exe
-# ("Chrome_InProcGpuThread"), whatever flags we pass. In Chrome a graphics
-# driver crash only kills the GPU process; here it kills the whole app.
-# Microsoft Store report, 3.0.73 on Windows 11 + NVIDIA: write access
-# violation on Chrome_InProcGpuThread, Qt6WebEngineCore -> d3d11 ->
-# nvwgf2umx.dll. crash.log, 3.0.78, 2026-11-21: two access violations four
-# minutes apart, both on a thread that was not Python's.
-# faulthandler marks the crashing thread "Current thread" when it is a
-# Python thread. A fatal native exception with NO "Current thread" in the
-# dump happened on a native thread, which in this process means Chromium,
-# and almost always its GPU thread. One of those within a week switches the
-# next launch to CPU rendering; the window then asks whether to keep it.
-# One, not two: waiting for a second crash cost the user their work twice
-# (2026-11-21: two crashes four minutes apart). A false alarm only costs
-# some speed, and "Use the graphics card again" undoes it.
+# Crash fallback: Qt WebEngine runs Chromium GPU code inside Cortex.exe
+# (Chrome_InProcGpuThread), so a driver crash kills the app, not just a GPU
+# process (Store 3.0.73 NVIDIA d3d11/nvwgf2umx; crash.log 3.0.78 two AVs).
+# A fatal native exception with NO "Current thread" in faulthandler means
+# Chromium's GPU thread. One such crash in a week switches next launch to
+# CPU, with an opt-out prompt. One, not two: two crashes four minutes apart
+# already cost the user their work twice on 2026-11-21.
 
 CRASH_LOG = os.path.join(os.path.expanduser("~"), ".cortex", "crash.log")
 CRASH_WINDOW_DAYS = 7

@@ -1,9 +1,6 @@
 # Post-sampling hooks run after the model produces a response.
 # They can inspect, modify, or log the response before it is used.
 # This stub provides the execute_post_sampling_hooks() interface
-# that query.py expects. Full implementation would integrate
-# with the hook registration system.
-
 from typing import Any, Dict, List, Optional
 
 __all__ = ["execute_post_sampling_hooks"]

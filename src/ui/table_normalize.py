@@ -141,16 +141,10 @@ def split_inline_tables(text: str) -> str:
     Strategy: find the full separator substring (|---|---|...|), use it
     to split header from data, then split data rows by pipe count.
     """
-    # Every cell of a separator must contain a dash. The previous pattern,
-    # \|[\s:\-]+\|(?:[\s:\-]+\|)+, let a cell be whitespace alone, so on the
-    # collapsed form this function exists to handle it started one pipe early
-    # and ended one pipe late:
-# Title| H1 | H2 | | | | |d1 | d2 |
-# matched '| | | | |' > n cols 4
-    #   header  '| H1 | H2 |'    -> hdr_cols 2
-    # so the counts never agreed and the split was abandoned every time, for
-    # the exact example in this docstring. Requiring a dash per cell matches
-# '| | |' and the counts line up.
+    # Every separator cell must contain a dash. The old pattern let a cell be
+    # whitespace alone, so collapsed form started one pipe early and ended one
+    # late (Title|H1|H2||||d1|d2 matched '| | | | |' > n cols 4 while header cols
+    # was 2), so counts never agreed and the split was abandoned. Require a dash.
     _FULL_SEP = re.compile(r'\|(?:[\s:]*-[-\s:]*\|)+')
     result = []
     lines = text.split('\n')
@@ -228,23 +222,16 @@ def split_inline_tables(text: str) -> str:
 
         hdr_cols = header.count('|') - 1
         if hdr_cols != n_cols:
-            # Put back the line taken out of result above. Without this the
-            # header vanished and the table rendered as one collapsed run of
-            # pipes, which is what happened when the i += 1 below was added
-            # on its own: the loop stopped spinning and started eating a line
-            # instead. The branch at the top of this block restores it for
-            # the same reason.
+            # Put back the line removed from result above: without it the header vanished
+            # and the table rendered as one collapsed run of pipes (what happened when
+            # i += 1 was added alone). The branch at the top of this block restores it.
             if _popped_original is not None:
                 result.append(_popped_original)
             result.append(line)
-            # i += 1 as every other branch in this loop does. Without it this
-            # reprocessed the same line forever: an infinite loop that spun
-            # the calling thread and appended the same line to result on
-            # every pass, so memory climbed too. A message whose header
-            # column count did not match its separator was enough, and chat
-            # restore then never finished. The worker thread and 1s timeout
-            # around this pipeline had been absorbing it, which is what the
-            # "TIMED OUT after 1.0s ... (len=430)" line really was.
+            # i += 1 like every other branch: without it this reprocessed the same line
+            # forever, spinning the thread and appending endlessly (memory climbed). A
+            # header/separator column mismatch triggered it; chat restore never finished.
+            # The worker + 1s timeout absorbed it: that was the "TIMED OUT (len=430)".
             i += 1
             continue
 
@@ -888,16 +875,11 @@ def normalize_table_markdown(text: str, timeout: Optional[float] = 1.0) -> str:
     if len(text) > 50_000:
         return text
 
-    # KEEP the worker thread and timeout for every caller that asks for one.
-    # An earlier change here ran small text inline, on the reading that a
-    # timeout firing on 430 characters had to be thread-scheduling overhead
-    # rather than real work. It was real work: split_inline_tables could
-    # enter an infinite loop, and the timeout was what kept the UI alive
-    # through it. Running inline removed the escape and turned a one second
-    # stall per block into a permanent freeze.
-    # That loop is fixed, but the guard stays. It is the only thing standing
-    # between a future bug in this file and a hung window, and this file is
-    # edited by the agent itself.
+    # Keep the worker + timeout for callers that ask: an earlier change ran small
+    # text inline, reading a 430-char timeout as thread overhead. It was real work:
+    # split_inline_tables could infinite-loop and the timeout kept the UI alive.
+    # That loop is fixed but the guard stays: it's the only thing between a future
+    # bug in this agent-edited file and a hung window.
     if timeout is None:
         try:
             return _run_table_pipeline(text)

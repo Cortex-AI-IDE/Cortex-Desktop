@@ -26,11 +26,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-# The app's file handler is attached per named logger (src.utils.logger), and
-# the root logger has none, so logging.getLogger(__name__) wrote nowhere: not
-# one "Loaded N skills" line ever reached cortex.log, which is why skill
-# detection problems left no trace. The fallback keeps the module importable
-# on its own.
+# The file handler is attached per named logger (utils.logger), and root has
+# none, so logging.getLogger(__name__) wrote nowhere: no "Loaded N skills"
+# line ever reached cortex.log. The fallback keeps this module importable alone.
 try:
     from src.utils.logger import get_logger as _get_logger
     logger = _get_logger("skills")
@@ -197,10 +195,8 @@ def parse_skill_file(file_path: str) -> Optional[SkillDefinition]:
         logger.warning(f"Cannot read skill file {file_path}: {e}")
         return None
 
-    # Frontmatter may be preceded by an HTML comment (the editable-copy
-    # header prepare_edit writes, or any hand-added note). Tolerate it -
-# requiring " " at byte zero turned every such file into a nameless
-    # "Skill" card in the browser.
+    # Frontmatter may follow an HTML comment (prepare_edit's header or a hand
+    # note); requiring " " at byte zero made every such file a nameless Skill card.
     _stripped = content.lstrip()
     while _stripped.startswith("<!--"):
         _close = _stripped.find("-->")
@@ -337,11 +333,10 @@ def _extract_frontmatter_lenient(raw: str) -> Optional[Dict[str, Any]]:
                     continue    # nested mapping (metadata:, etc.), not used here
                 val = ' '.join(([val] if val else []) + content_lines)
 
-        # YAML block scalars: `description: |-` / `>` / `|+` etc. The value is
-        # the indented lines that follow. Skipping them was not merely lossy -
-        # a continuation line containing a colon (these are prose, so most do)
-        # was parsed as its OWN key, filling the frontmatter with junk keys and
-        # leaving `description` as the literal string "|-".
+        # YAML block scalars (description: |- / > / |+) put the value in following
+        # indented lines. Skipping them wasn't just lossy: a continuation line with a
+        # colon was parsed as its own key, filling frontmatter with junk and leaving
+        # description as the literal "|-".
         if val[:1] in ('|', '>') and set(val[1:]) <= set('-+0123456789'):
             fold = val[0] == '>'
             block: List[str] = []
@@ -362,10 +357,9 @@ def _extract_frontmatter_lenient(raw: str) -> Optional[Dict[str, Any]]:
         # Parse lists: [a, b, c]
         if val.startswith('[') and val.endswith(']'):
             val = [v.strip().strip("'\"") for v in val[1:-1].split(',') if v.strip()]
-        # Parse booleans, only if still a string: after list parsing val may
-        # be a list, and list.lower() raised AttributeError, which propagated
-        # up and killed the ENTIRE SkillsManager init (one skill file with
-        # `tags: [a, b]` frontmatter broke all skills).
+        # Parse booleans only if still a string: after list parsing val may be a list,
+        # and list.lower() killed the ENTIRE SkillsManager init (one skill with
+        # tags: [a, b] broke all skills).
         elif val.lower() in ('true', 'yes'):
             val = True
         elif val.lower() in ('false', 'no'):
@@ -675,31 +669,19 @@ class SkillsManager:
 
         home = os.path.expanduser('~')
 
-        # 2. Global ecosystem skills (~/.claude/skills/). This is where the
-        #    `skills` CLI (npx skills add ...) and other agent tools put things.
-        #    Reading it means a skill installed the normal way is usable in
-        #    Cortex without being copied somewhere Cortex-specific first,
-        #    which is what users actually expect after installing one.
-        # 2b. Every OTHER agent tool's skills directory, discovered rather
-        #     than hardcoded. Skills are a shared format now and each tool
-        #     keeps its own ~/.<tool>/skills/: .agents (the tool-neutral
-        #     AGENTS.md convention), and whatever ships next
-        #     month. Naming them one by one meant a user's installed skill
-        #     was invisible until someone added that vendor to this list, so
-        #     any ~/.<something>/skills/ directory is loaded.
-        # 3. Global Cortex skills (~/.cortex/skills/), wins over the shared
-        #    directory at the same scope, so a Cortex-specific override of
-        #    an installed skill is possible by reusing its name.
+        # Skill scopes in order: ~/.claude/skills (where the skills CLI installs, so
+        # normal installs work in Cortex without copying), then any other agent tool's
+        # ~/.<tool>/skills/ discovered rather than hardcoded (shared format, new tools
+        # shouldn't need a code change), then ~/.cortex/skills which wins at the same
+        # scope so Cortex-specific overrides can reuse a name.
         roots += [(d, 'global') for d in _vendor_skill_dirs(home)]
         cortex_global = os.path.join(home, '.cortex', 'skills')
         if os.path.isdir(cortex_global):
             roots.append((cortex_global, 'cortex'))
 
-        # 4/5. Project skills beat global ones, same shared-then-Cortex
-        #      order within the project.
-        #      Not in Restricted Mode: a skill is an instruction to the AI,
-        #      and an untrusted folder does not get to give those
-        #      (src/core/workspace_trust.py).
+        # Project skills beat global, same shared-then-Cortex order. Not in Restricted
+        # Mode: a skill instructs the AI, and an untrusted folder can't do that
+        # (workspace_trust.py).
         from src.core.workspace_trust import is_restricted
         if (self.project_root and os.path.isdir(self.project_root)
                 and not is_restricted(self.project_root)):
@@ -783,10 +765,9 @@ _REFRESH_INTERVAL = 2.0
 
 _skills_manager: Optional[SkillsManager] = None
 _skills_manager_lock = threading.Lock()
-# The open project, set by whoever owns that fact (the agent bridge, when a
-# project is opened). Callers of get_skills_manager() pass whatever directory
-# they have - for the agent tools that is the process cwd, /opt/cortex-ide in
-# the installed app - so their argument cannot decide which project is open.
+# The open project is set by whoever owns that fact (agent bridge on open).
+# get_skills_manager() callers pass whatever dir they have (process cwd,
+# /opt/cortex-ide in the installed app), so their argument can't decide it.
 _skills_project_root: Optional[str] = None
 
 

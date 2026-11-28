@@ -90,14 +90,10 @@ def get_status(repo_dir: str) -> Dict[str, Any]:
         if len(parts) == 2:
             ahead, behind = int(parts[0]), int(parts[1])
 
-    # Porcelain status for file listing.
-    # --untracked-files=all is required here: without it, git's default
-    # ("normal") mode collapses a brand-new, entirely-untracked directory
-    # into ONE line for the whole folder (e.g. "?? src/core/loop_engine/")
-    # instead of listing each file inside it. Every file-name-from-path
-    # extraction downstream (sidebar.html's `.split(/[/\\]/).pop()`) then
-    # gets an empty string for that trailing-slash directory path, which is
-    # exactly the blank "U" rows with no visible name in the sidebar.
+    # Porcelain status with --untracked-files=all: git's default "normal" collapses
+    # a brand-new untracked directory into one "?? dir/" line instead of listing
+    # files. Downstream name-from-path extraction then gets "" for the trailing
+    # slash, producing blank "U" rows in the sidebar.
     porcelain = _run_git(repo_dir, ["status", "--porcelain=v1", "--untracked-files=all"])
     files: List[Dict[str, str]] = []
     for line in porcelain.splitlines():

@@ -236,16 +236,11 @@ class AuthManager:
         self._on_login_callback: Optional[Callable] = None
         self._callback_server: Optional[HTTPServer] = None
         self._state: Optional[str] = None
-        # Monotonic login-attempt counter. Each start_login() bumps it and the
-        # waiter thread it spawns remembers its own value. Waiters from
-        # SUPERSEDED attempts (user clicked Sign In again) must exit without
-        # touching shared state: previously they kept waiting on the same
-        # global event for up to 5 minutes, and when the browser finally
-        # redirected, BOTH waiters woke, the stale one consumed and nulled
-        # the code, so the current one exchanged None → the server's 400
-        # {"error": "missing_code"} → "Failed to exchange auth code".
-        # A stale waiter's trailing sleep(60) + _stop_callback_server() could
-        # also kill the NEWER attempt's callback server mid-login.
+        # Monotonic login counter: each start_login bumps it; waiters remember theirs.
+        # Stale waiters (user clicked Sign In again) must exit without touching shared
+        # state. Previously both woke on the same event, the stale one consumed/nulled
+        # the code, and current got 400 missing_code; its trailing sleep+stop could kill
+        # the newer attempt's callback server.
         self._login_generation = 0
         # Why the last browser sign-in ended, or None while one is in flight.
         # The callback runs on its own thread, so without somewhere to put the

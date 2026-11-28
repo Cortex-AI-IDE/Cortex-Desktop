@@ -45,11 +45,9 @@ DARK = {
     "user_bubble":       "#212529",
     "green":             "#3fb950",
     "red":               "#f85149",
-    # Error card surface + the text that sits ON it. These travel together on
-    # purpose: the card background was hardcoded dark in BOTH themes while its
-    # label used text_secondary, which is dark in light mode, so light-mode
-    # users got dark text on a dark red card (unreadable). Any pairing like
-    # this must define the on-surface text with the surface.
+    # Keep an error surface WITH its on-surface text: the card was hardcoded dark
+    # in both themes while the label used text_secondary (dark in light mode), so
+    # light users got dark text on dark red. Define both together.
     "bg_error":          "#3b1010",
     "error_border":      "#e74c3c",
     "error":             "#e74c3c",
@@ -122,12 +120,9 @@ DARK = {
     "status_ok":      "#3fb950",
     "status_error":   "#f85149",
 
-    # Fonts
-    # Bundled with Cortex (src/assets/fonts, see src/ui/fonts.py): Inter for
-    # the interface, JetBrains Mono for code. Qt registers the Inter file as
-    # "Inter Variable"; web pages name it "Inter" through @font-face - the
-    # list carries both so each side finds its own name first. Geist was
-    # named here before but never shipped, so it always fell back.
+    # Bundled fonts (src/assets/fonts, see fonts.py): Inter for UI, JetBrains Mono
+    # for code. Qt registers Inter as "Inter Variable", web pages use "Inter" via
+    # @font-face, so list both. Geist was named but never shipped (always fell back).
     "font_ui":           "'Inter', 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif",
     "font_mono":         "'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace",
     "font_size":         "14px",
@@ -189,19 +184,11 @@ DARK = {
     "code_scrollbar":    "rgba(255,255,255,0.10)",
 }
 
-# ── Light theme tokens ──
-# Built as DARK-merge so key parity is guaranteed: any token not overridden
-# here inherits the dark value (correct for fonts/radii/line-heights, and a
-# safe fallback for any future key someone adds to DARK only).
-# Palette: warm Anthropic/Claude scheme, MATCHES editor.html, sidebar.html,
-# the status bar, and memory_management.css [data-theme="light"] exactly
-# (bg #ECE9E0, surfaces #E4E1D8/#DDDAD0, text #1A1814, muted #6B6860,
-# terracotta accent #C96A3E). Every "black-based" rgba tint below uses the
-# warm text RGB (26,24,20) instead of pure black so translucent overlays
-# read as warm, not cool-gray. THE RULE: light backgrounds get DARK text,
-# never light-hash grays. Syntax-highlighting hues (keyword/string/etc.)
-# are intentionally NOT warmed, those follow language-convention colors
-# for code readability, independent of chrome theming.
+# Light theme is a DARK-merge for key parity (unoverridden tokens inherit dark).
+# Warm Anthropic palette matches editor.html/sidebar.html/status bar:
+# bg #ECE9E0, surfaces #E4E1D8/#DDDAD0, text #1A1814, muted #6B6860,
+# accent #C96A3E. Black-based rgba tints use warm text RGB (26,24,20). Light
+# backgrounds get DARK text; syntax hues stay language-conventional.
 LIGHT = {
     **DARK,
 
@@ -371,11 +358,9 @@ class _TokenProxy:
     __slots__ = ()
 
     def __getitem__(self, key):
-        # A missing token must NEVER crash a widget. Bug history: the update
-        # dialog referenced 'mono_bright' which no palette defined, the
-        # KeyError killed the dialog before it showed, so FORCE updates
-        # silently never appeared (9 crashes in one log, three releases).
-        # Log loudly, fall back to the theme's text color.
+        # A missing token must never crash a widget: the update dialog referenced
+        # 'mono_bright', the KeyError hid FORCE updates for three releases. Log loudly
+        # and fall back to the theme text colour.
         try:
             return _current_theme[key]
         except KeyError:
@@ -396,24 +381,11 @@ class _TokenProxy:
 TOKENS = _TokenProxy()
 
 
-# Chat panel palette
-# The chat panel's own look, layered over the active theme. Only
-# src/ui/chat_panel.py reads it (through CHAT_TOKENS / chat_theme()), so the
-# sidebar, settings, menus and tool cards keep their colours: ~30 of the
-# tokens the chat uses (accent, bg, border, green, orange, ...) are shared
-# with those modules, and changing the shared values would restyle the whole
-# app.
-# One accent - the Cortex brand lime from cortex-ide.app - marks what is live
-# (spinners, running, streaming cursor, links, focus). Everything else is
-# neutral; emphasis comes from weight, not colour: bold, italic, inline code,
-# headings and table headers use the text colour (they were orange, gold,
-# green, white and purple). Tool rows are neutral: the icon says the kind,
-# the state says what is happening. Diff and syntax colours are unchanged -
-# they carry meaning.
-# Dark keeps the editor's own background so the chat sits flush with the
-# code. Light is white with cool greys; the cream + terracotta it replaces
-# measured 3.1:1 (accent) and 3.0:1 (muted) on its own background, under the
-# 4.5:1 WCAG AA minimum. Every text colour below is >= 4.5:1 on its surface.
+# Chat palette is read only by chat_panel.py; ~30 tokens are shared, so changing
+# them restyles the whole app. One accent (Cortex lime) marks what's live;
+# everything else neutral, emphasis by weight. Diff/syntax colours carry meaning.
+# Dark keeps editor bg; light is white with cool greys (cream+terracotta measured
+# 3.1:1 accent / 3.0:1 muted, below WCAG AA 4.5:1).
 CHAT_DARK = {
     "text": "#e6e8eb", "text_primary": "#e6e8eb",                  # 13.6:1
     "text_dim": "#a9afb8", "text_secondary": "#a9afb8",             # 7.6:1
@@ -448,10 +420,9 @@ CHAT_DARK = {
 }
 
 CHAT_LIGHT = {
-    # Surfaces, borders, bubble, menus and buttons are NOT overridden: the
-    # light chat keeps the app's warm paper (#ECE9E0 page, #DDDAD0 bubble).
-    # Only ink and accents change. Contrast is measured on the darkest warm
-    # surface text sits on (#DDDAD0).
+    # Don't override surfaces/borders/bubble/menus/buttons: light chat keeps the
+    # app's warm paper (#ECE9E0 page, #DDDAD0 bubble). Only ink and accents change;
+    # contrast measured on the darkest surface text sits on (#DDDAD0).
     "text": "#1A1814", "text_primary": "#1A1814",                  # 12.7:1
     "text_dim": "#4A463E", "text_secondary": "#4A463E",             # 6.7:1
     "muted": "#5E5A52", "mono_muted": "#5E5A52",                    # 4.9:1

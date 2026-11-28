@@ -34,12 +34,10 @@ VCS_DIRECTORIES_TO_EXCLUDE = [
     '.sl',
 ]
 
-# Vendored and generated folders that are never the user's code. ripgrep
-# honours .gitignore, but a project without one (or a search outside git)
-# searched node_modules and venv too, so a "where is X" answer led with
-# library copies. Same names as glob_tool.SKIP_DIRS minus dist/build/env, which
-# are too often real source folders to drop silently; a pattern or glob that
-# names one of these folders brings it back.
+# Skip vendored/generated dirs even without .gitignore (or outside git), so
+# "where is X" doesn't lead with library copies. Same names as glob_tool.
+# SKIP_DIRS minus dist/build/env (too often real source). A pattern naming one
+# brings it back.
 VENDORED_DIRECTORIES_TO_EXCLUDE = [
     'node_modules', '__pycache__', 'venv', '.venv',
     '.tox', '.mypy_cache', '.pytest_cache',
@@ -50,17 +48,13 @@ VENDORED_DIRECTORIES_TO_EXCLUDE = [
 # 80 lines × ~100 chars = ~8K chars per call, safe for 128K context models.
 DEFAULT_HEAD_LIMIT = 80
 
-# Longest single result line kept in full. Longer lines are windowed around
-# the match instead of dropped. 2000 is the number ripgrep used to be given as
-# --max-columns, so every line that used to display correctly still displays
-# byte-for-byte the same; only lines that were previously replaced by
-# "[Omitted long matching line]" now carry a usable slice.
+# Keep lines up to 2000 chars in full (what --max-columns used to show), window
+# longer ones around the match instead of dropping them. Only lines previously
+# replaced by "[Omitted long matching line]" now carry a usable slice.
 MAX_RESULT_LINE_CHARS = 2000
 
-# Only a guard against a pathological single-line file (a data dump that is one
-# 50 MB line). Above this ripgrep still emits its omission marker, which
-# _clip_long_lines() turns into an actionable "open this file at this line"
-# note, so the search result is never a bare dead end.
+# Upper bound only for a one-50MB-line data dump; above it rg still emits its
+# omission marker, which _clip_long_lines turns into an actionable note.
 PATHOLOGICAL_LINE_CHARS = 1_000_000
 
 # Characters of context kept either side of the match when a long line is
@@ -262,10 +256,9 @@ async def ripgrep(args: List[str], cwd: str, signal: Optional[asyncio.Event] = N
     # Find rg executable
     rg_exe = _find_ripgrep()
 
-    # In frozen builds: try rg.exe first with a short timeout (5s).
-    # If rg.exe hangs (Defender scan, broken pipe, OneDrive placeholder, etc.),
-    # immediately fall back to pure-Python grep. This keeps rg.exe speed
-    # when it works, but never lets it block the agent for 30s.
+    # Frozen builds: try rg.exe with a 5s timeout, fall back to Python grep on hang
+    # (Defender, broken pipe, OneDrive). Keeps rg speed when it works, never blocks
+    # the agent 30s.
     if getattr(_sys, 'frozen', False) and rg_exe:
         try:
             return await _try_rg(rg_exe, args, cwd, timeout=5.0)
@@ -326,10 +319,9 @@ async def _try_rg(rg_exe: str, args: List[str], cwd: str, timeout: float = 30.0)
     stdout, stderr = process.stdout, process.stderr
     _stderr_text = stderr.decode('utf-8', errors='replace').strip()
 
-    # A pattern the regex engine cannot compile is a caller mistake, not an
-    # engine failure. Reported as an engine failure it fell through to the
-    # Python engine, which hit the same error, returned [], and told the agent
-    # "no matches" for a search that never ran.
+    # An uncompilable pattern is a caller mistake, not an engine failure: reporting
+    # it as engine failure fell through to Python, which hit the same error,
+    # returned [], and told the agent "no matches" for a search that never ran.
     if 'regex parse error' in _stderr_text or 'error parsing regex' in _stderr_text:
         raise RipgrepPatternError(_stderr_text or 'invalid regular expression')
 
@@ -347,12 +339,10 @@ async def _try_rg(rg_exe: str, args: List[str], cwd: str, timeout: float = 30.0)
     lines = [ln[:-1] if ln.endswith('\r') else ln for ln in lines]
 
     if process.returncode != 0 and process.returncode != 1:
-        # Exit 2 means "an error occurred", and rg uses it for a path it could
-        # not read - a root-owned folder, a snap mount, a file deleted mid-run -
-        # AFTER printing every match it managed to find. Treating that as a
-        # total failure threw away good results and downgraded the search to
-        # the slow Python engine; on Linux an unreadable subdirectory is
-        # ordinary, so that hit almost every large tree.
+        # rg exit 2 also means an unreadable path (root-owned folder, snap mount,
+        # deleted file) AFTER printing matches found. Treating it as total failure
+        # discarded good results and downgraded to Python; on Linux an unreadable
+        # subdir is ordinary, so this hit almost every large tree.
         if lines:
             logger.info(
                 f"[Grep] rg exit {process.returncode} but returned "
@@ -367,12 +357,9 @@ async def _try_rg(rg_exe: str, args: List[str], cwd: str, timeout: float = 30.0)
             f"{_stderr_text[:300] or 'no stderr'}"
         )
 
-    # Field case (log 2026-07-30 14:49): two searches over a Django site
-    # whose patterns MUST match came back empty with no error anywhere -
-    # while OneDrive is validating/dehydrating files, rg reports per-file
-    # read errors on stderr yet still exits 1 ("no matches"). An empty
-    # result WITH error output is not a real "no matches", hand the
-    # search to the Python fallback, which reads per-file fault-tolerantly.
+    # OneDrive validation/dehydration makes rg report per-file read errors on
+    # stderr yet exit 1 ("no matches"). Empty result WITH error output isn't a
+    # real no-match; hand it to the fault-tolerant Python fallback.
     if not lines and _stderr_text:
         raise RuntimeError(
             f"Ripgrep empty result with errors: {_stderr_text[:300]}"
@@ -585,14 +572,9 @@ def _python_grep_fallback_sync(args: List[str], cwd: str) -> List[str]:
     if sp.is_file():
         results = _search_file(sp, str(sp))
     elif sp.is_dir():
-        # ── Storm-proof traversal ──
-        # This fallback exists precisely for the flaky cases (Defender
-        # scans, OneDrive), yet rglob() dies the moment its internal
-        # scandir hits one unreadable entry, field case: WinError 448 on
-        # a OneDrive reparse point killed the WHOLE search mid-iteration
-        # and the agent reported "Grep isn't hitting the project files".
-        # os.walk with onerror skips only the unreadable directory and
-        # keeps walking; each file is additionally guarded on its own.
+        # Storm-proof fallback for Defender/OneDrive: rglob() died on the first
+        # unreadable entry (WinError 448 on a OneDrive reparse point killed the whole
+        # search). os.walk(onerror=...) skips only that dir; each file is guarded too.
         import os as _os
         _unreadable = 0
         _scanned = 0
@@ -831,10 +813,9 @@ def _find_ripgrep() -> Optional[str]:
         if npm_rg:
             return npm_rg
 
-    # -- Frozen build: cache the binary to a stable, trusted location --
-    # Running it from the extraction dir (_MEIPASS) makes Windows Defender
-    # rescan it on every invocation, adding 5-20s. A stable copy under the
-    # user cache avoids that and gives POSIX a predictable path too.
+    # Cache rg.exe to a stable trusted location: running from _MEIPASS makes
+    # Defender rescan it each call (5-20s). A stable user-cache copy avoids that
+    # and gives POSIX a predictable path.
     if _frozen:
         if sys.platform == 'win32':
             cache_root = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
@@ -1297,16 +1278,10 @@ class GrepTool:
             if dir_name not in _asked_for.split('/') and f"{dir_name}/" not in _asked_for:
                 args.extend(['--glob', f'!{dir_name}'])
         
-        # Line length: the window trimmer decides, not ripgrep
-        # `--max-columns 2000` made ripgrep swap the whole line for
-        # "[Omitted long matching line]", so a match inside a minified bundle
-        # reported a location and hid the token the search was actually about.
-        # This repo is full of them (mermaid.min.js, xterm.js,
-        # three.core.min.js, icons/_mapping.json), so it was not theoretical.
-        # `--max-columns-preview` is NOT the fix: it prints the FIRST N chars,
-        # so a token at column 3000 stays invisible.
-        # The cap is now only a guard against a pathological one-line file;
-        # GrepTool._clip_long_lines() windows the line around the match.
+        # Let the window trimmer handle line length, not ripgrep: --max-columns
+        # replaced the whole line with "[Omitted long matching line]", hiding tokens
+        # in minified bundles (mermaid.min.js, xterm.js, three.core.min.js). The cap
+        # now guards only pathological one-line files; _clip_long_lines() windows.
         args.extend(['--max-columns', str(PATHOLOGICAL_LINE_CHARS)])
         
         # Apply multiline flags only when explicitly requested
@@ -1384,12 +1359,10 @@ class GrepTool:
         abort_controller = getattr(context, "abort_controller", None)
         signal = getattr(abort_controller, "signal", None) if abort_controller else None
         
-        # If path was a file, pass its BASENAME as the positional arg (cwd is
-        # already the file's parent) and force the filename prefix with -H:
-        # rg omits the filename when given a single explicit file, which made
-        # the content post-processor treat bare line numbers as file paths
-        # and mangle every line into ..\..\<n>: garbage. An absolute Windows
-        # path would break the same post-processor on the drive colon (C:).
+        # For a file path pass its BASENAME (cwd is its parent) and force -H: rg omits
+        # the filename for one explicit file, so the post-processor read bare line
+        # numbers as paths and mangled every line. An absolute Windows path breaks it
+        # on the drive colon (C:).
         if _restrict_to_file:
             args.insert(0, '-H')
             args.append(_restrict_to_file)

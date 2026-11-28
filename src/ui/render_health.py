@@ -52,15 +52,11 @@ _SCREEN_ENOUGH_COLOURS = 64   # plenty to say a panel painted; stop reading
 # compatibility-mode dialog.
 _failures: List[str] = []
 
-# Silent-failure probe. The failure this module was written for does NOT
-# fire renderProcessTerminated or loadFinished(False): on the affected
-# machines (older AMD-chipset Windows 10/11 PCs are the classic case) the
-# pages load, the bridges connect, the logs look healthy — only the pixels
-# are missing, because Chromium never obtained a GPU context. So a few
-# seconds after startup we ask the pages themselves whether Chromium could
-# create one: a WebGL context needs exactly the GPU context compositing
-# needs. Two or more core surfaces reporting "no WebGL" while we are in
-# GPU mode is that silent signature, and the fix is offered.
+# The failure this module was written for fires neither renderProcessTerminated
+# nor loadFinished(False): pages load, bridges connect, logs look healthy, only
+# pixels are missing because Chromium never got a GPU context. A few seconds
+# after startup we ask the pages whether WebGL works (same context compositing
+# needs). Two+ core surfaces reporting "no WebGL" in GPU mode is the signature.
 GPU_PROBE_JS = """(function(){
   try {
     var out = {webgl: false, renderer: ''};
@@ -434,14 +430,10 @@ def check_and_offer_fix(parent, widgets: Iterable) -> bool:
     if _already_software():
         return False           # already on; nothing to offer
 
-    # Chromium must have ACTUALLY reported a failure before we do anything.
-    # The pixel sample is NOT run in the healthy case any more. widget.grab()
-    # on a QWebEngineView forces a synchronous surface read on the GUI thread,
-    # and the watchdog caught it freezing startup for 10.7s:
-    #   _check_render_health -> check_and_offer_fix -> widget_is_blank
-    #     -> widget.grab().toImage()
-    # It was only ever an advisory log line, and it was never worth freezing
-    # the app to write it. Nothing failed, so there is nothing to check.
+    # Only sample pixels after Chromium ACTUALLY reported a failure. widget.grab()
+    # on QWebEngineView forces a synchronous surface read on the GUI thread, which
+    # froze startup 10.7s (watchdog stack: check_and_offer_fix -> widget_is_blank
+    # -> grab().toImage()). It was only an advisory log line, never worth freezing.
     if not _failures:
         log.info("[RenderHealth] no render-process failure reported")
         return False

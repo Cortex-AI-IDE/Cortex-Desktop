@@ -311,26 +311,17 @@ class FileManager(QObject):
         try:
             resolved_path = str(Path(filepath).resolve())
 
-# SAVE SIZE GUARD
-            # A code-editor buffer is never legitimately >50MB. A crashed or
-            # looping webview once flushed gigabytes of duplicated junk into
-            # a source file, refuse and keep the on-disk copy intact.
+            # Save-size guard: a code buffer is never legitimately >50MB. A
+            # crashed/looping webview once flushed gigabytes of duplicate junk
+            # into a source file; refuse and keep the on-disk copy intact.
             if content and len(content) > 50 * 1024 * 1024:
                 log.error(f"[SAVE-GUARD] BLOCKED save of {len(content):,} chars "
                           f"to {filepath}, buffer exceeds 50MB sanity cap")
                 return False
 
-# EMPTY CONTENT GUARD
-            # Prevent accidental file wiping. If the file already exists on
-            # disk with content but we're being asked to write empty/whitespace
-            # content, REFUSE and log a warning. This catches the race
-            # condition where Monaco's async get_current_content() returns ""
-            # before the editor model is ready.
-            # NOTE: Empty content guard REMOVED (2026-06-21).
-            # If the caller (main_window._do_save) passes empty content,
-            # the user intentionally cleared the file in Monaco and pressed Ctrl+S.
-            # Caller already validates Monaco responses (None = failure, "" = intentional).
-
+            # Empty-content guard REMOVED (2026-06-21): main_window._do_save
+            # validates Monaco (None = failure, "" = intentional clear), so an
+            # empty write means the user cleared the file and pressed Ctrl+S.
             # Normalize line endings to prevent doubled empty lines.
             # Monaco editor returns \n, but content from other sources
             # might have mixed \r\n and \n.
@@ -616,10 +607,9 @@ class FileManager(QObject):
         """Send a path to the Windows Recycle Bin. Returns the SHFileOperation
         code, 0 on success. Only called on Windows."""
         if sys.platform != "win32":
-            # ctypes.windll does not exist off Windows, so without this the
-            # call below raises AttributeError instead of returning a code.
-            # delete() only reaches here on win32, but the function stands on
-            # its own so a future caller cannot crash on macOS or Linux.
+            # ctypes.windll doesn't exist off Windows; without this guard the call raises
+            # AttributeError instead of returning a code. delete() only reaches here on
+            # win32, but the function stands alone so future callers can't crash elsewhere.
             return -1
         import ctypes
         from ctypes import wintypes
@@ -779,10 +769,9 @@ class FileManager(QObject):
                 # In undo_delete logic, 'trash_path' moves back to 'original_path'
                 trashed_location = op.get('trash_path') or ''
                 if not trashed_location:
-                    # Windows hands the file to the Recycle Bin, which we
-                    # cannot address, and a POSIX backend that moved it
-                    # without telling us where leaves the same gap. Refusing
-                    # is the only safe answer: Path('') is the cwd.
+                    # Windows hands deletion to the Recycle Bin (unaddressable), and a POSIX
+                    # backend may move the file without recording where. Refuse rather than guess:
+                    # Path('') is the cwd.
                     log.warning("Cannot undo delete: the trashed copy is not tracked")
                     self._op_stack.append(op)
                     return None

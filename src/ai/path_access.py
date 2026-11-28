@@ -127,16 +127,12 @@ def _cortex_home() -> str:
     return os.path.join(os.path.expanduser("~"), ".cortex")
 
 
-# Protected files in Cortex's own folder
-# Rule 2 above makes ~/.cortex fully accessible, and that folder also holds
-# the login session and the key vault, plus the files that decide what Cortex
-# runs and trusts. Security review 2026-10-23, run through the real tools:
-# Read returned auth.json and keys.enc, and with "Allow always" on a Write
-# into ~/.cortex went through without a prompt. Text the agent merely reads
-# (a web page, a README, an MCP result) could therefore have it add a server
-# to mcp.json - a program Cortex starts at every launch - or switch on
-# always_allow.json. These exceptions hold whatever rule 2 or "Allow always"
-# says, and with no project open too.
+# ~/.cortex also holds auth.json, keys.enc and the files that decide what
+# Cortex runs and trusts. Security review 2026-10-23: Read returned auth.json
+# and keys.enc, and Write with "Allow always" went through unprompted. Text
+# the agent merely reads could add a server to mcp.json (started every
+# launch) or switch on always_allow.json. These exceptions hold whatever rule
+# 2 or "Allow always" says, and with no project open too.
 
 # Never read or written by the agent: the session token, the encrypted key
 # vault and what unlocks it, and the single-instance IPC key.

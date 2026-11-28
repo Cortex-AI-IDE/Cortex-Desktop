@@ -183,19 +183,11 @@ THEMES = {
     },
 }
 
-# Accessibility themes
-# For users with low vision or colour-vision deficiency. Same structure as
-# the themes above, so they reach every part of Cortex the same way.
-# High Contrast: text and every syntax colour at least 7:1 on the background
-# (WCAG AAA), strong borders, and Monaco's own hc-black / hc-light editor
-# bases, which outline the current line, focus and selections.
-# Distinct Colors: built on the Okabe-Ito palette, whose colours stay
-# distinguishable for every type of colour vision (including protanopia,
-# deuteranopia and tritanopia). Meanings that other themes carry in red vs
-# green (errors vs success, git removed vs added, terminal red vs green) use
-# orange vs blue here instead, as GitHub's colour-vision themes do. Named for
-# what the theme does, not for who might pick it: anyone can choose it
-# without labelling themselves.
+# Accessibility themes use the same structure so they reach every part of
+# Cortex. High Contrast: 7:1 text/syntax (WCAG AAA), strong borders, Monaco
+# hc-black/hc-light. Distinct Colors: Okabe-Ito palette, distinguishable for
+# all colour-vision types; red-vs-green meanings become orange-vs-blue. Named
+# for what it does, not who might pick it.
 THEMES.update({
     "high-contrast-dark": {
         "label": "High Contrast Dark", "base": "dark", "a11y": True,

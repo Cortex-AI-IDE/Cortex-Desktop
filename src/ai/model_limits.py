@@ -114,24 +114,18 @@ class ModelLimits:
             f"turns={self.max_turns})"
         )
 
-# Model registry
-# Each entry: (substring_pattern, context_window_tokens, max_output_tokens)
-# Patterns are tested in order; first match wins.
-# OpenRouter models are identified by their "provider/model-name" format.
-# The patterns below match both the full OpenRouter ID (e.g. "anthropic/claude-opus-4.8")
-# and short names so direct-API and OpenRouter routing share the same limits.
-
+# Registry entries: (substring pattern, context tokens, max output tokens),
+# first match wins. Patterns match both full OpenRouter ids
+# (anthropic/claude-opus-4.8) and short names so direct and OpenRouter routes
 # fmt: off
 _REGISTRY: List[Tuple[str, int, int]] = [
     # The router itself. MUST precede every bare pattern below, or one of
     # them claims this id by substring match.
     ("openrouter/auto",      1_000_000,  32_768),
 
-# Meta via OpenRouter
-    # Verified against openrouter.ai/api/v1/models: context_length is
-    # 1048576 exactly, so the exact figure is used rather than a rounded
-    # 1_000_000. top_provider.max_completion_tokens is null there, so the
-    # 32K output cap is the owner's, not something the API reported.
+# Meta via OpenRouter: verified context_length is exactly 1048576 (use the
+# exact figure, not a rounded 1M); max_completion_tokens is null there, so the
+# 32K output cap is the owner's choice.
     ("meta/muse-spark-1.2",  1_048_576,  32_768),
     ("meta/muse-spark-1.1",  1_048_576,  32_768),
 
@@ -144,10 +138,8 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("gemini-2.5-pro",       1_048_576,  65_536),
     ("gemini",               1_048_576,  65_536),   # catch-all future Gemini
 
-# DeepSeek (native provider: deepseek v4 pro)
-    # The vision model must be listed BEFORE the bare "deepseek" catch-all,
-    # or the prefix match hands it the catch-all's 131K output instead of the
-    # 64K chosen for it.
+# DeepSeek vision model must precede the bare "deepseek" catch-all, or prefix
+# matching gives it the catch-all's 131K output instead of its chosen 64K.
     ("deepseek-v4-flash-vision-exp", 1_000_000, 65_536),
     ("deepseek-v4-pro",     1_000_000, 131_072),
     ("deepseek",            1_000_000, 131_072),   # catch-all
@@ -163,10 +155,9 @@ _REGISTRY: List[Tuple[str, int, int]] = [
     ("gpt-4o",               128_000,  16_384),
     ("o3",                   200_000, 100_000),
 
-    # ── Anthropic Claude (native API + OpenRouter), all 1M ctx, 64K output ──
-    # Bare names (claude-…) route to the native Anthropic provider; the
-    # "anthropic/…" slash format routes via OpenRouter. Substring matching
-    # means the bare patterns below also cover the prefixed OpenRouter ids.
+    # Claude (native + OpenRouter): 1M ctx, 64K out. Bare names route native,
+    # "anthropic/..." via OpenRouter; substring matching means bare patterns also
+    # cover prefixed ids.
     ("claude-fable-5",       1_000_000,  64_000),
     ("claude-opus-4.8",      1_000_000,  64_000),   # OpenRouter dot-slugs
     ("claude-opus-4.5",      1_000_000,  64_000),
@@ -181,11 +172,9 @@ _REGISTRY: List[Tuple[str, int, int]] = [
 
 # Qwen / Alibaba DashScope
     ("qwen3.8-max",        1_000_000, 131_072),   # vision, flagship
-    # qwen3.8-flash was missing here and fell through to the bare "qwen"
-    # catch-all below: a 1M-context model budgeted at 32,000 tokens. The log
-    # showed the cost directly: "Compacting on cycle 1: ~186,909 tokens used,
-    # threshold 19,200" (19,200 = 32,000 x 0.6), so every long turn re-compacted
-    # its own history over and over. That is the reported Qwen "slow".
+    # qwen3.8-flash fell through to the bare qwen catch-all: a 1M model budgeted
+    # 32K, so log showed "Compacting on cycle 1: ~186,909 used, threshold 19,200"
+    # and every long turn re-compacted repeatedly (the reported Qwen "slow").
     ("qwen3.8-flash",      1_000_000,  65_536),   # fast tier, same 1M window
     ("qwen3.7-max",        1_000_000,  65_536),   # reasoning
     ("qwen3.7-plus",       1_000_000,  32_768),   # vision, agentic
@@ -264,11 +253,9 @@ def get_model_limits(model_id: str) -> ModelLimits:
     if not model_id:
         return _DEFAULT_LIMITS
 
-    # A server-published model carries its own limits, set in the admin. Those
-    # win over the tables below, which cannot know about a model that shipped
-    # after this build. Without this a new model silently ran on the generic
-    # 500K/8K default and had its replies truncated far short of what it could
-    # actually produce.
+    # Server-published models carry admin-set limits that win over these tables
+    # (which can't know later models); otherwise a new model ran on the generic
+    # 500K/8K default and replies were truncated far short of its capability.
     try:
         from src.ai.remote_models import get_remote_limits
         remote = get_remote_limits(model_id)

@@ -520,14 +520,10 @@ class LoopOrchestrator:
         if not self._is_git_repo():
             return None
         try:
-            # Exclude .cortex/ (this loop's own spec/state/report bookkeeping)
-            # from the checkpoint commit. Otherwise a reverted checkpoint
-            # (see _revert_to, triggered by a test-integrity violation) takes
-            # spec.json down with it via `git reset --hard`, since it was
-            # only ever tracked inside the commit being discarded, every
-            # later verify() call then fails with "missing its spec file."
-            # Keeping loop bookkeeping untracked also keeps it out of the
-            # diff the reviewer (reviewer.py) audits against base_commit.
+            # Exclude .cortex/ (loop spec/state/report) from the checkpoint commit: a
+            # revert runs git reset --hard and would delete spec.json (tracked only in the
+            # discarded commit), so later verify() fails "missing its spec file". Keeping
+            # it untracked also keeps it out of the reviewer's audited diff.
             paths = self._worktree_paths()
             if paths:
                 staged = _git(["add", "-A", "--", *paths], self.project_root)

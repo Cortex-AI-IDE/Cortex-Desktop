@@ -194,19 +194,12 @@ def remap_all(was_dark: bool, is_dark: bool, on_done=None) -> None:
     run(0)
 
 
-# The app wide QSS, without re polishing the chat
-# QApplication.setStyleSheet() re-matches the whole theme file against EVERY
-# widget. Measured 2026-10-07 on a real 120-turn chat: 13,630 widgets, 12,674
-# of them in the chat, 7.6s in one call (5.6-6.0s in the user's own log),
-# long enough for the desktop to show "python3 is not responding". The chat
-# does not need it (it re-themes itself and this module's remap catches the
-# rest), so the new theme's QSS goes only where the chat is not:
-#   - each subtree hanging off the chat's ancestors (sidebar, editor,
-#     terminal, status bar, splitter handles...), as that subtree's own
-#     sheet, which outranks the app-wide one;
-#   - every other top-level window (open dialogs, menus) now;
-#   - every window shown later (dialogs, menus, tooltips) via a filter.
-# A restart applies the app-wide QSS once, cleanly, at startup.
+# App-wide QApplication.setStyleSheet() re-matches the theme file against EVERY
+# widget: 13,630 widgets (12,674 chat), 7.6s in one call (5.6-6.0s in user log),
+# enough to show "not responding". Chat re-themes itself, so apply the new QSS
+# only where chat is not: each subtree off the chat's ancestors as its own
+# sheet, every other top-level window now, later windows via a filter. A
+# restart applies app-wide QSS cleanly at startup.
 
 _BEGIN = "/* cortex-live-theme */"
 _END = "/* /cortex-live-theme */"
@@ -294,18 +287,11 @@ def apply_theme_outside(heavy: QWidget, qss: str) -> int:
     return len(roots)
 
 
-# Tooltips
 # Qt styles a tooltip with the stylesheets of the widget under the mouse and
-# that widget's parents: QToolTip::showText() sets the tip's
-# "_q_stylesheet_parent" to it and resets the tip's own sheet to "/* */".
-# Plain declarations on any parent ("background: transparent;" on the chat's
-# card headers, "background: #1e1e1e;" around the editor web view) act as
-# "* { ... }" and reach the tip, which then painted see-through or #1e1e1e:
-# dark tooltips in light mode over the chat's run-command rows and the
-# editor's "Copy Path" breadcrumb, whatever theme Cortex started in.
-# So every tip is re-parented, for styling only, to a hidden host widget
-# whose sheet is just the current theme's QToolTip rule. The widget's own
-# styling no longer reaches the tip.
+# its parents (showText sets _q_stylesheet_parent, resets the tip's sheet).
+# Plain declarations on a parent act as "* {}" and reach the tip, which
+# painted see-through or #1e1e1e in the wrong theme. Re-parent every tip for
+# styling only to a hidden host whose sheet is just the current QToolTip rule.
 
 def tooltip_qss() -> str:
     from src.ui.tokens import TOKENS as T

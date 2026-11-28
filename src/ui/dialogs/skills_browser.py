@@ -17,11 +17,9 @@ from PyQt6.QtWidgets import (
 )
 
 
-# Cost of what is switched on (pure, unit tested)
-# An enabled skill is not "available", its whole body is pasted into every
-# single request. 27 enabled skills measured 184,682 chars, ~46k tokens on
-# EVERY message, which is invisible in a list of toggles. The banner makes
-# that number visible at the moment the user is deciding.
+# Show the cost of enabled skills: each body is pasted into EVERY request,
+# 27 enabled measured 184,682 chars (~46k tokens) per message, invisible in a
+# toggle list. The banner makes it visible at decision time.
 CHARS_PER_TOKEN = 4          # rough but stable across these English bodies
 WARN_TOKENS = 8_000          # noticeable on the bill
 HEAVY_TOKENS = 25_000        # crowds out the actual conversation
@@ -62,12 +60,10 @@ def format_cost_banner(skills: List[dict]) -> tuple:
     return (base + ".", sev)
 
 
-# Skill viewing/editing (pure logic)
-# Users can OPEN any skill, read the full SKILL.md (rendered or raw), and
-# EDIT it. Editing follows the precedence contract that already ships:
-# ~/.cortex/skills/<name>/SKILL.md overrides a bundled skill by name, so
-# "edit a built-in" means copy it there and edit the copy. The bundled file
-# itself is never touched (in the installed exe it is not even writable).
+# Users can open any skill (rendered/raw SKILL.md) and edit it, following the
+# shipping precedence: ~/.cortex/skills/<name>/SKILL.md overrides a bundled
+# skill by name, so "edit built-in" copies it there. The bundled file (not
+# writable in the installed exe) is never touched.
 import os as _os
 import shutil as _shutil
 
@@ -94,10 +90,9 @@ def editable_path(skill: Dict, user_dir: Optional[str] = None) -> str:
     bundled skill      -> ~/.cortex/skills/<name>/SKILL.md (the override
                           location). Never the bundled file itself.
     """
-    # Resolved at CALL time, not def time: a default bound at definition
-    # cannot be monkeypatched, which is exactly how the dialog tests wrote
-    # fixture garbage into the REAL ~/.cortex/skills, overriding the
-    # user's genuine apple-design skill with "Skill body text."
+    # Resolve paths at CALL time, not def time: a default bound at definition
+    # can't be monkeypatched, which is how dialog tests wrote fixture garbage into
+    # the REAL ~/.cortex/skills, overriding a genuine skill with "Skill body text".
     if user_dir is None:
         user_dir = USER_SKILLS_DIR
     path = skill.get("path") or ""
@@ -135,10 +130,9 @@ def prepare_edit(skill: Dict, user_dir: Optional[str] = None) -> str:
             f"skill. While this file exists it REPLACES the built-in "
             f"(override by name). Delete this folder to restore the "
             f"original. -->\n")
-    # The note goes AFTER the frontmatter, never before it. The parser
-# requires " " first; a leading comment made every edited copy parse
-    # as a nameless "Skill" card that SHADOWED the real skill (field
-    # screenshot: algorithmic-art listed as "Skill").
+    # Put the note AFTER frontmatter: the parser requires it first, and a leading
+    # comment made edited copies parse as nameless "Skill" cards SHADOWING the
+    # real skill (screenshot: algorithmic-art listed as "Skill").
     if body.startswith("---"):
         _end = body.find("\n---", 3)
         if _end != -1:
@@ -540,11 +534,9 @@ class SkillsBrowserDialog(QDialog):
         tok = estimate_tokens(int(s.get("chars") or 0))
         state = (f"● Enabled, adding ~{tok:,} tokens to every message" if active
                  else f"○ Off, costs nothing until used (~{tok:,} tokens if switched on)")
-        # Header stays COMPACT: title + state only. The description and tags
-        # are not repeated here, they are the first thing visible inside
-        # the SKILL.md body below, and the field screenshot showed the old
-        # header paragraph eating the pane, leaving the actual skill a
-        # four-line strip at the bottom. The body is the point of this pane.
+        # Keep the header compact (title + state): description/tags already lead the
+        # SKILL.md body, and the old header paragraph left the actual skill a four-
+        # line strip at the bottom (field screenshot). The body is the point.
         parts = [
             f'<div style="font-size:16px;font-weight:700;margin-bottom:2px;">{pretty}</div>',
             f'<div style="color:{self._c["accent"] if active else self._c["sub"]};'

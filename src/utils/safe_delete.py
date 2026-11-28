@@ -53,12 +53,10 @@ def _gio_trash(filepath: str) -> bool:
         return False
 
 
-# SHFileOperation reports failures through its own error space, not GetLastError,
-# so the raw number is meaningless on its own. The codes that actually reach
-# users are the "source is busy/denied" family: a Chromium profile directory
-# left open by a live browser process fails here every time (cortex.log
-# 2026-08-24 logged "returned 120" on _edgeprof4-6 over and over while 31
-# msedge processes still held those directories open).
+# SHFileOperation reports failures in its own error space, not GetLastError, so
+# the raw number is meaningless. The codes users hit are "source busy/denied":
+# a Chromium profile left open by a live browser always fails here (cortex.log
+# logged "returned 120" repeatedly while 31 msedge processes held the dirs).
 _RECYCLE_UNAVAILABLE = -1
 
 _SHFILEOP_ERRORS = {

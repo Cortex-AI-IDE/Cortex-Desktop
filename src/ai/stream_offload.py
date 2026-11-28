@@ -156,12 +156,8 @@ async def aiter_offloaded(
             else:  # "end"
                 return
     finally:
-        # Releases the worker. If it is mid-_put on a queue nobody is reading
-        # any more it notices within _PUT_SLICE_SECONDS, and otherwise on its
-        # next loop iteration, so no drain task is needed to free it. Spawning
-        # one here only produced "Task was destroyed but it is pending" when
-        # the loop was torn down before it finished.
-        # No `return` in this block: returning from a finally swallows whatever
-        # is propagating out, including the CancelledError that shuts this
-        # generator down.
+        # Release the worker: a mid-_put notices within _PUT_SLICE_SECONDS, otherwise
+        # next loop iteration; no drain task needed (spawning one caused "Task was
+        # destroyed but pending"). No `return` here: returning from finally would
+        # swallow the CancelledError shutting down this generator.
         cancelled.set()

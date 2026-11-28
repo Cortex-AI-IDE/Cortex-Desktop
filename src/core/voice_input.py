@@ -111,14 +111,10 @@ def transcribe_async(
     a queued invocation, because touching a widget from the worker thread
     crashes rather than misbehaves.
     """
-    # Hand the result back to the GUI thread through a signal, NOT
-    # QTimer.singleShot.
-    # This was the whole bug. QTimer.singleShot posts to the CURRENT
-    # thread's event loop, and the worker thread below has none, so the
-    # timer never fired: the server transcribed the audio correctly and the
-    # text simply never reached the input box, leaving the mic button
-    # spinning forever. A signal on a QObject created here, on the GUI
-    # thread, is delivered with a queued connection and always arrives.
+    # Return the result via a signal, NOT QTimer.singleShot: that posts to the
+    # CURRENT thread, and the worker has no event loop, so transcription succeeded
+    # but text never reached the input box and the mic spun forever. A signal on
+    # a GUI-thread QObject is queued and always arrives.
     from PyQt6.QtCore import QObject, pyqtSignal
 
     class _Bridge(QObject):

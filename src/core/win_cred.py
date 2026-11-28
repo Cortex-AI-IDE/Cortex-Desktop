@@ -57,12 +57,10 @@ class _CREDENTIAL(ctypes.Structure):
 
 _advapi32 = None
 
-# advapi32 exists only on Windows. This module still imports anywhere, so the
-# platform check lives here, at the point the DLL is actually touched. Off
-# Windows the caller gets a clear OSError; without it ctypes raises
-# "module 'ctypes' has no attribute 'WinDLL'", which reads like a broken
-# install rather than "this is the wrong platform". key_manager only reaches
-# these functions under `os.name == 'nt'`, so Windows behaviour is unchanged.
+# advapi32 is Windows-only; check here where the DLL is touched so callers get
+# a clear OSError instead of ctypes' "no attribute WinDLL" (reads like a
+# broken install). key_manager only reaches these under os.name=='nt', so
+# Windows behaviour is unchanged.
 _IS_WINDOWS = sys.platform == "win32"
 
 

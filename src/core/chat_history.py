@@ -188,21 +188,16 @@ class ChatHistoryManager:
                 log.warning(f"[ChatPersist] could not create conversation {conversation_id}: {e}")
             return conversation_id
 
-        # No specific ID requested, find conversation for this project.
-        # require_timeline: a "+ New Chat" row (NULL timeline, newest
-        # updated_at) must not become THE conversation of the project for a
-        # caller that just wants "the chat that was here", otherwise the
-        # panel restores to an empty welcome screen while the real history
-        # sits one row below.
+        # No specific ID: find this project's conversation. require_timeline keeps a
+        # "+ New Chat" row (NULL timeline, newest updated_at) from becoming THE chat,
+        # which restored an empty welcome while the real history sat one row below.
         _latest = self.db.get_latest_conversation(project_path,
                                                   require_timeline=True)
         if not _latest:
-            # Nothing with a timeline yet. That is NOT "no chat here": a
-            # conversation whose timeline has not been written (a chat opened
-            # but never saved, or one whose save was refused) still belongs to
-            # this project. Creating a new row instead left the panel empty and
-            # orphaned the previous chat - reported on 3.0.59 as "chat history
-            # is not showing". Reuse the newest row before making another one.
+            # No timeline yet is NOT "no chat here": an unsaved/refused-save conversation
+            # still belongs to this project. Creating a new row left the panel empty and
+            # orphaned the previous chat (3.0.59 "chat history is not showing"). Reuse
+            # the newest row before making another.
             _latest = self.db.get_latest_conversation(project_path)
             if _latest:
                 log.info("[ChatPersist] No timeline yet; reusing the newest "

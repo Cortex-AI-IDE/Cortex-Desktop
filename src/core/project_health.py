@@ -186,12 +186,10 @@ _MAX_ORPHAN_FILES = 400
 _MAX_DEAD_SYMBOLS = 1500
 _MAX_MODULE_VARS_PER_FILE = 200
 
-# Identifier tokeniser for the dead-code usage census. Deliberately run over
-# RAW source: matches inside strings and comments count as "usage", which
-# biases the result toward false negatives (never reporting something as dead
-# when its name is mentioned anywhere, e.g. getattr/dispatch-by-name) instead
-# of false positives. A name that only ever appears in a comment stays
-# "used" - acceptable for an advisory panel.
+# Tokenise RAW source for the dead-code census: matches in strings/comments
+# count as usage, biasing toward false negatives (never call something dead if
+# its name appears anywhere, e.g. getattr dispatch). A name only in a comment
+# stays "used" - acceptable for an advisory panel.
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 
 # Files and directories that are entry points by convention: nothing imports
@@ -207,10 +205,9 @@ _ENTRY_DIRS: Set[str] = {"tests", "test", "scripts", "examples", "docs", "migrat
 # positive, so the whole tree is exempt from the unused-symbol pass.
 _TEST_DIRS: Set[str] = {"tests", "test"}
 
-# Methods invoked by a framework through a naming contract, not by project
-# code: http.server handlers, Qt/WebEngine event overrides, unittest
-# lifecycle hooks, QThread.run. Static reference counting can never see the
-# caller, so these names are exempt from the unused-symbol pass.
+# Framework-called methods (http.server handlers, Qt/WebEngine overrides,
+# unittest hooks, QThread.run) have no static caller, so exempt them from the
+# unused-symbol pass.
 _FRAMEWORK_NAMES: Set[str] = {
     "do_GET", "do_POST", "do_PUT", "do_DELETE", "do_HEAD", "do_OPTIONS",
     "do_PATCH", "log_message", "log_request", "log_error",
@@ -244,13 +241,10 @@ _FRAMEWORK_NAMES: Set[str] = {
     "run",
 }
 
-# Dispatch-by-name frameworks: the base class looks a method up from the node
-# or token type at runtime (``getattr(self, "visit_" + node.__class__.__name__)``
-# in ast.NodeVisitor, ``handle_starttag`` in html.parser.HTMLParser), so the
-# method name NEVER appears at a call site anywhere in the project. Exempting
-# by name alone would hide real dead code, so the exemption is scoped to
-# methods of classes that actually derive from one of these bases: base simple
-# name -> method-name prefixes that the framework owns.
+# Dispatch-by-name frameworks (ast.NodeVisitor.visit_*, HTMLParser.handle_*)
+# call methods via runtime lookup with no static call site. Exempt by name only
+# within classes actually deriving from those bases, scoped by simple base name
+# -> owned method prefixes, so unrelated classes keep real dead-code reports.
 _DISPATCH_BASE_PREFIXES: Dict[str, Tuple[str, ...]] = {
     "NodeVisitor": ("visit_",),
     "NodeTransformer": ("visit_",),
@@ -265,18 +259,14 @@ _DISPATCH_BASE_EXACT: Dict[str, Set[str]] = {
     "NodeTransformer": {"generic_visit"},
 }
 
-# Shortest literal prefix worth treating as a runtime dispatch key when a
-# module builds a method name itself (``getattr(o, f"on_{event}")``). A
-# one- or two-character head (``f"{a}{b}"``) says nothing about which methods
-# the lookup can reach, so it is ignored rather than exempting half the file.
+# Minimum literal prefix for a runtime dispatch key (getattr(o, f"on_{event}")):
+# 1-2 char heads say nothing and would exempt half the file, so ignore them.
 _MIN_DISPATCH_PREFIX = 3
 
-# Qt virtuals whose names are ordinary words. Qt calls them on a subclass
-# (``QAbstractItemModel.data``, ``QGraphicsItem.paint``, ``QDialog.accept``),
-# but exempting ``data`` or ``accept`` everywhere would hide genuinely dead
-# methods of plain classes, so they apply only to a class with a direct Qt
-# base (see _is_qt_base). A subclass of a project class that derives from Qt
-# is not covered.
+# Qt virtuals with ordinary names (data, paint, accept) are called by Qt on a
+# subclass, but exempting them globally hides dead methods on plain classes.
+# Apply only to classes with a direct Qt base (see _is_qt_base); a project
+# subclass of a Qt class isn't covered.
 _QT_GENERIC_VIRTUALS: Set[str] = {
     "event", "paint", "shape", "data", "setData", "flags", "index", "parent",
     "validate", "fixup", "accept", "reject", "done", "itemAt", "takeAt",
@@ -288,12 +278,9 @@ def _is_qt_base(name: str) -> bool:
     """True for a PyQt/PySide class name: ``Q`` followed by a capital."""
     return len(name) > 2 and name[0] == "Q" and name[1].isupper()
 
-# File-object and agent-tool protocol methods. A class defining these is
-# standing in for a stream (io.StringIO, sys.stdout, a log sink) or an agent
-# Tool/Context contract, and the consumer calls them through the protocol,
-# never by name in project code. Only applied to METHODS (a symbol with a
-# parent class) - a module-level ``def read()`` is still reported, since
-# nothing dispatches to it.
+# File/agent-tool protocol methods (read, write, ...) are called through the
+# protocol, never by name in project code. Exempt METHODS only (symbols with
+# a parent class); a module-level def read() is still reported.
 _PROTOCOL_NAMES: Set[str] = {
     "read", "read1", "readall", "readinto", "readline", "readlines",
     "write", "writelines", "flush", "close", "closed", "seek", "seekable",
@@ -306,18 +293,15 @@ _PROTOCOL_NAMES: Set[str] = {
     "render_tool_use_message",
 }
 
-# Config/build files the main walk ignores (extension not in _LANG_BY_EXT)
-# but which routinely reference modules by name - PyInstaller .spec hooks,
-# requirements .txt, setup .cfg/.ini. Included in the dead-code census so
-# those references count as usage.
+# Include config/build files the main walk skips (.spec, requirements .txt,
+# setup .cfg/.ini) in the census: they reference modules by name, so those
+# mentions must count as usage.
 _CENSUS_EXTRA_EXT: Set[str] = {".spec", ".cfg", ".ini", ".txt"}
 _MAX_CENSUS_EXTRA_FILES = 500
 
-# Plugin entry points: ``plugins/<name>/plugin.py`` is discovered at runtime
-# by ``PluginManager`` scanning the ``plugins/`` directory and loaded via
-# ``importlib.util.spec_from_file_location`` - never via a static import.
-# Without this rule every plugin would be a permanent unimported false
-# positive.
+# Plugin entry points plugins/<name>/plugin.py are discovered by PluginManager
+# scanning the directory and loaded via importlib.util.spec_from_file_location,
+# never a static import. Without this rule every plugin looks permanently dead.
 _PLUGIN_ENTRY_RE = re.compile(r"^plugins/[^/]+/plugin\.py$")
 
 
@@ -325,39 +309,20 @@ def _is_plugin_entry(rel: str) -> bool:
     return bool(_PLUGIN_ENTRY_RE.match(rel))
 
 
-# Lighter exclusion for the census-extra walk than _EXCLUDED_DIRS: build/
-# and dist/ MUST be traversed because that is exactly where PyInstaller
-# .spec files live (build/linux/cortex.spec), while VCS/dependency/cache
-# dirs stay out - they are huge and never reference project modules.
+# Census-extra walk uses lighter exclusions: build/ and dist/ MUST be traversed
+# (PyInstaller .spec files live in build/linux/cortex.spec), while VCS/deps/
+# caches stay out (huge, never reference project modules).
 _CENSUS_EXCLUDED_DIRS: Set[str] = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
     "site-packages", ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".cortex", "htmlcov", "coverage", ".next", ".nuxt",
 }
 
-# Bumped to 2 when HTML/YAML/TOML/CSS validation landed, to 3 when the
-# dead-code pass added per-file ``module_vars``, to 4 when the dead-code
-# census widened to all text files (JS/HTML/spec) and gained test/framework
-# exemptions, and to 5 when per-file ``class_bases`` was added so
-# dispatch-by-name methods (``visit_*``, ``handle_*``) stop being reported
-# unused - v4 cache entries carry no bases, so reusing them would silently
-# reintroduce those false positives on incremental scans, and to 6 when the
-# generated health report and PyInstaller hooks were excluded from the
-# dead-code census (a v5 verdict can still be the report-poisoned one), to 8
-# when relative imports started producing edges, and to 9 when per-file
-# ``submodule_imports`` was added - older entries carry none, so
-# ``from pkg import helper`` would keep leaving helper.py unimported, and to
-# 10 when imports from a subdirectory on sys.path (``from utils.x import``
-# under src/agent/src) started resolving - the cached whole-project dead-code
-# verdict is reused when no file changed, so it must not survive this, and to
-# 11 when per-file ``string_modules`` was added and skill-folder and
-# build-spec files left the app's dead-code lists, and to 12 when more Qt
-# virtuals became exempt (a cached verdict would keep listing createHandle),
-# and to 14 when runtime ``getattr`` prefixes and contract stubs became exempt
-# - an older entry carries neither, so reusing it would keep listing every
-# method those two rules now cover, and to 15 when plugin entry points
-# (``plugins/*/plugin.py``) and PyInstaller runtime hooks wired in
-# ``cortex.spec`` were excluded from the unimported list.
+# Cache schema version 15: bump invalidates whole-project dead-code verdicts.
+# New rules (HTML/YAML validation, module_vars, class_bases, all-text census,
+# report/hook exclusions, relative imports, sys.path subdirs, string_modules,
+# Qt virtuals, runtime getattr, plugin entry points) made older verdicts wrong.
+# Bump whenever an exemption or edge type changes the verdict.
 _CACHE_VERSION = 15
 _CACHE_RELATIVE = Path(".cortex") / "health_map.json"
 
@@ -403,10 +368,9 @@ class FileHealth:
     # pass. Kept separate from ``symbols`` so the graph/detail payload and its
     # caps are unaffected.
     module_vars: List[Dict[str, Any]] = field(default_factory=list)
-    # Class name -> simple names of its base classes, collected for the
-    # dead-code pass so dispatch-by-name frameworks (ast.NodeVisitor,
-    # html.parser.HTMLParser) can be recognised. Simple names only: both
-    # ``NodeVisitor`` and ``ast.NodeVisitor`` reduce to ``NodeVisitor``.
+    # Class -> simple base names for the dead-code pass, so dispatch-by-name bases
+    # (ast.NodeVisitor, html.parser.HTMLParser) can be recognised. Simple names only:
+    # both NodeVisitor and ast.NodeVisitor reduce to NodeVisitor.
     class_bases: Dict[str, List[str]] = field(default_factory=dict)
     imports: List[Tuple[str, int, bool]] = field(default_factory=list)  # (dotted, line, guarded)
     # ``X.name`` for each ``from X import name``; edge candidates only.
@@ -414,10 +378,9 @@ class FileHealth:
     # Dotted string literals (``"src.ai.providers.x_provider"``); edges only
     # when one is exactly a project module.
     string_modules: List[str] = field(default_factory=list)
-    # Literal name prefixes this module hands to ``getattr``/``hasattr``
-    # (``getattr(plugin, f"on_{event}")`` -> ``"on_"``). A method reached that
-    # way has no static call site anywhere, so the dead-code pass exempts
-    # methods whose name starts with one of these.
+    # Literal prefixes this module passes to getattr/hasattr (getattr(p, f"on_{e}")
+    # -> "on_"). Such methods have no static call site, so exempt methods whose
+    # name starts with one of these.
     dispatch_prefixes: List[str] = field(default_factory=list)
     # ``"Class.method"`` for every method whose body is only a docstring and/or
     # ``pass``, ``...`` or ``raise NotImplementedError``. That is a contract to
@@ -552,10 +515,9 @@ def _is_excluded_dir(name: str) -> bool:
     return name in _EXCLUDED_DIRS or name.endswith(".egg-info")
 
 
-# The health panel exports ``health-report-<project>.md`` by default. A copy
-# saved inside the project must never be read back as source: the dead-code
-# census counts any text mention of a name as usage, and a report lists every
-# symbol it found, so the next scan would report "0 unused symbols".
+# Never read back health-report-<project>.md as source: the census counts any
+# text mention as usage and a report lists every symbol, so the next scan would
+# claim "0 unused symbols".
 _GENERATED_REPORT_PREFIX = "health-report-"
 
 # Directories holding PyInstaller hooks. A hook is loaded by FILENAME from
@@ -888,10 +850,9 @@ class ProjectHealthScanner:
         self._resolve_edges()
         self._mark_affected()
 
-        # Dead-code census. It is a whole-project property (a symbol's usage
-        # count spans every file), so it cannot be cached per-file like the
-        # parse results. Reuse the previous verdict only when literally
-        # nothing changed on disk; any edit invalidates it globally.
+        # Dead-code census is a whole-project property (usage spans all files), so it
+        # can't be cached per-file. Reuse the previous verdict only when literally
+        # nothing changed; any edit invalidates it globally.
         dead_code: Optional[Dict[str, Any]] = None
         if reused == len(self._files) and isinstance(self._previous, dict):
             cached_dead = self._previous.get("dead_code")
@@ -1066,10 +1027,9 @@ class ProjectHealthScanner:
             except Exception as exc:
                 log.debug(f"[ProjectHealth] symbol extraction failed for {fh.rel}: {exc}")
 
-        # Module-level assignments for the dead-code pass. Only plain Name
-        # targets at the top level of the module: tuple unpacking, attributes
-        # (``mod.x = 1``) and conditional/loop bodies are skipped because
-        # their "definition site" semantics are ambiguous.
+        # Module-level assignments for the dead-code pass: only plain Name targets at
+        # module top level. Tuple unpacking, attributes and conditional/loop bodies are
+        # skipped because their definition-site semantics are ambiguous.
         for node in tree.body:
             if len(fh.module_vars) >= _MAX_MODULE_VARS_PER_FILE:
                 break
@@ -1084,14 +1044,11 @@ class ProjectHealthScanner:
                 ):
                     fh.module_vars.append({"name": tgt.id, "line": node.lineno})
 
-        # Base classes per class, for the dead-code pass: a method of an
-        # ``ast.NodeVisitor`` subclass (``visit_ClassDef``) or an
-        # ``HTMLParser`` subclass (``handle_starttag``) is invoked by the
-        # framework through a runtime name lookup, so no call site exists to
-        # count. Bases are reduced to their simple name so ``ast.NodeVisitor``
-        # and a bare ``NodeVisitor`` import both match. Nested classes are
-        # included (``ast.walk``); a name defined twice keeps the last bases,
-        # which is fine - the exemption is advisory either way.
+        # Bases per class for the dead-code pass: a method of an ast.NodeVisitor
+        # subclass (visit_ClassDef) or HTMLParser subclass (handle_starttag) is invoked
+        # by runtime lookup, so no call site exists. Bases reduced to simple names so
+        # ast.NodeVisitor and bare NodeVisitor match. ast.walk includes nested classes;
+        # a name defined twice keeps the last bases (the exemption is advisory).
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
@@ -1525,11 +1482,10 @@ class ProjectHealthScanner:
         ]
         py_rels = {fh.rel for fh in py}
 
-        # Dispatch-by-name classes per file: class name -> (method-name
-        # prefixes, exact method names) owned by its framework base. Built
-        # from the bases recorded during the AST pass, so ``visit_ClassDef``
-        # is exempt in an ``ast.NodeVisitor`` subclass but still reported in
-        # an unrelated class that happens to define a ``visit_*`` method.
+        # Per-file dispatch-by-name classes: class -> (method prefixes, exact names)
+        # owned by its framework base, built from the AST-pass bases. So visit_ClassDef
+        # is exempt in a NodeVisitor subclass but still reported in an unrelated class.
+        # Also covers runtime getattr prefixes and "Class.method" contract stubs.
         dispatch_rules: Dict[str, Dict[str, Tuple[Tuple[str, ...], Set[str]]]] = {}
         for fh in py:
             rules: Dict[str, Tuple[Tuple[str, ...], Set[str]]] = {}
@@ -1546,10 +1502,9 @@ class ProjectHealthScanner:
             if rules:
                 dispatch_rules[fh.rel] = rules
 
-        # Runtime name lookups the project builds itself: every literal
-        # ``getattr(o, f"on_{event}")`` prefix anywhere in the tree, plus the
-        # ``"Class.method"`` contract stubs per file. Both describe methods
-        # that are reached without a call site naming them, so both exempt.
+        # Runtime lookups the project builds itself: every getattr(o, f"on_{event}")
+        # prefix plus per-file "Class.method" contract stubs. Both reach methods with
+        # no call site naming them, so both are exempt.
         runtime_prefixes: Set[str] = set()
         stub_methods: Dict[str, Set[str]] = {}
         for fh in py:
@@ -1584,10 +1539,9 @@ class ProjectHealthScanner:
                     prefixes, exact = entry
                     if name in exact or name.startswith(prefixes):
                         return True
-                # Method this project looks up by a name it builds itself
-                # (``getattr(plugin, f"on_{event}")``). The prefix is only
-                # honoured for methods: a module-level ``on_*`` function is
-                # not reachable through an instance lookup.
+                # Method reached via a self-built name (getattr(p, f"on_{event}")); honoured
+                # only for methods, since a module-level on_* function isn't reachable through
+                # an instance lookup.
                 if name.startswith(tuple(runtime_prefixes)):
                     return True
                 # Contract stub (``pass``, ``...``, ``raise
@@ -1662,10 +1616,9 @@ class ProjectHealthScanner:
             orphan_candidates.append(fh)
         cand_stems: Set[str] = {Path(fh.rel).stem for fh in orphan_candidates}
 
-        # 3. One tokenising pass over EVERY text file in the project (all
-        #    languages, plus .spec/.cfg/.ini/.txt extras the main walk skips):
-        #    global occurrence counts for defined names, stem mentions for
-# orphan candidates, and the main guard set.
+        # Pass 3: one tokenising pass over EVERY text file (all languages plus the
+        # .spec/.cfg/.ini/.txt extras the main walk skips) for global occurrence
+        # counts, orphan stem mentions and the main guard set.
         totals: Dict[str, int] = dict.fromkeys(defs, 0)
         stem_hits: Dict[str, int] = dict.fromkeys(cand_stems, 0)
         stem_self: Dict[str, int] = dict.fromkeys(cand_stems, 0)
@@ -1749,10 +1702,9 @@ class ProjectHealthScanner:
             if fh.rel not in build_refs and not _in_skill(fh.rel)
         ]
 
-        # 5. Orphans: candidates whose stem no OTHER file mentions. The stem
-        #    rule rescues dynamically loaded modules - importlib string paths
-        #    ("src.ai.providers.x_provider"), PyInstaller hooks in .spec
-        #    files, nested source trees with unresolvable internal imports.
+        # Pass 5: orphans are candidates whose stem no OTHER file mentions. The stem
+        # rule rescues dynamically loaded modules (importlib string paths, spec hooks,
+        # nested trees with unresolvable imports).
         orphans: List[Dict[str, Any]] = []
         total_orphans = 0
         for fh in orphan_candidates:
@@ -1772,16 +1724,11 @@ class ProjectHealthScanner:
         orphans.sort(key=lambda d: d["file"])
         orphans_capped = total_orphans > len(orphans)
 
-        # 6. Unimported modules - the raw fact, without the stem rescue.
-        #    ``orphans`` above asserts "dead" and is therefore deliberately
-        #    conservative: a module whose stem appears in ANY project text is
-        #    rescued, because that is where a dynamic reference would show up.
-        #    The cost is that the rule can never fire for a module named after
-        #    an ordinary word - every project says "context", "security",
-        #    "errors" - so a tree full of unimported modules still exported as
-        #    "Orphan files: 0". Reporting only the rescued set conflated
-        #    "provably unreferenced" with "nothing imports this". Both facts
-        #    are now exported, and the unproven one is labelled as such.
+        # Pass 6: unimported modules, the raw fact without stem rescue. "orphans"
+        # asserts dead and is conservative (a stem in ANY text rescues it), which means
+        # it can never fire for ordinary-word names (context, security, errors) and a
+        # tree of unimported modules still shows "Orphan files: 0". Export both facts
+        # and label the unproven one.
         unimported: List[Dict[str, Any]] = []
         total_unimported = 0
         for fh in orphan_candidates:
@@ -1840,13 +1787,10 @@ class ProjectHealthScanner:
         total_symbols = 0
         symbols_capped = False
 
-        # Unresolved intra-project imports (unguarded only) -> WARNING. This is
-        # computed before the node loop because it is a whole-project property:
-        # whether ``from pkg.gone import x`` is broken depends on the full module
-        # map, not on the one file doing the import. It is deliberately derived
-        # here instead of written back onto ``fh.status`` - the on-disk cache
-        # stores per-file status keyed by mtime, so caching a project-wide
-        # verdict would leave a stale WARNING on a reused file after the missing
+        # Unresolved unguarded intra-project imports -> WARNING. Compute before the
+        # node loop: whether `from pkg.gone import x` breaks depends on the whole module
+        # map. Derive it here rather than writing fh.status, since the on-disk cache
+        # stores per-file status by mtime and would leave a stale warning after the
         # module is added.
         unresolved = self._unresolved_imports()
         warn_rels = {item["file"] for item in unresolved}
@@ -1903,11 +1847,10 @@ class ProjectHealthScanner:
                         }
                     )
 
-            # Symbol detail is budgeted, not filtered by status: `ordered` is
-            # already sorted problems-first, so filling until the cap guarantees
-            # every problem file's symbols are included before any healthy
-            # file's. Gating on status here instead would ship zero symbols for
-            # a project whose only broken file is a JSON document.
+            # Symbol detail is budgeted, not status-filtered: `ordered` is problems-first,
+            # so filling to the cap includes every problem file's symbols before healthy
+            # ones. Gating on status would ship zero symbols when the only broken file is
+            # a JSON document.
             for sym in fh.symbols:
                 if len(symbols_out) >= _MAX_PAYLOAD_SYMBOLS:
                     break

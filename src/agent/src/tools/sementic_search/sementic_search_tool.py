@@ -1,8 +1,6 @@
-# Semantic code search tool for Cortex IDE, handles large codebases
-# where traditional grep/regex search struggles.
-# Uses the existing Cortex SemanticSearch infrastructure 
-# (src/core/semantic_search.py) with SiliconFlow Qwen embeddings
-# as primary backend, falling back to local sentence-transformers.
+# Semantic code search for large codebases where grep struggles. Uses
+# src/core/semantic_search.py with SiliconFlow Qwen embeddings, falling back
+# to local sentence-transformers.
 
 import os
 import asyncio
@@ -65,16 +63,11 @@ MAX_RESULT_SIZE_CHARS = 12_000
 # Context lines to include around matches
 DEFAULT_CONTEXT_LINES = 3
 
-# How much indexing one search call may do before it answers.
-# Both paths used to be unbounded (or unboundable) and both were a trap:
-# a heal of 350 stale entries held one tool call for 19 minutes, and a cold
-# index of this repo meant ~1,225 files at ~3.3s each, about 67 minutes.
-# One file is one network round-trip through the subscription proxy, so a
-# file count alone is not a bound either: 25 files on a bad connection is
-# still 82s. Time is the cap that actually holds, the count keeps a fast
-# connection from over-spending.
-# The index is saved as the loop goes and a capped run stops where it is,
-# so the next search continues instead of starting over.
+# Bound indexing per search call: a 350-entry heal held one 19 minutes, a
+# cold repo index ~67. One file is one network round-trip, so a file count
+# alone isn't a bound (25 files on a bad connection = 82s). Time is the cap;
+# count stops fast connections over-spending. Save as it goes so the next
+# search resumes.
 COLD_INDEX_BUDGET = 12
 COLD_INDEX_SECONDS = 20.0
 STALE_HEAL_BUDGET = 6
@@ -487,18 +480,11 @@ class SementicSearchTool:
             
             searcher = get_semantic_searcher(project_root)
             
-            # Auto-index if no embeddings exist, on force reindex, or when
-            # entries came from another embedding model than the one in use
-            # now (incremental: only those are re-embedded). Their vectors
-            # cannot be scored against this query, so skipping this left
-            # them unfindable.
-            # Every branch is bounded, including the cold one. A cold index is
-            # the caller's first search, so it gets the larger of the two
-            # budgets, but "the caller asked for it" is not a reason to hold a
-            # tool call for 67 minutes; the index saves as it goes and the
-            # next search continues. A genuinely full rebuild of a large
-            # project belongs to start_background_indexing(force=True), not to
-            # a search.
+            # Auto-index when no embeddings exist, on force, or when entries came from a
+            # different model (incremental: only those re-embed); foreign vectors can't be
+            # scored and were unfindable. Every branch is bounded, including cold: it gets
+            # the larger budget, but a caller's request doesn't justify holding a tool call
+            # 67 minutes. Full rebuilds belong to start_background_indexing(force=True).
             _stale = getattr(searcher, "stale_model_count", None)
             _stale_count = _stale() if callable(_stale) else 0
             _cold = force_reindex or not searcher.embeddings_cache

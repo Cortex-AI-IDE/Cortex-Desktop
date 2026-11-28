@@ -15,13 +15,10 @@ Style: italic keywords, bold types, bold+italic type keywords.
 from __future__ import annotations
 import re
 
-# ── Color tokens, theme-aware ──
-# Two palettes; _sync_palette() points the module-level C_* names at the
-# ACTIVE theme's palette before each highlight run.
-# Bug history: only the OC-2 DARK palette existed, comments were
-# rgba(255,255,255,0.42) white-translucent, variables near-white, types pale
-# yellow. Rendered on the LIGHT warm background those spans were invisible
-# ("#commenting still using light fonts in light mode").
+# Two theme-aware palettes; _sync_palette() points the module C_* names at the
+# active one before each highlight. Only OC-2 dark existed before, with white-
+# translucent comments and near-white variables that vanished on the warm
+# light background ("commenting still using light fonts in light mode").
 
 # DARK, OC-2
 _DARK_PALETTE = {
@@ -506,11 +503,10 @@ _LANG_PATTERNS: dict[str, dict[str, re.Pattern]] = {
 }
 
 
-# One left-to-right alternation, in priority order.  A single finditer gives
-# correct tokenizer semantics: the leftmost match wins, so `x = 'a # b'` is a
-# string (the quote starts first) while `x = 1  # "note"` is a comment (the
-# `#` starts first).  Running the patterns as separate sequential re.sub
-# passes over generated HTML is what caused the bug below.
+# One left-to-right alternation in priority order via a single finditer: the
+# leftmost match wins, so x='a # b' is a string (quote first) and x=1 # "n" is
+# a comment (# first). Sequential re.sub passes over generated HTML caused
+# the old bug.
 _GENERIC_TOKEN_RE = re.compile(
     r'(?P<comment>//.*?)(?=\n|$)'
     r'|(?P<hash>#.*?)(?=\n|$)'
@@ -619,13 +615,10 @@ def highlight_code(code: str, lang: str = "") -> str:
     # Escape HTML entities FIRST
     code = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-    # Every "&...;" in the escaped text is an HTML entity, and no token may be
-    # emitted from its interior. A bash operator match on the trailing ";" of
-    # "&lt;" used to cut the entity in half, so a heredoc printed literally::
-    #     ssh root@host &lt<span style="color:#abb2bf">;</span>&lt<span ...>;</span>
-    # Qt shows that as the text "&lt;&lt;EOF" instead of "<<EOF". Only a token
-    # that sits ENTIRELY inside an entity is rejected, so a string containing
-    # "<<x" is still highlighted as a string.
+    # Every "&...;" in escaped text is an entity; no token may come from its
+    # interior. A bash operator matching the trailing ";" of "&lt" split the
+    # entity, so Qt showed "&lt;&lt;EOF" instead of "<<EOF". Reject only tokens
+    # entirely inside an entity, so strings containing "<<x" still highlight.
     _entity_spans = [
         (m.start() + 1, m.end())  # keep the '&', include the closing ';'
         for m in re.finditer(r'&(?:[A-Za-z][A-Za-z0-9]{1,8}|#\d{1,6});', code)
@@ -641,10 +634,8 @@ def highlight_code(code: str, lang: str = "") -> str:
     if not patterns:
         return _highlight_generic(code)
 
-    # ── TOKEN-FIRST APPROACH ──
-    # Collect all tokens as (start, end, color, style) tuples first,
-    # then generate HTML in a single pass. This prevents generated HTML tags
-    # from being re-processed by subsequent regex patterns.
+    # Token-first: collect (start, end, color, style) tuples, then emit HTML in one
+    # pass so generated tags aren't re-processed by later regexes.
 
     tokens: list[tuple[int, int, str, str]] = []  # (start, end, color, extra_style)
 

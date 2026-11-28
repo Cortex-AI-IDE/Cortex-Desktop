@@ -53,12 +53,9 @@ def to_msix_version(version: str = VERSION) -> str:
 MSIX_VERSION = to_msix_version()
 
 
-# Which channel this binary was built for:
-#   "web"   - the cortex-ide.app installer (self-updating)
-#   "store" - the Microsoft Store MSIX (Microsoft owns updating)
-#   "dev"   - running from source
-# build.ps1 generates src/_build_info.py for every build; when it is missing
-# we are running from source.
+# Build channel: "web" (cortex-ide.app, self-updating), "store" (MSIX,
+# Microsoft updates), "dev" (from source). build.ps1 generates
+# src/_build_info.py for each build; missing means running from source.
 try:
     from src._build_info import CHANNEL as _CHANNEL  # type: ignore[import-not-found]
 except Exception:

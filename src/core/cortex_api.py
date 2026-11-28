@@ -17,21 +17,18 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# get_logger(), not logging.getLogger(): the bare call attaches no
-# handler, so every line this module logged went nowhere. A browser
-# sign-in that failed its code exchange left "Login Successful" in the
-# browser, a spinning dialog, and NOT ONE line in cortex.log to say why.
+# Use get_logger(): the bare logging.getLogger() attaches no handler, so
+# nothing this module logged reached cortex.log (a failed browser sign-in left
+# "Login Successful" and a spinner with no reason anywhere).
 try:
     from src.utils.logger import get_logger
     log = get_logger("cortex_api")
 except Exception:
     log = logging.getLogger("cortex_api")
 
-# App version, sent as X-Cortex-Version on every API request so the server
-# can track which IDE version each user runs (admin panel "App Versions in
-# Use"). Read from src/version.py: this used to be a hand-maintained literal
-# and sat at "2.8.5" for four releases, so the admin panel believed every
-# user was on 2.8.5 no matter what they had installed.
+# Send the app version as X-Cortex-Version so the admin panel tracks real
+# installs. Read from src/version.py: the old literal stuck at "2.8.5" for four
+# releases, so admin believed everyone ran 2.8.5.
 from src.version import VERSION as APP_VERSION
 
 # Sent as X-Cortex-Platform so the server can answer for this OS, e.g.
@@ -53,20 +50,10 @@ except ImportError:
         log.warning("[CortexAPI] No HTTP client available (install httpx or requests)")
 
 
-# Secret file permissions
-# ~/.cortex holds live 30-day bearer tokens (auth.json), the encrypted
-# provider-key vault (keys.enc) and cortex.db. auth.json used to be written
-# with Path.write_text(), which creates it 0664 under the common umask 0002,
-# so every other local user on a shared machine could read the token and
-# impersonate the account for its full lifetime. keys.enc already got this
-# right (key_manager._restrict_perms); auth.json was the one secret left out.
-# os.open(mode=0o600) creates the file already owner-only -- chmod *after*
-# write_text() would leave a window where the tokens sit world-readable --
-# and the follow-up chmod heals files an older build left at 0664, because
-# O_CREAT's mode is ignored when the file already exists.
-# On Windows os.chmod only toggles the read-only bit and grants no real ACL
-# protection, but it is harmless: each user's profile directory is already
-# isolated by NTFS ACLs, so the exposure closed here is POSIX-specific.
+# ~/.cortex holds auth.json (bearer tokens), keys.enc and cortex.db. write_text
+# made auth.json 0664 under umask 0002 (readable by other local users); use
+# os.open(mode=0o600) from the start and chmod to heal old files. Windows
+# chmod only toggles read-only, but NTFS profile ACLs already isolate users.
 _CORTEX_DIR_MODE = 0o700
 _SECRET_FILE_MODE = 0o600
 
@@ -138,12 +125,10 @@ def _write_secret_text(path: Path, text: str) -> None:
     _restrict_existing(path)
 
 
-# This install's device id, and the "you were signed out" note
-# An account may be signed in on 2 Cortex desktops at once (server side:
-# api/devices.py). The server tells them apart by a random id this install
-# makes once and keeps. It is random, not read from the hardware, so it says
-# nothing about the machine and is gone if ~/.cortex is deleted (the server
-# then just sees a new device).
+# Device id + "signed out" note: an account may be signed in on two desktops
+# (api/devices.py), distinguished by a random id kept once per install. Random,
+# not hardware-derived, so it says nothing about the machine and resets if
+# ~/.cortex is deleted (server just sees a new device).
 _DEVICE_ID_FILE = Path.home() / ".cortex" / "device_id"
 # Why the server signed this device out, kept for the sign-in screen, which
 # may only appear on the next launch.
@@ -215,19 +200,10 @@ class CortexAPIClient:
         self.expires_at: Optional[str] = None
         self.user_info: Optional[Dict] = None
         self._lock = threading.Lock()
-        # Serialises every request made on the single shared httpx.Client
-        # created below. Three threads use that client at once: the
-        # semantic-search background indexer (`semantic-bg-ind`), the
-        # `cortex-account-refresh` worker and the agent/main thread. httpx is
-        # nominally thread-safe, but under Python 3.14.4 + OpenSSL 3.5.5 the
-        # concurrent TLS handshakes segfault in native code -- 9 identical
-        # crashes in ~/.cortex/crash.log, every one faulting in
-        # ssl.do_handshake on the `semantic-bg-ind` thread at
-        # siliconflow_embeddings.generate_embedding. A Python-level exception
-        # handler cannot catch this; the only fix is to never let two threads
-        # enter the native handshake at the same time.
-        # RLock, not Lock: _request re-enters the client via _try_refresh on a
-        # 401, and a plain Lock would deadlock the caller there.
+        # Serialise the shared httpx.Client: indexer/account/agent threads hit it, and
+        # Python 3.14.4 + OpenSSL 3.5.5 segfaulted in concurrent TLS handshakes (9
+        # crashes in ssl.do_handshake). A Python handler can't catch it; use mutual
+        # exclusion. RLock not Lock: _request re-enters via _try_refresh on 401.
         self._http_lock = threading.RLock()
         self.last_error: Optional[str] = None
         self._token_file = Path.home() / ".cortex" / "auth.json"
@@ -261,10 +237,9 @@ class CortexAPIClient:
     def _load_tokens(self):
         """Load tokens from disk."""
         try:
-            # ~/.cortex also holds .env (provider API keys) and cortex.db, and
-            # main.py creates it under the default umask (0775), so tighten it
-            # here instead of only on the next sign-in. Guarded by exists() so
-            # a read never creates directories as a side effect.
+            # Tighten ~/.cortex permissions here (it holds .env keys and cortex.db, created
+            # under umask 0775 by main.py) rather than waiting for next sign-in. Guard with
+            # exists() so a read never creates dirs.
             if self._token_file.parent.exists():
                 _harden_secret_dir(self._token_file.parent)
             if self._token_file.exists():
@@ -290,18 +265,15 @@ class CortexAPIClient:
                 "expires_at": self.expires_at,
                 "user": self.user_info,
             }
-            # _write_secret_text() creates ~/.cortex (0700) and auth.json
-            # (0600) in one step. This file holds live bearer tokens, and the
-            # old write_text() left it 0664 -- readable by every other local
-            # user for the token's whole 30-day life.
+            # _write_secret_text() creates ~/.cortex (0700) and auth.json (0600) in one
+            # step; the old write_text left 0664, readable by other local users for the
+            # token's whole 30-day life.
             _write_secret_text(self._token_file, json.dumps(data, indent=2))
             return True
         except Exception as e:
-            # A sign-in that cannot be written to disk works until the app is
-            # closed and is then gone, so the login screen comes back on every
-            # launch with nothing explaining why. This used to be a warning on
-            # a logger that had no handler: invisible twice over. A full disk
-            # is the realistic cause.
+            # A sign-in that can't be written works until close then vanishes, returning to
+            # login each launch with no explanation (usually a full disk). It used to warn
+            # on a handler-less logger: invisible twice over.
             log.error(f"[CortexAPI] Could not save the session to "
                       f"{self._token_file}: {e}")
             self.last_error = (
@@ -672,12 +644,10 @@ class CortexAPIClient:
 
 # Billing endpoints
 
-    # proxy_service() calls get_subscription() once per embedding purely to
-    # read the license_key, so indexing a 1659-file project fired ~1659 extra
-    # TLS requests from the background indexer thread. That request volume is
-    # what made the shared-client race guarded by _http_lock so likely to be
-    # hit. A license key only changes when a plan is bought or renewed, so a
-    # short TTL is safe; `force` bypasses it for the "I just purchased" path.
+    # proxy_service() called get_subscription() per embedding just for the license
+    # key, so indexing 1659 files fired ~1659 extra TLS requests from the indexer
+    # and made the shared-client race likely. A key only changes on purchase/
+    # renewal, so short TTL is safe; force bypasses for "just purchased".
     _SUBSCRIPTION_TTL = 60.0
 
     def get_subscription(self, force: bool = False) -> Optional[Dict]:
@@ -866,12 +836,10 @@ class CortexAPIClient:
         except Exception:
             return False
 
-    # One entitlement gate, deliberately. Telegram used to consult a stricter
-    # sibling of has_subscription() (a billed plan, trial excluded), which meant
-    # two different answers to "may this account use the product" and a feature
-    # that froze on a different schedule from the rest of Cortex. Every feature
-    # now reads has_subscription(): a lapsed plan locks them together, and a
-    # renewal unlocks them together. Do not add a second verdict here.
+    # One entitlement gate: Telegram used a stricter sibling of has_subscription
+    # (billed plan, trial excluded), giving two answers and a different freeze
+    # schedule. Every feature now reads has_subscription(), so lapse/renew lock and
+    # unlock together. Do not add a second verdict.
 
 # Lifecycle
 
