@@ -12561,8 +12561,6 @@ class ChatPanel(QWidget):
         except (AttributeError, RuntimeError):
             _swallow("stop the todo spinners")
         QTimer.singleShot(1500, self._end_follow_after_turn)
-        if getattr(self, '_pending_reject_reason', None):
-            QTimer.singleShot(0, self._flush_reject_reason)
         try:
             if self._cur_msg is not None:
                 for _g in self._cur_msg.findChildren(ActivityGroup):
@@ -13652,12 +13650,7 @@ class ChatPanel(QWidget):
     def _on_file_rejected(self, filename: str):
         """Reject file edit, discard deferred content, stop agent, and notify user."""
         log.info(f"[edit] {filename} -> rejected")
-        # Immediately inject a STOP message so the AI sees it
-        self._inject_system_message(
-            f"STOP: You were rejected on editing '{filename}'. "
-            f"Do NOT continue writing code or injecting files. "
-            f"STOP and wait for the user's next message."
-        )
+        self._focus_input_after_reject()
         if hasattr(self, '_bridge') and self._bridge:
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             full_path = _resolve_project_path(filename, project_root)
@@ -13666,8 +13659,8 @@ class ChatPanel(QWidget):
             # Track rejection count, after N rejections, enforce stop
             nudge = self._bridge.record_rejection(full_path)
             if nudge:
+                # The bridge hands the nudge to the model; it is not shown as a banner.
                 log.info(f"[edit] {filename} -> rejection threshold reached, enforcing stop")
-                self._inject_system_message(nudge)
 
     def _inject_system_message(self, message: str):
         """Inject a system message into the chat so the AI sees it on its next turn."""
@@ -13717,14 +13710,12 @@ class ChatPanel(QWidget):
         self._active_edit_permission_card = card
 
         def _handle(rid, decision, c=card):
+            # The card stays, collapsed to one line ("Denied: ..."), like a tool row.
             self._on_file_edit_permission_response(decision)
-            c.setVisible(False)
-            c.deleteLater()
             self._active_edit_permission_card = None
 
         card.allow_once.connect(lambda rid: _handle(rid, "once"))
         card.allow_always.connect(lambda rid: _handle(rid, "always"))
-        card.reason_given.connect(lambda rid, text: self._queue_reject_reason(text))
         card.rejected.connect(lambda rid: _handle(rid, "rejected"))
 
         if self._cur_msg:
@@ -13767,13 +13758,10 @@ class ChatPanel(QWidget):
 
         def _handle(rid, decision, c=card):
             self._on_project_access_response(decision)
-            c.setVisible(False)
-            c.deleteLater()
             self._active_project_access_card = None
 
         card.allow_once.connect(lambda rid: _handle(rid, "once"))
         card.allow_always.connect(lambda rid: _handle(rid, "always"))
-        card.reason_given.connect(lambda rid, text: self._queue_reject_reason(text))
         card.rejected.connect(lambda rid: _handle(rid, "rejected"))
 
         if self._cur_msg:
@@ -13791,21 +13779,13 @@ class ChatPanel(QWidget):
         except Exception:
             _swallow("raise the Windows notification for a project access request")
 
-    _REJECT_PREFIX = "I declined that step. Instead: "
-
-    def _queue_reject_reason(self, text: str) -> None:
-        """Hold the user's instruction until the run the rejection stops has
-        ended (on_turn_done); sending it earlier would race that run's end."""
-        self._pending_reject_reason = text
-        QTimer.singleShot(5000, self._flush_reject_reason)   # if no turn end arrives
-
-    def _flush_reject_reason(self) -> None:
-        text = getattr(self, '_pending_reject_reason', None)
-        if not text:
-            return
-        self._pending_reject_reason = None
-        log.info("[PERMISSION] Sending the instruction given with a rejection")
-        self.input_area.send_requested.emit(self._REJECT_PREFIX + text)
+    def _focus_input_after_reject(self) -> None:
+        """Deny ends the turn; the next thing typed tells the AI what to do
+        instead (the bridge frames it as such). No banner, like Claude Code."""
+        try:
+            self.input_area.input.setFocus()
+        except (AttributeError, RuntimeError):
+            _swallow("focus the chat input after a denial")
 
     def _on_project_access_response(self, decision: str):
         """Handle project access permission response.
@@ -13835,19 +13815,9 @@ class ChatPanel(QWidget):
         # Emit signal for main_window to forward to bridge (webview path fallback)
         self.permission_decided.emit(bridge_decision)
         
-        # ── ENFORCE USER CHOICE: on reject, inject visible STOP ──
+        # Deny: the bridge ends the turn; the next message says what to do instead.
         if decision == "rejected":
-            # Shown to the user only; the AI gets the rejection as the tool result.
-            if getattr(self, '_pending_reject_reason', None):
-                self._inject_system_message(
-                    "You declined file access. Cortex stopped and changed nothing, "
-                    "and will continue with your instruction.")
-            else:
-                self._inject_system_message(
-                    "You declined file access, so Cortex stopped and changed nothing. "
-                    "Send a message to continue: it will ask again before editing, "
-                    "or choose Allow always to stop these prompts."
-                )
+            self._focus_input_after_reject()
 
     def _on_file_edit_permission_response(self, decision: str):
         """Handle file edit permission response from PermissionCard (file edit mode).
@@ -13882,17 +13852,9 @@ class ChatPanel(QWidget):
         # system (_permission_event) that conflicts with the project_access_event
         # and file_edit_permission_event.
         
-# ENFORCE USER CHOICE: on reject, inject visible STOP
+        # Deny: the bridge ends the turn; the next message says what to do instead.
         if decision == "rejected":
-            if getattr(self, '_pending_reject_reason', None):
-                self._inject_system_message(
-                    "You declined this edit. The file was not changed, and Cortex "
-                    "will continue with your instruction.")
-            else:
-                self._inject_system_message(
-                    "You declined this edit, so Cortex stopped and the file was not "
-                    "changed. Send a message to tell it what to do instead."
-                )
+            self._focus_input_after_reject()
 
     def on_permission_request(self, request_id, command, warning, files_json):
         import json
@@ -13909,9 +13871,9 @@ class ChatPanel(QWidget):
             except (json.JSONDecodeError, ValueError):
                 patterns = [files_json]
         card = PermissionCard(request_id, command, warning, patterns=patterns)
-        card.allow_once.connect(lambda rid, c=card: (self._on_permission_response(rid, "once", command), c.setVisible(False), c.deleteLater()))
-        card.allow_always.connect(lambda rid, c=card: (self._on_permission_response(rid, "always", command), c.setVisible(False), c.deleteLater()))
-        card.rejected.connect(lambda rid, c=card: (self._on_permission_response(rid, "reject", command), c.setVisible(False), c.deleteLater()))
+        card.allow_once.connect(lambda rid: self._on_permission_response(rid, "once", command))
+        card.allow_always.connect(lambda rid: self._on_permission_response(rid, "always", command))
+        card.rejected.connect(lambda rid: self._on_permission_response(rid, "reject", command))
         self._insert(card)
         # Single deferred scroll, no need for two timers
         QTimer.singleShot(100, lambda c=card: self._scroll_card_into_view(c))
@@ -13962,12 +13924,7 @@ class ChatPanel(QWidget):
         
         # ── ENFORCE USER CHOICE: on reject, inject visible STOP + halt agent ──
         if decision == "reject":
-            self._inject_system_message(
-                f"STOP: You were REJECTED on running '{command[:80]}'. "
-                f"The command was NOT executed. "
-                f"Do NOT continue with more tools. Do NOT retry this command. "
-                f"STOP and wait for the user's next message."
-            )
+            self._focus_input_after_reject()
 
     def _extract_text_question_blocks(self):
         """Fallback for models that EMIT '<questions>[{...}]</questions>' as

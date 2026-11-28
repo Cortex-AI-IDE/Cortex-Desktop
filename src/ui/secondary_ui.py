@@ -10,9 +10,10 @@ secondary_ui.py, Phase 8 secondary UI components
 
 from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QProgressBar, QSizePolicy, QScrollArea,
+    QPushButton, QLineEdit, QProgressBar, QSizePolicy, QScrollArea, QMenu,
 )
 
 from src.ui.tokens import TOKENS as T, CHAT_TOKENS as C
@@ -28,21 +29,29 @@ def _tint(hexcol: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-# PERMISSION CARD  (Allow once / Allow always / Reject)
+# PERMISSION CARD  (Deny / Always allow, Allow once in the ▾ menu)
+# The gate cards ask about the whole project, not one command.
+_GATE_COMMANDS = {
+    "project_access": "All file edits and commands in this project, also after a "
+                      "restart, until you turn it off in the status bar.",
+    "file_edit": "All file edits in this project, until you turn it off in the "
+                 "status bar.",
+}
+
+
 class PermissionCard(QFrame):
     """
-    Gates the agent loop, user must Allow once, Allow always, or Reject.
-    Allow always → confirm step: remembered for this project, also after a
-    restart, until turned off in the status bar (src/core/project_permissions.py).
+    Gates the agent loop, laid out like Claude Code's desktop card: what the
+    AI wants to do, what "Always allow" covers, then Deny and Always allow
+    (Ctrl+Shift+Enter), with Allow once in the ▾ menu. After a choice the
+    card collapses to one line; there is no banner and no text field, the
+    user's next chat message tells the AI what to do instead.
 
-    Emits: allow_once(str), allow_always(str), rejected(str) with request_id,
-    and reason_given(request_id, text) just before rejected when the user
-    rejects with an instruction ("No, tell Cortex what to do instead").
+    Emits: allow_once(str), allow_always(str), rejected(str) with request_id.
     """
     allow_once   = pyqtSignal(str)   # request_id
     allow_always = pyqtSignal(str)   # request_id
     rejected     = pyqtSignal(str)   # request_id
-    reason_given = pyqtSignal(str, str)   # request_id, what to do instead
 
     def __init__(self, request_id: str, command: str, warning: str = "",
                  patterns: list[str] | None = None, parent=None):
@@ -50,22 +59,26 @@ class PermissionCard(QFrame):
         self._rid = request_id
         self._command = command
         self._warning = warning
-        self._patterns = patterns or ([command] if command else [])
+        self._patterns = patterns or ([command] if command and command not in _GATE_COMMANDS else [])
         self._resolved = False
+        self._shortcuts: list = []
 
         # Responsive containment: fill parent width, never overflow
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        # The chat's accent, like the Send button: it follows the colour
-        # theme (it was a fixed orange on every theme).
         self.setObjectName("permFrame")
-        self.setStyleSheet(
-            f"QFrame#permFrame {{ border-left: 2px solid {C['accent']};"
-            f" background: {_tint(C['accent'], 0.05)}; border-radius: 0px; }}")
+        self._style_card(open_=True)
         self._v = QVBoxLayout(self)
-        self._v.setContentsMargins(16, 12, 16, 12)
-        self._v.setSpacing(10)
+        self._v.setContentsMargins(14, 12, 14, 12)
+        self._v.setSpacing(8)
         self._build_main(command, warning)
+
+    def _style_card(self, open_: bool) -> None:
+        if open_:
+            self.setStyleSheet(
+                f"QFrame#permFrame {{ background:{T['bg_card']}; border:1px solid {T['border']};"
+                f" border-radius:10px; }}")
+        else:
+            self.setStyleSheet("QFrame#permFrame { background:transparent; border:none; }")
 
     def _clear(self):
         # hide() first: deleteLater only runs on the next event-loop pass, so
@@ -83,141 +96,110 @@ class PermissionCard(QFrame):
                         x.widget().hide()
                         x.widget().deleteLater()
 
-    def _patterns_block(self, title: str):
-        if title:
-            t = QLabel(title)
-            t.setStyleSheet(f"color:{T['muted']};font-size:12px;")
-            self._v.addWidget(t)
-        for pat in self._patterns:
-            p = QLabel(f"- {pat}")
-            p.setStyleSheet(f"font-family:{T['font_mono']};font-size:12px;color:{T['text_dim']};")
-            p.setWordWrap(True)
-            self._v.addWidget(p)
+    def _label(self, text: str, color: str, size: int = 12, mono: bool = False,
+               weight: int = 400) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setWordWrap(True)
+        lbl.setTextFormat(Qt.TextFormat.PlainText)
+        lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        font = f"font-family:{T['font_mono']};" if mono else ""
+        lbl.setStyleSheet(f"{font}color:{color};font-size:{size}px;font-weight:{weight};"
+                          "background:transparent;border:none;")
+        return lbl
 
-    def _btn(self, text: str, color: str, filled: bool = False) -> QPushButton:
+    def _button(self, text: str, primary: bool) -> QPushButton:
         b = QPushButton(text)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
-        if filled:
+        if primary:
+            # Light on dark, dark on light: the theme's own text colour as fill.
             b.setStyleSheet(
-                f"QPushButton {{ background:{C['accent_fill']};color:{C['accent_ink']};border:none;"
-                f"font-size:12px;font-weight:600;padding:4px 12px;border-radius:4px; }}"
-                f"QPushButton:hover {{ background:{C['accent_fill_hover']}; }}")
+                f"QPushButton {{ background:{T['text']}; color:{T['bg']}; border:none;"
+                f" border-radius:7px; padding:5px 12px; font-size:12px; font-weight:600; }}"
+                f"QPushButton:hover {{ background:{T['text_dim']}; }}")
         else:
             b.setStyleSheet(
-                f"background:transparent;color:{color};border:none;"
-                f"font-size:12px;padding:4px 10px;")
+                f"QPushButton {{ background:rgba(127,127,127,0.18); color:{T['text']}; border:none;"
+                f" border-radius:7px; padding:5px 12px; font-size:12px; }}"
+                f"QPushButton:hover {{ background:rgba(127,127,127,0.28); }}")
         return b
 
     def _build_main(self, command: str, warning: str):
         self._clear()
-        head = QHBoxLayout()
-        ic = QLabel("\u26A0")
-        ic.setStyleSheet(f"color:{C['accent']};font-size:14px;")
-        ti = QLabel("Permission required")
-        ti.setStyleSheet(f"color:{T['text']};font-weight:600;font-size:13px;")
-        head.addWidget(ic)
-        head.addWidget(ti)
-        head.addStretch()
-        self._v.addLayout(head)
-
         if warning:
-            act = QLabel(warning)
-            act.setStyleSheet(f"color:{T['text_dim']};font-size:13px;")
-            act.setWordWrap(True)
-            self._v.addWidget(act)
+            self._v.addWidget(self._label(warning, T['text'], 13, weight=600))
+        # What the AI wants to run, as a code block (gate cards have no command).
+        if command and command not in _GATE_COMMANDS:
+            code = self._label(command, T['text'], 12, mono=True)
+            code.setStyleSheet(code.styleSheet().replace(
+                "background:transparent;", f"background:{T['bg']};") +
+                "border-radius:6px;padding:8px 10px;")
+            self._v.addWidget(code)
 
+        self._v.addWidget(self._label("“Always allow” covers:", T['muted'], 12))
         if self._patterns:
-            self._patterns_block("Patterns")
+            for pat in self._patterns:
+                self._v.addWidget(self._label(pat, T['text_dim'], 12, mono=True))
+        else:
+            self._v.addWidget(self._label(_GATE_COMMANDS.get(command, "This kind of action, "
+                                          "until you turn it off in the status bar."),
+                                          T['text_dim'], 12))
 
         row = QHBoxLayout()
-        row.setSpacing(8)
-        once = self._btn("Allow once", C['accent_fill'], filled=True)
-        always = self._btn("Allow always", T['text_dim'])
-        rej = self._btn("Reject", T['text_dim'])
-        instead = self._btn("No, tell Cortex what to do instead", T['text_dim'])
-        once.clicked.connect(lambda: (self.allow_once.emit(self._rid), self._resolved_ok("Allowed once", T['green'])))
-        rej.clicked.connect(lambda: (self.rejected.emit(self._rid), self._resolved_ok("Rejected", T['red'])))
-        always.clicked.connect(self._build_confirm)
-        instead.clicked.connect(self._build_reason)
-        row.addWidget(once)
+        row.setSpacing(6)
+        row.addStretch()
+        deny = self._button("Deny", primary=False)
+        always = self._button("Always allow   Ctrl Shift ⏎", primary=True)
+        more = self._button("▾", primary=True)
+        more.setFixedWidth(30)
+        menu = QMenu(more)
+        menu.addAction("Allow once", self._choose_once)
+        menu.addAction("Always allow", self._choose_always)
+        menu.addAction("Deny", self._choose_deny)
+        more.setMenu(menu)
+        more.setStyleSheet(more.styleSheet() + "QPushButton::menu-indicator { image:none; width:0; }")
+        deny.clicked.connect(self._choose_deny)
+        always.clicked.connect(self._choose_always)
+        row.addWidget(deny)
         row.addWidget(always)
-        row.addWidget(rej)
-        row.addWidget(instead)
-        row.addStretch()
+        row.addWidget(more)
         self._v.addLayout(row)
 
-    def _build_confirm(self):
-        self._clear()
-        head = QHBoxLayout()
-        ic = QLabel("\u26A0")
-        ic.setStyleSheet(f"color:{C['accent']};font-size:14px;")
-        ti = QLabel("Always allow")
-        ti.setStyleSheet(f"color:{T['text']};font-weight:600;font-size:13px;")
-        head.addWidget(ic)
-        head.addWidget(ti)
-        head.addStretch()
-        self._v.addLayout(head)
+        if not self._shortcuts:
+            for seq in ("Ctrl+Shift+Return", "Ctrl+Shift+Enter"):
+                sc = QShortcut(QKeySequence(seq), self)
+                sc.setContext(Qt.ShortcutContext.WindowShortcut)
+                sc.activated.connect(self._choose_always)
+                self._shortcuts.append(sc)
 
-        sub = QLabel("The AI will edit files and run commands in this project without "
-                     "asking, also after a restart. Turn it off with \"Always allow\" "
-                     "in the status bar.")
-        sub.setStyleSheet(f"color:{T['muted']};font-size:12px;")
-        sub.setWordWrap(True)
-        self._v.addWidget(sub)
+    def _choose_once(self):
+        if not self._resolved:
+            self._resolved_ok("Allowed once", T['green'])
+            self.allow_once.emit(self._rid)
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        confirm = self._btn("Confirm", C['accent_fill'], filled=True)
-        cancel = self._btn("Cancel", T['text_dim'])
-        confirm.clicked.connect(lambda: (self.allow_always.emit(self._rid), self._resolved_ok("Always allowed", T['green'])))
-        cancel.clicked.connect(lambda: self._build_main(self._command, self._warning))
-        row.addWidget(confirm)
-        row.addWidget(cancel)
-        row.addStretch()
-        self._v.addLayout(row)
+    def _choose_always(self):
+        if not self._resolved:
+            self._resolved_ok("Always allowed", T['green'])
+            self.allow_always.emit(self._rid)
 
-    def _build_reason(self):
-        """Reject and say what to do instead, like Claude Code's "No, and tell
-        Claude what to do differently": the text becomes the next message."""
-        self._clear()
-        ti = QLabel("Tell Cortex what to do instead")
-        ti.setStyleSheet(f"color:{T['text']};font-weight:600;font-size:13px;")
-        self._v.addWidget(ti)
-        self._reason = edit = QLineEdit()
-        edit.setPlaceholderText("e.g. Don't create a test file, just read the code and explain")
-        edit.setStyleSheet(
-            f"QLineEdit {{ background:{T['bg_input']}; color:{T['text']}; border:1px solid {T['border']};"
-            f" border-radius:4px; padding:5px 8px; font-size:12px; }}")
-        self._v.addWidget(edit)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        send = self._btn("Reject and send", C['accent_fill'], filled=True)
-        back = self._btn("Back", T['text_dim'])
-        send.clicked.connect(self._send_reason)
-        edit.returnPressed.connect(self._send_reason)
-        back.clicked.connect(lambda: self._build_main(self._command, self._warning))
-        row.addWidget(send)
-        row.addWidget(back)
-        row.addStretch()
-        self._v.addLayout(row)
-        edit.setFocus()
-
-    def _send_reason(self):
-        if self._resolved:
-            return
-        text = self._reason.text().strip() if getattr(self, '_reason', None) else ""
-        if text:
-            # Before rejected: the panel deletes the card when it sees rejected.
-            self.reason_given.emit(self._rid, text)
-        self.rejected.emit(self._rid)
-        self._resolved_ok("Rejected, your instruction was sent" if text else "Rejected", T['red'])
+    def _choose_deny(self):
+        if not self._resolved:
+            self._resolved_ok("Denied", T['muted'])
+            self.rejected.emit(self._rid)
 
     def _resolved_ok(self, label: str, color: str):
+        """Collapse to one line, like a finished tool row."""
         self._resolved = True
+        for sc in self._shortcuts:
+            sc.setEnabled(False)
         self._clear()
-        l = QLabel(f"\u2713 {label}")
-        l.setStyleSheet(f"color:{color};font-size:12px;")
-        self._v.addWidget(l)
+        self._style_card(open_=False)
+        self._v.setContentsMargins(2, 2, 2, 2)
+        what = (self._command if self._command and self._command not in _GATE_COMMANDS
+                else self._warning)
+        line = f"{label}: {what}" if what else label
+        lbl = self._label(line if len(line) <= 140 else line[:137] + "...", color, 12)
+        lbl.setWordWrap(False)
+        self._v.addWidget(lbl)
 
 # QUESTION CARD
 class _OptionRow(QFrame):

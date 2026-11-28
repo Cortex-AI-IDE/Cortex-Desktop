@@ -104,8 +104,15 @@ def _is_continuation(message: str) -> bool:
     """
     text = (message or "").lstrip()
     return text.startswith(("Continue the task", "[Question answer]",
-                            "I declined that step."))   # reject with a reason (chat panel)
+                            "To tell you how to proceed"))   # the message after a Deny
 
+
+# What the model is told when the user denies an action: Claude Code's wording.
+# The turn then ends; the user's next message arrives as DENIED_FOLLOWUP + text.
+DENIED_RESULT = ("The user doesn't want to take this action right now. Nothing was "
+                 "changed. STOP what you are doing and wait for the user to tell you "
+                 "how to proceed.")
+DENIED_FOLLOWUP = "To tell you how to proceed, the user said:\n"
 
 _DESTRUCTIVE_WORDS = (
     "rm -rf", "rmdir /s", "del /f", "format ", "shutdown",
@@ -1663,7 +1670,7 @@ class BridgeBashTool:
                 _reason = ("STOP: The user pressed Stop while this command was awaiting "
                            "permission. It was NOT executed."
                            if self._bridge.stop_requested else
-                           "STOP: The user REJECTED this command. It was NOT executed.")
+                           DENIED_RESULT + " The command was not run.")
                 return ToolResult(
                     tool_id="", result=None, success=False,
                     error=f"{_reason} "
@@ -11158,22 +11165,11 @@ Required behavior:
             granted = await self._request_project_access()
             if not granted:
                 return ToolResult(tool_id=tool_id, result=None, success=False,
-                    error=(
-                        "STOP: The user REJECTED or did not respond to project access. "
-                        "Do NOT continue with more tools. "
-                        "Do NOT write new files or inject code into the project. "
-                        "STOP and wait for the user's next message. "
-                        "Respond to the user explaining that the edit was declined."
-                    ))
+                    error=DENIED_RESULT)
 
         if self._stop_requested:
             return ToolResult(tool_id=tool_id, result=None, success=False,
-                error=(
-                    "STOP: The user REJECTED this edit. Do NOT continue with more tools. "
-                    "Do NOT write new files or inject code into the project. "
-                    "The user has made their choice, STOP and wait for the user's next message. "
-                    "Respond to the user explaining that the edit was declined."
-                ))
+                error=DENIED_RESULT)
 
         # Emit signal to show file operation card with animation
         card_id = None
@@ -11474,22 +11470,11 @@ Required behavior:
             granted = await self._request_project_access()
             if not granted:
                 return ToolResult(tool_id=tool_id, result=None, success=False,
-                    error=(
-                        "STOP: The user REJECTED or did not respond to project access. "
-                        "Do NOT continue with more tools. "
-                        "Do NOT write new files or inject code into the project. "
-                        "STOP and wait for the user's next message. "
-                        "Respond to the user explaining that the edit was declined."
-                    ))
+                    error=DENIED_RESULT)
 
         if self._stop_requested:
             return ToolResult(tool_id=tool_id, result=None, success=False,
-                error=(
-                    "STOP: The user REJECTED this edit. Do NOT continue with more tools. "
-                    "Do NOT write new files or inject code into the project. "
-                    "The user has made their choice, STOP and wait for the user's next message. "
-                    "Respond to the user explaining that the edit was declined."
-                ))
+                error=DENIED_RESULT)
 
         # Emit signal to show "Editing file..." card with animation
         card_id = None
@@ -14024,6 +14009,10 @@ Required behavior:
         # chat shows them as written; the model gets an explicit instruction
         # for each one that names something installed or connected.
         message = self._with_invocation_directive(message)
+        if getattr(self, '_resume_after_reject', False):
+            # After a Deny, whatever the user types says what to do instead.
+            self._resume_after_reject = False
+            message = DENIED_FOLLOWUP + message
 
         # Reset tool safety counters for genuinely new requests (not Continue).
         _is_continue = _is_continuation(message)
@@ -14269,6 +14258,7 @@ Required behavior:
             self._project_access_granted = False
             self._stop_requested = True
             self._stop_reason = "rejected"
+            self._resume_after_reject = True
             log.info("[BRIDGE] User REJECTED project access, stopping agentic turn")
         
         if self._project_access_event is not None:
@@ -14318,6 +14308,7 @@ Required behavior:
         if decision == 'reject':
             self._stop_requested = True
             self._stop_reason = "rejected"
+            self._resume_after_reject = True
             log.info("[BRIDGE] User REJECTED permission, stopping agentic turn")
         if self._permission_event is not None:
             # _permission_event may have been created in the async worker thread.
@@ -15907,6 +15898,7 @@ Required behavior:
         try:
             self._current_todos.clear()
             self._carried_todos = set()   # a new chat carries nothing over
+            self._resume_after_reject = False
             self._session_mutation_count = 0
             self._mutation_success_count = 0
             self._auto_continue_requested = False
