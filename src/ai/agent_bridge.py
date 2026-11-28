@@ -84,6 +84,35 @@ _READ_ONLY_VERB_PREFIXES = (
 )
 
 
+_BLOCKED_TAG = " ⚠️ [BLOCKED: No mutations, do actual work first]"
+_USER_WAIT_PREFIXES = ("ask ", "ask the user", "ask user", "wait for", "get user", "get approval")
+
+
+def _is_continuation(message: str) -> bool:
+    """A message that carries on the current task instead of starting a new one.
+
+    The Resume card sends "Continue the task from where we left off", the
+    interrupted-run card "Continue the task.", and a late question answer
+    "[Question answer] ...". Only the second used to match, so Resume reset
+    the edit count (finished todos were then BLOCKED) and dropped the open
+    questions.
+    """
+    text = (message or "").lstrip()
+    return text.startswith("Continue the task") or text.startswith("[Question answer]")
+
+
+def _todo_key(content: str) -> str:
+    """Comparable form of a todo's text (tag stripped, case and spaces folded)."""
+    return " ".join((content or "").replace(_BLOCKED_TAG, "").lower().split())
+
+
+def _todo_waits_for_user(content: str) -> bool:
+    """True for a todo only the user can move ("Ask user approval, then push").
+    It never gets a file edit, so it must not count as a stalled task."""
+    text = (content or "").replace(_BLOCKED_TAG, "").strip().lower()
+    return text.startswith(_USER_WAIT_PREFIXES) or "user approval" in text
+
+
 def _todo_is_implementation(content: str) -> bool:
     """True when completing this todo should require a file mutation.
 
@@ -7844,6 +7873,7 @@ Required behavior:
                 _pending_todos: List[Dict[str, Any]] = [
                     t for t in self._current_todos
                     if str(t.get('status', '')).upper() in ('PENDING', 'IN_PROGRESS')
+                    and not _todo_waits_for_user(str(t.get('content', '')))
                 ]
                 if _pending_todos:
                     # Use content-based fingerprint instead of IDs
@@ -12745,6 +12775,8 @@ Required behavior:
             t_map = cast(Dict[str, Any], t)
             td: Dict[str, Any] = dict(t_map)
             td["status"] = _normalize_status(td.get("status"))
+            if isinstance(td.get("content"), str) and _BLOCKED_TAG in td["content"]:
+                td["content"] = td["content"].replace(_BLOCKED_TAG, "").rstrip()
             
 # Validate todo completion
             # If marking as COMPLETE, check if it has mutations
@@ -12755,7 +12787,9 @@ Required behavior:
                 # Skip validation for non-implementation tasks
                 # These are analysis/research tasks that legitimately complete
                 # without file mutations (e.g. reading code, building an index)
-                _is_implementation = _todo_is_implementation(_content)
+                _is_implementation = (_todo_is_implementation(_content)
+                                      and not _todo_waits_for_user(_content)
+                                      and _todo_key(_content) not in getattr(self, '_carried_todos', set()))
                 
                 if _is_implementation and _mutation_count == 0:
                     # Block only if the session has NO mutations: one Write/Edit can fulfill several
@@ -12770,7 +12804,7 @@ Required behavior:
                         td["status"] = "IN_PROGRESS"
                         td["_completion_blocked"] = True
                         if "content" in td:
-                            td["content"] = td["content"] + " ⚠️ [BLOCKED: No mutations, do actual work first]"
+                            td["content"] = td["content"] + _BLOCKED_TAG
                     else:
                         # Session has real mutations, per-todo count of 0 is normal
                         # when mutations were credited to other IN_PROGRESS todos.
@@ -12815,12 +12849,17 @@ Required behavior:
         # CRITICAL: AI cannot mark todos as complete without actual mutations!
         # Validate that mutations match the number of implementation tasks
         if all_done:
+            _carried = getattr(self, '_carried_todos', set())
             _implementation_tasks = [
                 t for t in normalized_todos 
                 if t.get("status") == "COMPLETE"
-                and not t.get("content", "").lower().startswith(("test", "verify", "analyze", "read"))
+                and _todo_is_implementation(str(t.get("content", "")))
+                and not _todo_waits_for_user(str(t.get("content", "")))
+                and _todo_key(str(t.get("content", ""))) not in _carried
             ]
-            _required_mutations = len(_implementation_tasks)
+            # One edit often finishes several tasks; demanding one per task
+            # refused honest completions ("2 mutations now, it wants 5").
+            _required_mutations = 1 if _implementation_tasks else 0
             
 # MANDATORY VERIFICATION STEP
             # Industry-standard: block completion unless tests/verification
@@ -13006,14 +13045,26 @@ Required behavior:
                 f"Injecting answer as a follow-up user message so it is not lost."
             )
             if answer and answer.strip():
-                try:
-                    self.process_message(
-                        f"[Question answer] {answer.strip()}",
-                        self._project_root or "",
-                    )
-                    log.info(f"[ASK] Late answer injected as user message: {answer!r}")
-                except Exception as _e:
-                    log.warning(f"[ASK] Failed to inject late answer as message: {_e}")
+                self._deliver_when_idle(f"[Question answer] {answer.strip()}")
+
+    def _deliver_when_idle(self, message: str, waited_s: float = 0.0) -> None:
+        """Send ``message`` now, or once the running task has finished.
+
+        Sending it while a task runs made the worker cancel that task
+        (2026-11-28 14:01:59: a late "Commit & push" answer stopped turn 12
+        mid-work and saved a checkpoint).
+        """
+        if getattr(self, '_run_active', False) and waited_s < 1800:
+            if waited_s == 0.0:
+                log.info("[ASK] Task still running; the late answer waits for it to finish")
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1000, lambda: self._deliver_when_idle(message, waited_s + 1.0))
+            return
+        try:
+            self.process_message(message)   # 2nd parameter is images, not the project
+            log.info(f"[ASK] Late answer sent as user message: {message[:80]!r}")
+        except Exception as _e:
+            log.warning(f"[ASK] Failed to send late answer as message: {_e}")
 
     def _resume_agent_with_answer(self, _pending_question: Dict[str, Any]) -> None:
         """
@@ -14130,7 +14181,7 @@ Required behavior:
         message = self._with_invocation_directive(message)
 
         # Reset tool safety counters for genuinely new requests (not Continue).
-        _is_continue = message.strip().startswith('Continue the task.')
+        _is_continue = _is_continuation(message)
         if not _is_continue:
             self._continue_cycle_count = 0
             self._last_pending_ids = set()
@@ -14142,6 +14193,7 @@ Required behavior:
             self._mcp_action_count = 0
             # Reset stale todo state from previous session snapshot
             # so fresh requests don't show leftover "2 todos pending"
+            self._remember_carried_todos()
             self._current_todos.clear()
             self._todo_write_streak = 0
             self._last_todo_signature = ""
@@ -14162,6 +14214,7 @@ Required behavior:
             self._auto_continue_compacted = None
             self._auto_continue_cycle = 0
             # Clear ALL todo state from the stopped task
+            self._remember_carried_todos()
             self._current_todos.clear()
             self._todo_write_streak = 0
             self._last_todo_signature = ""
@@ -16028,6 +16081,22 @@ Required behavior:
         except Exception as e:
             log.warning(f"[BRIDGE] _write_memory_summary failed: {e}")
 
+    def _remember_carried_todos(self) -> None:
+        """Keep the text of todos written before this request.
+
+        The Tasks panel still shows them after a new message (or compaction)
+        clears the list here, and the model ticks them once it has checked
+        the work. That work was done earlier, so this request's edit count
+        says nothing about it: blocking it (2026-11-28, "it only counts file
+        edits made in this session") left finished tasks spinning.
+        """
+        carried = set(getattr(self, '_carried_todos', set()))
+        for t in self._current_todos:
+            key = _todo_key(str(t.get("content", "")))
+            if key:
+                carried.add(key)
+        self._carried_todos = carried
+
     def start_fresh_session(self) -> None:
         """Reset all in-memory conversation state for a brand-new chat.
 
@@ -16053,6 +16122,7 @@ Required behavior:
         self._ensure_conversation_id()
         try:
             self._current_todos.clear()
+            self._carried_todos = set()   # a new chat carries nothing over
             self._session_mutation_count = 0
             self._mutation_success_count = 0
             self._auto_continue_requested = False

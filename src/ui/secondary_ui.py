@@ -458,9 +458,23 @@ class TodoSection(QFrame):
             sp.deleteLater()
         self._spinners.clear()
 
+    def set_running(self, running: bool) -> None:
+        """Spin in-progress items only while the agent is working.
+
+        A run that ended with a todo still in progress left its spinner
+        turning forever, so a finished task looked like it was still running.
+        """
+        running = bool(running)
+        if running == getattr(self, '_running', True):
+            return
+        self._running = running
+        if getattr(self, '_last_todos', None) is not None:
+            self.update_todos(self._last_todos, getattr(self, '_last_main_task', ""))
+
     def update_todos(self, todos: list[dict], main_task: str = ""):
         """Update the todo list. Each todo: {text, done, status}.
         Sorts by priority: in_progress → pending → completed."""
+        self._last_todos, self._last_main_task = list(todos), main_task
         # Stop old spinners
         self._stop_all_spinners()
 
@@ -504,13 +518,21 @@ class TodoSection(QFrame):
                 ind.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 ind.setStyleSheet(f"color:{T['green']};font-size:13px;font-weight:600;background:transparent;border:none;")
                 rl.addWidget(ind)
+            elif status == "in_progress" and not getattr(self, '_running', True):
+                # The run ended with this item open: show it paused, not spinning.
+                ind = QLabel("◐")
+                ind.setFixedWidth(18)
+                ind.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                ind.setToolTip("Stopped before this task finished")
+                ind.setStyleSheet(f"color:{T['mono_muted']};font-size:13px;background:transparent;border:none;")
+                rl.addWidget(ind)
             elif status == "in_progress":
                 # NEW: TodoRingSpinner, circle ring with spinning arc inside
                 from src.ui.spinner import TodoRingSpinner
                 spinner = TodoRingSpinner(18, T.get("think_label", "#a89df0"))
+                rl.addWidget(spinner)   # parented before start(), never a window
                 spinner.start()
                 self._spinners.append(spinner)
-                rl.addWidget(spinner)
             else:
                 # Empty circle for pending
                 ind = QLabel("○")

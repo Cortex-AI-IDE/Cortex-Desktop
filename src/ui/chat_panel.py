@@ -339,6 +339,27 @@ class MermaidStreamingCard(QFrame):
         self._spinner.stop()
 
 
+_CHECKPOINT_RE = re.compile(r"<cortex_checkpoint>\n?(.*?)\n?</cortex_checkpoint>\n*", re.S)
+
+
+def _split_checkpoint(text: str):
+    """Take the Resume checkpoint out of a user bubble; return (text, card).
+
+    The Resume button sends the whole saved checkpoint, code included, so the
+    bubble showed a wall of text and code blocks the user never typed. The
+    model still gets all of it; the bubble shows one card instead.
+    """
+    m = _CHECKPOINT_RE.search(text or "")
+    if not m:
+        return text, None
+    lines = m.group(1).count("\n") + 1
+    rest = (text[:m.start()] + text[m.end():]).replace(
+        "Here is the checkpoint from the previous session:", "").strip()
+    rest = re.sub(r"\n{3,}", "\n\n", rest)
+    return rest, {"path": "", "name": "Checkpoint from the previous session",
+                  "badge": "CKPT", "size_text": f"{lines} lines"}
+
+
 def _closed_fence_end(buf: str) -> int:
     """Offset just past the newline of the LAST line that closes a ``` fence,
     or -1. Unlike the seal fallback, text after the fence is not required:
@@ -1622,7 +1643,7 @@ class ThoughtsBlock(CollapsibleCard):
                 _already_frozen = (parent_panel is not None
                                    and getattr(parent_panel, '_freeze_depth', 0) > 0)
                 if parent_panel and not _already_frozen:
-                    parent_panel._freeze_viewport()
+                    parent_panel._freeze_viewport("card")
                 try:
                     if h > _MAX_THOUGHT_HEIGHT:
                         self._lbl.setMinimumHeight(capped_h)
@@ -2117,7 +2138,7 @@ class ToolGroup(CollapsibleCard):
         if already_frozen:
             log.info(f"[ToolGroup] _flush_tools: SKIPPING freeze (already frozen, depth={parent_panel._freeze_depth})")
         if parent_panel and not already_frozen:
-            parent_panel._freeze_viewport()
+            parent_panel._freeze_viewport("card")
         try:
             # ── SCROLL: capture position BEFORE mutations ──
             was_at_bottom = True
@@ -2143,7 +2164,9 @@ class ToolGroup(CollapsibleCard):
                 try:
                     bar = parent_panel.scroll.verticalScrollBar()
                     if was_at_bottom:
-                        bar.setValue(bar.maximum())
+                        # Same follow as prose: a hard snap here jumped while
+                        # the answer text was gliding.
+                        parent_panel._pin_bottom(bar)
                     else:
                         bar.setValue(saved_pos)
                 except RuntimeError:
@@ -4766,9 +4789,14 @@ class _ChatBrowser(QTextBrowser):
                 # Temporarily set text width so doc.size() returns the
                 # height for the current layout width, NOT a stale width.
                 old_w = doc.textWidth()
-                doc.setTextWidth(vp_w)
-                doc_h = doc.size().height()
-                doc.setTextWidth(old_w)
+                if abs(old_w - vp_w) < 1:
+                    # setTextWidth re-lays out the whole document even for
+                    # the same width: two full layouts per height step.
+                    doc_h = doc.size().height()
+                else:
+                    doc.setTextWidth(vp_w)
+                    doc_h = doc.size().height()
+                    doc.setTextWidth(old_w)
                 if doc_h > 0:
                     # Use the constrained vp_w, not super's sizeHint width, so the widget can't
                     # request more width than available and clip left-side text when centered.
@@ -5513,11 +5541,11 @@ class MessageWidget(QWidget):
             self.resizeEvent = _on_self_resize
         else:
             # AI response card
-            self._card = QFrame()
+            # Opaque with static contents, like the chat column: a transparent
+            # card made every height step of the live answer repaint the
+            # finished blocks above it as well.
+            self._card = _ThemedBG(T['bg'])
             self._card.setObjectName("aiCard")
-            self._card.setStyleSheet(
-                "QFrame#aiCard { background: transparent; border: none; }"
-            )
             self._card_v = QVBoxLayout(self._card)
             self._card_v.setContentsMargins(12, 4, 12, 4)
             self._card_v.setSpacing(8)
@@ -5647,6 +5675,9 @@ class MessageWidget(QWidget):
             body, attachments = split_attachments(display)
         except Exception:
             body, attachments = display, []
+        body, checkpoint_card = _split_checkpoint(body)
+        if checkpoint_card:
+            attachments = attachments + [checkpoint_card]
         prose, code_parts = split_user_code_blocks(
             "" if self._user_images and body == self._IMAGE_ONLY else body)
         self._user_label.setPlainText(prose)
@@ -6436,6 +6467,18 @@ class _PaintAudit(QObject):
         self.full = {}
         return out
 
+    @staticmethod
+    def _key(obj) -> str:
+        """Class, object name and parent, so a busy widget can be found."""
+        try:
+            name = obj.objectName()
+            par = obj.parent()
+            pname = (par.objectName() or par.__class__.__name__) if par is not None else "-"
+        except RuntimeError:
+            name, pname = "", "?"
+        tag = f"[{name}]" if name else ""
+        return f"{obj.__class__.__name__}{tag}#{id(obj) & 0xffff:x}<{pname}"
+
     def watch(self, widget) -> None:
         """Follow a widget for the rest of its life (idempotent).
 
@@ -6454,7 +6497,7 @@ class _PaintAudit(QObject):
 
     def eventFilter(self, obj, ev):
         if self.armed and ev.type() == QEvent.Type.Paint:
-            k = f"{obj.__class__.__name__}#{id(obj) & 0xffff:x}"
+            k = self._key(obj)
             self.counts[k] = self.counts.get(k, 0) + 1
             try:
                 r = ev.rect()
@@ -6729,13 +6772,16 @@ class _FileCard(QFrame):
         self._name = lbl = QLabel(shown)
         lbl.setWordWrap(True)
         top.addWidget(lbl, 1, Qt.AlignmentFlag.AlignTop)
-        self._close = close = QPushButton("×")
+        # Parented: setVisible(True) on a parentless button opened it as its
+        # own window, the "ghost pill" flashed on every paste.
+        self._close = close = QPushButton("×", self)
         close.setFixedSize(18, 18)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setToolTip("Remove")
         close.clicked.connect(self.remove_clicked.emit)
-        close.setVisible(removable)   # a sent message's card cannot be removed
         top.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
+        if not removable:
+            close.hide()   # a sent message's card cannot be removed
         v.addLayout(top, 1)
         bottom = QHBoxLayout()
         bottom.setSpacing(6)
@@ -10175,7 +10221,7 @@ class ChatPanel(QWidget):
         # to prevent widget accumulation during long sessions.
         self._cleanup_timer = QTimer(self)
         self._cleanup_timer.setInterval(60000)  # 60s
-        self._cleanup_timer.timeout.connect(self._virtualize_old_messages)
+        self._cleanup_timer.timeout.connect(self._virtualize_when_idle)
         self._cleanup_timer.start()
 
         # Chars appended to the live block since the last markdown render.
@@ -10267,6 +10313,10 @@ class ChatPanel(QWidget):
         # The answer is being written: the live block may only grow while this
         # holds (see the height rule in _apply_prose_render).
         self._turn_active = True
+        try:
+            self.todo_section.set_running(True)
+        except (AttributeError, RuntimeError):
+            _swallow("resume the todo spinners")
         # Count what actually repaints this turn; reported in on_turn_done.
         self._get_paint_audit().arm()
         self._open_kind = None; self._open_block = None; self._prose_buf = ""
@@ -10302,7 +10352,7 @@ class ChatPanel(QWidget):
         # that's 2-3 render timers per tool call = 2-3 unnecessary repaints.
         already_frozen = self._freeze_depth > 0
         if not already_frozen:
-            self._freeze_viewport()
+            self._freeze_viewport("card")
         bar = self.scroll.verticalScrollBar()
         saved_pos = bar.value()
         try:
@@ -10519,9 +10569,8 @@ class ChatPanel(QWidget):
 
         REWRITE 2026-06-24: Uses the same freeze/single-scroll/thaw pattern
         as _flush_prose(). Captures _is_at_bottom() BEFORE mutations, then
-        does ONE scroll AFTER all mutations. Eliminates the redundant
-        bar.setValue(max) that caused vertical jitter when thinking + prose
-        were both active.
+        does ONE scroll AFTER all mutations, through _pin_bottom, so a
+        thought follows the bottom the same way prose does.
         """
         # The open block, not _open_kind, decides: a tool end resets
         # _open_kind to None while its thought is still the open block, and
@@ -10533,7 +10582,7 @@ class ChatPanel(QWidget):
         try:
             already_frozen = self._freeze_depth > 0
             if not already_frozen:
-                self._freeze_viewport()
+                self._freeze_viewport("card")
             try:
                 # ── SCROLL: capture position BEFORE mutations ──
                 was_at_bottom = self._is_at_bottom(200)
@@ -10546,7 +10595,7 @@ class ChatPanel(QWidget):
                 if was_at_bottom:
                     try:
                         bar = self.scroll.verticalScrollBar()
-                        bar.setValue(bar.maximum())
+                        self._pin_bottom(bar)   # follow, not snap (see prose)
                     except RuntimeError:
                         _swallow("pin the view after a think flush")
             finally:
@@ -10596,6 +10645,10 @@ class ChatPanel(QWidget):
         self._append_stream_delta(chunk)
         if len(self._prose_buf) > self._PROSE_SEAL_CHARS:
             self._seal_prose_block()
+        if self._RENDERED_REVEAL:
+            # The reveal frames request renders (_render_request_due); this
+            # debounce added a second, unpaced stream of rebuilds.
+            return
         if not hasattr(self, '_prose_debounce'):
             self._prose_debounce = QTimer()
             self._prose_debounce.setSingleShot(True)
@@ -10728,6 +10781,10 @@ class ChatPanel(QWidget):
         if old_block is None or not hasattr(old_block, 'setHtml'):
             return
         finalized = False
+        try:
+            _h_before = old_block.minimumHeight()
+        except RuntimeError:
+            _h_before = 0
         if finalize:
             with self._stabilize_scroll():
                 finalized = self._finalize_live_block(old_block, prefix)
@@ -10736,6 +10793,11 @@ class ChatPanel(QWidget):
                 self._seal_render_old(old_block, prefix)
         except RuntimeError:
             return
+        try:
+            _h_after = 0 if finalized else old_block.minimumHeight()
+        except RuntimeError:
+            _h_after = 0
+        self._note_seal(_h_before, _h_after, finalized)
         self._prose_blocks.append((old_block, prefix))
         if finalized:
             # Never merge across it at turn end, and never render it again.
@@ -11687,6 +11749,11 @@ class ChatPanel(QWidget):
             "prov_max_gap": 0.0,
             "e2e_n": 0, "e2e_total": 0.0, "e2e_max": 0.0,
             "rtl_blocks": 0,
+            "ticks": 0, "scroll_px": 0, "episodes": 0, "reaccel": 0,
+            "tick_last": 0.0, "ep_prev_step": 0, "tick_gaps": [],
+            "snaps": 0, "snap_px_max": 0,
+            "height_steps": 0, "height_step_px_max": 0,
+            "seals": 0, "finalized": 0, "seal_shrink_max": 0,
         }
 
     def _smooth_metrics(self) -> dict:
@@ -11721,6 +11788,57 @@ class ChatPanel(QWidget):
         sm["vis_had_pending"] = bool(getattr(self, '_stream_pending', ''))
         sm["arr_after_vis"] = 0.0
         sm["prov_paused"] = False
+
+    # Per-event lines for scroll motion, snaps and seals; off by default
+    # because logging inside the 16 ms glide skews the timing it measures.
+    _SCROLL_TRACE = os.environ.get("CORTEX_SCROLL_TRACE") == "1"
+
+    def _note_scroll_tick(self, step: int, value: int, maximum: int) -> None:
+        """One glide tick. A gap over 50 ms starts a new motion episode; a
+        step larger than the one before inside an episode is a re-acceleration
+        (the pulse the jitter report traced)."""
+        sm = self._smooth_metrics()
+        now = time.perf_counter()
+        gap = (now - sm["tick_last"]) * 1000.0 if sm["tick_last"] else 0.0
+        if not sm["tick_last"] or gap > 50.0:
+            sm["episodes"] += 1
+            sm["ep_prev_step"] = 0
+        else:
+            if len(sm["tick_gaps"]) < 5000:
+                sm["tick_gaps"].append(gap)
+            if 0 < sm["ep_prev_step"] < step:
+                sm["reaccel"] += 1
+        sm["ep_prev_step"] = step
+        sm["tick_last"] = now
+        sm["ticks"] += 1
+        sm["scroll_px"] += step
+        if self._SCROLL_TRACE:
+            log.info(f"[SCROLL TRACE] dt={gap:.0f}ms px={step} value={value} max={maximum}")
+
+    def _note_snap(self, where: str, px: int) -> None:
+        if not getattr(self, '_turn_active', False):
+            return
+        sm = self._smooth_metrics()
+        sm["snaps"] += 1
+        sm["snap_px_max"] = max(sm["snap_px_max"], int(px))
+        if self._SCROLL_TRACE:
+            log.info(f"[SCROLL TRACE] snap from={where} px={px}")
+
+    def _note_height_step(self, px: int) -> None:
+        if not getattr(self, '_turn_active', False) or px <= 0:
+            return
+        sm = self._smooth_metrics()
+        sm["height_steps"] += 1
+        sm["height_step_px_max"] = max(sm["height_step_px_max"], int(px))
+
+    def _note_seal(self, before: int, after: int, finalized: bool) -> None:
+        sm = self._smooth_metrics()
+        sm["seals"] += 1
+        sm["finalized"] += int(bool(finalized))
+        if not finalized:
+            sm["seal_shrink_max"] = max(sm["seal_shrink_max"], before - after)
+        if self._SCROLL_TRACE:
+            log.info(f"[SCROLL TRACE] seal before={before} after={after} finalized={finalized}")
 
     def _note_holdback(self, held_ms: float = 0.0, emoji: bool = False) -> None:
         sm = self._smooth_metrics()
@@ -11769,6 +11887,10 @@ class ChatPanel(QWidget):
         gap = lambda a, b: f"{(b - a) * 1000:.0f}ms" if (a and b) else "n/a"
         sm = self._smooth_metrics()
         e2e_avg = (sm["e2e_total"] / sm["e2e_n"]) if sm["e2e_n"] else 0.0
+        _gaps = sorted(sm["tick_gaps"])
+        tick_p95 = _gaps[int(len(_gaps) * 0.95)] if _gaps else 0.0
+        _span = (time.perf_counter() - t_chunk) if t_chunk else 0.0
+        episodes_per_s = sm["episodes"] / _span if _span > 0 else 0.0
         log.info(
             f"[STREAM PERF] chars={getattr(self, '_stream_chars', 0)} chunks={chunks} "
             f"paints={getattr(self, '_stream_frames', 0)} markdown_renders={renders} "
@@ -11781,7 +11903,12 @@ class ChatPanel(QWidget):
             f"holdbacks={sm['holdbacks']} emoji_holds={sm['emoji_holds']} "
             f"held_ms_max={sm['held_max']:.0f} provider_max_gap_ms={sm['prov_max_gap']:.0f} "
             f"render_e2e_avg_ms={e2e_avg:.1f} render_e2e_max_ms={sm['e2e_max']:.1f} "
-            f"rtl_blocks={sm['rtl_blocks']}"
+            f"rtl_blocks={sm['rtl_blocks']} "
+            f"height_steps={sm['height_steps']} height_step_px_max={sm['height_step_px_max']} "
+            f"scroll_ticks={sm['ticks']} scroll_episodes={sm['episodes']} "
+            f"episodes_per_s={episodes_per_s:.1f} reaccel_ticks={sm['reaccel']} "
+            f"tick_p95_ms={tick_p95:.0f} snaps={sm['snaps']} snap_px_max={sm['snap_px_max']} "
+            f"seals={sm['seals']} finalized={sm['finalized']} seal_shrink_max_px={sm['seal_shrink_max']}"
         )
 
     def _prewarm_text_engine(self) -> None:
@@ -12034,7 +12161,7 @@ class ChatPanel(QWidget):
         _froze_block = False
         if not already_frozen:
             if _structural:
-                self._freeze_viewport()
+                self._freeze_viewport("card")
                 _froze_container = True
             else:
                 _froze_block = self._freeze_block(self._open_block)
@@ -12179,6 +12306,7 @@ class ChatPanel(QWidget):
                         if _doc_h > _cur_h and getattr(self, '_turn_active', False):
                             _doc_h = self._stepped_height(_cur_h, _doc_h)
                         self._open_block.setMinimumHeight(_doc_h)
+                        self._note_height_step(_doc_h - _cur_h)
                         # Shrinks don't propagate to the layout without an
                         # explicit updateGeometry() (see fit() note), without
                         # this the block stays at its tallest-ever height.
@@ -12642,6 +12770,10 @@ class ChatPanel(QWidget):
     def on_turn_done(self):
         # Compact chat: every activity line of this reply is finished.
         self._activity = None
+        try:
+            self.todo_section.set_running(False)
+        except (AttributeError, RuntimeError):
+            _swallow("stop the todo spinners")
         try:
             if self._cur_msg is not None:
                 for _g in self._cur_msg.findChildren(ActivityGroup):
@@ -14220,7 +14352,7 @@ class ChatPanel(QWidget):
         continuation = (
             "Continue the task from where we left off. "
             "Here is the checkpoint from the previous session:\n\n"
-            f"{checkpoint}\n\n"
+            f"<cortex_checkpoint>\n{checkpoint}\n</cortex_checkpoint>\n\n"
             "Resume working on the remaining items NOW. "
             "Do NOT re-read files you already have context for, "
             "start writing/editing immediately based on the checkpoint."
@@ -14427,6 +14559,13 @@ class ChatPanel(QWidget):
             _swallow("thaw the viewport at the end of a rapid batch")
         # Single smooth scroll after the entire batch
         self._autoscroll()
+
+    def _virtualize_when_idle(self) -> None:
+        """Timer entry: never collapse old messages while an answer streams,
+        when the column shift is visible to a reader scrolled up."""
+        if getattr(self, '_turn_active', False):
+            return
+        self._virtualize_old_messages()
 
     def _virtualize_old_messages(self, keep_recent: int = 30):
         """Collapse messages older than `keep_recent` to lightweight labels.
@@ -14639,6 +14778,7 @@ class ChatPanel(QWidget):
         finally:
             self._smooth_scrolling = False
         self._follow_last = cur + step
+        self._note_scroll_tick(step, cur + step, target)
 
     def _pin_bottom(self, bar) -> None:
         """Bottom-pin for streaming paths: glide during a turn, snap otherwise."""
@@ -14674,7 +14814,7 @@ class ChatPanel(QWidget):
         except RuntimeError:
             return True  # Widget destroyed → safe default
 
-    def _freeze_viewport(self):
+    def _freeze_viewport(self, scope: str = "container"):
         """Ref-counted content-widget freeze. Freezes the inner container
         (QWidget holding all chat cards) so layout recalculations and
         widget additions produce zero visible frames.
@@ -14684,9 +14824,23 @@ class ChatPanel(QWidget):
         of the viewport background, which on Windows shows as a white flash
         before child widgets paint on top.
 
-        Safe to call from nested contexts."""
+        Safe to call from nested contexts.
+
+        scope="card" (streaming paths only) freezes just the answer being
+        written while a turn runs: thawing the whole container repainted every
+        visible message, up to 16 times a second while the model was thinking.
+        """
         if self._freeze_depth == 0:
-            self.container.setUpdatesEnabled(False)
+            target = self.container
+            if scope == "card" and getattr(self, '_turn_active', False):
+                card = getattr(self._cur_msg, '_card', None) if self._cur_msg is not None else None
+                try:
+                    if card is not None and card.isVisible():
+                        target = card
+                except RuntimeError:
+                    target = self.container
+            self._frozen_widget = target
+            target.setUpdatesEnabled(False)
             log.debug(f"[ChatRestore] Viewport FROZEN (depth={self._freeze_depth})")
         self._freeze_depth += 1
 
@@ -14705,7 +14859,14 @@ class ChatPanel(QWidget):
         This eliminates the micro-flicker on EVERY card type during streaming."""
         self._freeze_depth = max(0, self._freeze_depth - 1)
         if self._freeze_depth == 0:
-            self.container.setUpdatesEnabled(True)
+            target = getattr(self, '_frozen_widget', None) or self.container
+            self._frozen_widget = None
+            try:
+                target.setUpdatesEnabled(True)
+            except RuntimeError:
+                pass   # silent-ok: the frozen card was deleted; the container below is re-enabled anyway
+            if target is not self.container and not self.container.updatesEnabled():
+                self.container.setUpdatesEnabled(True)
             log.debug(f"[ChatRestore] Viewport THAWED (depth={self._freeze_depth})")
 
 # Block-scoped paint freeze: freeze the block being written, not the container.
@@ -14881,7 +15042,7 @@ class ChatPanel(QWidget):
             except RuntimeError:
                 yield
                 return  # Widget destroyed, skip all stabilization
-            self._freeze_viewport()
+            self._freeze_viewport("card")
             try:
                 yield
             finally:
@@ -16573,6 +16734,10 @@ class ChatPanel(QWidget):
             self._root_bg = _QColor(T['bg'])
             self.update()
             self.container.set_bg(T['bg'])
+            for _mw in self.container.findChildren(MessageWidget):
+                _c = getattr(_mw, '_card', None)
+                if isinstance(_c, _ThemedBG):
+                    _c.set_bg(T['bg'])
             self._header.setStyleSheet(
                 "QWidget#chatHeader {"
                 f" background: transparent; border-bottom: 1px solid {T['border']}; }}")

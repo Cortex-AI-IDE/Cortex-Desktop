@@ -61,11 +61,12 @@ class WorkspaceTrustDialog(QDialog):
             f"Trust the authors of all files in the parent folder "
             f"'{os.path.basename(parent_dir) or parent_dir}'")
         self._parent_box.setObjectName("trustParent")
+        v.addSpacing(4)
+        # Added before setVisible: a parentless widget shown is its own window.
+        v.addWidget(self._parent_box)
         self._parent_box.setVisible(bool(parent_dir) and parent_dir != folder
                                     and parent_dir != os.path.expanduser("~")
                                     and os.path.dirname(parent_dir) != parent_dir)
-        v.addSpacing(4)
-        v.addWidget(self._parent_box)
 
         row = QHBoxLayout()
         row.setSpacing(8)

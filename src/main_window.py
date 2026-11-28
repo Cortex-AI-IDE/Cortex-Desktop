@@ -2464,8 +2464,10 @@ class CortexMainWindow(QMainWindow):
             "Click to review.")
         self._status_trust_btn.clicked.connect(self._on_restricted_mode_clicked)
         from src.core.workspace_trust import is_restricted as _is_restricted
-        self._status_trust_btn.setVisible(_is_restricted())
+        # Into the status bar first: setVisible(True) on a parentless button
+        # flashes it as its own window.
         sb.insertWidget(0, self._status_trust_btn)
+        self._status_trust_btn.setVisible(_is_restricted())
         self._style_trust_button()
 
         # "Always allow": shown while the open project has a remembered
