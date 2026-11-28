@@ -46,17 +46,10 @@ def compute_word_diff(
     new_text: str,
     change_threshold: float = 0.5
 ) -> dict:
-    """Return character ranges added/removed between two texts.
+    """Character ranges added/removed between two texts.
 
-    Args:
-        old_text: Text before the edit.
-        new_text: Text after the edit.
-        change_threshold: Above this fraction changed (0.0-1.0) the texts are
-            too far apart for a word diff, so empty ranges are returned.
-
-    Returns:
-        {'removed_ranges': [(start, end)...] in old_text,
-         'added_ranges': [(start, end)...] in new_text}
+    change_threshold: above this fraction changed the texts are too far apart
+    for a word diff, so empty ranges come back.
     """
     # Tokenize both texts
     old_tokens = tokenize(old_text)

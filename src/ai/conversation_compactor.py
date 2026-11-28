@@ -160,16 +160,8 @@ def should_auto_compact(
     threshold_pct: float = AUTOCOMPACT_THRESHOLD_PCT,
 ) -> bool:
     """
-    Should auto-compaction trigger.
-
-    Args:
-        estimated_tokens: Current estimated token usage.
-        context_budget: Context budget for the model.
-        state: Auto-compact tracking state, for the circuit breaker.
-        threshold_pct: Fraction of budget that triggers compaction.
-
-    Returns:
-        True if auto-compaction should run.
+    Whether auto-compaction should trigger, from token usage and the
+    circuit-breaker state.
     """
     if state and state.circuit_breaker_tripped:
         return False

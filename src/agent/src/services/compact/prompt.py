@@ -347,15 +347,6 @@ def get_compact_user_summary_message(
 ) -> str:
     """
     User-facing summary message that continues the session after compaction.
-
-    Args:
-        summary: Raw summary from the compact API call.
-        suppress_follow_up_questions: Drop the follow-up question.
-        transcript_path: Optional path to the full transcript.
-        recent_messages_preserved: Recent messages are kept verbatim.
-
-    Returns:
-        Formatted user message for session continuation.
     """
     formatted_summary = format_compact_summary(summary)
     

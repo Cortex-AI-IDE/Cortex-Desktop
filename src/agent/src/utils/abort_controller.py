@@ -101,16 +101,8 @@ def create_child_abort_controller(
     max_listeners: int = 50,
 ) -> AbortController:
     """
-    Child AbortController that aborts when the parent does.
-
-    Aborting the child leaves the parent alone.
-
-    Args:
-        parent: Parent AbortController.
-        max_listeners: Listener cap.
-
-    Returns:
-        Child AbortController.
+    Child AbortController that aborts when the parent does; aborting the
+    child leaves the parent alone.
     """
     child = create_abort_controller(max_listeners)
     

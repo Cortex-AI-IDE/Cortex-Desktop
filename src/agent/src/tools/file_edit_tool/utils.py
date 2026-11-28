@@ -264,16 +264,8 @@ def apply_edit_to_file(
     replace_all: bool = False,
 ) -> str:
     """
-    Apply an edit, normalising replace_all to a boolean.
-
-    Args:
-        original_content: File content before the edit.
-        old_string: Text to replace.
-        new_string: Replacement text.
-        replace_all: Replace every occurrence instead of the first.
-
-    Returns:
-        Updated content.
+    Apply an edit, normalising replace_all to a boolean. Returns the new
+    content.
     """
     if replace_all:
         f = lambda content, search, replace: content.replace(search, replace)
@@ -672,13 +664,6 @@ def normalize_file_edit_input(
 
     If the string to replace is not found verbatim, retry against a normalized
     form of it; the original input comes back unchanged when neither matches.
-
-    Args:
-        file_path: Path to the file.
-        edits: Edits to normalize.
-
-    Returns:
-        Dict with normalized file_path and edits.
     """
     if len(edits) == 0:
         return {"file_path": file_path, "edits": edits}

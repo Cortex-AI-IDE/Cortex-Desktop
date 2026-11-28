@@ -79,17 +79,7 @@ def check_write_permission_for_tool(
     input_: Dict[str, Any],
     tool_permission_context: Any,
 ) -> Any:
-    """
-    Check write permission for tool using permission system.
-    
-    Args:
-        tool: The tool class (FileEditTool, etc.)
-        input_: Tool input dictionary
-        tool_permission_context: Permission context from app state
-        
-    Returns:
-        PermissionDecision with behavior 'allow', 'deny', or 'ask'
-    """
+    """Ask the permission system about a write, returning allow/deny/ask."""
     # See file_read_tool: the bare `utils.*` form needs src/agent/src as its
     # own sys.path root, which neither dev nor the frozen build guarantees.
     try:

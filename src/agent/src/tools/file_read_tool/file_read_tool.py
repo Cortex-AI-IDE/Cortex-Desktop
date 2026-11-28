@@ -1305,14 +1305,8 @@ class FileReadTool:
         """
         Execute the file read operation.
 
-        Args:
-            input_data: file_path, offset, limit, pages.
-            context: Tool execution context.
-            can_use_tool: Permission check for the tool.
-            parent_message: Parent message, for message ID tracking.
-
-        Returns:
-            Dict with 'data' holding FileReadOutput, and optional 'new_messages'.
+        Returns a dict with 'data' holding FileReadOutput, plus optional
+        'new_messages'.
         """
         # Refuse bad input before touching the filesystem. The hook tolerates a
         # missing or failing validator, so it can never block the read itself.

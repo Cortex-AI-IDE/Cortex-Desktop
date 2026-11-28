@@ -275,16 +275,8 @@ def try_session_memory_compaction(
     auto_compact_threshold: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Try session memory instead of traditional compaction.
-
-    Args:
-        messages: Message dicts.
-        session_memory: Extracted session memory content.
-        last_summarized_message_id: UUID of the last summarized message.
-        auto_compact_threshold: Token threshold for autocompact, None for manual.
-
-    Returns:
-        Compaction result dict, or None when session memory cannot be used.
+    Try session memory instead of traditional compaction. Returns the
+    compaction result, or None when session memory cannot be used.
     """
     if not should_use_session_memory_compaction():
         return None

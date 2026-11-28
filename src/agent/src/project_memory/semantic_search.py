@@ -86,16 +86,8 @@ class MemoryIndex:
     
     def build_index(self, force_rebuild: bool = False) -> int:
         """
-        Build or rebuild the memory index.
-
-        Scans .md files in the memory directory, extracts metadata and generates
-        embeddings for semantic search.
-
-        Args:
-            force_rebuild: Rebuild even when an index already exists.
-
-        Returns:
-            Number of memories indexed.
+        Build or rebuild the memory index from the memory directory's .md
+        files. Returns the number of memories indexed.
         """
         if not force_rebuild and self._load_index():
             log.info(f"[MemoryIndex] Loaded existing index with {len(self._index)} entries")

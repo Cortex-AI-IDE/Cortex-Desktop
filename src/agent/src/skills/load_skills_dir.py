@@ -953,16 +953,10 @@ def activateConditionalSkillsForPaths(
     cwd: str,
 ) -> List[str]:
     """
-    Activates conditional skills (skills with paths frontmatter) whose path
-    patterns match the given file paths, adding them to the dynamic skills map
-    the model sees. Matching is gitignore-style, same as CORTEX.md rules.
-
-    Args:
-        file_paths: Paths being operated on.
-        cwd: Paths are matched relative to this directory.
-
-    Returns:
-        Names of newly activated skills.
+    Activate conditional skills (paths frontmatter) whose patterns match the
+    given file paths, adding them to the dynamic skills map the model sees.
+    Matching is gitignore-style, same as CORTEX.md rules. Returns the newly
+    activated skill names.
     """
     if len(conditional_skills) == 0:
         return []

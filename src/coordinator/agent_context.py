@@ -53,16 +53,7 @@ def format_worker_prompt(
     expected_output: str = None
 ) -> str:
     """
-    Structured worker prompt.
-
-    Args:
-        task_description: What to do.
-        purpose: Why it matters, which helps the worker calibrate depth.
-        file_paths: Files to work with.
-        expected_output: What "done" looks like.
-
-    Returns:
-        Formatted prompt string.
+    Structured worker prompt; purpose helps the worker calibrate depth.
     """
     parts = []
     

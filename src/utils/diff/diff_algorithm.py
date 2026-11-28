@@ -61,15 +61,8 @@ def compute_word_diff(
     """
     Word-level diff between two texts, as character ranges.
 
-    Args:
-        old_text: Text before the edit.
-        new_text: Text after the edit.
-        change_threshold: Above this fraction changed (0.0-1.0) the texts are
-            too far apart for a word diff, so empty ranges are returned.
-
-    Returns:
-        Dict with 'removed_ranges' (in old_text) and 'added_ranges' (in new_text),
-        each a list of (start, end) tuples.
+    change_threshold: above this fraction changed the texts are too far apart
+    for a word diff, so empty ranges come back.
     """
     # Tokenize both texts
     old_tokens = tokenize(old_text)
