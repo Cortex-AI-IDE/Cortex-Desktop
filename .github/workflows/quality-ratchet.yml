@@ -1,0 +1,47 @@
+name: quality ratchet
+
+# Freezes the lint and comment-cleanup gains. A pull request may reduce the
+# baseline freely, but adding a new ruff finding or a 5+ line comment run
+# fails the check. The baseline is keyed by file and rule, not line number,
+# so ordinary edits do not move the goalposts.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'plugins/**'
+      - 'tools/**'
+      - 'pyproject.toml'
+      - 'requirements-dev.txt'
+      - '.github/workflows/quality-ratchet.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-ratchet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ratchet:
+    name: lint and comment baseline
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: python -m pip install --disable-pip-version-check ruff==0.14.5
+
+      - name: Run ratchet
+        run: python tools/quality_ratchet.py
